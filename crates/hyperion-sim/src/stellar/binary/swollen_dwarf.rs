@@ -158,14 +158,18 @@ pub(crate) enum Ending {
     ElectronCapture,
     /// A disruption at its track's death.
     Disruption,
+    /// An electron capture at its core's limit (`Engine::reach_core_limit`).
+    CaptureAtLimit,
+    /// A disruption at its core's limit (`Engine::reach_core_limit`).
+    DisruptionAtLimit,
 }
 
 #[cfg(test)]
 thread_local! {
     /// This thread's deaths of giants whose cores are dwarfs' since it started
     /// ([`dwarf_core_deaths`]).
-    static DWARF_CORE_DEATHS: core::cell::Cell<[usize; 4]> =
-        const { core::cell::Cell::new([0; 4]) };
+    static DWARF_CORE_DEATHS: core::cell::Cell<[usize; 6]> =
+        const { core::cell::Cell::new([0; 6]) };
 }
 
 /// Counts a death of `ending` ([`dwarf_core_deaths`]) on this thread.
@@ -181,10 +185,12 @@ pub(super) fn count_dwarf_core_death(ending: Ending) {
 /// The deaths of giants whose cores are carbon–oxygen or oxygen–neon dwarfs'
 /// (`Engine::dwarf_cores`) this thread's engines have acted on since it started, by ending: their
 /// tracks' own, a white
-/// dwarf of the dwarf's kind, and an electron capture and a disruption at their tracks' deaths
-/// ([`SwollenDeath`]), a test build's counter for the dwarf limit's census ([`Ending`]'s order).
+/// dwarf of the dwarf's kind, an electron capture and a disruption at their tracks' deaths
+/// ([`SwollenDeath`]), and an electron capture and a disruption at their cores' limits
+/// (`Engine::reach_core_limit`), a test build's counter for the dwarf limit's census
+/// ([`Ending`]'s order).
 #[cfg(test)]
 #[must_use]
-pub(crate) fn dwarf_core_deaths() -> [usize; 4] {
+pub(crate) fn dwarf_core_deaths() -> [usize; 6] {
     DWARF_CORE_DEATHS.with(core::cell::Cell::get)
 }

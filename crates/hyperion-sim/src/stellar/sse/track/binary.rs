@@ -605,6 +605,45 @@ impl Track {
         core
     }
 
+    /// The star's carbon–oxygen core, M☉, at track age `age`, where its phase has one: on the
+    /// early AGB the phase's own (HPT equation 39 with `A_He`, inside the hydrogen-exhausted core
+    /// the state reports), on the thermally pulsing AGB and as a helium giant the state's core
+    /// (HPT sections 5.4 and 6.1); `None` in any other phase. For the binary engine's limit on a
+    /// core that is a white dwarf's (plan 11, P11.T4's dwarf limit, `Engine::core_limit_age`).
+    #[must_use]
+    pub(crate) fn carbon_oxygen_core_at(&self, age: f64) -> Option<SolarMasses> {
+        let age = self.checked_age(Years::new(age));
+        let index = self
+            .segments
+            .partition_point(|s| s.start <= age)
+            .saturating_sub(1);
+        let segment = &self.segments[index];
+        let (coord, _) = segment.coordinate_and_mass(age);
+        match &segment.model {
+            Model::EarlyAgb { phase, span, .. } => Some(phase.co_core_mass(span.at(coord))),
+            Model::ThermallyPulsingAgb { .. } | Model::HeliumShellBurning { .. } => {
+                let phys = self.physics();
+                Some(
+                    segment
+                        .evaluate_at(&phys, age, coord, segment.mass)
+                        .point
+                        .point
+                        .core_mass,
+                )
+            }
+            Model::Protostar(_)
+            | Model::PreMainSequence(_)
+            | Model::MainSequence { .. }
+            | Model::HertzsprungGap { .. }
+            | Model::FirstGiantBranch { .. }
+            | Model::FlashBridge { .. }
+            | Model::CoreHeliumBurning { .. }
+            | Model::HeliumMainSequence { .. }
+            | Model::PostAgb { .. }
+            | Model::Remnant { .. } => None,
+        }
+    }
+
     /// Whether the track's carbon–oxygen core burns to oxygen–neon (HPT section 6): its early AGB's
     /// `Mc,BAGB`, or its helium star's mass (HPT section 6.1), is 1.6 M☉ or more and below the
     /// 2.25 M☉ from which the core goes on to iron.

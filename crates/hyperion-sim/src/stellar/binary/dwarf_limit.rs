@@ -64,7 +64,11 @@
 //!   core, but carbon burning is not undone, and a cold carbon–oxygen core a shell grows below
 //!   about 2 × 10⁻⁶ M☉ yr⁻¹ ignites carbon at its centre at the Chandrasekhar mass, not off it
 //!   (Nomoto and Iben 1985, ApJ 297, 531; Kawai, Saio and Nomoto 1987, ApJ 315, 229), as on the
-//!   thermally pulsing AGB (fix-p11-placed-product-kind, research-leans-35 §7);
+//!   thermally pulsing AGB; so such a core whose track would collapse ends as a carbon–oxygen core
+//!   at the Chandrasekhar mass does, in a disruption that leaves nothing
+//!   (fix-p11-placed-product-kind, research-leans-35 §7; `Engine::core_limit_age`). An early AGB's
+//!   core grows at about that rate, where off-centre ignition, an oxygen–neon core and a collapse
+//!   are as likely (lean, 2026-11-03: the ruling's ending kept, for main);
 //! - a thermally pulsing AGB product whose `Mc,BAGB`, as its placement solves it back, is 2.25 M☉
 //!   or more (a carbon–oxygen core of 1.438 M☉ or more; the engine's `IRON_CORE_MC_BAGB`) and that
 //!   merged from no dwarf has an iron core (HPT section 6), which BSE section 2.7.4 makes a neutron
@@ -73,7 +77,16 @@
 //!   HPT's `Mc,SN` = 0.773 `Mc,BAGB` − 0.35 (equation 75) is the core itself at the `Mc,BAGB` it is
 //!   solved back to, so it collapses at once with its hydrogen envelope on, by plan 06's iron-core
 //!   collapse and its kick ([`Unplaced::IronCore`], `Engine::iron_core_collapse`), not by the
-//!   accretion-induced collapse of a dwarf as the held arm has it.
+//!   accretion-induced collapse of a dwarf as the held arm has it; so does a helium-giant product
+//!   of no dwarf with such a core, whose helium star's carbon–oxygen core at its `Mc,SN` HPT
+//!   section 6 makes a collapse too (fix-p11-helium-product-core, research-leans-35 §8), with no
+//!   hydrogen and its helium on;
+//! - a star whose core is a dwarf's (`Engine::dwarf_cores`) stops where that core reaches its limit
+//!   (`detached::Stop::CoreLimit`, `Engine::core_limit_age`, reading the track's carbon–oxygen core
+//!   with `Track::carbon_oxygen_core_at`): an oxygen–neon core collapses by electron capture at
+//!   `OXYGEN_NEON_CAPTURE_MASS` under `MandelMuller2020` and at the Chandrasekhar mass under
+//!   `Hurley2000`, and a carbon–oxygen core disrupts at the Chandrasekhar mass, where an early AGB
+//!   of `Mc,BAGB` above 2.316 M☉ would collapse it later.
 
 use crate::GeneratorVersion;
 use crate::stellar::Phase;
@@ -97,7 +110,7 @@ use super::star::Kind;
 /// reads in the engine, the brief's read of [`DwarfLimitRules::fitted_tables_hold`] and the
 /// tripwire (`the_dwarf_limit_is_held_only_until_the_29_bump`). It keeps, applied always, the
 /// typing of [`DwarfLimitRules::unplaced`]'s new arm, the record of [`DwarfLimitRules::placed`],
-/// the pin's bypasses and `Engine::iron_core_collapse`, and refits the
+/// the pin's bypasses, `detached::Stop::CoreLimit` and `Engine::iron_core_collapse`, and refits the
 /// pair-light and reach tables, which the engine's runs fit.
 pub(crate) const DWARF_LIMIT_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
@@ -139,11 +152,14 @@ pub(super) enum Unplaced {
         /// Its mass.
         mass: SolarMasses,
     },
-    /// A star of `mass` whose carbon–oxygen core of `co_core` is an iron core, which collapses at
-    /// once with its hydrogen envelope on.
+    /// A star of `mass` whose carbon–oxygen core of `co_core`, inside a helium core of
+    /// `helium_core`, is an iron core, which collapses at once with its envelope on.
     IronCore {
         /// Its carbon–oxygen core.
         co_core: SolarMasses,
+        /// Its helium core: the carbon–oxygen core for a thermally pulsing AGB star, as plan 06's
+        /// death at `Mc,SN` takes it, and the whole star for a helium giant.
+        helium_core: SolarMasses,
         /// Its mass.
         mass: SolarMasses,
     },
@@ -310,12 +326,11 @@ impl DwarfLimitRules {
         let mass = SolarMasses::new(core.value().max(1e-3).min(m.value()));
         match self {
             Self::Whole
-                if kind == Kind::PulsingAgb
-                    && source == CoreSource::Other
-                    && sse::pulsing_agb_helium_core(core) >= IRON_CORE_MC_BAGB =>
+                if carbon_oxygen_core(kind) && source == CoreSource::Other && iron_core(core) =>
             {
                 Unplaced::IronCore {
                     co_core: mass,
+                    helium_core: if kind == Kind::PulsingAgb { mass } else { m },
                     mass: m,
                 }
             }
@@ -384,6 +399,15 @@ impl DwarfLimitRules {
 #[must_use]
 pub(super) fn collapses(mass: f64) -> bool {
     mass >= CHANDRASEKHAR_MASS.value()
+}
+
+/// Whether a carbon–oxygen core of `core` is an iron core: one of 1.438 M☉ or more, from which
+/// `sse::pulsing_agb_helium_core`, as BSE's `gntage` solves it back for a type 6 (equation 75's
+/// `Mc,SN` = 0.773 `Mc,BAGB` − 0.35 inverted), reaches `IRON_CORE_MC_BAGB`, 2.25 M☉ (HPT section
+/// 6; 1.438 = 0.44 × 2.25 + 0.448, HPT equation 69's `Mc,DU` there).
+#[must_use]
+fn iron_core(core: SolarMasses) -> bool {
+    sse::pulsing_agb_helium_core(core) >= IRON_CORE_MC_BAGB
 }
 
 /// Whether a merger's product of `kind` is placed around a carbon–oxygen core (a thermally pulsing

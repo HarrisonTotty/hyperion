@@ -641,6 +641,11 @@ impl Engine {
                         self.strip(i);
                         return;
                     }
+                    super::detached::Stop::CoreLimit(i) => {
+                        self.reach_core_limit(i);
+                        self.end_without_a_living_donor(d);
+                        return;
+                    }
                     // A fed dwarf at the Chandrasekhar mass collapses in the accretor's events.
                     super::detached::Stop::Roche(_)
                     | super::detached::Stop::Collision
@@ -733,6 +738,9 @@ impl Engine {
                 | Member::Frozen { .. }
                 | Member::Remnant { .. }
                 | Member::Gone => {}
+            }
+            if let Some(at) = self.core_limit_age(i) {
+                limits.event((at - s.age).max(0.0), Stop::CoreLimit(i));
             }
         }
         let kd = Kind::of(sd.state.phase(), s.masses[d]);

@@ -7674,3 +7674,8 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     recorded for it: as first built, a swollen CO dwarf placed on an ONe-typing track (a 0.774 M☉
     core on a 6.54 M☉ track, pinned pair 0417) came back ONe through a merger. No placed product
     changes kind in the census now (4 in layer D at 25, 109 at 27 before the fix).
+  - From fix-p11-helium-product-core (dwarf limit at 29): an unplaced helium giant of no dwarf
+    with a CO core of 1.438 M☉ or more is `Unplaced::IronCore` (now with `helium_core`). A kept core
+    stops at its limit (`detached::Stop::CoreLimit`, `Engine::core_limit_age`,
+    `Track::carbon_oxygen_core_at`): ONe at `OXYGEN_NEON_CAPTURE_MASS` under MandelMuller2020,
+    M_Ch under Hurley2000, CO at M_Ch.

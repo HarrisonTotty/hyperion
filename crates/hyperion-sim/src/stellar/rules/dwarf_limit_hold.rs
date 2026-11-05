@@ -68,8 +68,8 @@ fn the_dwarf_limit_is_held_only_until_the_29_bump() {
          `Engine::to_the_dwarf_limit`, the brief's read of \
          `DwarfLimitRules::fitted_tables_hold`, its tripwire and its line in \
          `stellar/rules.rs`; it keeps `DwarfLimitRules::unplaced`'s new arm, \
-         `DwarfLimitRules::placed`'s record and the pin's bypasses applied always, and refits \
-         the pair-light and reach tables"
+         `DwarfLimitRules::placed`'s record, `detached::Stop::CoreLimit` and the pin's \
+         bypasses applied always, and refits the pair-light and reach tables"
     );
     assert_eq!(version().dwarf_limit, DwarfLimitRules::Held);
     let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).dwarf_limit;
@@ -114,8 +114,9 @@ struct Figures {
     merged: [[usize; 2]; 3],
     /// The deaths of giants whose cores are carbon–oxygen or oxygen–neon dwarfs', by ending
     /// (`swollen_dwarf::dwarf_core_deaths`): their tracks' own, a white dwarf of the dwarf's kind,
-    /// and an electron capture and a disruption at their tracks' deaths.
-    endings: [[usize; 4]; 3],
+    /// an electron capture and a disruption at their tracks' deaths, and an electron capture and
+    /// a disruption at their cores' limits.
+    endings: [[usize; 6]; 3],
 }
 
 /// The census of [`PAIRS`] pairs of each of layers C, D and E in `galaxy`, each run under `rules`.
@@ -128,7 +129,7 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
         unplaced: [[0; 6]; 3],
         swollen: [[0; 2]; 3],
         merged: [[0; 2]; 3],
-        endings: [[0; 4]; 3],
+        endings: [[0; 6]; 3],
     };
     for (k, layer) in [Layer::C, Layer::D, Layer::E].into_iter().enumerate() {
         let seed = CELLS_SEED + u64::try_from(k).expect("a small index");
@@ -165,7 +166,7 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
             let unplaced: [usize; 6] =
                 core::array::from_fn(|j| unplaced_after[j] - unplaced_before[j]);
             let endings_after = dwarf_core_deaths();
-            let endings: [usize; 4] =
+            let endings: [usize; 6] =
                 core::array::from_fn(|j| endings_after[j] - endings_before[j]);
             (counts, unplaced, endings)
         });
@@ -194,8 +195,9 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
 /// was stale at version 27's base; under the held arm of version 25, 94 of layer D's pairs and 157
 /// of E's showed a dwarf above the limit; the unplaced products: no iron core, every thermally
 /// pulsing product of layer E that no star holds being a pinned primary's; under every 29 hold no
-/// placed product changes kind, and the carbon–oxygen cores whose tracks would collapse disrupt at
-/// their deaths and leave nothing, which leaves both members `NoRemnant`).
+/// placed product changes kind, and the carbon–oxygen cores whose tracks would collapse disrupt and
+/// leave nothing, most at the Chandrasekhar mass on their early AGB, which leaves both members
+/// `NoRemnant`).
 const CENSUS_FIGURES: [Figures; 2] = [
     Figures {
         run: [8_519, 17_814, 19_213],
@@ -205,7 +207,7 @@ const CENSUS_FIGURES: [Figures; 2] = [
         unplaced: [[0; 6], [0, 4, 0, 3, 0, 0], [0, 0, 0, 0, 0, 109]],
         swollen: [[0, 0], [1, 0], [0, 0]],
         merged: [[6, 0], [371, 26], [25, 0]],
-        endings: [[0; 4]; 3],
+        endings: [[0; 6]; 3],
     },
     Figures {
         run: [8_519, 17_814, 19_213],
@@ -215,7 +217,11 @@ const CENSUS_FIGURES: [Figures; 2] = [
         unplaced: [[0; 6], [0, 1, 0, 6, 0, 0], [0, 0, 0, 0, 0, 109]],
         swollen: [[0; 2]; 3],
         merged: [[0; 2]; 3],
-        endings: [[25, 0, 0, 0], [341, 54, 143, 381], [14, 6, 19, 37]],
+        endings: [
+            [25, 0, 0, 0, 0, 0],
+            [341, 42, 0, 35, 155, 346],
+            [14, 6, 0, 2, 19, 35],
+        ],
     },
 ];
 

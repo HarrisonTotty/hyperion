@@ -827,9 +827,15 @@ impl Engine {
     fn finish_merger(&mut self, product: Product) {
         let (product, source, iron_core) = match product {
             Product::Member(member, source) => (member, source, None),
-            Product::IronCore { co_core, mass } => {
-                (Member::Gone, CoreSource::Other, Some((co_core, mass)))
-            }
+            Product::IronCore {
+                co_core,
+                helium_core,
+                mass,
+            } => (
+                Member::Gone,
+                CoreSource::Other,
+                Some((co_core, helium_core, mass)),
+            ),
         };
         let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
         let dwarf = if let Member::Remnant { phase, mass, .. } = &product
@@ -855,8 +861,8 @@ impl Engine {
         self.kind = SegmentKind::Merged;
         self.stripped[1] = false;
         self.corotate(0);
-        if let Some((co_core, mass)) = iron_core {
-            self.iron_core_collapse(0, co_core, mass);
+        if let Some((co_core, helium_core, mass)) = iron_core {
+            self.iron_core_collapse(0, co_core, helium_core, mass);
         }
         if let (Some((phase, m)), Some(masses)) = (dwarf, masses) {
             if phase != Phase::OxygenNeonWhiteDwarf {
@@ -1385,7 +1391,15 @@ impl Engine {
                 .unwrap_or_else(|| self.white_dwarf(phase, mass.value()))
                 .into(),
             Unplaced::HeliumStar { mass } => self.helium_main_sequence(mass.value(), burnt).into(),
-            Unplaced::IronCore { co_core, mass } => Product::IronCore { co_core, mass },
+            Unplaced::IronCore {
+                co_core,
+                helium_core,
+                mass,
+            } => Product::IronCore {
+                co_core,
+                helium_core,
+                mass,
+            },
         }
     }
 
@@ -1617,11 +1631,14 @@ fn held_core(core: &StarState, core_radius: SolarRadii) -> Member {
 pub(super) enum Product {
     /// The member, and the dwarf its core is.
     Member(Member, CoreSource),
-    /// A star of `mass` whose carbon–oxygen core of `co_core` is an iron core.
+    /// A star of `mass` whose carbon–oxygen core of `co_core`, inside a helium core of
+    /// `helium_core`, is an iron core.
     IronCore {
         /// Its carbon–oxygen core.
         co_core: SolarMasses,
-        /// Its mass, its hydrogen envelope on.
+        /// Its helium core, everything below its hydrogen envelope.
+        helium_core: SolarMasses,
+        /// Its mass.
         mass: SolarMasses,
     },
 }

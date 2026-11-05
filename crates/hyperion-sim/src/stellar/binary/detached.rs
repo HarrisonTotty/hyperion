@@ -126,6 +126,9 @@ pub(super) enum Stop {
     /// Member `i`, a white dwarf a wind feeds, reaches the Chandrasekhar mass (P11.T4's
     /// `dwarf_limit`; [`Engine::collapse_fed_dwarf`]).
     Chandrasekhar(usize),
+    /// Member `i`'s core, a white dwarf's, reaches its limit with its envelope on (from version
+    /// 29, P11.T4's swollen dwarf and dwarf limit; [`Engine::core_limit_age`]).
+    CoreLimit(usize),
 }
 
 /// The limits on one step: its length from the rates, and the events it may land on, of which
@@ -223,6 +226,7 @@ impl Engine {
             Stop::Collision | Stop::Coalescence => self.collide(),
             Stop::Stripped(i) => self.strip(i),
             Stop::Chandrasekhar(i) => self.collapse_fed_dwarf(i),
+            Stop::CoreLimit(i) => self.reach_core_limit(i),
         }
     }
 
@@ -743,6 +747,19 @@ impl Engine {
         (dwarf && rates.mass[i] > 0.0).then(|| ((limit - s.masses[i]) / rates.mass[i]).max(0.0))
     }
 
+    /// Adds to `limits` the events of member `i`'s white dwarf, or of its core that is one's, from
+    /// `s` at `rates` (P11.T4's dwarf limit, and from version 29 its swollen dwarf): a dwarf a wind
+    /// feeds at the Chandrasekhar mass ([`Stop::Chandrasekhar`]), and a dwarf's core at its limit
+    /// ([`Stop::CoreLimit`]).
+    fn dwarf_limits(&self, i: usize, s: &Snapshot, rates: &Rates, limits: &mut StepLimit) {
+        if let Some(dt) = self.to_the_dwarf_limit(i, s, rates) {
+            limits.event(dt, Stop::Chandrasekhar(i));
+        }
+        if let Some(at) = self.core_limit_age(i) {
+            limits.event((at - s.age).max(0.0), Stop::CoreLimit(i));
+        }
+    }
+
     /// The step's length from `s` and the event it lands on, if its limit is one (BSE section
     /// 2.8's limits; see the module documentation).
     #[must_use]
@@ -815,9 +832,7 @@ impl Engine {
                     }
                 }
             }
-            if let Some(dt) = self.to_the_dwarf_limit(i, s, rates) {
-                limits.event(dt, Stop::Chandrasekhar(i));
-            }
+            self.dwarf_limits(i, s, rates, &mut limits);
             if rates.braking[i] > 0.0 {
                 limits.length(BRAKING_STEP * s.spins[i] / rates.braking[i]);
             }

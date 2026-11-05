@@ -54,10 +54,13 @@ use std::sync::Arc;
 use crate::coords::{SystemVector, SystemVelocity};
 use crate::orbit::{Eccentricity, KeplerElements, Orbit, elements_from_state};
 use crate::stellar::Phase;
-use crate::stellar::remnant::collapse::{RemnantDraws, electron_capture_remnant};
+use crate::stellar::remnant::collapse::{
+    OXYGEN_NEON_CAPTURE_MASS, RemnantDraws, electron_capture_remnant,
+};
+use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 use crate::stellar::remnant::{
     CollapseChannel, CompactRemnant, DeathKind, KickDraws, KickLaw, NatalKick, ProgenitorAtDeath,
-    RemnantKind, StandardKickLaw, Stripping, SupernovaType,
+    RemnantKind, RemnantRecipe, StandardKickLaw, Stripping, SupernovaType,
 };
 use crate::stellar::sse;
 use crate::time::{Span, UniverseTime};
@@ -65,6 +68,7 @@ use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M};
 use crate::units::{GravitationalParameter, Megayears, Radians, SolarMasses, Years};
 
 use super::detached::last_living;
+use super::dwarf_limit::CoreSource;
 use super::evolve::{Engine, LiveOrbit, OwnMainSequenceEnd, Pin, PreTest, clock_resolution_years};
 use super::star::{Member, Path, cooling_origin, positive};
 use super::swollen_dwarf::SwollenDeath;
@@ -72,6 +76,101 @@ use super::timeline::{
     BinaryInput, BinaryTimeline, Component, Context, FixedOrbit, MAX_REPORTED_ECCENTRICITY,
     OrbitPath, Segment, SegmentKind, SupernovaRecord,
 };
+
+/// The bisections of a core's limit on a phase's span ([`Engine::core_limit_age`]):
+/// 64 halve a span of a million years far below a step's length (the engine's clock resolution,
+/// `clock_resolution_years`).
+const CAPTURE_BISECTIONS: u32 = 64;
+
+/// The first track age, years, in `from_years`–`to_years` at which `core_msun`, a core's mass in
+/// M☉ at a track age and non-decreasing there, reaches `limit_msun`, to [`CAPTURE_BISECTIONS`]
+/// halvings of the span or until they stop moving (the age returned has reached it): `from_years`
+/// if it already has, `None` if it does not by `to_years` or the span is empty.
+#[must_use]
+pub(super) fn first_age_at(
+    core_msun: impl Fn(f64) -> f64,
+    from_years: f64,
+    to_years: f64,
+    limit_msun: f64,
+) -> Option<f64> {
+    if from_years >= to_years || core_msun(to_years) < limit_msun {
+        return None;
+    }
+    if core_msun(from_years) >= limit_msun {
+        return Some(from_years);
+    }
+    let (mut lo, mut hi) = (from_years, to_years);
+    for _ in 0..CAPTURE_BISECTIONS {
+        let mid = lo + 0.5 * (hi - lo);
+        if mid <= lo || mid >= hi {
+            break;
+        }
+        if core_msun(mid) >= limit_msun {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
+}
+
+/// The mass, M☉, at which a core that is a dwarf's of `source` reaches its end under `recipe`
+/// ([`Engine::core_limit_age`]): a carbon–oxygen one at the Chandrasekhar mass, where carbon
+/// ignites (HPT section 6); an oxygen–neon one at the capture mass under
+/// [`RemnantRecipe::MandelMuller2020`], at which electron captures on ²⁴Mg and ²⁰Ne collapse it
+/// (Miyaji et al. 1980, PASJ 32, 303; Nomoto 1984, ApJ 277, 791; ruling 57), as the recipe caps
+/// the oxygen–neon cores of single stars outside the capture window there ([`capture_mass`]), and
+/// at the Chandrasekhar mass under [`RemnantRecipe::Hurley2000`], which caps none; `None` for a
+/// core that is no dwarf's.
+#[must_use]
+fn core_limit(source: CoreSource, recipe: RemnantRecipe) -> Option<SolarMasses> {
+    match (source, recipe) {
+        (CoreSource::Other, _) => None,
+        (CoreSource::OxygenNeonDwarf, RemnantRecipe::MandelMuller2020) => Some(capture_mass()),
+        (CoreSource::CarbonOxygenDwarf, _)
+        | (CoreSource::OxygenNeonDwarf, RemnantRecipe::Hurley2000) => Some(CHANDRASEKHAR_MASS),
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The capture mass of this thread's runs, M☉: [`OXYGEN_NEON_CAPTURE_MASS`] unless a test
+    /// lowers it ([`with_capture_mass`]); the generator's builds have no such knob.
+    static CAPTURE_MASS: core::cell::Cell<f64> =
+        const { core::cell::Cell::new(OXYGEN_NEON_CAPTURE_MASS.value()) };
+}
+
+/// The capture mass of an oxygen–neon core under the default recipe ([`core_limit`]):
+/// [`OXYGEN_NEON_CAPTURE_MASS`], or in a test build the mass a test has set
+/// ([`with_capture_mass`]).
+#[must_use]
+fn capture_mass() -> SolarMasses {
+    #[cfg(test)]
+    {
+        SolarMasses::new(CAPTURE_MASS.with(core::cell::Cell::get))
+    }
+    #[cfg(not(test))]
+    {
+        OXYGEN_NEON_CAPTURE_MASS
+    }
+}
+
+/// `run` with the capture mass at `mass_msun` on this thread, for this call alone, so that a test
+/// can reach an oxygen–neon core's limit, which no built track's carbon–oxygen core does: the
+/// generator's path is untouched, [`capture_mass`] being [`OXYGEN_NEON_CAPTURE_MASS`] outside test
+/// builds, and here outside this call.
+#[cfg(test)]
+pub(super) fn with_capture_mass<T>(mass_msun: f64, run: impl FnOnce() -> T) -> T {
+    /// Puts the thread's capture mass back when the run ends, a panicking one included.
+    struct Restore(f64);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CAPTURE_MASS.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(CAPTURE_MASS.with(|c| c.replace(mass_msun)));
+    run()
+}
 
 impl Engine {
     /// Member `i`'s own track dies now.
@@ -126,7 +225,7 @@ impl Engine {
             .map_or(Phase::NoRemnant, |(phase, ..)| phase);
         let ending = SwollenDeath::of(self.dwarf_cores[i], death.kind(), phase);
         #[cfg(test)]
-        if self.dwarf_cores[i] != super::dwarf_limit::CoreSource::Other {
+        if self.dwarf_cores[i] != CoreSource::Other {
             ending.count();
         }
         let member = match ending {
@@ -145,7 +244,7 @@ impl Engine {
                 }
             }
             SwollenDeath::ElectronCapture => {
-                self.electron_capture_collapse(i, &death, before);
+                self.electron_capture_collapse(i, death.progenitor().co_core_mass(), before);
                 return;
             }
             SwollenDeath::Disruption => {
@@ -190,22 +289,18 @@ impl Engine {
             })
     }
 
-    /// Member `i`, a swollen oxygen–neon dwarf's giant of `before` M☉, collapses now by electron
-    /// capture where its own track's `death` would not.
+    /// Member `i`, a giant of `before` M☉ whose core of `core` is an oxygen–neon dwarf's
+    /// ([`Engine::dwarf_cores`]), collapses now by electron capture where its own track would not.
     ///
     /// The core collapses inside its hydrogen envelope, an electron-capture supernova (Nomoto
     /// 1984, ApJ 277, 791; HPT section 6, the engine's [`DeathKind::ElectronCapture`]), into Mandel
     /// and Müller's 1.26 M☉ neutron star ([`electron_capture_remnant`]) with the low-mode kick of
-    /// electron capture and no Type Ia candidate (P11.T4's swollen dwarf from version 29,
-    /// [`SwollenDeath::ElectronCapture`]). The progenitor's core is the track's at its death and
-    /// its envelope the rest of `before`.
-    fn electron_capture_collapse(
-        &mut self,
-        i: usize,
-        death: &crate::stellar::remnant::Death,
-        before: f64,
-    ) {
-        let core = SolarMasses::new(death.progenitor().co_core_mass().value().min(before));
+    /// electron capture and no Type Ia candidate (P11.T4's swollen dwarf and dwarf limit from
+    /// version 29): at its track's death ([`SwollenDeath::ElectronCapture`]), or where its core
+    /// reaches its limit first ([`Engine::core_limit_age`]). Its envelope is the rest of
+    /// `before`.
+    fn electron_capture_collapse(&mut self, i: usize, core: SolarMasses, before: f64) {
+        let core = SolarMasses::new(core.value().min(before));
         let envelope = SolarMasses::new((before - core.value()).max(0.0));
         let progenitor = ProgenitorAtDeath::new(core, core, envelope, Stripping::None);
         let death = crate::stellar::remnant::Death::new(
@@ -225,6 +320,90 @@ impl Engine {
             },
         );
         self.explode(i, before, remnant, kick);
+    }
+
+    /// The engine's age, years, at which member `i`'s core, a white dwarf's whose kind its track
+    /// would not give it ([`Engine::dwarf_cores`]), reaches its limit ([`core_limit`]) inside the
+    /// member's current phase, where it ends as that dwarf's core does
+    /// ([`Engine::reach_core_limit`]; P11.T4's swollen dwarf and dwarf limit from version 29,
+    /// research-leans-35 §7–§8); `None` for any other member, for a pinned primary whose pin is
+    /// pending, or where the phase ends first, whose boundary the next step's limit starts from.
+    ///
+    /// A carbon–oxygen core reaches the Chandrasekhar mass before a track that would collapse it
+    /// does: on an early AGB whose `Mc,BAGB` passes 2.316 M☉ its `Mc,SN` (HPT equation 75) lies
+    /// above it. An oxygen–neon core on a carbon–oxygen track would grow to that track's `Mc,SN`,
+    /// 1.44 M☉, or leave a dwarf above the capture mass. The core is the track's own carbon–oxygen
+    /// core ([`Track::carbon_oxygen_core_at`]), which the binary's mass does not change, found on
+    /// the phase's span by bisection ([`first_age_at`]). No built track's carbon–oxygen core passes
+    /// about 1.20 M☉, so an oxygen–neon core's limit is reached only where its track would
+    /// collapse.
+    ///
+    /// [`Track::carbon_oxygen_core_at`]: crate::stellar::sse::Track::carbon_oxygen_core_at
+    #[must_use]
+    pub(super) fn core_limit_age(&self, i: usize) -> Option<f64> {
+        let source = self.dwarf_cores[i];
+        if source == CoreSource::Other || self.pin_pending(i) {
+            return None;
+        }
+        let (track, offset) = match &self.members[i] {
+            Member::Track { track, offset } | Member::Shaped { track, offset, .. } => {
+                (track, *offset)
+            }
+            Member::MainSequence { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Remnant { .. }
+            | Member::Gone => return None,
+        };
+        let death = track.death()?;
+        let phase = track
+            .remnant_clock()
+            .map_or(Phase::NoRemnant, |(phase, ..)| phase);
+        if SwollenDeath::of(source, death.kind(), phase) == SwollenDeath::Own {
+            return None;
+        }
+        // The phase the engine's age is in or about to enter, as the step's own limits read it.
+        let (_, end, now) = super::evolve::phase_ahead(track, offset, self.age);
+        let to = last_living(end.min(death.age().value()));
+        let core = |age: f64| {
+            track
+                .carbon_oxygen_core_at(age)
+                .map_or(0.0, SolarMasses::value)
+        };
+        let limit = core_limit(source, self.ctx.track_options().remnant())?;
+        let at = first_age_at(core, now, to, limit.value())?;
+        Some(self.age.max(offset + at))
+    }
+
+    /// Member `i`'s core, a white dwarf's, reaches its limit now ([`Engine::core_limit_age`]): an
+    /// oxygen–neon one collapses by electron capture, and a carbon–oxygen one at the Chandrasekhar
+    /// mass ignites carbon and leaves nothing (HPT section 6), as at its track's death
+    /// ([`SwollenDeath::Disruption`]).
+    pub(super) fn reach_core_limit(&mut self, i: usize) {
+        self.close_segment();
+        let (m, _) = self.current(i);
+        let source = self.dwarf_cores[i];
+        match source {
+            CoreSource::OxygenNeonDwarf => {
+                #[cfg(test)]
+                super::swollen_dwarf::count_dwarf_core_death(
+                    super::swollen_dwarf::Ending::CaptureAtLimit,
+                );
+                let limit = core_limit(source, self.ctx.track_options().remnant());
+                self.electron_capture_collapse(i, limit.unwrap_or(CHANDRASEKHAR_MASS), m);
+            }
+            // A core that is no dwarf's has no limit (`core_limit_age`).
+            CoreSource::Other => {}
+            CoreSource::CarbonOxygenDwarf => {
+                #[cfg(test)]
+                super::swollen_dwarf::count_dwarf_core_death(
+                    super::swollen_dwarf::Ending::DisruptionAtLimit,
+                );
+                self.set_member(i, Member::Gone);
+                let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);
+                self.explode(i, m, nothing, None);
+            }
+        }
     }
 
     /// Holds the pinned primary, whose own track `track` (at `offset`) dies now, at its last
@@ -311,23 +490,32 @@ impl Engine {
 
     /// Member `i`, a merger's product of `mass` M☉ with an iron core, collapses now.
     ///
-    /// The product is one that no star can hold, its hydrogen envelope on, whose carbon–oxygen core
-    /// of `co_core` is an iron core (P11.T4's dwarf limit from version 29, [`Unplaced::IronCore`];
-    /// HPT section 6, BSE section 2.7.4). It takes plan 06's iron-core collapse ([`sse::iron_core_fate`]) under the pair's remnant recipe and the
-    /// member's remnant draws, a hydrogen-rich supernova of its envelope
-    /// ([`SupernovaType::of_envelopes`]), and the kick of plan 06's law for an iron core, the
-    /// progenitor unstripped. The thermally pulsing star's helium core is its carbon–oxygen core,
-    /// as plan 06's own death at `Mc,SN` takes it (`pulsing_agb_end`).
+    /// The product is one that no star can hold, its envelope on, whose carbon–oxygen core of
+    /// `co_core`, inside a helium core of `helium_core`, is an iron core (P11.T4's dwarf limit
+    /// from version 29, [`Unplaced::IronCore`]; HPT section 6, BSE section 2.7.4). It takes plan
+    /// 06's iron-core collapse ([`sse::iron_core_fate`]) under the pair's remnant recipe and the
+    /// member's remnant draws, the supernova of its hydrogen envelope and the helium outside its
+    /// carbon–oxygen core ([`SupernovaType::of_envelopes`]), and the kick of plan 06's law for an
+    /// iron core, the progenitor unstripped. A thermally pulsing star's helium core is its
+    /// carbon–oxygen core, as plan 06's own death at `Mc,SN` takes it (`pulsing_agb_end`), so its
+    /// supernova is hydrogen-rich; a helium giant's is the whole star, with no hydrogen.
     ///
     /// [`Unplaced::IronCore`]: super::dwarf_limit::Unplaced::IronCore
-    pub(super) fn iron_core_collapse(&mut self, i: usize, co_core: SolarMasses, mass: SolarMasses) {
-        let envelope = SolarMasses::new((mass.value() - co_core.value()).max(0.0));
+    pub(super) fn iron_core_collapse(
+        &mut self,
+        i: usize,
+        co_core: SolarMasses,
+        helium_core: SolarMasses,
+        mass: SolarMasses,
+    ) {
+        let envelope = SolarMasses::new((mass.value() - helium_core.value()).max(0.0));
+        let helium = SolarMasses::new((helium_core.value() - co_core.value()).max(0.0));
         let fate = sse::iron_core_fate(
             self.ctx.track_options().remnant(),
             Years::new(self.age),
-            SupernovaType::of_envelopes(envelope, SolarMasses::ZERO),
+            SupernovaType::of_envelopes(envelope, helium),
             co_core,
-            ProgenitorAtDeath::new(co_core, co_core, envelope, Stripping::None),
+            ProgenitorAtDeath::new(co_core, helium_core, envelope, Stripping::None),
             RemnantDraws::of(self.ctx.draws(i)),
         );
         let kick = own_kick(&self.ctx, i, &fate.death, &fate.remnant, Stripping::None);
