@@ -61,7 +61,7 @@ import type { RenderStyle, ViewId } from "../camera/state";
 import { relativeToCamera } from "../coords/relative";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type { DrawItem, MaterialHandle, TextureHandle, ViewSize } from "../engine/types";
-import type { FrameTerrain } from "../photoreal/renderer";
+import type { FrameTerrain, FrameVisibility } from "../photoreal/renderer";
 import type { GeometrySettings } from "../quality/qualitySetting";
 import { sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
 import { angularDiameterPx, bodyRegime, graticuleStepDeg } from "../wireframe/bodies";
@@ -361,6 +361,7 @@ export class LiveFrameTerrain implements FrameTerrain {
   #decorated = false;
   #depth: DrawItem[] = [];
   #sceneDepth = false;
+  #visibility: FrameVisibility | null = null;
   /** The bodies the last {@link LiveFrameTerrain.draws} drew with the two-pass occlusion. */
   #occluded: BodyIdHex[] = [];
 
@@ -437,6 +438,11 @@ export class LiveFrameTerrain implements FrameTerrain {
     const byId = new Map(bodies.map((body) => [body.id, body]));
     const draws: DrawItem[] = [];
     const depth: DrawItem[] = [];
+    // Every body's terrain by the visibility buffer, while each body drawn gives its own (R14.T2.c).
+    let visibility: { raster: DrawItem[]; forward: DrawItem[] } | null = {
+      raster: [],
+      forward: [],
+    };
     // Whether every body drawn lets the symbology take the scene's depth (plan R14, R14.T1.e).
     let sceneDepth = true;
     let annunciation: TerrainAnnunciation | null = null;
@@ -497,6 +503,12 @@ export class LiveFrameTerrain implements FrameTerrain {
       }
       decorated ||= frame.decorated;
       draws.push(...frame.draws);
+      if (visibility !== null && frame.visibility !== null) {
+        visibility.raster.push(...frame.visibility.raster);
+        visibility.forward.push(...frame.visibility.forward);
+      } else {
+        visibility = null;
+      }
       const pass = this.#source.pass(record.body);
       // The scene's depth carries the camera's strides (plan R14, R14.T3.c), which move marks.
       sceneDepth &&=
@@ -525,7 +537,17 @@ export class LiveFrameTerrain implements FrameTerrain {
     this.#occluded = occluded;
     this.#depth = depth;
     this.#sceneDepth = sceneDepth && depth.length > 0;
+    this.#visibility = visibility !== null && draws.length > 0 ? visibility : null;
     return draws;
+  }
+
+  /**
+   * The terrain the last {@link LiveFrameTerrain.draws} drew, by the visibility buffer (plan R14,
+   * R14.T2.c): each body's ID raster's draws, then each body's forward draws, where every body it
+   * drew gives them (`TerrainViewFrame.visibility`); `null` otherwise, and where it drew none.
+   */
+  visibility(): FrameVisibility | null {
+    return this.#visibility;
   }
 
   /**

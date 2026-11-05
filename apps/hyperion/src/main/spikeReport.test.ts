@@ -160,6 +160,7 @@ describe("the spike report's check", () => {
         finClusters: false,
         strides: "off",
         occlusion: "off",
+        shading: "forward",
       },
       segments: [
         {

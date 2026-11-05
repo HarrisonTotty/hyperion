@@ -404,6 +404,7 @@ function fakeSource(
     readonly hasPass?: boolean;
     readonly draws?: ReadonlyArray<DrawItem>;
     readonly overlayDepth?: TerrainViewFrame["overlayDepth"];
+    readonly visibility?: TerrainViewFrame["visibility"];
     readonly decorated?: boolean;
     readonly overlayMode?: FrameTerrainPass["geometry"]["overlayDepth"];
     readonly strides?: FrameTerrainPass["geometry"]["strides"];
@@ -442,6 +443,7 @@ function fakeSource(
     maskReady: true,
     cascades: null,
     overlayDepth: options.overlayDepth ?? null,
+    visibility: options.visibility ?? null,
     decorated: options.decorated ?? false,
   };
   return {
@@ -1302,6 +1304,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
               maskReady: true,
               cascades: null,
               overlayDepth: null,
+              visibility: null,
               decorated: false,
               ...each.frame,
             };

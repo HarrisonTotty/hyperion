@@ -347,6 +347,7 @@ describe("the photorealistic renderer", () => {
       symbologyDepth: () => [],
       sceneDepth: () => false,
       lateDraws: () => [],
+      visibility: () => null,
     };
     const bodiesPass = (from: number): ReadonlyArray<string> | undefined =>
       engine.targetFrames
@@ -389,6 +390,7 @@ describe("the photorealistic renderer", () => {
       symbologyDepth: () => [],
       sceneDepth: () => false,
       lateDraws: () => [drawOfName("late")],
+      visibility: () => null,
     };
     const occluded = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
     const passes = (): Array<readonly [string, string]> => {
@@ -465,6 +467,7 @@ describe("the photorealistic renderer", () => {
       symbologyDepth: () => [],
       sceneDepth: () => false,
       lateDraws: () => [],
+      visibility: () => null,
     };
     const geometry = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
     // Drawn at an internal scale of 1.5, its presented size kept, then again after a restore at it.
@@ -940,6 +943,7 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
       symbologyDepth: () => [],
       sceneDepth: () => false,
       lateDraws: () => [],
+      visibility: () => null,
     };
     const air = { ...frameWith([]), bodies: [planet], atmospheres: [airOf(planet, tables)] };
     const first = renderer.render(view, air);
@@ -1625,6 +1629,7 @@ describe("the photorealistic renderer's overlay", () => {
       symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
       sceneDepth: () => false,
       lateDraws: () => [],
+      visibility: () => null,
     };
     renderer.render(view, { ...frameWith([]), overlay, terrain });
     expect(
@@ -1651,6 +1656,7 @@ describe("the photorealistic renderer's overlay", () => {
       symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
       sceneDepth: () => asks,
       lateDraws: () => [],
+      visibility: () => null,
     });
     const symbology = (frame: PhotorealFrame): ReadonlyArray<string> | undefined => {
       view.frames.length = 0;
@@ -2294,6 +2300,7 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
       symbologyDepth: () => [],
       sceneDepth: () => false,
       lateDraws: () => [drawOfName("late")],
+      visibility: () => null,
     };
     const geometry = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
     const overlay = (): FrameSubmission => SYMBOLOGY;

@@ -137,6 +137,7 @@ describe("the capability summary", () => {
       float32Blendable: false,
       rg11b10Renderable: true,
       depthClipControl: true,
+      primitiveIndex: false,
       maxTextureDimension2D: 16_384,
       subgroupMinSize: 8,
       maxStorageBufferBindingSize: 134_217_728,
@@ -210,6 +211,27 @@ describe("the required features", () => {
       true,
     ]);
     expect(withheld).toEqual(kept.filter((feature) => feature !== "depth-clip-control"));
+  });
+
+  it("ask primitive-index where the adapter has it, and leave it out when withheld (R14.T2.c)", async () => {
+    const adapter = new FakeAdapter({
+      info: INTEL_UHD_620_INFO,
+      features: [...INTEL_FEATURES, "primitive-index"],
+    });
+    const withheld = requiredFeatures(adapter, {
+      withholdSubgroups: false,
+      withholdShaderF16: false,
+      withholdPrimitiveIndex: true,
+    });
+    const kept = requiredFeatures(adapter, undefined);
+    const device = await adapter.requestDevice({ requiredFeatures: [...withheld] });
+    expect([
+      kept.includes("primitive-index"),
+      withheld.includes("primitive-index"),
+      summariseAdapter(adapter).capabilities.primitiveIndex,
+      deviceCapabilities(device).primitiveIndex,
+      requiredFeatures(intel, undefined).includes("primitive-index"),
+    ]).toEqual([true, false, true, false, false]);
   });
 });
 

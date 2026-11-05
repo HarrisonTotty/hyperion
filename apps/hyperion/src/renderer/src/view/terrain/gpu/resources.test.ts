@@ -1383,6 +1383,26 @@ describe("the terrain's resources", () => {
     expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
   });
 
+  it("make a clustered lit layout's cluster mesh de-indexed for the ID raster, again at a restore, and none on another layout (R14.T2.c)", async () => {
+    const engine = await countingRenderEngine();
+    const lit = new TerrainResources(engine, LOW, WGS84, "lit", true);
+    const wire = new TerrainResources(engine, LOW, WGS84, "wire", true);
+    const plain = new TerrainResources(engine, LOW, WGS84, "lit");
+    const made = lit.clusterIdMesh;
+    engine.restore();
+    expect([
+      made?.name,
+      lit.clusterIdMesh?.name,
+      lit.clusterIdMesh === made,
+      wire.clusterIdMesh,
+      plain.clusterIdMesh,
+    ]).toEqual(["terrain cluster ids", "terrain cluster ids", false, null, null]);
+    for (const each of [lit, wire, plain]) {
+      each.dispose();
+    }
+    expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
+  });
+
   it("make no cluster records unless clustered, and refuse a clustered upload without its bake's origin (R14.T1.b)", async () => {
     const engine = await countingRenderEngine();
     const plain = new TerrainResources(engine, LOW, WGS84, "lit");

@@ -195,6 +195,15 @@ export interface GeometrySettings {
    * acceptance on the pod (the brief's ruling, 2026-11-02; the plan writes `none`).
    */
   readonly occlusion: "off" | "hzb";
+  /**
+   * R14.T2: the lit pass's interior patches shaded `forward`, each fragment the rasteriser covers
+   * (T2.a), or by the `visibility` buffer: rasterised once into the scene's depth and an `r32uint`
+   * ID of the visible cluster and its triangle (T2.c), then shaded once a pixel by a full-screen
+   * resolve that refetches the triangle's vertices (T2.d), the edge patches drawn forward after it.
+   * Read where `litClusters` is on. `forward` on both settings until the owner's Mac and RTX runs
+   * (T2.e; Design note 17): low waits on the UHD 620's.
+   */
+  readonly shading: "forward" | "visibility";
 }
 
 /**
@@ -221,6 +230,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   finClusters: false,
   strides: "off",
   occlusion: "off",
+  shading: "forward",
 };
 
 /**
@@ -398,6 +408,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       finClusters: true,
       strides: "measured",
       occlusion: "off",
+      shading: "forward",
     },
     decoration: true,
     scatterDensity: 1,
@@ -446,6 +457,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       finClusters: true,
       strides: "measured",
       occlusion: "off",
+      shading: "forward",
     },
     decoration: false,
     scatterDensity: 0,

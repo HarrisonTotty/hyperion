@@ -54,6 +54,7 @@ import {
   writeTerrainClusterRecords,
 } from "../../clusters/terrain";
 import { terrainClusterMesh } from "../../clusters/templates";
+import { deindexedClusterMesh } from "../../clusters/visibility";
 import { packPhaseFactorRows } from "../../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../../engine/gpuFlags";
 import { type GpuCapabilities, MAX_TEXTURE_ARRAY_LAYERS } from "../../engine/platform";
@@ -176,6 +177,16 @@ export const LIT_INTERIOR_INDICES = GRID_INDICES + 4 * QUADS * 6;
 
 /** Terrain's cluster mesh and its eight templates (plan R14, R14.T1.b), made once. */
 export const TERRAIN_CLUSTER_MESH = terrainClusterMesh();
+
+/**
+ * Terrain's cluster mesh de-indexed (plan R14, R14.T2.c; `clusters/visibility.ts`'
+ * `deindexedClusterMesh`), which the visibility buffer's ID raster draws the lit pass's buckets with
+ * on a device without `primitive-index`, made once.
+ */
+export const TERRAIN_CLUSTER_ID_MESH = deindexedClusterMesh(
+  TERRAIN_CLUSTER_MESH,
+  "terrain cluster ids",
+);
 
 /** The shadow cascades' passes of a view's cluster buckets (plan R14, R14.T1.b), the first four. */
 export const CLUSTER_CASTER_PASSES = 4;
@@ -1005,6 +1016,12 @@ interface MadeFields {
    */
   readonly clusterMesh: MeshHandle | null;
   readonly clusterRecords: BufferHandle | null;
+  /**
+   * On a lit layout made with its clusters, terrain's cluster mesh de-indexed, which the
+   * visibility buffer's ID raster draws without `primitive-index` (plan R14, R14.T2.c;
+   * {@link TERRAIN_CLUSTER_ID_MESH}); `null` otherwise.
+   */
+  readonly clusterIdMesh: MeshHandle | null;
   /** Each view's cluster buffers, made at its first cluster frame on the device (R14.T1.b). */
   readonly clusters: Map<string, TerrainClusterBuffers>;
   /** Each view's frame buffers, made at its first frame on the device. */
@@ -1131,6 +1148,14 @@ export class TerrainResources {
    */
   get clusterMesh(): MeshHandle | null {
     return this.#made.clusterMesh;
+  }
+
+  /**
+   * Terrain's cluster mesh de-indexed (plan R14, R14.T2.c; {@link TERRAIN_CLUSTER_ID_MESH}), on a lit
+   * layout made with its clusters; `null` otherwise.
+   */
+  get clusterIdMesh(): MeshHandle | null {
+    return this.#made.clusterIdMesh;
   }
 
   /**
@@ -1730,7 +1755,7 @@ export class TerrainResources {
    * and a disposal releases the rest (the batch review's S3).
    */
   #release(made: Made): void {
-    const { lit, normals, interiorMesh, clusterMesh, clusterRecords } = made;
+    const { lit, normals, interiorMesh, clusterMesh, clusterIdMesh, clusterRecords } = made;
     const releases: Array<() => void> = [
       ...[...made.fields.values()].map((buffer) => () => {
         this.#engine.releaseBuffer(buffer);
@@ -1760,6 +1785,13 @@ export class TerrainResources {
         : [
             (): void => {
               this.#engine.releaseMesh(clusterMesh);
+            },
+          ]),
+      ...(clusterIdMesh === null
+        ? []
+        : [
+            (): void => {
+              this.#engine.releaseMesh(clusterIdMesh);
             },
           ]),
       ...(clusterRecords === null
@@ -2074,6 +2106,7 @@ export class TerrainResources {
         mesh,
         interiorMesh,
         clusterMesh: clustered ? engine.createMesh(TERRAIN_CLUSTER_MESH.mesh) : null,
+        clusterIdMesh: clustered && traits.lit ? engine.createMesh(TERRAIN_CLUSTER_ID_MESH) : null,
         clusterRecords: clustered
           ? engine.createBuffer({
               name: "terrain cluster records",

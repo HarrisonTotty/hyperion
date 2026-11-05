@@ -208,7 +208,10 @@ interface Report {
  * its engine task has it ("the rest present") and `platform.test.ts`' `SWIFTSHADER_FEATURES` now
  * does, so the default run takes the shadow cascades' unclipped path, `unclippedDepth` pancaking the
  * casters in front, and `no-subgroups` the pulled-back near plane that every adapter without the
- * feature takes (decision-r10-t9b-design D2).
+ * feature takes (decision-r10-t9b-design D2). It withholds `primitive-index` too (plan R14,
+ * R14.T2.c), so that on an adapter that offers it the default run's ID raster takes the triangle
+ * from `primitive_index` and `no-subgroups`' draws de-indexed; SwiftShader offers neither run it
+ * (Electron 45.1.0, 2026-11-04), so both draw de-indexed there.
  */
 const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
   default: undefined,
@@ -216,6 +219,7 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
     withholdSubgroups: true,
     withholdShaderF16: false,
     withholdDepthClipControl: true,
+    withholdPrimitiveIndex: true,
   },
 };
 
@@ -354,6 +358,7 @@ function capabilityLine(capabilities: GpuCapabilities): string {
     `timestamp-query ${capabilities.timestampQuery ? "yes" : "no"}`,
     `float32-blendable ${capabilities.float32Blendable ? "yes" : "no"}`,
     `rg11b10 ${capabilities.rg11b10Renderable ? "yes" : "no"}`,
+    `primitive-index ${capabilities.primitiveIndex ? "yes" : "no"}`,
   ].join(", ");
 }
 

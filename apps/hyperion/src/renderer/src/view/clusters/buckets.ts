@@ -37,6 +37,18 @@ export const MAX_LIST_ENTRIES = 2 ** 24;
 /** The `Draw` uniform a bucket draw reads its list's base from. */
 export const CLUSTER_BASE_UNIFORM = "clusterBase";
 
+/** The sets of draws a pass keeps ({@link ClusterBuckets.drawItems}). */
+const HELD_DRAWS_A_PASS = 4;
+
+/** A pass's draws, and the mesh, bases and cap they were made with. */
+interface HeldDraws {
+  readonly mesh: MeshHandle;
+  readonly base: BucketDrawBase | null;
+  readonly discardBase: BucketDrawBase | null;
+  readonly cap: Stride;
+  readonly items: ReadonlyArray<DrawItem>;
+}
+
 /** The parts of a bucket draw its consumer gives: all but its mesh, indirect arguments and base. */
 export type BucketDrawBase = Omit<DrawItem, "mesh" | "indirect" | "instanceCount">;
 
@@ -60,16 +72,13 @@ export class ClusterBuckets {
   readonly lists: BufferHandle;
   readonly args: BufferHandle;
   readonly #cleared: Uint32Array;
-  /** Each pass's draws, and the bases and cap they were made with. */
-  readonly #items = new Map<
-    number,
-    {
-      readonly base: BucketDrawBase;
-      readonly discardBase: BucketDrawBase | null;
-      readonly cap: Stride;
-      readonly items: ReadonlyArray<DrawItem>;
-    }
-  >();
+  /**
+   * Each pass's draws, and the mesh, bases and cap they were made with: up to
+   * {@link HELD_DRAWS_A_PASS} sets a pass, the newest last, so that the forms a frame draws one pass
+   * by (the lit pass's, the overlay's redraw of it, the visibility buffer's raster and its forward
+   * draws) each keep theirs from frame to frame.
+   */
+  readonly #items = new Map<number, HeldDraws[]>();
   #disposed = false;
 
   /**
@@ -159,23 +168,27 @@ export class ClusterBuckets {
   /**
    * Pass `pass`'s bucket draws of the templates at strides up to `cap`, in the templates' order:
    * `base` with `mesh`, the bucket's arguments and its list's base as {@link CLUSTER_BASE_UNIFORM},
-   * a may-discard template's with `discardBase` in place of `base`, or none where it is `null` (plan
-   * R14, R14.T1.g); made again where a base or `cap` changed.
+   * a may-discard template's with `discardBase` in place of `base`; none of the opaque templates
+   * where `base` is `null` (the visibility buffer's forward draws after its resolve, plan R14,
+   * R14.T2.c), and none of the may-discard ones where `discardBase` is (plan R14, R14.T1.g); made
+   * again where a base or `cap` changed.
    */
   drawItems(
     pass: number,
     mesh: MeshHandle,
-    base: BucketDrawBase,
+    base: BucketDrawBase | null,
     cap: Stride,
     discardBase: BucketDrawBase | null = null,
   ): ReadonlyArray<DrawItem> {
-    const held = this.#items.get(pass);
-    if (
-      held?.base === base &&
-      held.discardBase === discardBase &&
-      held.cap === cap &&
-      held.items[0]?.mesh === mesh
-    ) {
+    const sets = this.#items.get(pass) ?? [];
+    const held = sets.find(
+      (each) =>
+        each.base === base &&
+        each.discardBase === discardBase &&
+        each.cap === cap &&
+        each.mesh === mesh,
+    );
+    if (held !== undefined) {
       return held.items;
     }
     const place = this.place(pass);
@@ -195,7 +208,11 @@ export class ClusterBuckets {
         indirect: { buffer: this.args, offsetBytes: (place.bucketBase + t) * BUCKET_ARGS_BYTES },
       });
     });
-    this.#items.set(pass, { base, discardBase, cap, items });
+    sets.push({ mesh, base, discardBase, cap, items });
+    if (sets.length > HELD_DRAWS_A_PASS) {
+      sets.shift();
+    }
+    this.#items.set(pass, sets);
     return items;
   }
 

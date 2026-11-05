@@ -196,6 +196,23 @@ export interface FrameTerrain {
    * R14.T1.e; `GeometrySettings.overlayDepth` `scene-depth`).
    */
   sceneDepth(): boolean;
+  /**
+   * The terrain the last {@link FrameTerrain.draws} drew, by the visibility buffer (plan R14,
+   * R14.T2.c; `GeometrySettings.shading` `visibility`), where every body it drew gives its own;
+   * `null` otherwise, when its draws draw it forward.
+   */
+  visibility(): FrameVisibility | null;
+}
+
+/**
+ * A frame's terrain by the visibility buffer (plan R14, R14.T2.c; Design note 9), the same
+ * triangles as its forward draws, each part every handed-over body's in the frame's order: the ID
+ * raster's draws, into the view's visibility target with the scene's depth, then the draws drawn
+ * forward over the resolve, depth-tested against the raster's depth (`TerrainVisibility`).
+ */
+export interface FrameVisibility {
+  readonly raster: ReadonlyArray<DrawItem>;
+  readonly forward: ReadonlyArray<DrawItem>;
 }
 
 /**

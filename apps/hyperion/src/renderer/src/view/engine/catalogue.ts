@@ -99,6 +99,7 @@ import { DEPTH_PYRAMID_KERNEL } from "../clusters/hzb";
 import { CLUSTER_STATS_KERNEL } from "../clusters/stats";
 import {
   TERRAIN_CLUSTER_DEPTH_MATERIALS,
+  TERRAIN_CLUSTER_ID_MATERIALS,
   TERRAIN_CLUSTER_SHADOW_MATERIALS,
   TERRAIN_DEPTH_MATERIALS,
   TERRAIN_FIN_DEPTH_MATERIALS,
@@ -305,8 +306,9 @@ export const ATMOSPHERE_DECK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
  * pass, one per vertex path, and its interior patches' on the cluster path (plan R14, R14.T1.e),
  * R10.T11's wireframe terrain, one per vertex path, and R10.T9.b's shadow casters, one per vertex
  * path, and plan R14's cluster casters (R14.T1.b), for the cascades' `depth-only` layers, and the
- * cluster path's cull and counters; and the edge patches' fin forms of the lit terrain, its depth
- * and its caster on the cluster path (plan R14, R14.T1.g).
+ * cluster path's cull and counters; the edge patches' fin forms of the lit terrain, its depth
+ * and its caster on the cluster path (plan R14, R14.T1.g); and the visibility buffer's ID raster
+ * (plan R14, R14.T2.c).
  */
 const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...[
@@ -330,6 +332,13 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     kind: "material",
     spec,
     targets: ["depth-only"],
+  })),
+  // The visibility buffer's ID raster on the de-indexed path (plan R14, R14.T2.c), into its
+  // `r32uint`; its `primitive_index` forms need a feature SwiftShader does not offer.
+  ...TERRAIN_CLUSTER_ID_MATERIALS.map((spec): CatalogueEntry => ({
+    kind: "material",
+    spec,
+    targets: ["r32uint"],
   })),
   // Plan R14's cluster path (R14.T1.b): its cull, the copy of its counters and its stable
   // compaction (R14.T2.a); the cull with the two-pass occlusion and the depth pyramid (R14.T3.d).

@@ -24,6 +24,7 @@ const CAPABILITIES: GpuCapabilities = {
   float32Blendable: false,
   rg11b10Renderable: false,
   depthClipControl: false,
+  primitiveIndex: false,
   maxTextureDimension2D: 8192,
   subgroupMinSize: null,
   maxStorageBufferBindingSize: 134_217_728,

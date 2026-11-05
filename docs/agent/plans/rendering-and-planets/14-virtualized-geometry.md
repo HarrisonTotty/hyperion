@@ -1355,6 +1355,7 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
     counted against 8.
   - _Acceptance:_ the scene's depth after the bodies pass byte-identical to T2.a's; the raster
     pass's inter-stage data at most 20 B a vertex.
+  - _Built_ (r14-t2-visibility-buffer): records at the end of Risks.
 - **R14.T2.d The resolve.** Size L.
   - The full-screen resolve with `ResolveMaterial`: a pixel whose ID is 0xffff_ffff discarded with
     no depth written; the visible cluster's template from its list entry (the cluster word's top 3
@@ -2513,3 +2514,31 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Unchanged on it: T6.b's layers `0123 01 013 01`; T6.a's `0123 01 013 01 2 - 3 -` (13 passes) and
     `0123 01 013 01 012 01 013 01` (21). The far maps hold 99.980% and more within a texel (99.995%
     before), against `FAR_MAP_WITHIN_SHARE`'s 99.9%.
+- **R14.T2.c** (`r14-t2-visibility-buffer`):
+  - `GeometrySettings.shading` (`forward` | `visibility`), `forward` on both settings and the way
+    back; `--geometry shading=`; results files without it read `forward`.
+  - `primitive-index` in `WANTED_FEATURES`, `GpuCapabilities.primitiveIndex`, and
+    `CapabilityOverrides.withholdPrimitiveIndex`, which test-render's `no-subgroups` takes.
+    SwiftShader (Electron 45.1.0) offers no `primitive-index`, so both variants draw de-indexed and
+    the `primitive_index` form is compiled and drawn on no pod (pending: the owner's runs).
+  - `clusters/visibility.ts`: `packVisibilityId`, `unpackVisibilityId`, `VISIBILITY_TRIANGLE_BITS`
+    (7), `deindexedClusterMesh`, `visibleConsumerRanges`, and `VisibilityBuffer(engine, name, scene,
+size)`, which takes the scene target whose depth it draws with (not Provides' two arguments),
+    `target` and `ids`; the pass labels `terrain id raster` and `terrain resolve`.
+  - (lean, 2026-11-04) The view's index space is shared by consumer ranges, terrain's lit lists from
+    0, a consumer its range: an entry stays the lists' one `u32`, (instance << 8) | cluster, not
+    Design note 9's two words. T5.e takes the range after terrain's, and its resolve pass refuses
+    the IDs outside its own.
+  - (lean, 2026-11-04) The de-indexed path draws `TerrainResources.clusterIdMesh`
+    (`TERRAIN_CLUSTER_ID_MESH`), each index its own vertex, the template's triangle in its z above
+    the lit-mesh code (z = code + 8 t, `DEINDEXED_TRIANGLE_STEP`), so that the buckets' indexed
+    arguments draw it unchanged; not `vertex_index ÷ 3`.
+  - Materials `id-cluster` and `id-cluster-primitive` (`terrainClusterIdMaterialSpec`,
+    `terrainClusterId*.wgsl`, over `withClusterLibrary`'s decode), asked at the first frame whose
+    geometry shades by IDs, and compiled into `r32uint`; the de-indexed form in `WGSL_CATALOGUE`.
+  - `TerrainViewFrame.visibility` (`TerrainVisibility`: `raster`, then `forward`, the may-discard
+    buckets and the edge patches' lit mesh) and `FrameTerrain.visibility()` (`FrameVisibility`);
+    `null` until the ID form is made. `ClusterBuckets.drawItems` takes a `null` base, drawing the
+    may-discard buckets alone, and keeps four sets of draws a pass.
+  - (lean, 2026-11-04) A frame with the two-pass occlusion draws forward: the visibility path does
+    not take the late raster yet.

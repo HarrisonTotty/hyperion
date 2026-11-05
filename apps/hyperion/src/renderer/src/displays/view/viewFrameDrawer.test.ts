@@ -769,6 +769,7 @@ describe("what a view's frame gives its label block and list (the batch review's
         maskReady: false,
         cascades: null,
         overlayDepth: null,
+        visibility: null,
         decorated: false,
       }),
       coverageMask: () => null,
@@ -918,6 +919,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
             maskReady: true,
             cascades: null,
             overlayDepth: null,
+            visibility: null,
             decorated: false,
           };
         },

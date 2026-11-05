@@ -99,6 +99,10 @@ import {
   texelWeights,
   terrainLitEmissiveInteriorMaterialSpec,
   terrainLitInteriorMaterialSpec,
+  TERRAIN_CLUSTER_ID_MATERIALS,
+  TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS,
+  terrainClusterIdMaterialSpec,
+  terrainLitClusterMaterialSpec,
   withoutSurveyDiscard,
   withTerrainEmission,
 } from "./terrainMaterial";
@@ -1802,5 +1806,142 @@ describe("a Regolith class on its body's curve (R10.T10.e)", () => {
     expect(classTexelLaw(photometry, 1, MARS).table).toEqual(
       phaseFactorTableOf(classRowLaw(PHASE_LAW.regolith, 1, MARS)),
     );
+  });
+});
+
+/** Bytes of each inter-stage type a vertex stage here hands on (W3C WGSL's sizes). */
+const INTER_STAGE_BYTES: Readonly<Record<string, number>> = {
+  f32: 4,
+  u32: 4,
+  vec2f: 8,
+  vec2u: 8,
+  vec3f: 12,
+  vec4f: 16,
+  vec4u: 16,
+};
+
+/** The bytes a vertex stage hands its fragment stage by struct `name` in `source`, position included. */
+function interStageBytes(source: string, name: string): number {
+  const body = new RegExp(String.raw`struct\s+${name}\s*\{([^}]*)\}`, "u").exec(
+    source.replaceAll(/\/\/[^\n]*/gu, ""),
+  )?.[1];
+  if (body === undefined) {
+    throw new Error(`the source declares no struct ${name}`);
+  }
+  return body
+    .split(",")
+    .map((member) => /:\s*(\w+)\s*$/u.exec(member.trim())?.[1])
+    .filter((type): type is string => type !== undefined)
+    .reduce((sum, type) => sum + (INTER_STAGE_BYTES[type] ?? Number.NaN), 0);
+}
+
+describe("the visibility buffer's ID raster (plan R14, R14.T2.c)", () => {
+  it("registers both vertex paths' de-indexed rasters in the catalogue, compiled for r32uint", () => {
+    for (const spec of TERRAIN_CLUSTER_ID_MATERIALS) {
+      expect(
+        WGSL_CATALOGUE.some(
+          (entry) =>
+            entry.kind === "material" &&
+            entry.spec === spec &&
+            entry.targets?.length === 1 &&
+            entry.targets[0] === "r32uint",
+        ),
+      ).toBe(true);
+    }
+    expect(
+      [...TERRAIN_CLUSTER_ID_MATERIALS, ...TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS].map(
+        (spec) => spec.displayName,
+      ),
+    ).toEqual([
+      "ID RASTER OFFSETS",
+      "TERRAIN ID RASTER",
+      "PRIMITIVE IDS OFFSETS",
+      "TERRAIN PRIMITIVE IDS",
+    ]);
+  });
+
+  it("hands its fragment stage the clip position and one flat u32, 20 B a vertex, on either path", () => {
+    for (const primitive of [false, true]) {
+      const source = terrainClusterIdMaterialSpec("baked-offsets", primitive).vertexWgsl;
+      expect(interStageBytes(source, "TerrainIdVertex")).toBe(20);
+    }
+    // The lit cluster form's, which the raster's stands in for: far more.
+    expect(
+      interStageBytes(
+        terrainLitClusterMaterialSpec("baked-offsets", false).vertexWgsl,
+        "LitVertexOut",
+      ),
+    ).toBeGreaterThan(100);
+  });
+
+  it("places each vertex as the lit cluster form does, its clip position @invariant", () => {
+    const source = terrainClusterIdMaterialSpec("face-differences", false).vertexWgsl;
+    const lit = terrainLitClusterMaterialSpec("face-differences", false).vertexWgsl;
+    const place = wgslFunction(source, "terrain_id_place");
+    const clip = "frame.clipProjection * frame.viewRotation * vec4f(placed.fromCameraM, 1.0)";
+    // The lit form's vertex stage places by `stride_place` and its clip position so (terrainLit.wgsl).
+    expect(wgslFunction(lit, "lit_vertex")).toContain(`out.clip = ${clip};`);
+    expect(wgslFunction(lit, "lit_vertex")).toContain("let placed = stride_place(grid, instance);");
+    expect(place).toContain(`out.clip = ${clip};`);
+    expect(place).toContain("let placed = stride_place(grid, instance);");
+    expect(collapseWhitespace(source)).toContain("@builtin(position) @invariant clip : vec4f,");
+    expect(source).toContain("const STRIDE_MORPH : bool = true;");
+    // No discard, no shading.
+    expect(wgslFunction(source, "fragmentMain")).toBe("{ return in.word; }");
+  });
+
+  it("takes the triangle from primitive_index on that path, its source enabling it first", () => {
+    const source = terrainClusterIdMaterialSpec("face-differences", true).vertexWgsl;
+    expect(source.startsWith("enable primitive_index;\n")).toBe(true);
+    expect(collapseWhitespace(source)).toContain("@builtin(primitive_index) triangle : u32");
+    expect(wgslFunction(source, "fragmentMain")).toBe(
+      "{ return (in.word << VISIBILITY_TRIANGLE_BITS) | triangle; }",
+    );
+    const deindexed = terrainClusterIdMaterialSpec("face-differences", false).vertexWgsl;
+    expect([
+      deindexed.includes("enable "),
+      deindexed.includes("@builtin(primitive_index)"),
+    ]).toEqual([false, false]);
+  });
+
+  it("binds what its vertex stage reads alone, seven at most, and nothing in its fragment stage", () => {
+    for (const primitive of [false, true]) {
+      const spec = terrainClusterIdMaterialSpec("baked-offsets", primitive);
+      const read = bindingStages(spec.vertexWgsl);
+      expect([spec.colourWrites, spec.depthWrite, spec.textures, spec.cullMode]).toEqual([
+        true,
+        true,
+        [],
+        "back",
+      ]);
+      expect(
+        (spec.storageBuffers ?? []).map((buffer) => [
+          buffer.name,
+          [...(buffer.stages ?? [])].join(" "),
+          [...(read.get(buffer.binding) ?? [])].toSorted().join(" "),
+        ]),
+      ).toEqual([
+        ["heights", "vertex", "vertex"],
+        ["slots", "vertex", "vertex"],
+        ["instances", "vertex", "vertex"],
+        ["contacts", "vertex", "vertex"],
+        ["offsets", "vertex", "vertex"],
+        ["surveyMask", "vertex", "vertex"],
+        ["clusterLists", "vertex", "vertex"],
+      ]);
+      const declared = new Set((spec.storageBuffers ?? []).map((buffer) => buffer.binding));
+      expect([...read.keys()].filter((binding) => !declared.has(binding))).toEqual([]);
+    }
+  });
+
+  it("takes the lit material's own draw fields, with the bucket's list base after them", () => {
+    expect(
+      terrainClusterIdMaterialSpec("face-differences", false).uniforms.map((u) => u.name),
+    ).toEqual([
+      ...terrainLitMaterialSpec("face-differences")
+        .uniforms.slice(0, 3)
+        .map((u) => u.name),
+      "clusterBase",
+    ]);
   });
 });

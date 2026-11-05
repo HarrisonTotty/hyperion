@@ -108,6 +108,9 @@ import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
 import terrainClusterWgsl from "./shaders/terrainCluster.wgsl?raw";
+import terrainClusterIdWgsl from "./shaders/terrainClusterId.wgsl?raw";
+import terrainClusterIdDeindexedWgsl from "./shaders/terrainClusterIdDeindexed.wgsl?raw";
+import terrainClusterIdPrimitiveWgsl from "./shaders/terrainClusterIdPrimitive.wgsl?raw";
 import terrainClusterShadowWgsl from "./shaders/terrainClusterShadow.wgsl?raw";
 import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
 import terrainStridesWgsl from "./shaders/terrainStrides.wgsl?raw";
@@ -826,6 +829,91 @@ export function terrainFinDepthMaterialSpec(path: TerrainVertexPath): WgslMateri
   };
 }
 
+/** `terrainCluster.wgsl`'s entry point, which a form with an entry point of its own takes as a function. */
+const CLUSTER_VERTEX_HEAD =
+  "@vertex\nfn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) -> LitVertexOut {";
+
+/** {@link CLUSTER_VERTEX_HEAD} as a function, no longer an entry point. */
+const CLUSTER_VERTEX_FUNCTION =
+  "fn cluster_lit_vertex(local : vec3f, entry : u32) -> LitVertexOut {";
+
+/**
+ * A lit terrain source with entry points of its own over the cluster path's decode (plan R14,
+ * R14.T2.c): its lit vertex stage made the function `lit_vertex` and `terrainCluster.wgsl`
+ * appended with its entry point made a function, so that the source's own entry points read a
+ * bucket's lists and decode its clusters as the cluster forms do.
+ *
+ * @throws Error unless the lit vertex stage's head occurs exactly once in `source`.
+ */
+export function withClusterLibrary(source: string): string {
+  const parts = source.split(LIT_VERTEX_HEAD);
+  const cluster = terrainClusterWgsl.split(CLUSTER_VERTEX_HEAD);
+  if (parts.length !== 2 || cluster.length !== 2) {
+    throw new Error(
+      `a form over the cluster decode needs terrainLit.wgsl's vertex stage once, found ${String(parts.length - 1)}, and terrainCluster.wgsl's once, found ${String(cluster.length - 1)}`,
+    );
+  }
+  return `${parts.join(LIT_VERTEX_FUNCTION)}\n${cluster.join(CLUSTER_VERTEX_FUNCTION)}`;
+}
+
+/** The directive a `primitive_index` source begins with (plan R14, R14.T2.c). */
+const PRIMITIVE_INDEX_ENABLE = "enable primitive_index;\n";
+
+/** The console names of the two paths' ID rasters on each of its two paths (plan R14, R14.T2.c). */
+const CLUSTER_ID_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "ID RASTER OFFSETS",
+  "face-differences": "TERRAIN ID RASTER",
+};
+
+/** Their `primitive_index` forms' names (plan R14, R14.T2.c). */
+const CLUSTER_ID_PRIMITIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "PRIMITIVE IDS OFFSETS",
+  "face-differences": "TERRAIN PRIMITIVE IDS",
+};
+
+/**
+ * The visibility buffer's ID raster for a vertex path (plan R14, R14.T2.c;
+ * `terrainClusterId.wgsl`): the lit pass's opaque buckets drawn into an `r32uint` target with the
+ * scene's depth, their vertices placed as the lit cluster form places them, `@invariant`, with no
+ * discard and no shading, by `primitive_index` where `primitive` (a device with `primitive-index`)
+ * over the terrain cluster mesh, else de-indexed (`clusters/visibility.ts`'
+ * `deindexedClusterMesh`).
+ *
+ * @remarks
+ * Its storage is the vertex stage's alone, as the cluster caster's: R05's (four on
+ * `face-differences`), the survey mask, which `lit_place` reads for the fins, and the lists, seven
+ * at most against WebGPU's eight; its fragment stage reads none and no texture. Its vertex stage
+ * hands the fragment stage the clip position and one flat `u32`, 20 B (Design note 9).
+ */
+export function terrainClusterIdMaterialSpec(
+  path: TerrainVertexPath,
+  primitive: boolean,
+): WgslMaterialSpec {
+  const entries = primitive ? terrainClusterIdPrimitiveWgsl : terrainClusterIdDeindexedWgsl;
+  const source =
+    (primitive ? PRIMITIVE_INDEX_ENABLE : "") +
+    withClusterLibrary(LIT_TERRAIN_SOURCE + terrainClusterIdWgsl + entries + PATH_SOURCES[path]);
+  const vertex = ["vertex"] as const;
+  return {
+    name: `terrain-id-cluster-${primitive ? "primitive-" : ""}${path}`,
+    displayName: (primitive ? CLUSTER_ID_PRIMITIVE_DISPLAY_NAMES : CLUSTER_ID_DISPLAY_NAMES)[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...LIT_DRAW_UNIFORMS, { name: "clusterBase", type: "u32" }],
+    samplers: [],
+    textures: [],
+    cullMode: "back",
+    depthWrite: true,
+    colourWrites: true,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      { name: "surveyMask", binding: TERRAIN_LIT_BINDINGS.surveyMask, stages: vertex },
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: vertex },
+    ],
+  };
+}
+
 /** Both paths' lit materials, for the catalogue. */
 export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainLitMaterialSpec("baked-offsets"),
@@ -884,6 +972,21 @@ export const TERRAIN_LIT_EMISSIVE_FIN_MATERIALS: ReadonlyArray<WgslMaterialSpec>
 export const TERRAIN_FIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainFinDepthMaterialSpec("baked-offsets"),
   terrainFinDepthMaterialSpec("face-differences"),
+];
+
+/**
+ * Both paths' ID rasters on the de-indexed path (plan R14, R14.T2.c), for the catalogue, compiled
+ * for `r32uint`; their `primitive_index` forms only where the device has the feature.
+ */
+export const TERRAIN_CLUSTER_ID_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainClusterIdMaterialSpec("baked-offsets", false),
+  terrainClusterIdMaterialSpec("face-differences", false),
+];
+
+/** The ID rasters' `primitive_index` forms (plan R14, R14.T2.c), for a device with `primitive-index`. */
+export const TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainClusterIdMaterialSpec("baked-offsets", true),
+  terrainClusterIdMaterialSpec("face-differences", true),
 ];
 
 /** Both paths' cluster depths (plan R14, R14.T1.e), for the catalogue, compiled for the canvas. */

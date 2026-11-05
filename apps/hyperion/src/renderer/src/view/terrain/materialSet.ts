@@ -69,6 +69,7 @@ import { fittedTerrainLayout, type TerrainLimits, terrainMeshSpec } from "./gpu/
 import type { TerrainShading } from "./slotLayout";
 import {
   terrainClusterDepthMaterialSpec,
+  terrainClusterIdMaterialSpec,
   terrainClusterShadowMaterialSpec,
   terrainDepthMaterialSpec,
   terrainFinDepthMaterialSpec,
@@ -99,7 +100,9 @@ import {
  * (`lit-cluster`, `lit-emissive-cluster`, plan R14, R14.T2.a), the wireframe's interior patches
  * on it (`wire-cluster`, plan R14, R14.T4.c), and the edge patches' may-discard clusters' lit form,
  * its emissive form, depth and caster on it (`lit-fin`, `lit-emissive-fin`, `depth-fin`,
- * `shadow-fin`, plan R14, R14.T1.g).
+ * `shadow-fin`, plan R14, R14.T1.g), and the visibility buffer's ID raster of the interior patches
+ * on it, de-indexed or by `primitive_index` (`id-cluster`, `id-cluster-primitive`, plan R14,
+ * R14.T2.c).
  */
 export type TerrainMaterialKind =
   | "lit"
@@ -117,7 +120,9 @@ export type TerrainMaterialKind =
   | "wire-cluster"
   | "shadow"
   | "shadow-cluster"
-  | "shadow-fin";
+  | "shadow-fin"
+  | "id-cluster"
+  | "id-cluster-primitive";
 
 /** A material of the terrain and a vertex path it is compiled on. */
 export interface TerrainMaterialKey {
@@ -144,7 +149,8 @@ export interface TerrainMaterialMaking {
  * The lit material draws into the photorealistic scene target (`rgba16float`); its depth material
  * and the wireframe's into the canvas, the symbology's pass and the wireframe's frame; the caster
  * into the shadow cascades' layers (`depth-only`), drawing the lit mesh, with `unclippedDepth`
- * where the device offers `depth-clip-control` (decision-r10-t9b-design D1).
+ * where the device offers `depth-clip-control` (decision-r10-t9b-design D1); the ID raster into
+ * the visibility buffer's `r32uint` (plan R14, R14.T2.c).
  *
  * @param capabilities - The device's, read at each making, so that a caster made again after a
  *   restore onto another adapter takes that adapter's `depth-clip-control`.
@@ -230,6 +236,14 @@ export function terrainMaterialOf(
       made = {
         spec: terrainFinShadowMaterialSpec(path, capabilities.depthClipControl),
         targets: ["depth-only"],
+        shading: "lit",
+      };
+      break;
+    case "id-cluster":
+    case "id-cluster-primitive":
+      made = {
+        spec: terrainClusterIdMaterialSpec(path, kind === "id-cluster-primitive"),
+        targets: ["r32uint"],
         shading: "lit",
       };
       break;

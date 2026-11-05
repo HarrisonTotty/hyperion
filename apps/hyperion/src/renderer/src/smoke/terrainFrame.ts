@@ -60,6 +60,14 @@ import {
   pyramidProjectionOf,
 } from "../view/clusters/hzb";
 import type { ClusterPassStats } from "../view/clusters/stats";
+import { CLUSTER_BASE_UNIFORM } from "../view/clusters/buckets";
+import { TERRAIN_CLUSTERS_PER_PAGE } from "../view/clusters/terrain";
+import {
+  unpackVisibilityId,
+  VISIBILITY_RASTER_LABEL,
+  VISIBILITY_RESOLVE_LABEL,
+  VisibilityBuffer,
+} from "../view/clusters/visibility";
 import { lookAlong, rotate } from "../view/camera/quaternion";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
@@ -88,7 +96,7 @@ import {
   LiveFrameTerrain,
   terrainViewOf,
 } from "../view/terrain/frameTerrain";
-import type { FrameTerrain } from "../view/photoreal/renderer";
+import type { FrameTerrain, FrameVisibility } from "../view/photoreal/renderer";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../view/terrain/handover";
 import { uvToSt, vertexSpacing, xyzToFaceUv } from "../view/terrain/cube";
 import { type PatchKey, sameKey } from "../view/terrain/patchKey";
@@ -153,6 +161,12 @@ const LOW_AT_STRIDE_1: GeometrySettings = { ...SETTINGS.low.geometry, strides: "
 
 /** How long the workers may take over the field, and a pass over its streaming, milliseconds. */
 const FIELD_TIMEOUT_MS = 60_000;
+
+/**
+ * How long the visibility buffer's ID form may take to compile once a frame asks it (plan R14,
+ * R14.T2.c), ms: a lit vertex stage, compiled on SwiftShader in some seconds.
+ */
+const ID_FORM_TIMEOUT_MS = 60_000;
 const STREAM_TIMEOUT_MS = 90_000;
 
 /**
@@ -504,6 +518,151 @@ async function drawnOccluded(
   }
 }
 
+/** A frame's scene read back: its colour, its depth and, drawn by the visibility buffer, its IDs. */
+interface DrawnScene {
+  readonly colour: Float32Array;
+  readonly depth: Float32Array;
+  readonly ids: Uint32Array | null;
+}
+
+/** The frame's matrices from `pose`, as the renderer forms them. */
+function poseFrame(pose: Pose): {
+  readonly viewRotation: Float32Array;
+  readonly projection: Float32Array;
+  readonly postProcesses: [];
+} {
+  return {
+    viewRotation: viewRotation4(pose.camera.orientation),
+    projection: perspectiveReversedInfinite(
+      pose.camera.fovXRad,
+      VIEWPORT.widthPx / VIEWPORT.heightPx,
+      NEAR_PLANE_M,
+    ),
+    postProcesses: [],
+  };
+}
+
+/** `draws` drawn forward in the bodies pass of a fresh scene target from `pose`, read back. */
+async function drawnScene(
+  engine: RenderEngine,
+  pose: Pose,
+  draws: ReadonlyArray<DrawItem>,
+): Promise<DrawnScene> {
+  const target = createSceneTarget(engine, "smoke forward frame", VIEWPORT);
+  try {
+    const depth = target.depth;
+    if (depth === null) {
+      throw new Error("the scene target has no depth");
+    }
+    target.render({ ...poseFrame(pose), label: PHOTOREAL_PASS_LABELS.bodies, draws });
+    const [colour, depthBytes] = await Promise.all([
+      engine.readTexture(target.colour),
+      engine.readTexture(depth),
+    ]);
+    return { colour: halfTexels(colour), depth: new Float32Array(depthBytes), ids: null };
+  } finally {
+    target.dispose();
+  }
+}
+
+/**
+ * A frame drawn as the renderer draws it by the visibility buffer (plan R14, R14.T2.c): `before` in
+ * the bodies pass, then `visibility`'s ID raster into a visibility target drawn with the scene's
+ * depth, then its forward draws over it, loading the scene's colour and depth; read back, its IDs
+ * with it.
+ */
+async function drawnByIds(
+  engine: RenderEngine,
+  pose: Pose,
+  before: ReadonlyArray<DrawItem>,
+  visibility: FrameVisibility,
+): Promise<DrawnScene> {
+  const target = createSceneTarget(engine, "smoke frame by IDs", VIEWPORT);
+  const buffer = new VisibilityBuffer(engine, "smoke frame by IDs", target, VIEWPORT);
+  try {
+    const depth = target.depth;
+    if (depth === null) {
+      throw new Error("the scene target has no depth");
+    }
+    const frame = poseFrame(pose);
+    target.render({ ...frame, label: PHOTOREAL_PASS_LABELS.bodies, draws: before });
+    buffer.target.render({ ...frame, label: VISIBILITY_RASTER_LABEL, draws: visibility.raster });
+    target.render({
+      ...frame,
+      label: VISIBILITY_RESOLVE_LABEL,
+      draws: visibility.forward,
+      colourLoad: "load",
+    });
+    const [colour, depthBytes, ids] = await Promise.all([
+      engine.readTexture(target.colour),
+      engine.readTexture(depth),
+      engine.readTexture(buffer.ids),
+    ]);
+    return {
+      colour: halfTexels(colour),
+      depth: new Float32Array(depthBytes),
+      ids: new Uint32Array(ids),
+    };
+  } finally {
+    buffer.dispose();
+    target.dispose();
+  }
+}
+
+/**
+ * How the IDs a raster wrote name its draws' triangles (plan R14, R14.T2.c): the pixels holding one,
+ * and of them those naming none, an ID whose visible-cluster index lies in no bucket draw's entries
+ * from its list's base, or whose triangle lies past that bucket's template's, or whose entry is no
+ * block or strip of an instance the raster's records hold.
+ */
+async function idsNamed(
+  engine: RenderEngine,
+  raster: ReadonlyArray<DrawItem>,
+  ids: Uint32Array,
+): Promise<{ readonly pixels: number; readonly namingNone: number; readonly clusters: number }> {
+  const first = raster[0];
+  const lists = first?.storageBuffers?.["clusterLists"];
+  const args = first?.indirect?.buffer;
+  if (first === undefined || lists === undefined || args === undefined) {
+    return { pixels: 0, namingNone: 0, clusters: 0 };
+  }
+  const [listWords, argWords] = await Promise.all([
+    engine.readBuffer(lists, "tolerance").then((bytes) => new Uint32Array(bytes)),
+    engine.readBuffer(args, "tolerance").then((bytes) => new Uint32Array(bytes)),
+  ]);
+  const buckets = raster.map((draw) => {
+    const at = (draw.indirect?.offsetBytes ?? 0) / 4;
+    return {
+      base: draw.uniforms[CLUSTER_BASE_UNIFORM]?.[0] ?? -1,
+      count: argWords[at + 1] ?? 0,
+      triangles: (argWords[at] ?? 0) / 3,
+    };
+  });
+  let pixels = 0;
+  let namingNone = 0;
+  const seen = new Set<number>();
+  for (const id of ids) {
+    const named = unpackVisibilityId(id);
+    if (named === null) {
+      continue;
+    }
+    pixels += 1;
+    seen.add(named.visible);
+    const bucket = buckets.find(
+      ({ base, count }) => named.visible >= base && named.visible < base + count,
+    );
+    const entry = listWords[named.visible] ?? 0;
+    if (
+      bucket === undefined ||
+      named.triangle >= bucket.triangles ||
+      (entry & 0xff) >= TERRAIN_CLUSTERS_PER_PAGE
+    ) {
+      namingNone += 1;
+    }
+  }
+  return { pixels, namingNone, clusters: seen.size };
+}
+
 /** A frame through the photorealistic renderer (plan R14, R14.T3.d), its scene read back. */
 interface SceneFrame {
   readonly colour: Float32Array;
@@ -540,6 +699,7 @@ async function sceneFrame(
     draws: (...args) => frame.terrain.draws(...args),
     symbologyDepth: () => frame.terrain.symbologyDepth(),
     sceneDepth: () => frame.terrain.sceneDepth(),
+    visibility: () => frame.terrain.visibility(),
     lateDraws: () => {
       const draws = frame.terrain.lateDraws();
       late = draws.length > 0;
@@ -1071,6 +1231,43 @@ export async function checkTerrainFrame(
       `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: lit triangles ${String(litClusterTriangles)} by clusters, ${litClusterTriangles === null ? "—" : (litClusterTriangles / litTriangles).toFixed(4)} of T1.a's ${String(litTriangles)}; digests ${bytesDigest(byMesh)} by the interior mesh, ${bytesDigest(byClusters)} by clusters; tie pixels ${String(ties.pixels)}, the largest difference ${ties.largest.toExponential(3)}`,
     );
 
+    // R14.T2.c: the lit pass's interior patches by the visibility buffer's ID raster, into the
+    // scene's depth and an r32uint ID a pixel, then its edge patches forward over them, against the
+    // forward pass's frame (T2.a's), from the same selection and residents, in one run; the ID form
+    // asked at the first frame that shades by IDs, and compiled meanwhile.
+    relief.setGeometry(LOW_AT_STRIDE_1);
+    const forwardFrame = liveFrame(relief, mask, pose, performance.now());
+    const forwardScene = await drawnScene(engine, pose, [
+      ...renderer.meshDraws(forwardFrame.plan),
+      ...forwardFrame.terrainDraws,
+    ]);
+    relief.setGeometry({ ...LOW_AT_STRIDE_1, shading: "visibility" });
+    let idFrame = liveFrame(relief, mask, pose, performance.now());
+    await until(() => {
+      idFrame = liveFrame(relief, mask, pose, performance.now());
+      return idFrame.terrain.visibility() !== null;
+    }, ID_FORM_TIMEOUT_MS);
+    const byIds = idFrame.terrain.visibility();
+    const idScene =
+      byIds === null
+        ? null
+        : await drawnByIds(engine, pose, renderer.meshDraws(idFrame.plan), byIds);
+    const named =
+      byIds === null || idScene?.ids === null || idScene === null
+        ? null
+        : await idsNamed(engine, byIds.raster, idScene.ids);
+    relief.setGeometry(LOW_AT_STRIDE_1);
+    const depthSame =
+      idScene !== null && bytesDigest(idScene.depth) === bytesDigest(forwardScene.depth);
+    const idPath = engine.capabilities.primitiveIndex ? "primitive_index" : "de-indexed";
+    checks.check(
+      "R14.T2.c the lit pass's interior patches by the visibility buffer's ID raster, its edge patches forward after it, leave the scene's depth T2.a's, byte for byte, an ID at their pixels naming each one's cluster and triangle",
+      withRelief.done && depthSame && named !== null && named.pixels > 0 && named.namingNone === 0,
+      byIds === null
+        ? `the ID form was not made in ${String(ID_FORM_TIMEOUT_MS)} ms`
+        : `${String(byIds.raster.length)} raster and ${String(byIds.forward.length)} forward draws, the raster ${idPath}; the depth ${depthSame ? "the same bytes" : "differs"}, digests ${bytesDigest(forwardScene.depth)} forward, ${idScene === null ? "—" : bytesDigest(idScene.depth)} by IDs; ${String(named?.pixels)} pixels of ${String(VIEWPORT.widthPx * VIEWPORT.heightPx)} hold an ID, of ${String(named?.clusters)} clusters, ${String(named?.namingNone)} naming none; IDs digest ${idScene?.ids === null || idScene === null ? "—" : bytesDigest(idScene.ids)}`,
+    );
+
     // R14.T1.g: the edge patches through the cull and the stable compaction beside the interior
     // patches, their fins and skirt heads as `terrain-fin` clusters and every cluster the survey's
     // edge comes near by the fin forms, against their lit mesh's draw, from the same selection and
@@ -1359,6 +1556,7 @@ export async function checkTerrainFrame(
             symbologyDepth: () => [],
             sceneDepth: () => false,
             lateDraws: () => [],
+            visibility: () => null,
           };
       // The datums the renderer packs the overlay with, from its plan.
       let datums = 0;

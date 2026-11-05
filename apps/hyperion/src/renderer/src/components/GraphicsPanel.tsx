@@ -65,6 +65,7 @@ const FEATURE_NAMES: ReadonlyArray<
   ["float32Blendable", "float32-blendable"],
   ["rg11b10Renderable", "rg11b10ufloat-renderable"],
   ["depthClipControl", "depth-clip-control"],
+  ["primitiveIndex", "primitive-index"],
 ];
 
 function summaryOf(condition: GraphicsCondition): AdapterSummary | null {

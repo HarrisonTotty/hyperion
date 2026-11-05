@@ -258,6 +258,8 @@ export interface GeometryOverride {
   readonly strides?: "off" | "measured";
   /** R14.T3.d: two-pass occlusion against the depth pyramid. */
   readonly occlusion?: "off" | "hzb";
+  /** R14.T2: the lit pass's interior patches shaded forward, or by the visibility buffer. */
+  readonly shading?: "forward" | "visibility";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

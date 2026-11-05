@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { type CatalogueEntry, TABLE_ONLY_ENTRIES, WGSL_CATALOGUE } from "./catalogue";
 import { fragmentOutputAt } from "./webgpu/fragmentOutput";
-import { assertOutputsFit, ENTRY_POINTS } from "./webgpu/materials";
+import {
+  assertOutputsFit,
+  ENTRY_POINTS,
+  materialBindings,
+  storageBuffersPerStage,
+} from "./webgpu/materials";
+import { TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS } from "../terrain/terrainMaterial";
 import { pipelineOutputs } from "./webgpu/pipelineOutputs";
 
 /**
@@ -129,5 +135,27 @@ describe("the catalogue's materials' outputs (plan R14, R14.T2.b's finding)", ()
       }
     }
     expect(refused).toEqual([]);
+  });
+});
+
+/** WebGPU's default `maxStorageBuffersPerShaderStage`, which the engine never raises. */
+const DEFAULT_STORAGE_BUFFERS_PER_STAGE = 8;
+
+describe("the catalogue's materials' storage bindings (plan R14, R14.T2.c)", () => {
+  it("count at most WebGPU's default eight storage buffers in each stage of every material", () => {
+    const specs = [
+      ...WGSL_CATALOGUE.flatMap((entry) => (entry.kind === "material" ? [entry.spec] : [])),
+      // The ID raster's `primitive_index` forms, which the catalogue leaves out (SwiftShader has no
+      // `primitive-index`).
+      ...TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS,
+    ];
+    const over = specs.flatMap((spec) => {
+      const counts = storageBuffersPerStage(materialBindings(spec));
+      return Math.max(counts.vertex, counts.fragment) > DEFAULT_STORAGE_BUFFERS_PER_STAGE
+        ? [`${spec.name}: ${String(counts.vertex)} vertex, ${String(counts.fragment)} fragment`]
+        : [];
+    });
+    expect(over).toEqual([]);
+    expect(specs.length).toBeGreaterThan(100);
   });
 });

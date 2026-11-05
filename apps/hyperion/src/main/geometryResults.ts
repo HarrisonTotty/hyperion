@@ -74,8 +74,8 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
  * The fields a file written before each lacks: the consumers' levers (plan R14's T4) and the edge
  * patches' (R14.T1.g), each absent one read as off, the mesh page pool's bytes (T5.b), absent read
  * as 0, no pool, the meshes' tolerance (T5.f), absent read as 0 px, the finest cut, the camera
- * passes' strides (T3.c), absent read as `off`, and the two-pass occlusion (T3.d), absent read as
- * `off`.
+ * passes' strides (T3.c), absent read as `off`, the two-pass occlusion (T3.d), absent read as
+ * `off`, and the lit pass's shading (T2), absent read as `forward`.
  */
 const LATER_FIELDS = [
   "figureClusters",
@@ -86,6 +86,7 @@ const LATER_FIELDS = [
   "finClusters",
   "strides",
   "occlusion",
+  "shading",
 ] as const;
 
 /** `value` as a mesh tolerance, two numbers of at least 0, px, or `null`. */
@@ -130,6 +131,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     finClusters = false,
     strides = "off",
     occlusion = "off",
+    shading = "forward",
   } = value;
   const meshTolerancePx = meshToleranceOf(tolerance);
   if (
@@ -145,6 +147,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     typeof finClusters !== "boolean" ||
     (strides !== "off" && strides !== "measured") ||
     (occlusion !== "off" && occlusion !== "hzb") ||
+    (shading !== "forward" && shading !== "visibility") ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -168,6 +171,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     finClusters,
     strides,
     occlusion,
+    shading,
   };
 }
 
@@ -282,8 +286,9 @@ function settingsWords(settings: SpikeGeometryReport["settings"]): string {
     finClusters,
     strides,
     occlusion,
+    shading,
   } = settings;
-  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}, the camera's strides ${strides === "measured" ? "by measured error" : "off"}, occlusion ${occlusion === "hzb" ? "two-pass against the depth pyramid" : "off"}`;
+  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}, the camera's strides ${strides === "measured" ? "by measured error" : "off"}, occlusion ${occlusion === "hzb" ? "two-pass against the depth pyramid" : "off"}, the lit pass's interior patches shaded ${shading === "visibility" ? "by the visibility buffer" : "forward"}`;
 }
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */

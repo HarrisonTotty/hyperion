@@ -159,6 +159,7 @@ describe("the geometry's settings (plan R14)", () => {
         finClusters: true,
         strides: "measured",
         occlusion: "off",
+        shading: "forward",
       });
     }
     expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
@@ -179,6 +180,7 @@ describe("the geometry's settings (plan R14)", () => {
       finClusters: false,
       strides: "off",
       occlusion: "off",
+      shading: "forward",
     });
   });
 

@@ -33,6 +33,11 @@ export interface GpuCapabilities {
   readonly rg11b10Renderable: boolean;
   /** R10's shadow cascades. */
   readonly depthClipControl: boolean;
+  /**
+   * WGSL's `@builtin(primitive_index)` (plan R14, R14.T2.c): the visibility buffer's ID raster takes
+   * its triangle from it, and draws de-indexed without it.
+   */
+  readonly primitiveIndex: boolean;
   /** Pixels on a side. */
   readonly maxTextureDimension2D: number;
   /** Invocations in the smallest subgroup, or `null` without the `subgroups` feature. */
@@ -80,6 +85,7 @@ export const WANTED_FEATURES: ReadonlyArray<GPUFeatureName> = [
   "float32-blendable",
   "rg11b10ufloat-renderable",
   "depth-clip-control",
+  "primitive-index",
 ];
 
 /**
@@ -99,6 +105,11 @@ export interface CapabilityOverrides {
    * SwiftShader turned out to (T9.a's deferred finding; decision-r10-t9b-design D2).
    */
   readonly withholdDepthClipControl?: boolean;
+  /**
+   * Withholds `primitive-index` (plan R14, R14.T2.c), so that the visibility buffer's ID raster
+   * draws de-indexed on an adapter that offers the feature, as every adapter without it does.
+   */
+  readonly withholdPrimitiveIndex?: boolean;
   /**
    * Requests WebGPU's default limits rather than {@link requiredLimits}' raised ones, so that the
    * harness runs R05's `FaceDifferences` fallback for the high setting (decisions-r06-r07.md
@@ -129,6 +140,7 @@ export function summariseAdapter(adapter: GPUAdapter): {
       float32Blendable: features.has("float32-blendable"),
       rg11b10Renderable: features.has("rg11b10ufloat-renderable"),
       depthClipControl: features.has("depth-clip-control"),
+      primitiveIndex: features.has("primitive-index"),
       maxTextureDimension2D: limits.maxTextureDimension2D,
       subgroupMinSize: subgroups ? info.subgroupMinSize : null,
       maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
@@ -155,6 +167,7 @@ export function deviceCapabilities(device: GPUDevice): GpuCapabilities {
     float32Blendable: features.has("float32-blendable"),
     rg11b10Renderable: features.has("rg11b10ufloat-renderable"),
     depthClipControl: features.has("depth-clip-control"),
+    primitiveIndex: features.has("primitive-index"),
     maxTextureDimension2D: limits.maxTextureDimension2D,
     subgroupMinSize: subgroups ? adapterInfo.subgroupMinSize : null,
     maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
@@ -284,6 +297,9 @@ export function requiredFeatures(
   }
   if (overrides?.withholdDepthClipControl === true) {
     withheld.add("depth-clip-control");
+  }
+  if (overrides?.withholdPrimitiveIndex === true) {
+    withheld.add("primitive-index");
   }
   return WANTED_FEATURES.filter(
     (feature) => adapter.features.has(feature) && !withheld.has(feature),

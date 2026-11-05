@@ -47,6 +47,8 @@ const KINDS: Readonly<Record<TerrainMaterialKind, true>> = {
   shadow: true,
   "shadow-cluster": true,
   "shadow-fin": true,
+  "id-cluster": true,
+  "id-cluster-primitive": true,
 };
 /** The kinds of {@link KINDS}. */
 const TERRAIN_MATERIAL_KINDS = Object.keys(KINDS).filter(
