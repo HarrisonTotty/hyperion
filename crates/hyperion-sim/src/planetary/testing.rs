@@ -489,9 +489,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 ///
 /// The holds at 28:
 ///
-/// - a first solve labelled a steam envelope over a state that is not a runaway's, solved once
-///   more as a hothouse, `STEAM_DIVISION_VERSION` (P14.T53.b part 3's B5), at
-///   `SteamDivisionRules::Hothouse` through `with_steam_division`.
 /// - a paired star's remnant and death from its pair's timeline in the generation,
 ///   `BINARY_HOST_REMNANTS_VERSION` (P14.T1.h), at `BinaryHostRemnantsRules::Engine` through
 ///   `with_binary_host_remnants`: the neutron stars second-generation planets form about, the
@@ -512,7 +509,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 #[cfg(test)]
 pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
     use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
-    use crate::planetary::derive::atmosphere::{SteamDivisionRules, with_steam_division};
     let run = move || {
         use crate::planetary::fate::evaporation::{EvaporationRules, with_evaporation};
         with_evaporation(EvaporationRules::Evaporated, run)
@@ -524,7 +520,7 @@ pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
         with_zone_placement_margin(ZonePlacementMarginRules::Margin, run)
     };
     let run = move || with_binary_host_remnants(BinaryHostRemnantsRules::Engine, run);
-    with_every_27_hold(move || with_steam_division(SteamDivisionRules::Hothouse, run))
+    with_every_27_hold(run)
 }
 
 /// A pair's history before an age, by its worst event: the classes the binary hosts' census

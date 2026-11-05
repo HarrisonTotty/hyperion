@@ -100,6 +100,7 @@ pub(crate) use surface_mix::{
     pass_resurfacing,
 };
 
+use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::escape::{EnvelopeHelium, EscapeOutcome};
@@ -135,7 +136,6 @@ use crate::units::{
     EarthFluxes, EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, MetresPerSecond,
     MetresPerSecondSquared, Pascals, SolarLuminosities, SolarMasses, WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// The atomic mass constant, kg (CODATA 2022: 1.660 539 068 92 × 10⁻²⁷ kg), in which molecular
 /// masses are counted.
@@ -2643,8 +2643,8 @@ impl Atmosphere {
     /// every figure of the body (its temperature, albedo, pressure, condensates, deck and
     /// template) is the labelled solve's to the bit, since no branch of the state and no pass reads
     /// it (decision-p14-t53b-part3 §5). The record's sections read it: such a body has its
-    /// envelope's section, not modelled at 25, and no surface's. From generator version 28
-    /// (`STEAM_DIVISION_VERSION`) the solve it labels is a runaway's or a magma ocean's: a first
+    /// envelope's section, not modelled at 25, and no surface's. From generator version 28 the
+    /// solve it labels is a runaway's or a magma ocean's: a first
     /// solve it labels over a `Temperate` or a `Snowball` is solved again as a hothouse
     /// (P14.T53.b part 1 (c)'s re-solve).
     #[must_use]
@@ -3948,8 +3948,8 @@ pub(crate) fn water_saturation_temperature(pressure: Pascals) -> Option<Kelvin> 
 /// - and its mean surface temperature is at or above water's saturation temperature at its
 ///   surface pressure ([`water_saturation_temperature`]), at least water's triple-point pressure.
 ///
-/// From generator version 28 ([`STEAM_DIVISION_VERSION`]) a first solve labelled a steam envelope
-/// over a `Temperate` or `Snowball` is one too, whatever its division (P14.T53.b part 3's B5,
+/// A first solve labelled a steam envelope over a `Temperate` or `Snowball` is one too (from
+/// generator version 28), whatever its division (P14.T53.b part 3's B5,
 /// decision-p14-t53b-part3 §5 and §8). Most such solves end their passes at a context jump on a
 /// pass solved under the `Temperate` its previous pass's figures carried, while its own figures,
 /// which the label reads, are a runaway's by rule 6; the rest lie at water's critical
@@ -3970,73 +3970,8 @@ pub(crate) fn solved_as_a_hothouse(air: &Atmosphere) -> bool {
             .and_then(water_saturation_temperature)
             .is_some_and(|saturation| air.surface_temperature >= saturation);
     let steam_off_a_runaway_s_state = air.published_state() == SurfaceState::SteamEnvelope
-        && matches!(air.state, SurfaceState::Temperate | SurfaceState::Snowball)
-        && SteamDivisionRules::in_force() == SteamDivisionRules::Hothouse;
+        && matches!(air.state, SurfaceState::Temperate | SurfaceState::Snowball);
     dry_hothouse || steam_off_a_runaway_s_state
-}
-
-/// The generator version from which a first solve labelled a steam envelope over a state that is
-/// not a runaway's is solved once more as a hothouse (P14.T53.b part 3's B5,
-/// decision-p14-t53b-part3 §5 and §8): 28, the train after 27's, whose list is frozen.
-///
-/// It is this rule's one hold. Below it [`SteamDivisionRules::in_force`] is
-/// [`SteamDivisionRules::Label`], and every value on the record is version 27's bit for bit. 28's
-/// bump deletes this hold, [`SteamDivisionRules`] with its `Label` arm, the guard that reads it in
-/// [`solved_as_a_hothouse`], the tests' switch and its tripwire
-/// (`the_steam_division_is_held_only_until_the_28_bump`).
-pub(crate) const STEAM_DIVISION_VERSION: GeneratorVersion = GeneratorVersion::new(28);
-
-/// Whether a first solve labelled a steam envelope over a state that is not a runaway's is solved
-/// again as a hothouse (its hold, [`STEAM_DIVISION_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SteamDivisionRules {
-    /// Version 27's and before: such a solve is published as it stands, the label over the
-    /// `Temperate` or `Snowball` its published pass was solved under.
-    Label,
-    /// Version 28's: it is solved once more as a hothouse ([`solved_as_a_hothouse`]).
-    Hothouse,
-}
-
-impl SteamDivisionRules {
-    /// The rules this generator version gives: the hothouse from [`STEAM_DIVISION_VERSION`], the
-    /// label below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_steam_division`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = STEAM_DIVISION_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= STEAM_DIVISION_VERSION {
-            Self::Hothouse
-        } else {
-            Self::Label
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The steam division's rules a test sets on its thread, `None` for the version's.
-    static STEAM_DIVISION_RULES: core::cell::Cell<Option<SteamDivisionRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the steam division's rules `rules` on this thread, for the tests to reach
-/// version 28's ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. 28's bump deletes it
-/// with the hold.
-#[cfg(test)]
-pub(crate) fn with_steam_division<R>(rules: SteamDivisionRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SteamDivisionRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            STEAM_DIVISION_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(STEAM_DIVISION_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
 }
 
 /// What P14.T53.b part 1 (b)'s solves without the deck and (c)'s solves as a hothouse cost on a

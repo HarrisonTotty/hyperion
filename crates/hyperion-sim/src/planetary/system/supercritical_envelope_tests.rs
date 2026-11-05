@@ -97,73 +97,27 @@ fn off_a_runaway_s_state() -> Vec<(String, SteamDivision)> {
     found
 }
 
-/// From generator version 28 (`STEAM_DIVISION_VERSION`, P14.T53.b part 3's B5), a first solve
-/// labelled a steam envelope over a state that is not a runaway's is solved again as a hothouse,
-/// so that each steam envelope of [`OFF_A_RUNAWAY_S_STATE`] is a runaway's, with no surface
-/// section and its water's state the division's: its decked solve condenses a sea, so (b) takes the
-/// deck away, and the deckless runaway's climate is its first solve's within 10⁻⁹. At 26 each is
-/// published as it stands, over its `Temperate`.
+/// From generator version 28 (P14.T53.b part 3's B5), a first solve labelled a steam envelope over
+/// a state that is not a runaway's is solved again as a hothouse, so that each steam envelope of
+/// [`OFF_A_RUNAWAY_S_STATE`] is a runaway's, with no surface section: its decked solve condenses a
+/// sea, so (b) takes the deck away. Below 28 each was published as it stood, over its `Temperate`.
 #[test]
 fn from_28_a_steam_envelope_over_a_temperate_pass_is_solved_as_a_runaway() {
-    use crate::planetary::derive::atmosphere::{
-        RunawayDeck, SteamDivisionRules, with_steam_division,
-    };
+    use crate::planetary::derive::atmosphere::RunawayDeck;
     use crate::planetary::record::SectionState;
-    let held = off_a_runaway_s_state();
-    let at_28 = with_steam_division(SteamDivisionRules::Hothouse, off_a_runaway_s_state);
-    for ((id, before), (_, after)) in held.iter().zip(&at_28) {
-        eprintln!("{id}: at 26 {before:?}; at 28 {after:?}");
+    for (id, after) in off_a_runaway_s_state() {
+        eprintln!("{id}: {after:?}");
         assert_eq!(
-            (before.0, before.1, before.3),
-            (
-                SurfaceState::SteamEnvelope,
-                SurfaceState::Temperate,
-                RunawayDeck::Kept
-            ),
-            "{id}: the finding at 26"
-        );
-        assert_eq!(
-            (after.0, after.1, after.2, after.3),
+            (after.0, after.1, after.3),
             (
                 SurfaceState::SteamEnvelope,
                 SurfaceState::RunawayGreenhouse,
-                before.2,
                 RunawayDeck::Deckless
             ),
             "{id}: {after:?}"
         );
         assert_ne!(after.5, SectionState::Ok, "{id}: {after:?}");
-        assert!((after.4 / before.4 - 1.0).abs() < 1e-9, "{id}: {after:?}");
     }
-}
-
-/// P14.T53.b part 3's B5 fix is held until the 27 → 28 bump: the rules in force are version 27's
-/// and before, and 28's helper reaches the hothouse.
-#[test]
-fn the_steam_division_is_held_only_until_the_28_bump() {
-    use crate::planetary::derive::atmosphere::{STEAM_DIVISION_VERSION, SteamDivisionRules};
-    use crate::planetary::testing::{with_every_27_hold, with_every_28_hold};
-    use crate::{GENERATOR_VERSION, GeneratorVersion};
-    assert!(
-        GENERATOR_VERSION < STEAM_DIVISION_VERSION,
-        "the 27 → 28 bump puts P14.T53.b part 3's B5 fix on the record (decision-p14-t53b-part3 \
-         §8): delete `STEAM_DIVISION_VERSION`, `SteamDivisionRules` with its `Label` arm and the \
-         guard that reads it in `solved_as_a_hothouse`, the tests' `with_steam_division`, its \
-         switch in `with_every_28_hold` (and the helper, if no other 28 hold is left), the 26 arm \
-         of `from_28_a_steam_envelope_over_a_temperate_pass_is_solved_as_a_runaway`, the 26 and \
-         27 censuses of `composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold` \
-         and this test"
-    );
-    assert_eq!(STEAM_DIVISION_VERSION, GeneratorVersion::new(28));
-    assert_eq!(SteamDivisionRules::in_force(), SteamDivisionRules::Label);
-    assert_eq!(
-        with_every_27_hold(SteamDivisionRules::in_force),
-        SteamDivisionRules::Label
-    );
-    assert_eq!(
-        with_every_28_hold(SteamDivisionRules::in_force),
-        SteamDivisionRules::Hothouse
-    );
 }
 
 /// FNV-1a 64 of `text`'s bytes: a record's digest, so that a census keeps no record.

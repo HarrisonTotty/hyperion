@@ -1375,7 +1375,7 @@ fn composition_census_over_a_million_bodies_reaches_every_row_or_lists_why() {
     census.assert_no_envelope_changes();
 }
 
-/// Bodies the census found off a runaway's state at 26 and under every 27 hold, by ID
+/// Bodies the census found off a runaway's state below 28, by ID
 /// ([`composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold`]): the three of
 /// `supercritical_envelope_tests`'s `OFF_A_RUNAWAY_S_STATE`.
 const STEAM_OFF_A_RUNAWAY_S_STATE: [&str; 3] = [
@@ -1419,16 +1419,6 @@ impl SteamStates {
             passes: case.derived.atmosphere_passes(),
             jump: case.derived.convergence().is_jump(),
         }
-    }
-
-    /// Whether it publishes the same as `other`, its figures to the bit.
-    fn same(&self, other: &Self) -> bool {
-        self.states == other.states
-            && self.t_s.total_cmp(&other.t_s).is_eq()
-            && self.p_s.total_cmp(&other.p_s).is_eq()
-            && self.surface == other.surface
-            && self.condensed_water == other.condensed_water
-            && (self.passes, self.jump) == (other.passes, other.jump)
     }
 
     /// Whether it is a steam envelope over a state that is not a runaway's.
@@ -1518,63 +1508,41 @@ fn steam_census(
     all
 }
 
-/// P14.T53.b part 3's B5 over the ordinary census's systems (decision-p14-t53b-part3 §5 and §8), at
-/// 26, under every 27 hold and under every 28 hold: the steam envelopes over each state and those
-/// off a runaway's state, listed, [`STEAM_OFF_A_RUNAWAY_S_STATE`] among them at 26 and 27. Under
-/// every 28 hold (`STEAM_DIVISION_VERSION`) none is off a runaway's state but a magma ocean's, which
-/// the label precedes (§5), and every body 28's hold moves keeps B1 (no steam envelope or runaway
-/// listing H₂O condensed), B4 (a finite temperature) and B5 (no steam envelope with a surface
-/// section), listed.
+/// P14.T53.b part 3's B5 over the ordinary census's systems (decision-p14-t53b-part3 §5 and §8)
+/// under the version's rules: the steam envelopes over each state and those off a runaway's state,
+/// listed. From 28 none is off a runaway's state but a magma ocean's, which the label precedes (§5),
+/// [`STEAM_OFF_A_RUNAWAY_S_STATE`], off it below 28, among them, and every body keeps B1 (no steam
+/// envelope or runaway listing H₂O condensed), B4 (a finite temperature) and B5 (no steam envelope
+/// with a surface section), listed.
 #[test]
-#[ignore = "slow: 10⁵ bodies of 6,800 systems three times, on eight threads"]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems, on eight threads"]
 fn composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold() {
-    use crate::planetary::testing::{with_every_27_hold, with_every_28_hold};
-    let at_26 = steam_census("at 26", |run| run());
-    let at_27 = steam_census("under every 27 hold", |run| with_every_27_hold(run));
-    let at_28 = steam_census("under every 28 hold", |run| with_every_28_hold(run));
-    for on in [&at_26, &at_27, &at_28] {
-        assert!(on.len() >= 100_000, "{} bodies", on.len());
-    }
+    let at_28 = steam_census("at the version's rules", |run| run());
+    assert!(at_28.len() >= 100_000, "{} bodies", at_28.len());
     let listed = |on: &SteamCensus, id: &str| {
         on.iter()
             .any(|(label, body)| label.contains(id) && body.off_a_runaway_s_state())
     };
     for id in STEAM_OFF_A_RUNAWAY_S_STATE {
-        assert!(listed(&at_26, id), "{id} at 26");
-        assert!(listed(&at_27, id), "{id} under every 27 hold");
+        assert!(!listed(&at_28, id), "{id} at 28");
     }
     let mut failures = Vec::new();
     for (label, body) in &at_28 {
         if body.off_a_runaway_s_state() && body.states.1 != SurfaceState::MagmaOcean {
             failures.push(format!("B5: {label}: {}", body.line()));
         }
-    }
-    eprintln!("moved by 28's hold:");
-    let mut moved = 0_usize;
-    for (label, after) in &at_28 {
-        let Some(before) = at_27.get(label) else {
-            failures.push(format!("{label} under every 28 hold alone"));
-            continue;
-        };
-        if before.same(after) {
-            continue;
+        let runaway_or_steam = body.states.1 == SurfaceState::RunawayGreenhouse
+            || body.states.0 == SurfaceState::SteamEnvelope;
+        if runaway_or_steam && body.condensed_water {
+            failures.push(format!("B1: {label}: {}", body.line()));
         }
-        moved += 1;
-        eprintln!("  {label}: {} → {}", before.line(), after.line());
-        let runaway_or_steam = after.states.1 == SurfaceState::RunawayGreenhouse
-            || after.states.0 == SurfaceState::SteamEnvelope;
-        if runaway_or_steam && after.condensed_water {
-            failures.push(format!("B1: {label}: {}", after.line()));
+        if body.states.0 == SurfaceState::SteamEnvelope && body.surface == SectionState::Ok {
+            failures.push(format!("B5 surface: {label}: {}", body.line()));
         }
-        if after.states.0 == SurfaceState::SteamEnvelope && after.surface == SectionState::Ok {
-            failures.push(format!("B5 surface: {label}: {}", after.line()));
-        }
-        if !(after.t_s.is_finite() && after.t_s > 0.0) {
-            failures.push(format!("B4: {label}: {}", after.line()));
+        if !(body.t_s.is_finite() && body.t_s > 0.0) {
+            failures.push(format!("B4: {label}: {}", body.line()));
         }
     }
-    eprintln!("moved by 28's hold: {moved}");
-    assert_eq!(at_28.len(), at_27.len(), "28's hold moves no body's walk");
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
