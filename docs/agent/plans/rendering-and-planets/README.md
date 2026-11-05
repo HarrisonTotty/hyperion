@@ -64,6 +64,7 @@ open points list its own.
 | [R12](12-measurements-and-settings-ladder.md)          | Measurements and the settings ladder                                     | RM6       | all of R01–R11, as built; R14 as built (asked by R14, open)                                                             |
 | [R13](13-the-hybrid-sky.md)                            | The hybrid sky: the census near, synthetic stars far                     | RM7       | R06 (T5, T7.b, T8.i, T9.f, T9.j, T11.d), R07 (the label block); galaxy 03; R06.T5.f's tables corrected (R13.T9's gate)  |
 | [R14](14-virtualized-geometry.md)                      | Virtualized geometry: one cluster path for every 3D model, terrain first | RM8       | R01, R05, R10 as built; R02, R07, R08 read; R11 and craft art for T5's consumers; R12 holds its ladder rows             |
+| [R15](15-planet-viewer.md)                             | The planet viewer: a dev tab for one planet from the generator's inputs  | none      | R07, R08, R10 as built; galaxy 06, 14                                                                                   |
 
 Each plan's header gives its own dependencies, which this table repeats. The plans were written in
 parallel on 2026-09-29, against the tree at `4abab50` and each other's drafts, then reviewed, fixed
