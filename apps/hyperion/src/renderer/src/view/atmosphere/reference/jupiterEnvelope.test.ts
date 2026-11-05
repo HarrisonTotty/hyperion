@@ -77,14 +77,16 @@ describe("the absorbing envelope's case", { timeout: BUILD_MS }, () => {
     expect(nearest).toBeGreaterThan(LEAST_SUN_DISTANCE_DEG - 1e-9);
   });
 
-  it("splits at the hand Jupiter's envelope floor, its medium above absorbing in every channel", () => {
+  // At 27's chromophore (its disc column, τ(550) 0.117 from 0.307 at 26) the medium above absorbs
+  // in green and blue alone, red's τ (1 − ω̄) 0.025 (0.065 at 26); the reference was traced at 26's.
+  it("splits at the hand Jupiter's envelope floor, its medium above absorbing in green and blue at 27", () => {
     const { referenceCase, split } = jupiterEnvelopeCase();
     const above = regimeChannels(upperMediumOf(referenceCase.medium, split.altitudeM));
     expect([
       split.floor,
       referenceCase.medium.groundAlbedo,
       above.map((c) => c.opticalDepth * (1 - c.singleScatteringAlbedo) > 0.05),
-    ]).toEqual(["envelope", [0, 0, 0], [true, true, true]]);
+    ]).toEqual(["envelope", [0, 0, 0], [false, true, true]]);
   });
 
   it("names one of its geometries by each of its counts", () => {

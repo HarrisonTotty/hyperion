@@ -25010,3 +25010,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     1.1% of them; the march at 36 within 1.1% of its 16×.
   - _Pending_: the owner's RTX frame of a routed envelope, an RM4 close item (main's ruling); not
     run, the route being closed.
+  - _At 27_ (round 12 onto v27, 2026-11-05): the hand Jupiter's chromophore column fell to
+    τ(550) 0.117 from 0.307 (train 27), so red's τ (1 − ω̄) above the floor is 0.025 (0.065 at 26).
+    The case is re-blessed at 27 and its channels re-pinned; its reference, the twin's values and
+    the tallies stand as traced at 26. Pending: a retrace at 27 (`traceCommand`, about 140
+    thread-h, checkpointed), then the gate's tallies again.

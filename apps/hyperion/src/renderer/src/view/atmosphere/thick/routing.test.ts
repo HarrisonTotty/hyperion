@@ -528,8 +528,8 @@ describe("the absorbing envelope's gate (R08.T16.a.2)", () => {
       "the protocol fixture's generated Jupiter, by its depth and its chromophore",
       jupiterDetail,
       [
-        [true, false, true],
-        [false, false, true],
+        [true, false, false],
+        [true, false, false],
         [false, false, true],
       ],
     ],
