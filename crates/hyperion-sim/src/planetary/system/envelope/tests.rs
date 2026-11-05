@@ -1564,9 +1564,16 @@ fn records_at_26(
 /// P14.T52.h's census over `thin_air_sets` (the sample's 400, the golden systems and LOOK72's) at
 /// the epoch: every 26 hold against every 26 hold with the dayside decks' rules set back to
 /// `Held`, printed (`--nocapture`). Only modes of refractory, sulphide or salt decks on envelopes
-/// at `T_eq` ≥ 950 K move (asserted). Printed: the envelopes moved, each with its `T_eq` and the τ
-/// removed above its cut level (each mode weighted by its coverage), and the largest τ such modes
-/// leave above a photosphere below 950 K.
+/// at `T_eq` ≥ 950 K move (asserted), with what the envelope's own Bond albedo gives: from
+/// generator version 27 the passes read a gas envelope's Bond albedo on its own column
+/// (P14.T24.h.b), which cuts its dayside decks as the record does, so that the cut moves the
+/// albedo, `T_eq` and profile of a record whose dayside modes it moves (asserted: no other record
+/// moves). An envelope is judged hot at its record's `T_eq` under the cut, the version's: at 27
+/// sample 42002cae00000005's 0300 is bistable across the line, 888 K under its bright held decks
+/// (Bond 0.429) and 983 K with them cut (0.141), and 0200's albedo moves in its last bits.
+/// Printed: the envelopes moved, each with its `T_eq` and the τ removed above its cut level (each
+/// mode weighted by its coverage), the records moved beyond their dayside modes with their Bond
+/// albedos, and the largest τ such modes leave above a photosphere below 950 K.
 #[test]
 #[ignore = "slow: the dayside census over 442 systems, held and cleared"]
 #[expect(
@@ -1579,6 +1586,7 @@ fn under_every_26_hold_the_dayside_moves_only_hot_envelopes_deep_decks() {
     let (mut envelopes, mut hot) = (0usize, 0usize);
     let mut moved: Vec<DaysideMove> = Vec::new();
     let mut warm: Vec<(f64, String)> = Vec::new();
+    let mut through_albedo = Vec::new();
     for (set, seed, ctx) in &sets {
         let held = records_at_26(*seed, ctx, DaysideDecksRules::Held);
         let cleared = records_at_26(*seed, ctx, DaysideDecksRules::Cleared);
@@ -1591,10 +1599,14 @@ fn under_every_26_hold_the_dayside_moves_only_hot_envelopes_deep_decks() {
                 continue;
             };
             envelopes += 1;
-            let Section::Ok(bulk) = a.bulk() else {
+            let (Section::Ok(bulk_held), Section::Ok(bulk)) = (a.bulk(), b.bulk()) else {
                 panic!("{at}: an envelope with no bulk");
             };
-            let t_eq = bulk.equilibrium_temperature().value();
+            // Hot by the record under the cut: from 27 the cut moves the albedo and with it T_eq.
+            let (t_eq_held, t_eq) = (
+                bulk_held.equilibrium_temperature().value(),
+                bulk.equilibrium_temperature().value(),
+            );
             let photosphere = was.atmosphere().profile().photosphere_pressure().value();
             let (mut text_a, mut text_b) = (format!("{a:?}"), format!("{b:?}"));
             let mut by_row = Vec::new();
@@ -1624,10 +1636,23 @@ fn under_every_26_hold_the_dayside_moves_only_hot_envelopes_deep_decks() {
                 text_a = text_a.replacen(&dx, "a dayside mode", 1);
                 text_b = text_b.replacen(&dy, "a dayside mode", 1);
             }
-            assert_eq!(
-                text_a, text_b,
-                "{at}: the record moves beyond its dayside modes"
-            );
+            if text_a != text_b {
+                // From 27 the envelope's own Bond albedo reads its column with the cut.
+                assert!(
+                    t_eq >= HOT_DAYSIDE_TEMPERATURE.value() && !by_row.is_empty(),
+                    "{at} (T_eq {t_eq} K): the record moves beyond its dayside modes"
+                );
+                let bond = |record: &BodyRecord| match record.photometry() {
+                    Section::Ok(photometry) => photometry.bond_albedo().value(),
+                    _ => f64::NAN,
+                };
+                through_albedo.push(format!(
+                    "{at}: Bond {:.6} → {:.6} ({:+.3e}), T_eq {t_eq_held:.3} → {t_eq:.3} K",
+                    bond(a),
+                    bond(b),
+                    bond(b) / bond(a) - 1.0
+                ));
+            }
             if t_eq >= HOT_DAYSIDE_TEMPERATURE.value() {
                 hot += 1;
                 if !by_row.is_empty() {
@@ -1686,10 +1711,13 @@ fn under_every_26_hold_the_dayside_moves_only_hot_envelopes_deep_decks() {
         .collect();
     eprintln!(
         "the dayside census at 26 over {} systems: {envelopes} envelopes, {hot} at T_eq ≥ 950 K, \
-         {} moved:\n{lines}golden systems moved: {golden_moved:?}\nbelow 950 K, the largest τ of \
+         {} moved:\n{lines}golden systems moved: {golden_moved:?}\nmoved beyond their dayside \
+         modes, through their Bond albedo, {}:\n  {}\nbelow 950 K, the largest τ of \
          refractory, sulphide or salt modes above a photosphere, the first five:\n  {}",
         sets.len(),
         moved.len(),
+        through_albedo.len(),
+        through_albedo.join("\n  "),
         warm.iter()
             .take(5)
             .map(|(tau, line)| format!("{tau:.4}: {line}"))
