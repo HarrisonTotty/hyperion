@@ -6964,15 +6964,16 @@ const THERMOSTAT_RAISED: [&str; 18] = [
 /// The 18 bodies whose partials alone move under P14.T51.l's secant steps, beyond 10⁻⁹ of max(each,
 /// 10⁻⁶ Pa), with `T_eq` within 3.1 × 10⁻¹⁰, `T_s` within 10⁻⁶ and every discrete member the same:
 /// at jumps across the diagonal or steep crossings, where both roots stop within 2⁻³² of the
-/// crossing, in the walk's order. Re-measured at generator version 27 (19 to 26, two of which,
-/// 01fffb2bdfff0001.0600 and `close_binary`'s 0900, end at 27 at another crossing, and three more
-/// still move their partials, 01ffeb2d20000000.e101, 41ffecb1ffc00007.e101 and
-/// 01ffcb2ba0010000.0700): mostly icy N₂ and methane `Snowball`s and cold airless or tenuous
-/// members, bracketed under both roots.
+/// crossing, in the walk's order. Re-measured at generator version 28: 41ffecb1ffc00007.0d00,
+/// whose orbit about its pair P14.T9.d's placement margin widens (440 → 453 Gm), an N₂ `Snowball`
+/// on the 100 Pa line from 28, joins them, and 41ffecb200000005.1600's partials stay within the
+/// bound; at 27 the other 17 and 1600. To 26 they were 19, two of which, 01fffb2bdfff0001.0600
+/// and `close_binary`'s 0900, end at 27 at another crossing, and three more still move their
+/// partials, 01ffeb2d20000000.e101, 41ffecb1ffc00007.e101 and 01ffcb2ba0010000.0700: mostly icy
+/// N₂ and methane `Snowball`s and cold airless or tenuous members, bracketed under both roots.
 const SECANT_PARTIALS_ONLY: [&str; 18] = [
     "02000b2ca0000000.0800",
     "02001b2ca0000000.0300",
-    "41ffecb200000005.1600",
     "01ffeb2c20000000.0500",
     "02001b2c9ffe0000.0500",
     "01ffdb2c1fff0001.0501",
@@ -6983,6 +6984,7 @@ const SECANT_PARTIALS_ONLY: [&str; 18] = [
     "02003b2c1fff0000.0900",
     "01ffdb2c60020000.0400",
     "02003b2ce0010000.0400",
+    "41ffecb1ffc00007.0d00",
     "41ffecb1ffc00007.e101",
     "01fffb2ce0030000.0400",
     "01ffeb2d5fff0001.0800",
@@ -6992,7 +6994,10 @@ const SECANT_PARTIALS_ONLY: [&str; 18] = [
 
 /// The bodies whose secant root is another crossing of the diagonal than the halvings', in the
 /// walk's order (P14.T51.l's record; `under_the_secant_root_the_passes_and_movers_are_stated`):
-/// 11 at generator version 27, re-measured. 01fffb2bdfff0001.0600, an N₂ `Snowball`, ends at
+/// 12 at generator version 28, 27's 11 and 41ffecb1ffc00007.0d01, a moon of the planet 0d00 that
+/// P14.T9.d's placement margin moves out about its pair, which from 28 ends at another fixed point
+/// (`T_eq` 45.6 → 62.0 K, `T_s` 46.9 → 81.2 K, its argon no longer capped and its jump gone). At
+/// 27, re-measured, 01fffb2bdfff0001.0600, an N₂ `Snowball`, ends at
 /// another fixed point (`T_eq` 51.1 → 59.6 K, `T_s` 52.1 → 78.1 K, its argon no longer capped and
 /// its jump gone); one of the gas envelopes at a `T_eq` of 250.0 K, 41ffecb5ffc00004.0400, stops
 /// 1.7 × 10⁻⁵ of `T_eq` away on its steep crossing; and nine `Snowball`s at jumps, `close_binary`'s
@@ -7000,11 +7005,12 @@ const SECANT_PARTIALS_ONLY: [&str; 18] = [
 /// them a jump under the secant steps alone. To 26 they were three: 01ffdb2c1fff0001.0b00 and
 /// 02003b2d1ffe0001.0200, which at 27 end where the halvings do, and 41ffecb200000004.0200, gone
 /// from the sample with its system at 27.
-const SECANT_OTHER_CROSSINGS: [&str; 11] = [
+const SECANT_OTHER_CROSSINGS: [&str; 12] = [
     "01fffb2bdfff0001.0600",
     "02001b2ce0020002.0800",
     "21ffd65a7ff80001.0700",
     "41ffecb5ffc00004.0400",
+    "41ffecb1ffc00007.0d01",
     "41ffecb600000005.0500",
     "02003b2c60010001.0600",
     "01fffb2d5ffe0000.0700",
@@ -7273,8 +7279,8 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
     let slowest = rounds.iter().copied().max().unwrap_or(0);
     assert!(slowest < SECANT_STEPS, "a round took {slowest} steps");
     assert!(halvings.len() > 2_000, "{}", halvings.len());
-    // Pinned as measured (P14.T51.l's record, re-measured at 27). Eleven bodies end at another
-    // crossing of the diagonal (`SECANT_OTHER_CROSSINGS`): one at another fixed point, a gas
+    // Pinned as measured (P14.T51.l's record, re-measured at 28). Twelve bodies end at another
+    // crossing of the diagonal (`SECANT_OTHER_CROSSINGS`): two at another fixed point, a gas
     // envelope on its steep crossing, and nine `Snowball`s on a jump's other side. The rest move
     // only their partials, at jumps or steep crossings where both roots stop within 2⁻³² of the
     // crossing. To 26 three ended at another crossing: 41ffecb200000004.0200, whose 2-cycle's
@@ -7293,7 +7299,7 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
 
 /// The pinned bodies of P14.T51.l's record ([`SECANT_OTHER_CROSSINGS`], [`SECANT_PARTIALS_ONLY`])
 /// whose passes converge under both roots, where with its holds they ended in brackets, in the
-/// walk's order: none of 27's, every one of its pins bracketed under both roots. To 26 the pins
+/// walk's order: none of 27's or 28's, every one of their pins bracketed under both roots. To 26 the pins
 /// held twelve: from generator version 25 five by P14.T53.b part 3 (01ffeb2c5ffe0000.0400,
 /// 01ffdb2c1fff0001.0900 and .0b00, 01ffdb2c60020000.0100 and 01ffeb2d1ffc0000.0600), and
 /// 02003b2d1ffe0001.0200, whose bracket held several jumps, by P14.T53.e's present state; from 26
@@ -7309,7 +7315,7 @@ const SECANT_PINNED_CONVERGED: [&str; 0] = [];
 /// bracketed, and every bracket round whose published end is the body's albedo stopped at a
 /// crossing of the diagonal: its two ends' g on opposite sides within 2⁻³² in albedo
 /// (`Crossing::is_valid`); but [`SECANT_PINNED_CONVERGED`]'s, which converge under both (none of
-/// the pins as re-measured at generator version 27). It moves no output.
+/// the pins as re-measured at generator versions 27 and 28). It moves no output.
 #[test]
 #[expect(
     clippy::too_many_lines,
