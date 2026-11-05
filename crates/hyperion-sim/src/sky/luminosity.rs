@@ -2523,6 +2523,9 @@ pub(crate) mod file {
 }
 
 #[cfg(test)]
+mod realised_cells;
+
+#[cfg(test)]
 mod tests {
     use hyperion_testkit::float::assert_same_bits;
 

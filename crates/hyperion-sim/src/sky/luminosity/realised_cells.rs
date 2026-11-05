@@ -14,28 +14,39 @@
 //! is held against the cells' own paired deficit, the same stars evolved each alone, within the
 //! cells' compound-Poisson interval and the fit's standard error together; each layer's residual
 //! against the tables without the correction is printed beside the one with it.
+//!
+//! The cells are the budget's ([`budget_galaxy`]), which the tables read (R06.T16.a's item 1 lean,
+//! 2026-11-01): from generator version 27 a version's grid holds the field alone, less the
+//! features' share (P09.T2.c) and the catalogue classes' hosts (P09.T35), and gains plan 08's
+//! displaced classes in layers D and E (P08.T12), none of which the tables' light per star is
+//! about. So this test moved here from `tests/sky_luminosity.rs`, where those test-only doors are
+//! out of reach, as the band's own test reads the budget (`sky::band`'s `budget_galaxy`).
 
-#[expect(
-    dead_code,
-    reason = "these checks use the placement helpers of tests/common alone"
-)]
-mod common;
+use std::sync::OnceLock;
 
-use common::reference_box_component_integrals;
-use hyperion_sim::Seed;
-use hyperion_sim::galaxy::imf::MassBand;
-use hyperion_sim::galaxy::params::GalaxyParams;
-use hyperion_sim::galaxy::placement::{CellKey, SystemRecord, generate_cell};
-use hyperion_sim::galaxy::{Galaxy, PointLy};
-use hyperion_sim::id::Layer;
-use hyperion_sim::math;
-use hyperion_sim::sky::luminosity::LuminosityTables;
-use hyperion_sim::sky::photometry::absolute_v_of_state;
-use hyperion_sim::stellar::system::SystemStars;
-use hyperion_sim::time::{Span, UniverseTime};
-use hyperion_sim::units::Magnitudes;
-use hyperion_sim::units::consts::SOLAR_ABSOLUTE_MAGNITUDE_V;
 use hyperion_testkit::stats::{poisson_interval, poisson_two_sided_p};
+
+use super::LuminosityTables;
+use crate::galaxy::ages::FieldShareRules;
+use crate::galaxy::displaced::DisplacedRules;
+use crate::galaxy::displaced::site::CarveOutRules;
+use crate::galaxy::fields::MAX_COMPONENTS;
+use crate::galaxy::imf::MassBand;
+use crate::galaxy::params::GalaxyParams;
+use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
+use crate::galaxy::rules::GalaxyRules;
+use crate::galaxy::{Galaxy, PointLy};
+use crate::id::Layer;
+use crate::math;
+use crate::rng::Seed;
+use crate::sky::photometry::absolute_v_of_state;
+use crate::stellar::system::SystemStars;
+use crate::time::{Span, UniverseTime};
+use crate::units::Magnitudes;
+use crate::units::consts::SOLAR_ABSOLUTE_MAGNITUDE_V;
+
+/// The galaxy's seed.
+const SEED: u64 = 0x0926_0000;
 
 /// Cells along each edge of a block: 6³ = 216 cells.
 const BLOCK_CELLS: i32 = 6;
@@ -45,6 +56,31 @@ const Z: f64 = 3.29;
 
 /// The allowance for the tables' approximations, a share of the expected light.
 const TRACK_SAMPLING: f64 = 0.05;
+
+/// The most threads the cells are realised on.
+const THREADS: usize = 8;
+
+/// The Milky Way-like galaxy of [`SEED`] with its grid holding every population's whole budget, as
+/// the tables read it: the field keeps the features' share (`FieldShareRules::None`) and the
+/// catalogue classes' hosts (`CarveOutRules::Unclaimed`), and layers D and E hold the field alone,
+/// each component at its population's whole band share (`DisplacedRules::FieldOnly`). Its density
+/// fields, its components and so its tables are the version's galaxy's.
+fn budget_galaxy() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| {
+        Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules {
+                field_share: FieldShareRules::None,
+                carve_out: CarveOutRules::Unclaimed,
+                displaced: DisplacedRules::FieldOnly,
+                ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
+            },
+        )
+        .expect("the Milky Way-like parameters are valid")
+    })
+}
 
 /// What a block holds: the realised light and its square sum, the light the same stars would have
 /// evolved alone (each star's single-star model, which the tables assume), and the stars brighter
@@ -74,6 +110,35 @@ fn count_f64(k: u64) -> f64 {
 /// The V light of an absolute magnitude, L☉,V.
 fn light_of(v: f64) -> f64 {
     math::exp10(-0.4 * (v - SOLAR_ABSOLUTE_MAGNITUDE_V))
+}
+
+/// Each component's number of systems in the box of whole light-years from `min_ly` with edge
+/// `size_ly`: the midpoint sum of its density over `steps³` equal boxes.
+fn box_component_integrals(
+    galaxy: &Galaxy,
+    min_ly: [i32; 3],
+    size_ly: u32,
+    steps: u32,
+) -> [f64; MAX_COMPONENTS] {
+    let fields = galaxy.fields();
+    let mut integrals = [0.0; MAX_COMPONENTS];
+    let mut densities = [0.0; MAX_COMPONENTS];
+    let [x0, y0, z0] = min_ly.map(f64::from);
+    let h = f64::from(size_ly) / f64::from(steps);
+    let weight = h * h * h;
+    let at = |base: f64, i: u32| base + (f64::from(i) + 0.5) * h;
+    for ix in 0..steps {
+        for iy in 0..steps {
+            for iz in 0..steps {
+                let point = PointLy::new(at(x0, ix), at(y0, iy), at(z0, iz));
+                fields.densities(&point, &mut densities);
+                for (integral, density) in integrals.iter_mut().zip(densities) {
+                    *integral += weight * density;
+                }
+            }
+        }
+    }
+    integrals
 }
 
 fn realise_cell(galaxy: &Galaxy, key: CellKey) -> Realised {
@@ -112,30 +177,15 @@ fn realise_cell(galaxy: &Galaxy, key: CellKey) -> Realised {
     out
 }
 
-/// Every cell of `keys` realised, on eight threads (in turn on wasm32-wasip1, which has none),
-/// summed in the cells' order.
+/// Every cell of `keys` realised, on up to [`THREADS`] threads (in turn on WebAssembly, which has
+/// none), summed in the cells' order.
 ///
 /// Each cell's part is its own and the parts are summed in the cells' order however they were
-/// realised, so both ways give the same bits.
+/// realised, so every number of threads gives the same bits.
 fn realise(galaxy: &Galaxy, keys: &[CellKey]) -> Realised {
-    let mut parts = vec![Realised::default(); keys.len()];
-    let fill = |chunk_keys: &[CellKey], chunk_parts: &mut [Realised]| {
-        for (&key, part) in chunk_keys.iter().zip(chunk_parts) {
-            *part = realise_cell(galaxy, key);
-        }
-    };
-    #[cfg(not(target_family = "wasm"))]
-    std::thread::scope(|scope| {
-        const THREADS: usize = 8;
-        let chunk = keys.len().div_ceil(THREADS);
-        for (chunk_keys, chunk_parts) in keys.chunks(chunk).zip(parts.chunks_mut(chunk)) {
-            let fill = &fill;
-            scope.spawn(move || fill(chunk_keys, chunk_parts));
-        }
+    let parts = crate::planetary::testing::in_shares(keys.len(), THREADS, |k| {
+        realise_cell(galaxy, keys[k])
     });
-    // wasm32-wasip1 has no threads: the cells are realised one after another on this one.
-    #[cfg(target_family = "wasm")]
-    fill(keys, &mut parts);
     parts.iter().fold(Realised::default(), |a, b| Realised {
         systems: a.systems + b.systems,
         light: a.light + b.light,
@@ -176,9 +226,8 @@ fn block(layer: Layer, at: [f64; 3]) -> (Vec<CellKey>, [i32; 3], u32) {
 #[test]
 #[ignore = "slow: realises some 10^4 systems with their tracks"]
 fn luminosity_matches_realised_cells() {
-    let galaxy = Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
-        .expect("the Milky Way-like parameters are valid");
-    let tables = LuminosityTables::build(&galaxy);
+    let galaxy = budget_galaxy();
+    let tables = LuminosityTables::build(galaxy);
     // The cells are realised at the epoch: the tables, built at +H, read their light there.
     let now = tables.age_for(UniverseTime::EPOCH, Span::ZERO);
     let sites = [
@@ -197,7 +246,7 @@ fn luminosity_matches_realised_cells() {
     for (name, at) in sites {
         for layer in layers {
             let (keys, min_ly, edge) = block(layer, at);
-            let integrals = reference_box_component_integrals(&galaxy, min_ly, edge, 4 * 6);
+            let integrals = box_component_integrals(galaxy, min_ly, edge, 4 * 6);
             let band = MassBand::from(layer);
             let (mut light, mut bright_3, mut bright_5, mut systems) = (0.0, 0.0, 0.0, 0.0);
             let (mut pair, mut pair_sigma) = (0.0, 0.0);
@@ -212,7 +261,7 @@ fn luminosity_matches_realised_cells() {
                 bright_3 += n * table.count_brighter_than(Magnitudes::new(-3.0), now);
                 bright_5 += n * table.count_brighter_than(Magnitudes::new(-5.0), now);
             }
-            let realised = realise(&galaxy, &keys);
+            let realised = realise(galaxy, &keys);
             let sigma = realised.light_squared.sqrt();
             let allowed = Z * sigma + TRACK_SAMPLING * light;
             let bright = |k: u64, expected: f64| {

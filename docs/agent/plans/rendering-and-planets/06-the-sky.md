@@ -10118,3 +10118,7 @@ CensusCost)`.
     2026-11-05). An hour's orbital motion is some 10⁻³ au against a bound of tens of au.
   - The end at `valid_until` is tested on the hold, the memory and the files; `tests/sky.rs` skips
     it, a sky a year on being in another time bucket, some 40 s more in a test build.
+- **T5.c's test moved (2026-11-05).** `luminosity_matches_realised_cells` is now
+  `sky::luminosity::realised_cells`'s (was `tests/sky_luminosity.rs`), on the budget's grid
+  (`FieldShareRules::None`, `CarveOutRules::Unclaimed`, `DisplacedRules::FieldOnly`); the tables
+  stay on the whole budget.
