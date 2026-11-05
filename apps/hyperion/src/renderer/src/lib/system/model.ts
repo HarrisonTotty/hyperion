@@ -814,7 +814,9 @@ export interface AerosolMode {
   /**
    * The exponent of its mixing ratio's (p ÷ p_base) law, dimensionless: its deck's f_sed, or for a
    * loop deck's mode from generator version 26 the smaller of that and its saturation's log-slope
-   * at the base; 0 when well mixed. Its optical depth is spread by the same profile.
+   * at the base; 0 when well mixed; negative, above −1, for a haze whose mixing ratio rises aloft
+   * (from generator version 30 the methane haze's). Its optical depth is spread by the same
+   * profile.
    */
   readonly fSed: number;
   /** The share of the sky it covers, in `[0, 1]`. */

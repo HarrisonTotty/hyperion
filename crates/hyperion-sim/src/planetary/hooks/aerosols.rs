@@ -10,8 +10,9 @@
 //!   aggregate's monomers), its column mass, its τ(550) (in-cloud, over its coverage) and its
 //!   vertical profile, a base and a top pressure between which its mixing ratio goes as
 //!   (p ÷ `p_base`)^f, f its deck's `f_sed` (from generator version 26 for a loop deck's mode the
-//!   smaller of that and its saturation's log-slope at the base, P14.T52.g) or 0 for a well-mixed
-//!   layer, its coverage and the temperature its optics were taken at.
+//!   smaller of that and its saturation's log-slope at the base, P14.T52.g), 0 for a well-mixed
+//!   layer, or from generator version 30 the methane haze's [`TITAN_HAZE_MIXING_EXPONENT`], its
+//!   mixing ratio rising aloft; its coverage and the temperature its optics were taken at.
 //! - **Decks** ([`AerosolDeck`]): each condensate's deck, its base, top, vapour below and above
 //!   (the cold trap's, which R08 reads for the vapour's column there), its `f_sed` and its τ(550),
 //!   the sum of its modes'.
@@ -116,6 +117,7 @@ use crate::units::{
     Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, MetresPerSecond,
     MetresPerSecondSquared, Pascals,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The cloud layer's eddy diffusion, m² s⁻¹: 10, Ackerman and Marley's `K_min`, 10⁵ cm² s⁻¹ (2001,
 /// §2: "an eddy diffusion coefficient no less than a prescribed minimum value (`K_min` = 10⁵ cm²
@@ -367,10 +369,95 @@ pub const TITAN_HAZE_MONOMERS: f64 = 3_000.0;
 /// set to 2").
 pub const TITAN_HAZE_FRACTAL_DIMENSION: f64 = 2.0;
 
-/// The haze's top over the ground's pressure: four decades, well mixed between (Titan's particles
-/// reach from the surface to its ionosphere; its extinction's 65 km scale height above 80 km,
-/// longer than its air's, is not modelled).
+/// The haze's top over the ground's pressure: four decades (Titan's particles reach from the
+/// surface to its ionosphere). Between them it is well mixed below generator version 30, and from
+/// 30 (`HAZE_PROFILE_VERSION`) its mixing ratio rises aloft as [`TITAN_HAZE_MIXING_EXPONENT`], so
+/// that its extinction falls more slowly than its air's, as DISR's does above 80 km (a 65 km
+/// scale height there).
 pub const HAZE_TOP_RATIO: f64 = 1e-4;
+
+/// The methane haze's mixing-ratio exponent f in (p ÷ `p_ground`)^f: −0.83, its mixing ratio rising
+/// aloft, fitted to DISR's three layers (Tomasko et al. 2008, Fig. 47, as Bazzon et al. 2014 fit
+/// them: τ(550) 3.940 above 80 km, 2.793 from 30 to 80 km and 1.372 below) on rendering plan R08's
+/// Titan-class column, isothermal at 93.65 K from 1,467 hPa to 1 Pa, where it gives 3.93, 2.29 and
+/// 1.88 (R08.T17; research-leans-36 §1); on that column its extinction's scale height is the air's
+/// over 1 + f, some 124 km. One power law cannot make DISR's growth below 30 km; the upper layer,
+/// which it matches, sets the disc's colour, its haze absorbing the blue above the air whose
+/// Rayleigh scattering would send it back. Topped at [`HAZE_TOP_RATIO`] (14.7 Pa on Titan), it
+/// puts 3.48 above 80 km on that column: recorded. Taken from generator version 30
+/// (`HAZE_PROFILE_VERSION`).
+pub const TITAN_HAZE_MIXING_EXPONENT: f64 = -0.83;
+
+/// The generator version from which the methane haze's mixing ratio rises aloft as
+/// [`TITAN_HAZE_MIXING_EXPONENT`] (rendering plan R08, R08.T17): its N₂'s Rayleigh scattering then
+/// lies beneath most of the haze, as on Titan, not mixed through it, and a Titan-class disc reads
+/// orange-brown, not grey; 30, held with the 30 train (train 29's list froze before it).
+///
+/// Below it [`HazeProfileRules::in_force`] is [`HazeProfileRules::WellMixed`]: the haze is well
+/// mixed from the ground to [`HAZE_TOP_RATIO`], and every figure is version 29's bit for bit. 30's
+/// bump deletes this hold, [`HazeProfileRules`] with its `WellMixed` arm, the tests' switch, its
+/// line in the tests' `HeldRules` and its tripwire
+/// (`the_haze_profile_is_held_only_until_the_30_bump`).
+pub(crate) const HAZE_PROFILE_VERSION: GeneratorVersion = GeneratorVersion::new(30);
+
+/// How the methane haze's mixing ratio goes with height (its hold, [`HAZE_PROFILE_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum HazeProfileRules {
+    /// Version 29's and before: well mixed, exponent 0.
+    WellMixed,
+    /// Version 30's: rising aloft, [`TITAN_HAZE_MIXING_EXPONENT`].
+    RisingAloft,
+}
+
+impl HazeProfileRules {
+    /// The rules this generator version gives: rising aloft from [`HAZE_PROFILE_VERSION`], well
+    /// mixed below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_haze_profile`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = HAZE_PROFILE_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= HAZE_PROFILE_VERSION {
+            Self::RisingAloft
+        } else {
+            Self::WellMixed
+        }
+    }
+
+    /// The haze's mixing-ratio exponent under these rules.
+    #[must_use]
+    const fn exponent(self) -> f64 {
+        match self {
+            Self::WellMixed => 0.0,
+            Self::RisingAloft => TITAN_HAZE_MIXING_EXPONENT,
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The haze's profile rules a test sets on its thread, `None` for the version's.
+    static HAZE_PROFILE_RULES: core::cell::Cell<Option<HazeProfileRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the haze's profile rules `rules` on this thread, for the tests to reach the
+/// haze rising aloft ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. 30's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_haze_profile<R>(rules: HazeProfileRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<HazeProfileRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            HAZE_PROFILE_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(HAZE_PROFILE_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// Mars's background dust τ(550): 0.5, an annual mean read from Montabone et al. 2015's
 /// climatology's maps (Icarus 251, 65: 9.3 µm absorption referred to 610 Pa about 0.09–0.13 at
@@ -1782,9 +1869,10 @@ pub fn haze_optical_depth(index: f64) -> f64 {
 }
 
 /// The methane haze of the air `inputs` describe (P14.T24.c): a fractal-aggregate mode of `tholin`
-/// with Titan's monomers ([`TITAN_HAZE_MONOMER_RADIUS`]), its τ(550) [`haze_optical_depth`], well mixed
-/// from the ground to [`HAZE_TOP_RATIO`] of its pressure over the whole sky; `None` with no star,
-/// whose ultraviolet photolyses the methane, or an index at most 1.
+/// with Titan's monomers ([`TITAN_HAZE_MONOMER_RADIUS`]), its τ(550) [`haze_optical_depth`], from
+/// the ground to [`HAZE_TOP_RATIO`] of its pressure over the whole sky, well mixed or from
+/// generator version 30 rising aloft ([`HazeProfileRules`]); `None` with no star, whose
+/// ultraviolet photolyses the methane, or an index at most 1.
 ///
 /// # Panics
 ///
@@ -1809,7 +1897,11 @@ fn methane_haze(
     .expect("Titan's monomers are an aggregate");
     let tholin = crate::substance::by_key("tholin").expect("tholin is a registry row");
     let ground = inputs.surface_pressure;
-    let profile = ModeProfile::new(ground, Pascals::new(ground.value() * HAZE_TOP_RATIO), 0.0)?;
+    let profile = ModeProfile::new(
+        ground,
+        Pascals::new(ground.value() * HAZE_TOP_RATIO),
+        HazeProfileRules::in_force().exponent(),
+    )?;
     AerosolMode::aggregate(tholin, tholin, aggregate, tau, profile, 1.0).map(Some)
 }
 

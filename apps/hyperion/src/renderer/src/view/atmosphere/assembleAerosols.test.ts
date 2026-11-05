@@ -33,7 +33,7 @@ import {
   assembleMedium,
   sizeConvergenceReasons,
 } from "./assemble";
-import { columnLengthM } from "./medium";
+import { columnLengthM, densityAt } from "./medium";
 import { modeOptics } from "./sizeDistribution";
 
 /** The generated Earth with an inventory, assembled with no line tables. */
@@ -493,6 +493,27 @@ describe("a mode outside its optics' range (R08.T10.b)", () => {
 
   it("draws aggregates of fractal dimension 2", () => {
     expect(aerosolTerms(earthWith(modes(tholinAggregates(2))))).toEqual(["aerosol:tholin"]);
+  });
+});
+
+/** The drawn tholin term's density at its layer's top over its peak, from an assembly. */
+function tholinTopShare(result: AssembledMedium): number {
+  const density = result.medium?.terms.find((term) => term.name === "aerosol:tholin")?.density;
+  if (density?.kind !== "tabulated") {
+    throw new Error("the tholin term is drawn on a tabulated density");
+  }
+  const heights = Array.from(density.altitudesM).filter((_, i) => (density.relative[i] ?? 0) > 0);
+  return densityAt(density, Math.max(...heights)) / Math.max(...density.relative);
+}
+
+describe("a haze whose mixing ratio rises aloft (R08.T17)", () => {
+  it("draws its negative f_sed, more of it at its top than well mixed", () => {
+    const mixed = earthWith(modes(tholinAggregates(2)));
+    const aloft = earthWith(modes({ ...tholinAggregates(2), f_sed: -0.83 }));
+    expect(aerosolTerms(aloft)).toEqual(["aerosol:tholin"]);
+    // Over 20 to 5 kPa the gas thins about fourfold; a mixing ratio rising as p^−0.83 keeps
+    // (1/4)^0.17 of the base's density at the top.
+    expect(tholinTopShare(aloft)).toBeGreaterThan(3 * tholinTopShare(mixed));
   });
 });
 

@@ -22,6 +22,7 @@ use crate::planetary::derive::photometry::area_mix::{
     with_rayleigh_adding,
 };
 use crate::planetary::fate::{MergedStepsRules, with_merged_steps};
+use crate::planetary::hooks::aerosols::{HazeProfileRules, with_haze_profile};
 use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
@@ -82,6 +83,7 @@ held_rules! {
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
     merged_steps: MergedStepsRules = MergedStepsRules::in_force => with_merged_steps,
+    haze_profile: HazeProfileRules = HazeProfileRules::in_force => with_haze_profile,
 }
 
 /// `share(0)` to `share(shares − 1)` on at most `hyperion_testkit::threads::granted(reserved)`

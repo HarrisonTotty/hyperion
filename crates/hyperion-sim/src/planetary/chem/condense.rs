@@ -561,7 +561,9 @@ impl Error for ResolveOpticalDepthError {
 }
 
 /// A mode's vertical profile (P14.T24.c): its base and its top, between which its mixing ratio
-/// goes as (p ÷ `p_base`)^f, f its exponent, 0 for a well-mixed layer (P14.T24.g's modes). The
+/// goes as (p ÷ `p_base`)^f, f its exponent, 0 for a well-mixed layer (P14.T24.g's modes) and
+/// negative, above −1, for a haze whose mixing ratio rises aloft (from generator version 30 the
+/// methane haze's, `HAZE_PROFILE_VERSION`, rendering plan R08's R08.T17). The
 /// loop's modes take their deck's base and top, and its `f_sed`, or from generator version 26 the
 /// smaller of that and its saturation's log-slope at the base (P14.T52.g, from 26;
 /// P14.T52.g).
@@ -578,11 +580,12 @@ impl ModeProfile {
     /// # Errors
     ///
     /// [`BuildModeError::Profile`] unless the top is finite and positive and no deeper than the
-    /// base, which is finite, and the exponent is finite and non-negative.
+    /// base, which is finite, and the exponent is finite and above −1: at −1 the share of the
+    /// column above a level, which goes as the power f + 1 of its pressure, is singular.
     pub fn new(base: Pascals, top: Pascals, exponent: f64) -> Result<Self, BuildModeError> {
         let (b, t) = (base.value(), top.value());
         if !(t.is_finite() && t > 0.0 && b.is_finite() && t <= b && exponent.is_finite())
-            || exponent < 0.0
+            || exponent <= -1.0
         {
             return Err(BuildModeError::Profile {
                 base,
@@ -631,7 +634,7 @@ impl ModeProfile {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BuildModeError {
     /// The profile's top is not finite and positive and no deeper than its finite base, or its
-    /// exponent is not finite and non-negative.
+    /// exponent is not finite and above −1.
     Profile {
         /// The base given.
         base: Pascals,

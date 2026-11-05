@@ -25127,3 +25127,11 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     already thick-routed.
   - Pending: the owner's RTX frame of a routed envelope (now the product's), an RM4 close item; the
     hand Saturn's case settles blue τ 17–25.
+- **Titan-class's haze rises aloft, as built** (R08.T17, 2026-11-03; lane `fix-titan-haze-profile`;
+  research-leans-36 §1).
+  - Sim: `methane_haze` takes `TITAN_HAZE_MIXING_EXPONENT` (−0.83) behind `HAZE_PROFILE_VERSION`
+    30 (`HazeProfileRules`, the tests' `with_haze_profile`, a line in `HeldRules`); nothing moves
+    below 30.
+  - `ModeProfile::new` takes an exponent above −1; the wire's `AerosolModeDto.f_sed` may be
+    negative above −1, and `bodiesWire.ts` reads it (a deck's `f_sed` stays non-negative).
+  - The ice giants' haze (−0.5) stays well mixed: no version holds its own exponent.

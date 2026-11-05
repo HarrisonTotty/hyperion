@@ -1423,6 +1423,67 @@ fn the_table_s_titan_carries_titan_s_haze() {
     );
 }
 
+/// The table's Titan's methane haze, derived under the rules in force on this thread.
+fn titan_s_haze() -> AerosolMode {
+    let (body, conditions, structure) = table_air("Titan");
+    let inputs = inputs_of(&body, &conditions, &structure, 1.0);
+    let inventory = AerosolInventory::derive(&inputs).unwrap();
+    let mut haze = inventory
+        .modes()
+        .iter()
+        .filter(|m| m.shape() == ShapeClass::Aggregate);
+    let (Some(&haze), None) = (haze.next(), haze.next()) else {
+        panic!("one haze: {inventory:?}");
+    };
+    haze
+}
+
+/// The methane haze's profile is held until the 29 → 30 bump (R08.T17): the rules in force are
+/// well mixed, and the tests' switch reaches the haze rising aloft.
+#[test]
+fn the_haze_profile_is_held_only_until_the_30_bump() {
+    use crate::GENERATOR_VERSION;
+    assert!(
+        GENERATOR_VERSION < HAZE_PROFILE_VERSION,
+        "the 29 → 30 bump raises the methane haze's mixing ratio aloft: delete \
+         `HAZE_PROFILE_VERSION`, `HazeProfileRules` with its `WellMixed` arm and its match in \
+         `methane_haze`, the tests' `with_haze_profile`, its line in `HeldRules`, and this test; \
+         restate the tests held below 30"
+    );
+    assert_eq!(HazeProfileRules::in_force(), HazeProfileRules::WellMixed);
+    assert_eq!(
+        with_haze_profile(HazeProfileRules::RisingAloft, HazeProfileRules::in_force),
+        HazeProfileRules::RisingAloft
+    );
+}
+
+/// The table's Titan's haze rises aloft under its hold (R08.T17): its mixing ratio's exponent
+/// [`TITAN_HAZE_MIXING_EXPONENT`], over the same ground and top, at the same τ(550) and of the same
+/// particles; the rules in force keep it well mixed, version 28's.
+#[test]
+fn under_its_hold_titan_s_haze_rises_aloft() {
+    let mixed = titan_s_haze();
+    let aloft = with_haze_profile(HazeProfileRules::RisingAloft, titan_s_haze);
+    assert_same_bits(mixed.profile().exponent(), 0.0);
+    assert_same_bits(aloft.profile().exponent(), TITAN_HAZE_MIXING_EXPONENT);
+    let rest = |mode: &AerosolMode| {
+        let profile = mode.profile();
+        format!(
+            "{:?}",
+            (
+                mode.material(),
+                mode.size(),
+                mode.optical_depth(),
+                mode.column_mass(),
+                mode.coverage(),
+                profile.base(),
+                profile.top()
+            )
+        )
+    };
+    assert_eq!(rest(&aloft), rest(&mixed));
+}
+
 /// A Mars-like world (the measured Mars's air) carries non-spherical dust at Mars's background
 /// τ(550), 0.5; an ocean world none, and a Mars-like air over a wet ground none; and the dust's τ is
 /// continuous in the pressure through its limits.

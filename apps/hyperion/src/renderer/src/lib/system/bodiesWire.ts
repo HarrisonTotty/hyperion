@@ -254,6 +254,11 @@ function atLeastZero(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
 }
 
+/** A mode's mixing-ratio exponent: finite and above −1, where its share above a level is singular. */
+function aboveMinusOne(value: number): boolean {
+  return Number.isFinite(value) && value > -1;
+}
+
 function toSection<T, U>(section: SectionDto<T>, convert: (value: T) => U): Section<U> {
   let result: Section<U>;
   switch (section.state) {
@@ -1299,7 +1304,7 @@ function toAerosolMode(mode: AerosolModeDto): AerosolMode {
       (temperature === undefined || positive(temperature)) &&
       fraction(mode.coverage) &&
       layerUsable(mode.base_pa, mode.top_pa) &&
-      atLeastZero(mode.f_sed) &&
+      aboveMinusOne(mode.f_sed) &&
       membersFitReason(sent, reason?.type ?? null),
     "aerosol mode unusable",
   );

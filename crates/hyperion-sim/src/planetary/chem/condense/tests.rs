@@ -965,6 +965,48 @@ fn a_mode_below_a_level_keeps_its_share_below_it() {
     }
 }
 
+/// A haze whose mixing ratio rises aloft (R08.T17) takes a negative exponent above −1, at which the
+/// share's power f + 1 vanishes and is refused; cut at a level, it keeps its share below by the
+/// same law, and less of its column lies below the level than a well-mixed layer's.
+#[test]
+fn a_haze_rising_aloft_keeps_its_share_below_a_level() {
+    assert!(matches!(
+        ModeProfile::new(bar(0.7), bar(0.3), -1.5),
+        Err(BuildModeError::Profile { .. })
+    ));
+    let clouds = warm_giant_clouds();
+    let forsterite = deck(&clouds, "Mg2SiO4");
+    let mode = forsterite.modes()[0];
+    let temperature = forsterite.base_temperature();
+    let well_mixed = mode.profile();
+    let (base, top) = (well_mixed.base(), well_mixed.top());
+    let aloft = ModeProfile::new(base, top, -0.83).expect("a profile rising aloft");
+    assert_same_bits(aloft.exponent(), -0.83);
+    let rising = Mode {
+        profile: aloft,
+        ..mode
+    };
+    let level = (base.value() * top.value()).sqrt();
+    let cut = rising
+        .below(Pascals::new(level), temperature)
+        .expect("a cut");
+    let share = share_below(aloft, level);
+    assert!(
+        0.0 < share && share < share_below(ModeProfile::new(base, top, 0.0).unwrap(), level),
+        "S {share}"
+    );
+    assert_same_bits(
+        cut.column_mass().value(),
+        rising.column_mass().value() * share,
+    );
+    assert_same_bits(cut.profile().exponent(), -0.83);
+    let back = aloft.level_of(1.0 - share).value();
+    assert!(
+        (back / level - 1.0).abs() < 1e-12,
+        "{back} Pa against {level}"
+    );
+}
+
 /// A mode with no size keeps its reason through the cut, its column its share below; a level or a
 /// temperature that is not finite and positive is refused.
 #[test]

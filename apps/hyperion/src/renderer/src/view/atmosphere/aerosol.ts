@@ -458,8 +458,9 @@ export interface AerosolModeSpec {
   readonly topPa: number;
   /**
    * The mixing ratio's exponent f in (p ÷ p_base)^f: the deck's f_sed (from generator version 26
-   * for a loop deck's mode the smaller of that and its saturation's log-slope at the base), or 0
-   * for a well-mixed layer.
+   * for a loop deck's mode the smaller of that and its saturation's log-slope at the base), 0 for a
+   * well-mixed layer, or negative for a haze whose mixing ratio rises aloft (a Titan-class haze's
+   * −0.83, R08.T17).
    */
   readonly mixingExponent: number;
 }

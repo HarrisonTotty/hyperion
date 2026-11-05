@@ -1638,6 +1638,10 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     ]);
   });
 
+  it("reads a haze whose mixing ratio rises aloft, its negative f_sed kept (R08.T17)", () => {
+    expect(modeRead({ ...HAZE, f_sed: -0.83 }).fSed).toBe(-0.83);
+  });
+
   it("reads an inventory's condensate deck with its phase, base, top, vapours, f_sed and extrapolation", () => {
     expect(inventoryRead(inventoryOf([DROPLETS])).decks).toEqual([
       {
@@ -1744,6 +1748,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       { ...DROPLETS_WITHOUT_OPTICS, not_modelled: { type: "no_size_distribution" } },
     ],
     ["a coverage beyond the sky", { ...DROPLETS, coverage: 1.5 }],
+    ["an f_sed of -1, at which its share above a level is singular", { ...HAZE, f_sed: -1 }],
     ["a temperature of 0 K", { ...DROPLETS, temperature_k: 0 }],
     [
       "a grain density's reason of no temperature",

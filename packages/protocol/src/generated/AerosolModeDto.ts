@@ -65,11 +65,12 @@ top_pa: number,
 /**
  * The exponent f of its mixing ratio, which goes as (p ÷ `p_base`)^f between its base and
  * top: its deck's `f_sed` (Ackerman and Marley 2001), or for a loop deck's mode from generator
- * version 26 the smaller of that and its saturation's log-slope at the base (P14.T52.g), or 0
- * for a well-mixed layer; not negative. Its `tau_550` is spread by the same profile, so that
- * the share of it above a level p between its top and base is ((p ÷ `base_pa`)^(f+1) −
- * (`top_pa` ÷ `base_pa`)^(f+1)) ÷ (1 − (`top_pa` ÷ `base_pa`)^(f+1)): plan 08 cuts a mode at a
- * gas envelope's floor by it.
+ * version 26 the smaller of that and its saturation's log-slope at the base (P14.T52.g); 0 for
+ * a well-mixed layer; or negative for a haze whose mixing ratio rises aloft, from generator
+ * version 30 the methane haze's −0.83 (rendering plan R08, R08.T17); finite and above −1.
+ * Its `tau_550` is spread by the same profile, so that the share of it above a level p
+ * between its top and base is ((p ÷ `base_pa`)^(f+1) − (`top_pa` ÷ `base_pa`)^(f+1)) ÷
+ * (1 − (`top_pa` ÷ `base_pa`)^(f+1)): plan 08 cuts a mode at a gas envelope's floor by it.
  */
 f_sed: number, 
 /**

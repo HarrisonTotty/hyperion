@@ -1889,8 +1889,9 @@ pub(crate) fn haze_mode_at(
             top,
             exponent,
         } => {
-            // A mode's profile takes no negative exponent: the ice giants' haze, its mixing ratio
-            // rising with height, is taken well mixed.
+            // The ice giants' haze, its mixing ratio rising with height, is taken well mixed, as
+            // at version 24: a mode's profile takes a negative exponent since R08.T17, but no
+            // version holds this haze's own.
             let exponent = if exponent > 0.0 { exponent } else { 0.0 };
             ModeProfile::new(base, top, exponent)?
         }
