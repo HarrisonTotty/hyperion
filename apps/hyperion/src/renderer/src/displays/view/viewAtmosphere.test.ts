@@ -6,18 +6,28 @@ import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { detailOf } from "../../test/atmosphereRecords";
 import { aHostDisc } from "../../test/litFixtures";
+import { earthDetail } from "../../test/planetaryFixture";
+import type { ClassMapDiscSurface } from "../../view/appearance/bodyAppearance";
+import type { PhotometricLaw } from "../../view/appearance/law";
+import { heldAppearanceOf } from "../../view/appearance/fromWire";
+import { lawFor } from "../../view/appearance/phase";
 import { AtmosphereCache } from "../../view/atmosphere/AtmosphereCache";
+import { classMapGroundAlbedo } from "../../view/atmosphere/classMapGround";
 import type { AtmosphereBuilder } from "../../view/atmosphere/opticsPool";
 import { THICK_REASON } from "../../view/atmosphere/thick/regime";
 import type { BodyLightSources } from "../../view/bodies/draw";
+import { packClassMap } from "../../view/bodies/discSurface";
 import type { LitRegime } from "../../view/bodies/regime";
+import type { Rgb } from "../../view/photometry/toneCurve";
 import type { ViewBody, ViewScene } from "../../view/scene/model";
 import { phaseScene } from "../../view/scenes/phaseScene";
 import {
   atmosphereFrameOf,
   atmosphereObserverOf,
   atmosphereShownOf,
+  cloudFreeGrounds,
   ViewAtmosphereHandle,
 } from "./viewAtmosphere";
 
@@ -275,5 +285,92 @@ describe("where a view's camera stands at a body (R08.T14.d.4)", () => {
       (each) => (each.id === body.id ? observer : undefined),
     );
     expect(frame.bodies.find((each) => each.id === body.id)?.observer).toEqual(observer);
+  });
+});
+
+describe("a view's cloud-free grounds (fix-r08-decked-air-opacity)", () => {
+  /** A named class's law, lambertian. */
+  const NAMED = lawFor([0.2, 0.25, 0.3], [1.5, 1.5, 1.5], "lambert");
+
+  /** A map of one named class over every texel, shading elsewhere with `elsewhere`. */
+  function oneClass(elsewhere: PhotometricLaw): ClassMapDiscSurface {
+    return {
+      kind: "class-map",
+      weights: { kind: "texture", name: "cloud-free ground test" },
+      texels: packClassMap(4, 1, () => [1]),
+      laws: [NAMED],
+      elsewhere,
+      normals: null,
+    };
+  }
+
+  /** A ground the view gives one body. */
+  const GROUND: Rgb = [0.25, 0.25, 0.25];
+
+  /**
+   * PHASE TEST's giant drawn with the slice's Earth's photometry, its bodies having none, and its
+   * map of one named class under that law.
+   */
+  function drawnGiant(): { readonly body: ViewBody; readonly surface: ClassMapDiscSurface } {
+    const { body: giant } = phaseBody("TEST GIANT");
+    const appearance = heldAppearanceOf(detailOf(earthDetail()).record);
+    return { body: { ...giant, appearance }, surface: oneClass(appearance.photometry.law) };
+  }
+
+  /** The bodies of `scene`'s frame that carry a ground, each with it, the view giving `body` one. */
+  function groundsNoted(scene: ViewScene, body: ViewBody): ReadonlyArray<unknown> {
+    const regimes = new Map<BodyIdHex, LitRegime>([[body.id, "disc"]]);
+    const groundOf = (each: ViewBody): Rgb | null => (each.id === body.id ? GROUND : null);
+    return atmosphereFrameOf(
+      scene,
+      regimes,
+      new Map(),
+      { scene: null, nowMs: 0 },
+      true,
+      undefined,
+      groundOf,
+    )
+      .bodies.filter((each) => "cloudFreeGround" in each)
+      .map((each) => [each.id, each.cloudFreeGround]);
+  }
+
+  it("gives none without the view's class maps", () => {
+    expect(cloudFreeGrounds(undefined)).toBeUndefined();
+  });
+
+  it("gives a body its drawn map's mean", () => {
+    const { body, surface } = drawnGiant();
+    expect(cloudFreeGrounds({ classMapOf: () => surface })?.(body)).toEqual(
+      classMapGroundAlbedo(surface),
+    );
+  });
+
+  it("asks the body's map under the body's own law", () => {
+    const { body, surface } = drawnGiant();
+    const asked: PhotometricLaw[] = [];
+    cloudFreeGrounds({
+      classMapOf: (_, elsewhere) => {
+        asked.push(elsewhere);
+        return surface;
+      },
+    })?.(body);
+    expect(asked).toEqual([body.appearance?.photometry.law]);
+  });
+
+  it("gives null for a body with no map drawn", () => {
+    const { body } = drawnGiant();
+    expect(cloudFreeGrounds({ classMapOf: () => null })?.(body)).toBeNull();
+  });
+
+  it("notes a served scene's body's ground where the view gives one", () => {
+    const { scene, body } = phaseBody("TEST GIANT");
+    expect(groundsNoted({ ...scene, provenance: { kind: "server" } }, body)).toEqual([
+      [body.id, GROUND],
+    ]);
+  });
+
+  it("notes no ground for a kept scene's body, whose setting brings its own", () => {
+    const { scene, body } = phaseBody("TEST GIANT");
+    expect(groundsNoted(scene, body)).toEqual([]);
   });
 });

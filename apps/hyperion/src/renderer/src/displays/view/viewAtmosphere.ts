@@ -19,6 +19,7 @@ import type {
   KeptBodyAtmosphere,
 } from "../../view/atmosphere/AtmosphereCache";
 import type { BodyLight } from "../../view/atmosphere/atmosphereInput";
+import { classMapGroundAlbedo } from "../../view/atmosphere/classMapGround";
 import { geodeticOf } from "../../view/atmosphere/oblate";
 import {
   atmosphereApproximateLines,
@@ -42,6 +43,8 @@ import {
   type ViewScene,
 } from "../../view/scene/model";
 import type { BodyFigure } from "../../view/terrain/planet";
+import type { Rgb } from "../../view/photometry/toneCurve";
+import type { ClassMapSource } from "../../view/terrain/classMap";
 
 /** A view's atmospheres for its drawer's frame (`ViewFrameInputs.atmosphere`). */
 export interface ViewAtmosphereInput {
@@ -179,6 +182,25 @@ export function cameraObservers(
 }
 
 /**
+ * Each server body's cloud-free ground from the view's class maps (fix-r08-decked-air-opacity;
+ * research-decked-ground): its drawn map's area-weighted mean of its named classes' p q
+ * (`classMapGroundAlbedo`), `null` for a body with no map drawn or no photometry to take its
+ * `elsewhere` from; none at all without the maps.
+ */
+export function cloudFreeGrounds(
+  classMaps: ClassMapSource | undefined,
+): ((body: ViewBody) => Rgb | null) | undefined {
+  if (classMaps === undefined) {
+    return undefined;
+  }
+  return (body) => {
+    const law = body.appearance?.photometry.law;
+    const surface = law === undefined ? null : classMaps.classMapOf(body.id, law);
+    return surface === null ? null : classMapGroundAlbedo(surface);
+  };
+}
+
+/**
  * The frame a view notes with the atmosphere cache (`AtmosphereView.noteFrame`): each of the
  * scene's lit bodies, its regime on the view's last photorealistic plan (a point where it has none)
  * and the stars its record was shaded from, on a kept scene its setting, and where `observerOf`
@@ -190,6 +212,9 @@ export function cameraObservers(
  *   notes no body wanted.
  * @param observerOf - Where the camera stands at a body under its lights ({@link cameraObservers});
  *   none if absent.
+ * @param groundOf - A server body's cloud-free ground, its drawn class map's mean of its named
+ *   classes' p q (`view/atmosphere/classMapGround.ts`; fix-r08-decked-air-opacity), or `null`;
+ *   none if absent.
  */
 export function atmosphereFrameOf(
   scene: ViewScene,
@@ -198,6 +223,7 @@ export function atmosphereFrameOf(
   input: Pick<ViewAtmosphereInput, "scene" | "nowMs">,
   drawsAtmosphere: boolean,
   observerOf?: (body: ViewBody, lights: ReadonlyArray<BodyLight>) => AtmosphereObserver | undefined,
+  groundOf?: (body: ViewBody) => Rgb | null,
 ): AtmosphereFrame {
   // A kept scene of served bodies has their records asked, as a server scene's (the owner's body
   // inspection, 2026-11-01).
@@ -213,9 +239,15 @@ export function atmosphereFrameOf(
             ? { id: body.id, regime, lights, kept: setting }
             : { id: body.id, regime, lights, kept: setting, observer };
         }
-        return observer === undefined
-          ? { id: body.id, regime, lights }
-          : { id: body.id, regime, lights, observer };
+        const cloudFreeGround = groundOf?.(body) ?? null;
+        if (observer === undefined) {
+          return cloudFreeGround === null
+            ? { id: body.id, regime, lights }
+            : { id: body.id, regime, lights, cloudFreeGround };
+        }
+        return cloudFreeGround === null
+          ? { id: body.id, regime, lights, observer }
+          : { id: body.id, regime, lights, observer, cloudFreeGround };
       })
     : [];
   return { nowMs: input.nowMs, scene: kept ? null : input.scene, bodies };

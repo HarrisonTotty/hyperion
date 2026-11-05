@@ -508,7 +508,7 @@ export const HAZE_ROUTE_RANGE: ThickRouteRange = {
  * The range a decked thin air routes over to its bake, its gate passing (plan R08,
  * fix-r08-decked-air-opacity; lean, 2026-11-05): the channels of the served Earth-like
  * `42002cae00000004.0300` (generator version 28; `test/servedDeckedWorld.json`) as the client draws
- * it, over the check lane's ground of 0.1, about its drawn ground's, the range its gate covers, as
+ * it, over the check lane's ground of 0.1, the range its gate covers, as
  * {@link HAZE_ROUTE_RANGE} is `titan-class`'s. Its water deck, τ(550) 1.72 under a cloud fraction of
  * 0.67, is drawn uniform at 1.15, under the deck split's τ 10 and its cover of 1 (`regime.ts`'s
  * `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`), so it classifies `thickScattering`, and Ψ_ms drew its veil
@@ -520,11 +520,15 @@ export const HAZE_ROUTE_RANGE: ThickRouteRange = {
  * case): τ to 1.805 (blue), ω̄ from 0.99999 (red), ḡ to 0.7931 (red, the deck's 45 µm drops), the
  * ground to 0.1, τ ḡ to 1.017 (red) and τ (1 − ω̄) to 1.420 × 10⁻⁵ (red). A Mars-class dust lies
  * outside it by its absorption (ω̄ 0.83–0.97), and a Titan- or Venus-class column by its depth. The
- * served world itself lies outside it by its ground as the atmosphere cache takes it, R07's p q of
- * 0.28–0.35 (`decision-r08-t10a-leans.md` §2), its clouds' brightness among it, which the drawn deck
- * counts again: routed over that ground, its veil on SwiftShader from 2,000 km rose from I/F 0.173
- * to 0.241 in red and its drawn ground's slope through the air fell from 0.56 to 0.20, a paler disc
- * than the analytic path's, and that ground is ungated.
+ * served world itself lies outside it by its ground: R07's p q of 0.28–0.35, its clouds among it
+ * (`decision-r08-t10a-leans.md` §2), and since research-decked-ground the cloud-free ground the
+ * atmosphere cache hands a decked air's bake in its place, its drawn class map's mean
+ * (`../classMapGround.ts`), 0.267 / 0.259 / 0.244. The ground is held at 0.1 (lean): routed over
+ * either ground, on SwiftShader from 2,000 km, its veil's intercept against the airless build rose
+ * from I/F 0.173 to 0.236–0.241 in red and its drawn ground's slope through the air fell from 0.56
+ * to 0.19–0.20, as from 40,000 km (0.62–0.64 to 0.18–0.21). Under the bake's table the drawn
+ * surface keeps no lobe of its own (`hillaire.ts`'s `THICK_READ`): its forward-scattered light is
+ * the bake's J over one uniform ground, so the disc's mean holds and its ground's contrast goes.
  */
 export const DECKED_AIR_ROUTE_RANGE: ThickRouteRange = {
   mostOpticalDepth: 1.81,

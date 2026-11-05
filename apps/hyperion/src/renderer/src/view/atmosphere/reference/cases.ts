@@ -150,11 +150,11 @@ export interface ReferenceCase {
  * the `-spectral-` cases are R08.T17's 15-bin cases (`spectralCases.ts`); `jupiter-envelope` and
  * `saturn-envelope` are R08.T16.a.2's absorbing envelopes (`test/jupiterEnvelopeCase.ts`,
  * `test/saturnEnvelopeCase.ts`); `served-decked-orbit` is fix-r08-decked-air-opacity's served
- * decked world over its orbit images (`test/servedDeckedWorld.ts`), and `served-decked-app-orbit`
- * the same over the atmosphere cache's ground, untraced, on the same seed, so that a trace's
- * difference would be the ground's. Both were traced on 16 in a lane beside `saturn-envelope`'s, and
- * keep it (lean, 2026-11-06): a giant's envelope and an Earth-like decked air follow no common
- * paths, and no gate judges them together.
+ * decked world over its orbit images (`test/servedDeckedWorld.ts`), `served-decked-orbit-bright`
+ * the same over a brighter ground and `served-decked-app-orbit` over the atmosphere cache's,
+ * untraced, on one seed, so that two traces' difference is the ground's. They were traced on 16 in
+ * a lane beside `saturn-envelope`'s, and keep it (lean, 2026-11-06): a giant's envelope and an
+ * Earth-like decked air follow no common paths, and no gate judges them together.
  */
 export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   earth: 0,
@@ -175,6 +175,7 @@ export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   "jupiter-envelope": 15,
   "saturn-envelope": 16,
   "served-decked-orbit": 16,
+  "served-decked-orbit-bright": 16,
   "served-decked-app-orbit": 16,
 };
 

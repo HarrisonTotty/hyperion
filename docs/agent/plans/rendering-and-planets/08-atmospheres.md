@@ -25221,3 +25221,29 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   (above); `marchDepth.test.ts` now holds all four entry points' centre rays to
   `marchTexelDepthOf`. Pending: the smoke's packed-against-per-texel check draws a flat plane, whose
   four depths agree; a receding surface there would hold it.
+- **A decked air's bake over its drawn map's cloud-free ground** (fix-r08-decked-air-opacity step 4,
+  2026-11-05; research-decked-ground, main's ruling). `classMapGround.ts`'s `classMapGroundAlbedo`:
+  the area-weighted mean of a drawn class map's named classes' p q (each cell's solid angle on the
+  cube sphere times its weight byte; unnamed classes and unsurveyed cells left out), at 30 kPa and
+  above (`CLOUD_FREE_CLASSES_PA`). The view hands it the cache (`AtmosphereFrameBody.cloudFreeGround`,
+  `viewAtmosphere.ts`'s `cloudFreeGrounds`), which keys a record's build by it, held to 2⁻⁸, and
+  gives it the medium's tables and bake where the decked air's range takes the medium over it (a
+  column classed thick over R07's p q only if it is still thick over this ground). A ground's move
+  rebuilds only an entry whose decked air takes either ground, and a build landing over a ground
+  since moved is built again where it takes either; a kept body takes none.
+  - The served world's mean: 0.267 / 0.259 / 0.244 once surveyed (0.232, then 0.258, as the survey
+    grows), past the range's 0.1. The gate at 0.3 (`served-decked-orbit-bright`, `deckedAirGate.json`'s
+    `bright`) passes through the route: 8 pass, 0 miss, 16 refused (the disc at p0–p75 throughout),
+    0.92–1.05 of the trace by image; the analytic path misses 5 (to 12.2 of the edge).
+  - The range's ground stays 0.1 (lean). Routed over the cloud-free ground (a build with the range at
+    0.3, not kept; SwiftShader, low) the disc reads milkier: the centre 0.255 / 0.267 / 0.305 from
+    2e6 to 3.844e8 m (the analytic path 0.229 / 0.261 / 0.334); against the airless build the veil's
+    intercept rises 0.173 → 0.236 (red, 2,000 km) and the drawn ground's slope falls 0.56 → 0.19,
+    as over R07's p q (0.241, 0.20); at 4e7 m against the analytic capture, red 0.38–0.55 and blue
+    0.87–0.93. The ground's value was not the cause: under the bake's table the drawn surface keeps no
+    lobe of its own, its forward light being the bake's J over one uniform ground. Main's question.
+  - The airless build's I/F 0.06–0.08 is the ground lit through the air (`surfaceLighting.wgsl`),
+    not its albedo; it agrees with the mean, not with a third of it (step 2's outbox, corrected).
+  - The twin at disc-p0: the route's black-ground veil 0.0764 / 0.1192 / 0.2391 against the
+    independent-pixel truth's 0.078 / 0.118 / 0.230 (Ψ_ms 0.1223 / 0.1795 / 0.3291); its ground's
+    part over 0.3 0.233 / 0.220 / 0.170 against the drawn medium's trace, 0.240 / 0.230 / 0.185.

@@ -28,6 +28,7 @@ import {
   recordInput,
   SUN_LIGHT,
   withRecord,
+  withSurface,
 } from "../../test/atmosphereRecords";
 import { aHostDisc } from "../../test/litFixtures";
 import { handJupiterRecord } from "../../test/giantFixtures";
@@ -69,6 +70,7 @@ import {
   mediumTableRadiusM,
   withCurves,
 } from "./assemble";
+import { CLOUD_FREE_CLASSES_PA } from "./classMapGround";
 import { groundTemperatureFieldOf } from "./thermal";
 import type { MediumTemperature } from "./thermalSource";
 import {
@@ -81,6 +83,7 @@ import {
   type AtmosphereView,
   type AtmosphereViewReport,
   type BuiltAtmosphere,
+  CLOUD_FREE_GROUND_STEP,
   DECK_THERMAL_REASON,
   type KeptBodyAtmosphere,
   PendingLineHold,
@@ -93,6 +96,7 @@ import {
   clampedGroundAlbedo,
 } from "./atmosphereInput";
 import { EARTH_COLUMN, R05_EARTH_REFERENCE } from "./earth";
+import type { Rgb } from "../photometry/toneCurve";
 import type { AtmosphereMedium, MediumTerm } from "./medium";
 import { ATMOSPHERE_ANSWER_UNREADABLE, type AtmosphereLabel } from "./labels";
 import { keptBakeLightsOf, type OpticsRequest } from "./opticsMessages";
@@ -3616,5 +3620,179 @@ describe("the product's route (R08.T14.d.4)", () => {
       ["atmosphereApproximate"],
       [[A, [TWILIGHT_REASON]]],
     ]);
+  });
+});
+
+describe("a decked air's cloud-free ground (fix-r08-decked-air-opacity; research-decked-ground)", () => {
+  /** A class map's mean, on its step: about the served Earth-like world's. */
+  const GROUND: Rgb = [68 / 256, 66 / 256, 63 / 256];
+
+  /** A cloud-free ground no decked air's range in these tests takes. */
+  const OTHER: Rgb = [0.5, 0.5, 0.5];
+
+  /** {@link GROUND} moved in red by `steps` of {@link CLOUD_FREE_GROUND_STEP}. */
+  function movedBy(steps: number): Rgb {
+    return [GROUND[0] + steps * CLOUD_FREE_GROUND_STEP, GROUND[1], GROUND[2]];
+  }
+
+  /** The fixture's Earth with its surface just under 30 kPa, where no class's own albedo is drawn. */
+  function underCloudFreeClasses(): DetailAnswer {
+    return withSurface(answerFor(A, earthDetail()), (surface) => ({
+      ...surface,
+      surface_pressure_pa: CLOUD_FREE_CLASSES_PA - 1,
+    }));
+  }
+
+  /** A's frame body, lit by the Sun, its view's cloud-free ground `ground`. */
+  function grounded(ground: Rgb): AtmosphereFrameBody {
+    return { ...lit(A), cloudFreeGround: ground };
+  }
+
+  /** A decked air's range that takes a medium over {@link GROUND} alone. */
+  function deckedOverGround(_regime: AtmosphereRegime, medium: AtmosphereMedium): boolean {
+    return medium.groundAlbedo.every((x, c) => x === GROUND[c]);
+  }
+
+  /** R05's Earth, thin, as {@link earthAssembly}, with its terms' sources to bake from. */
+  function sourcedEarth(): AssembledMedium {
+    const earth = earthAssembly();
+    if (earth.drawn === undefined) {
+      throw new Error("R05's Earth's assembly draws its medium");
+    }
+    return {
+      ...earth,
+      drawn: { ...earth.drawn, sources: R05_EARTH_REFERENCE.terms.map(channelSource) },
+    };
+  }
+
+  /** A cache routing every medium to its bake, A asked over `ground`, answered and built. */
+  async function deckedDrawn(answered: DetailAnswer, ground: Rgb = GROUND): Promise<Harness> {
+    const h = harness(
+      undefined,
+      (): boolean => true,
+      routesNone,
+      undefined,
+      undefined,
+      deckedOverGround,
+    );
+    note(h, [grounded(ground)]);
+    await answer(h, A, answered);
+    await land(h, A, { kind: "built", assembled: sourcedEarth() });
+    note(h, [grounded(ground)]);
+    return h;
+  }
+
+  it("draws a record's decked air over its view's cloud-free ground", async () => {
+    const h = await deckedDrawn(answerFor(A, earthDetail()));
+    expect(h.cache.entryOf(A)?.built?.medium.groundAlbedo).toEqual(GROUND);
+  });
+
+  it("makes the decked air's tables over the cloud-free ground", async () => {
+    const h = await deckedDrawn(answerFor(A, earthDetail()));
+    expect(madeAt(h, 0).built.medium.groundAlbedo).toEqual(GROUND);
+  });
+
+  it("asks the decked air's bake over the cloud-free ground", async () => {
+    const h = await deckedDrawn(answerFor(A, earthDetail()));
+    expect(latestBake(h).ask.column.groundAlbedo).toEqual(GROUND);
+  });
+
+  it("keys a record's build by the cloud-free ground it was noted with", async () => {
+    const answered = answerFor(A, earthDetail());
+    const h = await deckedDrawn(answered);
+    expect(h.cache.entryOf(A)?.key).toBe(
+      `${atmosphereKey(inputOf(answered))}|cloud-free ground ${GROUND.join(",")}`,
+    );
+  });
+
+  it("keeps R07's ground where the decked air's range does not take the medium over the cloud-free one", async () => {
+    const h = await deckedDrawn(answerFor(A, earthDetail()), OTHER);
+    expect(h.cache.entryOf(A)?.built?.medium.groundAlbedo).toEqual(
+      R05_EARTH_REFERENCE.groundAlbedo,
+    );
+  });
+
+  it("holds a ground that moves by less than its step", async () => {
+    const h = await deckedDrawn(answerFor(A, earthDetail()));
+    note(h, [grounded(movedBy(0.4))]);
+    expect(h.builder.buildsOf(A).length).toBe(1);
+  });
+
+  it("rebuilds from the reply held when the ground moves by its step", async () => {
+    const h = await deckedDrawn(answerFor(A, earthDetail()));
+    note(h, [grounded(movedBy(1))]);
+    expect([h.seam.askedFor(A), h.builder.buildsOf(A).length]).toEqual([1, 2]);
+  });
+
+  it("draws the ground a decked air's range takes once it moves onto it", async () => {
+    const h = await deckedDrawn(answerFor(A, earthDetail()), OTHER);
+    note(h, [grounded(GROUND)]);
+    await land(h, A, { kind: "built", assembled: sourcedEarth() });
+    note(h, [grounded(GROUND)]);
+    expect(h.cache.entryOf(A)?.built?.medium.groundAlbedo).toEqual(GROUND);
+  });
+
+  it("builds nothing when the ground moves on a body whose decked air takes neither ground", async () => {
+    const h = await deckedDrawn(answerFor(A, earthDetail()), OTHER);
+    note(h, [grounded([0.6, 0.5, 0.5])]);
+    expect(h.builder.buildsOf(A).length).toBe(1);
+  });
+
+  it("takes a ground noted while it was built, its drawn entry an envelope's that takes none", async () => {
+    const h = harness(
+      undefined,
+      (): boolean => true,
+      routesNone,
+      undefined,
+      undefined,
+      deckedOverGround,
+    );
+    note(h, [grounded(OTHER)]);
+    await answer(h, A);
+    await land(h, A, { kind: "built", assembled: envelopeAssembly() });
+    const later = sceneOf({ arrival: {} });
+    note(h, [grounded(OTHER)], 0, later);
+    await answer(h, A, answerFor(A, earthDetail()));
+    // The drawn envelope takes neither ground: the frame builds nothing, the landing again.
+    note(h, [grounded(GROUND)], 0, later);
+    await land(h, A, { kind: "built", assembled: sourcedEarth() });
+    await land(h, A, { kind: "built", assembled: sourcedEarth() });
+    note(h, [grounded(GROUND)], 0, later);
+    expect(h.cache.entryOf(A)?.built?.medium.groundAlbedo).toEqual(GROUND);
+  });
+
+  it("draws a record under 30 kPa, whose class map draws its classes scaled to its p, over R07's ground", async () => {
+    const h = await deckedDrawn(underCloudFreeClasses());
+    expect(h.cache.entryOf(A)?.built?.medium.groundAlbedo).toEqual(
+      R05_EARTH_REFERENCE.groundAlbedo,
+    );
+  });
+
+  it("keys a record under 30 kPa by its input alone", async () => {
+    const answered = underCloudFreeClasses();
+    const h = await deckedDrawn(answered);
+    expect(h.cache.entryOf(A)?.key).toBe(atmosphereKey(inputOf(answered)));
+  });
+
+  it("holds no cloud-free ground for a kept body, whose setting brings its own", async () => {
+    const h = harness(
+      undefined,
+      (): boolean => true,
+      routesNone,
+      undefined,
+      undefined,
+      deckedOverGround,
+    );
+    const setting: KeptBodyAtmosphere = {
+      kind: "record",
+      detail: detailOf(answerFor(A, earthDetail())),
+    };
+    const body: AtmosphereFrameBody = { ...lit(A), kept: setting, cloudFreeGround: GROUND };
+    note(h, [body], 0, null);
+    await land(h, A, { kind: "built", assembled: sourcedEarth() });
+    note(h, [body], 0, null);
+    expect(h.cache.entryOf(A)?.built?.medium.groundAlbedo).toEqual(
+      R05_EARTH_REFERENCE.groundAlbedo,
+    );
   });
 });

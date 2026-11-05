@@ -1087,7 +1087,7 @@ async function servedDrawn(): Promise<{
   readonly medium: AtmosphereMedium;
   readonly regime: AtmosphereRegime;
 }> {
-  const { medium } = await servedDeckedCase("drawn");
+  const { medium } = await servedDeckedCase("dark");
   return { medium, regime: classifyRegime(medium, CLEAR_COVER) };
 }
 
@@ -1143,6 +1143,11 @@ describe("the decked thin air's route (fix-r08-decked-air-opacity)", () => {
     expect(thickBakeRouted(classifyRegime(medium, CLEAR_COVER), medium)).toBe(false);
   }, 180_000);
 
+  it("routes it nowhere over the gate's bright ground of 0.3, above its drawn map's cloud-free mean, while the range holds its ground at 0.1 (lean)", async () => {
+    const { medium } = await servedDeckedCase("bright");
+    expect(thickBakeRouted(classifyRegime(medium, CLEAR_COVER), medium)).toBe(false);
+  }, 180_000);
+
   it("routes no kept case, Mars's dust, the Venus-class cases nor titan-class by the decked range", () => {
     const media = [
       ...cases.REFERENCE_CASES.map((each) => each.medium),
@@ -1157,7 +1162,7 @@ describe("the decked thin air's route (fix-r08-decked-air-opacity)", () => {
   it.each(BOUNDS)(
     "sets the decked air's %s at the served world's extreme, rounded outward at its third figure",
     async (key, side, read) => {
-      const { medium } = await servedDeckedCase("drawn");
+      const { medium } = await servedDeckedCase("dark");
       expect(
         outwardSteps(DECKED_AIR_ROUTE_RANGE[key], regimeChannels(medium).map(read), side),
       ).toEqual([expect.toSatisfy((steps: number) => steps >= 0 && steps < 1)]);

@@ -63,15 +63,23 @@ export function servedDeckedGroundAlbedo(): Rgb {
 }
 
 /**
- * The ground a gate case of the served world takes: `drawn`, 0.1 grey, about its drawn ground's
- * (its seabed and land read I/F 0.06–0.08 without air from 2,000 km, check-atmosphere-opacity), the
- * check lane's; or `client`, R07's p q, the atmosphere cache's ({@link servedDeckedGroundAlbedo}).
+ * The ground a gate case of the served world takes: `dark`, 0.1 grey, the check lane's; `bright`,
+ * 0.3 grey, above the cloud-free mean its drawn class map gives it (0.267 / 0.259 / 0.244, its
+ * seas drawn as bare seabed until R11's water; `classMapGround.ts`); or `client`, R07's p q, the
+ * atmosphere cache's for every other air ({@link servedDeckedGroundAlbedo}).
  */
-export type ServedDeckedGround = "drawn" | "client";
+export type ServedDeckedGround = "dark" | "bright" | "client";
 
-/** Each case's name: the gate's, `drawn`, as its trace names it; `client`'s, untraced. */
+/** Each grey ground's albedo, per channel. */
+const GREY_GROUNDS: Readonly<Record<Exclude<ServedDeckedGround, "client">, Rgb>> = {
+  dark: [0.1, 0.1, 0.1],
+  bright: [0.3, 0.3, 0.3],
+};
+
+/** Each case's name, as its trace names it: the gate's `dark` and `bright`; `client`'s, untraced. */
 export const SERVED_DECKED_CASES: Readonly<Record<ServedDeckedGround, string>> = {
-  drawn: "served-decked-orbit",
+  dark: "served-decked-orbit",
+  bright: "served-decked-orbit-bright",
   client: "served-decked-app-orbit",
 };
 
@@ -139,7 +147,7 @@ function termHeldApart(term: MediumTerm, topHeightM: number): MediumTerm {
  * @throws Error where the record assembles no medium.
  */
 export async function servedDeckedCase(ground: ServedDeckedGround): Promise<ReferenceCase> {
-  const albedo: Rgb = ground === "client" ? servedDeckedGroundAlbedo() : [0.1, 0.1, 0.1];
+  const albedo: Rgb = ground === "client" ? servedDeckedGroundAlbedo() : GREY_GROUNDS[ground];
   const input = recordInput(servedDeckedDetail(), [SUN_LIGHT], albedo);
   const tables = await loadKDistributions([...lineSpeciesOf(input)], inlinePart);
   const { medium, drawn } = assembleMedium(input, { kDistributions: tables });

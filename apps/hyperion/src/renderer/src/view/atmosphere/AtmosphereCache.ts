@@ -196,6 +196,7 @@ import {
   clampedGroundAlbedo,
   type KeptAtmosphere,
 } from "./atmosphereInput";
+import { CLOUD_FREE_CLASSES_PA } from "./classMapGround";
 import {
   ATMOSPHERE_ANSWER_UNREADABLE,
   ATMOSPHERE_LABELS,
@@ -244,6 +245,7 @@ import {
   type BodyCover,
   CLEAR_COVER,
   classifyRegime,
+  regimeChannels,
   THICK_REASON,
 } from "./thick/regime";
 import {
@@ -454,6 +456,13 @@ export interface AtmosphereFrameBody {
   readonly kept?: KeptBodyAtmosphere;
   /** Where the view's camera stands at it (R08.T14.d.4); absent where the view gives none. */
   readonly observer?: AtmosphereObserver;
+  /**
+   * Its cloud-free ground, per channel (fix-r08-decked-air-opacity; research-decked-ground): its
+   * drawn class map's area-weighted mean of its named classes' p q (`classMapGround.ts`), which a
+   * decked thin air's bake takes in place of R07's p q at a surface pressure of
+   * `CLOUD_FREE_CLASSES_PA` and above; absent where the view draws no class map, and on a kept body.
+   */
+  readonly cloudFreeGround?: Rgb;
 }
 
 /** One frame of a view, as {@link AtmosphereView.noteFrame} takes it. */
@@ -690,6 +699,8 @@ interface Building {
   readonly key: string;
   readonly input: BodyAtmosphereInput;
   readonly handle: OpticsBuild;
+  /** The cloud-free ground its decked air takes ({@link HeldBody.cloudFreeGround}), or `null`. */
+  readonly cloudFreeGround: Rgb | null;
 }
 
 /** Where a body's build stands. */
@@ -787,6 +798,11 @@ interface HeldBody<T> {
   busyAnswers: number;
   /** Its lights as last noted. */
   lights: ReadonlyArray<BodyLight>;
+  /**
+   * Its cloud-free ground as last noted ({@link AtmosphereFrameBody.cloudFreeGround}), held to
+   * {@link CLOUD_FREE_GROUND_STEP}, or `null` for none.
+   */
+  cloudFreeGround: Rgb | null;
   /** The reply taken, for the scene, which a changed light set or an eviction builds from. */
   reply: BodyDetail | null;
   /** The ground's temperature field of the reply it was read from (R08.T18.a); `null` before. */
@@ -956,6 +972,46 @@ function detailAnswerOf(
       break;
   }
   return answer;
+}
+
+/**
+ * The step a body's cloud-free ground is held to, per channel: 2⁻⁸, so that a class map's mean,
+ * which moves as its survey grows, rebuilds the body only where it moves by a step
+ * (fix-r08-decked-air-opacity).
+ */
+export const CLOUD_FREE_GROUND_STEP = 2 ** -8;
+
+/** A frame's cloud-free ground as a body holds it: clamped to [0, 1] and held to its step. */
+function heldGroundOf(ground: Rgb | undefined): Rgb | null {
+  if (ground === undefined || !ground.every(Number.isFinite)) {
+    return null;
+  }
+  const held = (x: number): number =>
+    Math.round(Math.min(Math.max(x, 0), 1) / CLOUD_FREE_GROUND_STEP) * CLOUD_FREE_GROUND_STEP;
+  return [held(ground[0]), held(ground[1]), held(ground[2])];
+}
+
+/** Whether two held grounds are the same, none alike. */
+function sameGround(a: Rgb | null, b: Rgb | null): boolean {
+  return a === null || b === null ? a === b : a.every((x, c) => x === b[c]);
+}
+
+/**
+ * The cloud-free ground a record's decked air may take: `ground` where its surface stands at
+ * {@link CLOUD_FREE_CLASSES_PA} or more, where R10 draws its classes' own albedos, else `null`.
+ */
+function cloudFreeGroundOf(detail: BodyDetail, ground: Rgb | null): Rgb | null {
+  const surface = detail.record.surface;
+  return ground !== null &&
+    surface.state === "ok" &&
+    surface.value.surfacePressurePa >= CLOUD_FREE_CLASSES_PA
+    ? ground
+    : null;
+}
+
+/** What a cloud-free ground adds to a build's key: nothing without one. */
+function groundKeyOf(ground: Rgb | null): string {
+  return ground === null ? "" : `|cloud-free ground ${ground.join(",")}`;
 }
 
 /** A record's ground albedo: p q per channel of R07's photometry, clamped to [0, 1] (item 2). */
@@ -1692,6 +1748,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       eventPending: false,
       busyAnswers: 0,
       lights: body.lights,
+      // A kept body's setting brings its own ground.
+      cloudFreeGround: kept ? null : heldGroundOf(body.cloudFreeGround),
       reply: null,
       ground: null,
       build: null,
@@ -1804,6 +1862,59 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         this.#rebuild(held);
       }
     }
+    const ground = heldGroundOf(body.cloudFreeGround);
+    if (!sameGround(held.cloudFreeGround, ground)) {
+      const was = held.cloudFreeGround;
+      held.cloudFreeGround = ground;
+      // Its entry, landed or drawn, predicts its build: one whose decked air takes neither ground
+      // draws the same, so a survey's growing mean rebuilds, and bakes, no other body. Its key
+      // keeps the ground it was built with, so its next re-request builds it once more.
+      const entry = held.build?.kind === "landed" ? held.build.entry : held.drawn;
+      const matters =
+        entry === null ||
+        this.#deckedOver(entry, was) !== null ||
+        this.#deckedOver(entry, ground) !== null;
+      if (held.problem === null && matters) {
+        this.#rebuild(held);
+      }
+    }
+  }
+
+  /**
+   * The medium `entry`'s decked air takes over the cloud-free `ground` (research-decked-ground):
+   * its own with that ground where, over it, the medium routes to its bake by the decked air's
+   * range alone ({@link AtmosphereCacheOptions.deckedAir}); `null` for no ground, no medium or a
+   * gas envelope's, where the range does not take it, or where a column the assembly classed
+   * `thickScattering` over R07's p q is thick on no channel over this ground.
+   */
+  #deckedOver(
+    entry: Pick<ToDraw, "built" | "regime" | "envelope">,
+    ground: Rgb | null,
+  ): AtmosphereMedium | null {
+    const { built, regime } = entry;
+    if (ground === null || built === null || regime === null || entry.envelope) {
+      return null;
+    }
+    const medium: AtmosphereMedium = { ...built.medium, groundAlbedo: ground };
+    if (
+      regime.kind === "thickScattering" &&
+      !regimeChannels(medium).some((c) => c.thickByDepth || c.thickByGround)
+    ) {
+      return null;
+    }
+    return this.#deckedAir(regime, medium) ? medium : null;
+  }
+
+  /**
+   * `entry` with the medium its decked air takes over the cloud-free `ground` ({@link #deckedOver}):
+   * its tables and its bake then take that ground, never R07's p q,
+   * whose clouds the drawn deck counts again. Any other entry as it is.
+   */
+  #withDeckedGround(entry: ToDraw, ground: Rgb | null): ToDraw {
+    const medium = this.#deckedOver(entry, ground);
+    return medium === null || entry.built === null
+      ? entry
+      : { ...entry, built: { ...entry.built, medium } };
   }
 
   /** Asks for a body's record, cancelling a request or wait standing, or waits for the link. */
@@ -1912,6 +2023,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
     let input: BodyAtmosphereInput;
     let key: string;
+    let cloudFreeGround: Rgb | null;
     try {
       input = {
         kind: "record",
@@ -1919,7 +2031,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         lights: held.lights,
         groundAlbedo: groundAlbedoOf(reply),
       };
-      key = atmosphereKey(input);
+      cloudFreeGround = cloudFreeGroundOf(reply, held.cloudFreeGround);
+      key = atmosphereKey(input) + groundKeyOf(cloudFreeGround);
     } catch (error: unknown) {
       this.#fail(held, error);
       return;
@@ -1939,7 +2052,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       this.#fail(held, error);
       return;
     }
-    const building: Building = { kind: "building", key, input, handle };
+    const building: Building = { kind: "building", key, input, handle, cloudFreeGround };
     held.build = building;
     void this.#land(held, building, handle).catch((error: unknown) => {
       // A bug in taking the build: the body is held failed, with the error in the log, rather
@@ -1960,13 +2073,25 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       return;
     }
     switch (outcome.kind) {
-      case "built":
-        held.build = {
-          kind: "landed",
-          key: building.key,
-          entry: toDrawOf(building.key, building.input, outcome.assembled),
-        };
+      case "built": {
+        const entry = this.#withDeckedGround(
+          toDrawOf(building.key, building.input, outcome.assembled),
+          building.cloudFreeGround,
+        );
+        held.build = { kind: "landed", key: building.key, entry };
+        // A ground noted while it was built, which the drawn entry took neither of, is this
+        // entry's to take: it is built again over it.
+        const ground =
+          held.reply === null ? null : cloudFreeGroundOf(held.reply, held.cloudFreeGround);
+        if (
+          !sameGround(building.cloudFreeGround, ground) &&
+          (this.#deckedOver(entry, building.cloudFreeGround) !== null ||
+            this.#deckedOver(entry, ground) !== null)
+        ) {
+          this.#rebuild(held);
+        }
         break;
+      }
       case "failed":
         held.build = null;
         this.#fail(held, new Error(outcome.message));

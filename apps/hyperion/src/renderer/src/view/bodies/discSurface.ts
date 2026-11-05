@@ -331,6 +331,20 @@ function storedOffset(map: ClassMapTexels, face: Face, x: number, y: number, k: 
   return ((layer * side + y) * side + x) * CLASSES_PER_LAYER + (k % CLASSES_PER_LAYER);
 }
 
+/**
+ * Class `k`'s weight at face texel (i, j) of `face`, as {@link packClassMap} stored it: its share of
+ * the texel, 0 to 1 in steps of 1 ÷ 255, the texel's weights summing to its surveyed share.
+ */
+export function classWeightAt(
+  map: ClassMapTexels,
+  face: Face,
+  i: number,
+  j: number,
+  k: number,
+): number {
+  return (map.data[storedOffset(map, face, i + 1, j + 1, k)] ?? 0) / UNORM_MAX;
+}
+
 /** The byte offset of the high byte of the maturity code at stored texel (x, y) of `face`. */
 function codeOffset(map: ClassMapTexels, face: Face, x: number, y: number): number {
   const side = classMapSide(map.faceTexels);
