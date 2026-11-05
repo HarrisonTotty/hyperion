@@ -4347,7 +4347,14 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   margin-top: 0;
 }
 
-.planet-inputs__held {
+/* A body's ID, an identifier read character by character: monospaced, from the left. */
+.planet-inputs__body {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.planet-inputs__held,
+.planet-inputs__note {
   margin: 0.25rem 0 0;
 }
 

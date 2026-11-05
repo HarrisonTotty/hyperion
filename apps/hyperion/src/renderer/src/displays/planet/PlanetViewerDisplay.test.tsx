@@ -19,13 +19,19 @@ import { UniversePanel } from "../galaxy/UniversePanel";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import { FakeGpu } from "../../test/fakeGpu";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { anOpenedUniverse, aUniverse, aUniverseList } from "../../test/galaxyFixtures";
+import {
+  anOpenedUniverse,
+  aSystemRecord,
+  aUniverse,
+  aUniverseList,
+} from "../../test/galaxyFixtures";
+import { sliceEarthInspection } from "../../test/inspectionFixture";
 import { FIXTURE_EARTH, FIXTURE_SYSTEM, sliceBodies } from "../../test/planetaryFixture";
 import { REQUEST_TIMEOUT_MS } from "../../lib/useServerRequest";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { stubViewLayout } from "../../test/viewDisplayHarness";
 import { PlanetViewerDisplay } from "./PlanetViewerDisplay";
-import { nextDrawSeed } from "./usePlanetViewer";
+import { nextDrawSeed, type PlanetViewerOpening } from "./usePlanetViewer";
 import { formatInputsString, DEFAULT_INPUTS, toInputsDto } from "./planetInputs";
 
 afterEach(() => {
@@ -40,22 +46,29 @@ async function noAdapterStore(): Promise<GraphicsStatusStore> {
   return store;
 }
 
-/** Renders the display in its providers, a universe's panel beside it to open one. */
+/**
+ * Renders the display in its providers, a universe's panel beside it to open one, and a way to hand
+ * it a planet over, as `App` does.
+ */
 async function renderViewer(): Promise<{
   readonly socket: FakeWebSocket;
   readonly user: ReturnType<typeof userEvent.setup>;
+  readonly handOver: (opening: PlanetViewerOpening) => void;
+  /** Hides the display, as `App`'s `Activity` does when another is chosen, or shows it again. */
+  readonly show: (shown: boolean) => void;
 }> {
   const advanceTimers = fakeFramesAndTimeouts();
   stubViewLayout({ widthPx: 1280, heightPx: 720 }, () => ({ widthPx: 900, heightPx: 600 }));
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const user = userEvent.setup({ advanceTimers });
   const store = await noAdapterStore();
-  render(
+  let handedOver: PlanetViewerOpening | null = null;
+  const tree = (opening: PlanetViewerOpening | null, shown = true) => (
     <ServerLinkHarness>
       <UniverseProvider>
         <GraphicsStatusContext value={store}>
           <UniversePanel expanded onToggle={() => undefined} />
-          <Activity mode="visible">
+          <Activity mode={shown ? "visible" : "hidden"}>
             <main className="console__work console__work--planet">
               <PlanetViewerDisplay
                 setting="high"
@@ -63,18 +76,30 @@ async function renderViewer(): Promise<{
                 performanceThreads={null}
                 geometry={undefined}
                 atmosphereLevers={undefined}
+                opening={opening}
               />
             </main>
           </Activity>
         </GraphicsStatusContext>
       </UniverseProvider>
-    </ServerLinkHarness>,
+    </ServerLinkHarness>
   );
+  const { rerender } = render(tree(null));
   const socket = FakeWebSocket.latest();
   act(() => {
     socket.serverWelcomes();
   });
-  return { socket, user };
+  return {
+    socket,
+    user,
+    handOver: (opening) => {
+      handedOver = opening;
+      rerender(tree(opening));
+    },
+    show: (shown) => {
+      rerender(tree(handedOver, shown));
+    },
+  };
 }
 
 /** Opens the fixture's universe on the universe panel. */
@@ -142,6 +167,47 @@ async function showPlanet(
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+}
+
+/** The slice's Earth's inputs read back, its orbit at 1.5 au, its system of one star or more. */
+function readAnswer(multipleStars = false): ResponseFor<"viewer_inputs"> {
+  return {
+    kind: "viewer_inputs",
+    universe: aUniverse().id,
+    body: FIXTURE_EARTH,
+    inputs: { ...toInputsDto(DEFAULT_INPUTS), semi_major_axis_au: 1.5 },
+    multiple_stars: multipleStars,
+  };
+}
+
+/** Types `id` into `BODY` and presses `OPEN BODY`. */
+async function openTyped(user: ReturnType<typeof userEvent.setup>, id: string): Promise<void> {
+  const field = screen.getByRole("textbox", { name: "BODY" });
+  await user.clear(field);
+  await user.type(field, id);
+  await user.click(screen.getByRole("button", { name: "OPEN BODY" }));
+}
+
+/** Answers an `OPEN BODY` of the slice's Earth: its inputs, its system's record, its bodies. */
+async function answerOpen(socket: FakeWebSocket, multipleStars = false): Promise<void> {
+  await act(async () => {
+    socket.serverAnswers("viewer_inputs", () => readAnswer(multipleStars));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await act(async () => {
+    socket.serverAnswers("resolve_system", () => ({
+      kind: "resolve_system",
+      universe: aUniverse().id,
+      time: { seconds: 0, nanos: 0 },
+      record: { ...aSystemRecord({ positionLy: [26_000, 0, 12] }), id: FIXTURE_SYSTEM },
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await act(async () => {
+    socket.serverAnswers("system_bodies", () => sliceBodies());
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await settle();
 }
 
 /** Lets the requests' promises settle. */
@@ -399,5 +465,146 @@ describe("nextDrawSeed", () => {
   it("moves a seed on by one, wrapping at 2^64", () => {
     expect(nextDrawSeed("00000000000000ff")).toBe("0000000000000100");
     expect(nextDrawSeed("ffffffffffffffff")).toBe("0000000000000000");
+  });
+
+  describe("a planet of the galaxy (plan R15, T5)", () => {
+    it("is asked by the ID typed in BODY, in the wire's lower case", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, FIXTURE_EARTH.toUpperCase());
+      expect(socket.requestsOfKind("viewer_inputs").map(({ body }) => body.body)).toEqual([
+        FIXTURE_EARTH,
+      ]);
+    });
+
+    it("is shown with its inputs read back onto the panel", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, FIXTURE_EARTH);
+      await answerOpen(socket);
+      expect([
+        screen.queryByText(/NO PLANET/u),
+        screen.getByRole("textbox", { name: "SMA" }).getAttribute("value"),
+      ]).toEqual([null, "1.5"]);
+    });
+
+    it("is refused an ID of another form with what is valid, asking nothing", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, "0200.03");
+      expect([
+        wholeText("BODY INVALID: enter 16 hexadecimal digits, a full stop and 4 more (0-9, A-F)")
+          .length,
+        socket.requestsOfKind("viewer_inputs").length,
+      ]).toEqual([1, 0]);
+    });
+
+    it("states the server's refusal of a body that is no planet", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, FIXTURE_EARTH);
+      const [asked] = socket.requestsOfKind("viewer_inputs");
+      await act(async () => {
+        if (asked !== undefined) {
+          socket.serverRejects(asked.id, {
+            code: "bad_request",
+            message: "body is no planet: the viewer reads a planet's inputs",
+            field: "body",
+          });
+        }
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(
+        wholeText("OPEN BODY REJECTED: body is no planet: the viewer reads a planet's inputs"),
+      ).toHaveLength(1);
+    });
+
+    it("notes that its inputs hold one host of a system of more stars", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, FIXTURE_EARTH);
+      await answerOpen(socket, true);
+      expect(wholeText("MULTIPLE STARS: the inputs hold its host alone")).toHaveLength(1);
+    });
+
+    it("is opened as OPEN IN PLANET VIEWER hands it over, its system already read", async () => {
+      const { socket, handOver } = await renderViewer();
+      handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+      await act(async () => {
+        socket.serverAnswers("viewer_inputs", () => readAnswer());
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await settle();
+      expect([
+        screen.queryByText(/NO PLANET/u),
+        screen.getByRole("textbox", { name: "BODY" }).getAttribute("value"),
+        socket.requestsOfKind("resolve_system").length,
+      ]).toEqual([null, FIXTURE_EARTH.toUpperCase(), 0]);
+    });
+
+    it("is opened again when the display is shown, where hiding it cut the hand-over short", async () => {
+      const { socket, handOver, show } = await renderViewer();
+      handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+      show(false);
+      show(true);
+      await settle();
+      expect(socket.requestsOfKind("viewer_inputs")).toHaveLength(2);
+    });
+
+    it("is not opened again where a newer command cut the hand-over short", async () => {
+      const { socket, user, handOver, show } = await renderViewer();
+      await openUniverse(socket, user);
+      handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+      await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+      show(false);
+      show(true);
+      await settle();
+      expect(socket.requestsOfKind("viewer_inputs")).toHaveLength(1);
+    });
+
+    it("is not asked again when the display is shown again once its planet is shown", async () => {
+      const { socket, handOver, show } = await renderViewer();
+      handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+      await act(async () => {
+        socket.serverAnswers("viewer_inputs", () => readAnswer());
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await settle();
+      show(false);
+      show(true);
+      await settle();
+      expect(socket.requestsOfKind("viewer_inputs")).toHaveLength(1);
+    });
+  });
+
+  describe("BODY's field", () => {
+    it("states the form it takes while it is empty", async () => {
+      await renderViewer();
+      expect(screen.getByRole("textbox", { name: "BODY" })).toHaveAccessibleDescription(
+        "a body's ID: 16 hexadecimal digits, a full stop and 4 more",
+      );
+    });
+
+    it("shows the planet on show again under Escape, selected", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, FIXTURE_EARTH);
+      await answerOpen(socket);
+      const field = screen.getByRole("textbox", { name: "BODY" });
+      await user.clear(field);
+      await user.type(field, "02{Escape}");
+      expect(field).toHaveProperty("value", FIXTURE_EARTH.toUpperCase());
+    });
+
+    it("shows the planet on show again when it is left emptied", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, FIXTURE_EARTH);
+      await answerOpen(socket);
+      const field = screen.getByRole("textbox", { name: "BODY" });
+      await user.clear(field);
+      await user.tab();
+      expect(field).toHaveProperty("value", FIXTURE_EARTH.toUpperCase());
+    });
   });
 });

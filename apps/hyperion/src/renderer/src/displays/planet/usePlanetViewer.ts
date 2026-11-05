@@ -10,6 +10,12 @@
  * - **`RANDOMIZE`** asks `viewer_randomize` with the draw seed, puts the planet's inputs it draws
  *   on the panel, and generates them; once that planet is shown, and only then, the seed is the
  *   last draw's and the draw seed moves on by one, so that each press draws another planet.
+ * - **`OPEN BODY`** shows a planet of the galaxy itself (plan R15, T5): by its body ID, asking
+ *   `viewer_inputs` for its inputs, then `resolve_system` and `system_bodies` for its system at
+ *   the epoch; or as `SYSTEM`'s or `VIEW`'s `OPEN IN PLANET VIEWER` hands it over, an inspection
+ *   already read, at that display's time. Its inputs, read back, go on the panel, so that
+ *   `GENERATE` makes a planet of them, whose other draws are its own; the planet shown is the
+ *   galaxy's.
  * - **A command** shows `PENDING` and then its outcome, closed-loop as the guide asks: the planet
  *   shown, or the server's refusal, which names the input it is of, or its failure or time-out. A
  *   newer command cancels the one in flight, and so does leaving the display mounted no longer.
@@ -17,17 +23,18 @@
  * - **The planet shown** stays while a newer command is pending or has failed, so that the view
  *   keeps drawing it.
  */
-import type {
-  BodyIdHex,
-  RequestClient,
-  RequestFailure,
-  RequestKind,
-  RequestOf,
-  ResponseFor,
-  SeedHex,
-  SystemIdHex,
-  UniverseIdHex,
-  UniverseTime,
+import {
+  type BodyIdHex,
+  parseBodyId,
+  type RequestClient,
+  type RequestFailure,
+  type RequestKind,
+  type RequestOf,
+  type ResponseFor,
+  type SeedHex,
+  type SystemIdHex,
+  type UniverseIdHex,
+  type UniverseTime,
 } from "@hyperion/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -50,7 +57,7 @@ import {
 const EPOCH: UniverseTime = { seconds: 0, nanos: 0 };
 
 /** The viewer's commands. */
-export type ViewerCommandKind = "generate" | "randomize";
+export type ViewerCommandKind = "generate" | "randomize" | "open";
 
 /** Where a command stands: pending, its planet shown, or how it failed, as a request's states. */
 export type CommandState =
@@ -72,12 +79,20 @@ export interface ViewerCommand {
   readonly field: string | null;
 }
 
+/**
+ * Where the planet shown comes from: generated from the inputs, or the galaxy's own, its inputs
+ * read back, with whether its system has more stars than the inputs' one host.
+ */
+export type ShownSource =
+  { readonly kind: "generated" } | { readonly kind: "body"; readonly multipleStars: boolean };
+
 /** The planet the viewer shows: the inspection it opened, and what it was made from. */
 export interface ShownPlanet {
-  /** The viewer system's planet. */
+  /** The planet: a viewer system's, or the galaxy's. */
   readonly body: BodyIdHex;
-  /** Its system, at the Sun-like point. */
+  /** Its system: at the Sun-like point, or where the galaxy's stands. */
   readonly place: SystemPlace;
+  readonly source: ShownSource;
   /** Its inputs as the server read them. */
   readonly inputs: PlanetInputs;
   /** What the generator drew for each input left to it, and where the planet formed. */
@@ -110,11 +125,26 @@ export interface PlanetViewer {
   readonly setDrawSeed: (seed: SeedHex) => void;
   /** The draw seed of the last draw whose planet was shown, or `null` before the first. */
   readonly lastDraw: SeedHex | null;
+  /** Shows a planet of the galaxy by its ID, its inputs read back onto the panel. */
+  readonly openBody: (body: BodyIdHex) => void;
   /** Where the planet's sun stands (`viewerScene.ts`): `ORBITAL` as the display mounts. */
   readonly sun: SunSetting;
   /** Sets the sun, which moves the light at the view's next frame, the scene kept. */
   readonly setSun: (sun: SunSetting) => void;
 }
+
+/**
+ * One hand-over of a planet to the viewer, from `SYSTEM`'s or `VIEW`'s `OPEN IN PLANET VIEWER`
+ * (plan R15, T5): its inspection, and how many came before, so that each is opened once.
+ */
+export interface PlanetViewerOpening {
+  readonly inspection: BodyInspection;
+  /** Counts the hand-overs from 1. */
+  readonly sequence: number;
+}
+
+/** What the generator drew of a planet whose every input was read back: nothing. */
+const NONE_DRAWN: ShownPlanet["drawn"] = {};
 
 /** The draw seed `RANDOMIZE` starts from as the display mounts. */
 const FIRST_DRAW_SEED: SeedHex = "0000000000000001";
@@ -214,21 +244,158 @@ function openedOption(
   }
 }
 
+/**
+ * Whether the viewer opens `inspection`'s body (plan R15, T5): a planet or a dwarf planet, whose
+ * inputs the server reads back; a moon has none of the viewer's inputs.
+ */
+export function opensInViewer(inspection: BodyInspection): boolean {
+  const kind = inspection.bodies.bodies.find((body) => body.id === inspection.body)?.kind.kind;
+  return kind === "planet" || kind === "dwarf_planet";
+}
+
 /** The viewer system's designation: `VIEWER` and its ID's last six digits, upper case. */
 export function viewerDesignation(system: SystemIdHex): string {
   return `VIEWER ${system.slice(-6).toUpperCase()}`;
 }
 
-/** What opening a generated planet gave: its inspection and drawn values, or a failed command. */
+/** How a command's opening ended: its planet shown, its failure reported, or cut short. */
+type Presented = "shown" | "reported" | "aborted";
+
+/** What opening a planet gave: its inspection and drawn values, or a failed command. */
 type Opened =
   | {
       readonly kind: "opened";
       readonly inspection: BodyInspection;
       readonly inputs: PlanetInputs;
       readonly drawn: ShownPlanet["drawn"];
+      readonly source: ShownSource;
     }
   | { readonly kind: "failed"; readonly command: ViewerCommand }
   | { readonly kind: "aborted" };
+
+/** An opening that showed nothing: a failed command, or one cut short. */
+type NotOpened = Exclude<Opened, { readonly kind: "opened" }>;
+
+/** A client-side fault reading the server's answer, as a command refused `internal`. */
+function faulted(kind: ViewerCommandKind, fault: string): NotOpened {
+  return {
+    kind: "failed",
+    command: { kind, state: { kind: "rejected", code: "internal", reason: fault }, field: null },
+  };
+}
+
+/**
+ * Reads `place`'s system of `universe` at the epoch into an inspection of `body`, or how that
+ * failed.
+ */
+async function inspectionAt(
+  requests: Pick<RequestClient, "request">,
+  universe: UniverseIdHex,
+  place: SystemPlace,
+  body: BodyIdHex,
+  kind: ViewerCommandKind,
+  signal: AbortSignal,
+): Promise<{ readonly kind: "read"; readonly inspection: BodyInspection } | NotOpened> {
+  const bodies = await asked<"system_bodies">(
+    requests,
+    toBodiesRequest(universe, place.system, EPOCH),
+    signal,
+  );
+  if (bodies.kind === "aborted") {
+    return bodies;
+  }
+  if (bodies.kind !== "ok") {
+    return { kind: "failed", command: failedCommand(kind, bodies) };
+  }
+  const read = toSystemBodiesModel(bodies.response, place.designation);
+  if (read.kind === "fault") {
+    return faulted(kind, read.fault);
+  }
+  return {
+    kind: "read",
+    inspection: { universe, place, model: read.model, bodies: read.bodies, body, time: EPOCH },
+  };
+}
+
+/** Reads `body`'s inputs back for `inspection`, its own, as the viewer opens it. */
+async function readBack(
+  requests: Pick<RequestClient, "request">,
+  inspection: BodyInspection,
+  signal: AbortSignal,
+): Promise<Opened> {
+  const read = await asked<"viewer_inputs">(
+    requests,
+    { kind: "viewer_inputs", universe: inspection.universe, body: inspection.body },
+    signal,
+  );
+  if (read.kind === "aborted") {
+    return read;
+  }
+  if (read.kind !== "ok") {
+    return { kind: "failed", command: failedCommand("open", read) };
+  }
+  return {
+    kind: "opened",
+    inspection,
+    inputs: fromInputsDto(read.response.inputs),
+    drawn: NONE_DRAWN,
+    source: { kind: "body", multipleStars: read.response.multiple_stars },
+  };
+}
+
+/**
+ * Reads the galaxy's planet `body` of `universe`: its inputs, then its system's record and its
+ * bodies at the epoch.
+ */
+async function galaxyPlanet(
+  requests: Pick<RequestClient, "request">,
+  universe: UniverseIdHex,
+  body: BodyIdHex,
+  signal: AbortSignal,
+): Promise<Opened> {
+  // The inputs first: a body that is no planet is refused before its system is read.
+  const probe = await asked<"viewer_inputs">(
+    requests,
+    { kind: "viewer_inputs", universe, body },
+    signal,
+  );
+  if (probe.kind === "aborted") {
+    return probe;
+  }
+  if (probe.kind !== "ok") {
+    return { kind: "failed", command: failedCommand("open", probe) };
+  }
+  const { system } = parseBodyId(body);
+  const resolved = await asked<"resolve_system">(
+    requests,
+    { kind: "resolve_system", universe, system, time: EPOCH },
+    signal,
+  );
+  if (resolved.kind === "aborted") {
+    return resolved;
+  }
+  if (resolved.kind !== "ok") {
+    return { kind: "failed", command: failedCommand("open", resolved) };
+  }
+  const { record } = resolved.response;
+  const place: SystemPlace = {
+    kind: "charted",
+    system,
+    designation: record.designation,
+    barycentre: record.position,
+  };
+  const read = await inspectionAt(requests, universe, place, body, "open", signal);
+  if (read.kind !== "read") {
+    return read;
+  }
+  return {
+    kind: "opened",
+    inspection: read.inspection,
+    inputs: fromInputsDto(probe.response.inputs),
+    drawn: NONE_DRAWN,
+    source: { kind: "body", multipleStars: probe.response.multiple_stars },
+  };
+}
 
 /**
  * Generates `inputs` in `universe` and reads the planet's system at the epoch into an inspection.
@@ -252,41 +419,21 @@ async function generated(
     return { kind: "failed", command: failedCommand(kind, planet) };
   }
   const { system, body, barycentre } = planet.response;
-  const bodies = await asked<"system_bodies">(
-    requests,
-    toBodiesRequest(universe, system, EPOCH),
-    signal,
-  );
-  if (bodies.kind === "aborted") {
-    return bodies;
+  const place: SystemPlace = {
+    kind: "charted",
+    system,
+    designation: viewerDesignation(system),
+    barycentre,
+  };
+  const read = await inspectionAt(requests, universe, place, body, kind, signal);
+  if (read.kind !== "read") {
+    return read;
   }
-  if (bodies.kind !== "ok") {
-    return { kind: "failed", command: failedCommand(kind, bodies) };
-  }
-  const designation = viewerDesignation(system);
-  const read = toSystemBodiesModel(bodies.response, designation);
-  if (read.kind === "fault") {
-    return {
-      kind: "failed",
-      command: {
-        kind,
-        state: { kind: "rejected", code: "internal", reason: read.fault },
-        field: null,
-      },
-    };
-  }
-  const place: SystemPlace = { kind: "charted", system, designation, barycentre };
   const { drawn } = planet.response;
   return {
     kind: "opened",
-    inspection: {
-      universe,
-      place,
-      model: read.model,
-      bodies: read.bodies,
-      body,
-      time: EPOCH,
-    },
+    inspection: read.inspection,
+    source: { kind: "generated" },
     inputs: fromInputsDto(planet.response.inputs),
     drawn: {
       formedAtAu: drawn.formed_at_au,
@@ -306,6 +453,7 @@ async function generated(
 export function usePlanetViewer(
   requests: Pick<RequestClient, "request">,
   universe: UniverseIdHex | null,
+  opening: PlanetViewerOpening | null,
 ): PlanetViewer {
   const [inputs, setInputsState] = useState<PlanetInputs>(DEFAULT_INPUTS);
   const [command, setCommand] = useState<ViewerCommand | null>(null);
@@ -331,21 +479,23 @@ export function usePlanetViewer(
     return controller.signal;
   }, []);
 
-  /** Opens `inputs`' planet for `kind`, reporting the outcome unless `signal` has aborted. */
-  const open = useCallback(
+  /**
+   * Shows what `reading` gave for `kind`, reporting the outcome unless `signal` has aborted: how it
+   * ended, its planet shown, its failure reported, or cut short with nothing reported.
+   */
+  const present = useCallback(
     async (
       kind: ViewerCommandKind,
-      asking: UniverseIdHex,
-      given: PlanetInputs,
+      reading: Promise<Opened>,
       signal: AbortSignal,
-    ): Promise<boolean> => {
-      const outcome = await generated(requests, asking, given, kind, signal);
+    ): Promise<Presented> => {
+      const outcome = await reading;
       if (signal.aborted || outcome.kind === "aborted") {
-        return false;
+        return "aborted";
       }
       if (outcome.kind === "failed") {
         setCommand(outcome.command);
-        return false;
+        return "reported";
       }
       const option = openedOption(outcome.inspection, sunHolder.current);
       if (typeof option === "string") {
@@ -354,7 +504,7 @@ export function usePlanetViewer(
           state: { kind: "rejected", code: "bad_request", reason: option },
           field: null,
         });
-        return false;
+        return "reported";
       }
       const survey = surveyInspected(requests, outcome.inspection).then((settled) => {
         if (settled.kind === "refused") {
@@ -366,14 +516,27 @@ export function usePlanetViewer(
       setShown((previous) => ({
         body: outcome.inspection.body,
         place: outcome.inspection.place,
+        source: outcome.source,
         inputs: outcome.inputs,
         drawn: outcome.drawn,
         opening: { option, sequence: (previous?.opening.sequence ?? 0) + 1, survey },
       }));
       setCommand({ kind, state: { kind: "shown" }, field: null });
-      return true;
+      return "shown";
     },
     [requests],
+  );
+
+  /** Opens `inputs`' planet for `kind`; whether it was shown. */
+  const open = useCallback(
+    async (
+      kind: ViewerCommandKind,
+      asking: UniverseIdHex,
+      given: PlanetInputs,
+      signal: AbortSignal,
+    ): Promise<boolean> =>
+      (await present(kind, generated(requests, asking, given, kind, signal), signal)) === "shown",
+    [requests, present],
   );
 
   /** Reports a fault of the client's own while `signal` still stands, so no command stays pending. */
@@ -431,6 +594,52 @@ export function usePlanetViewer(
     });
   }, [universe, drawSeed, requests, start, open, failed]);
 
+  const openBody = useCallback(
+    (body: BodyIdHex): void => {
+      if (universe === null) {
+        return;
+      }
+      const signal = start();
+      setCommand({ kind: "open", state: { kind: "pending" }, field: null });
+      present("open", galaxyPlanet(requests, universe, body, signal), signal).catch(
+        (error: unknown) => {
+          failed("open", signal, error);
+        },
+      );
+    },
+    [universe, requests, start, present, failed],
+  );
+
+  // A planet handed over by `OPEN IN PLANET VIEWER` is opened once: once its outcome is reported,
+  // or a newer command has cut it short; one cut short by the display hidden is opened when it is
+  // next shown.
+  const handedOver = useRef(0);
+  useEffect(() => {
+    if (opening === null || opening.sequence <= handedOver.current) {
+      return undefined;
+    }
+    let hidden = false;
+    const signal = start();
+    setCommand({ kind: "open", state: { kind: "pending" }, field: null });
+    present("open", readBack(requests, opening.inspection, signal), signal)
+      .then((presented) => {
+        if (presented !== "aborted" || !hidden) {
+          handedOver.current = opening.sequence;
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        handedOver.current = opening.sequence;
+        failed("open", signal, error);
+      });
+    return () => {
+      hidden = true;
+      if (flight.current?.signal === signal) {
+        flight.current.abort();
+      }
+    };
+  }, [opening, requests, start, present, failed]);
+
   const setInput = useCallback((name: NumericInputName, wire: number | null): void => {
     setInputsState((previous) => ({ ...previous, values: { ...previous.values, [name]: wire } }));
   }, []);
@@ -454,6 +663,7 @@ export function usePlanetViewer(
     shown,
     generate,
     randomize,
+    openBody,
     drawSeed,
     setDrawSeed,
     lastDraw,

@@ -19,9 +19,10 @@ import {
   type InputUnit,
   unitWords,
 } from "./planetInputs";
+import { BodyField } from "./BodyField";
 import { describedBy } from "./describedBy";
 import { SeedField } from "./SeedField";
-import type { PlanetViewer } from "./usePlanetViewer";
+import type { PlanetViewer, ViewerCommand } from "./usePlanetViewer";
 
 /** The panel's groups of inputs, in procedure order: the star, the orbit, the planet, its volatiles. */
 const GROUPS: ReadonlyArray<{
@@ -54,11 +55,8 @@ export interface PlanetInputsPanelProps {
   readonly heldBack: string | null;
   /** The ID the words saying why take, which the bar's `RANDOMIZE` is described by too. */
   readonly heldBackId: string;
-  /**
-   * What stands after the planet's inputs and before its seed: the place kept for `SUN`, the
-   * direction of the planet's light, which plan R15's T4 provides; nothing until then.
-   */
-  readonly sun?: ReactNode;
+  /** What stands after the inputs and before the seed: the viewer's `SUN` (`SunControl`). */
+  readonly sun: ReactNode;
 }
 
 /** Whether two sets of inputs are the same planet's. */
@@ -85,6 +83,9 @@ function samePlanet(a: PlanetInputs, b: PlanetInputs): boolean {
  * - `GENERATE` (`G`), beside `SEED`, shows the panel's inputs as a planet, its `PENDING`, then its
  *   outcome, under it. It and the bar's `RANDOMIZE` are held back with the reason while no universe
  *   is open or the link is down.
+ * - `BODY` heads the panel ({@link BodyField}): `OPEN BODY` shows a planet of the galaxy by its ID
+ *   and puts its inputs, read back, on the panel. While the panel holds the inputs of a planet
+ *   whose system has more stars than one, a note says that they hold its host alone.
  */
 export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetInputsPanelProps) {
   const titleId = useId();
@@ -112,15 +113,37 @@ export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetI
   );
   // A refusal of a folded rank opens its group, so that it stands under its field.
   const volatilesShown = volatilesOpen || VOLATILES.some((name) => refusalOf(name) !== null);
-  const generateStatus =
-    command !== null && command.kind === "generate" && command.state.kind !== "shown"
+  const statusOf = (kind: ViewerCommand["kind"]) =>
+    command !== null && command.kind === kind && command.state.kind !== "shown"
       ? command.state
+      : null;
+  const generateStatus = statusOf("generate");
+  // The galaxy's planet on show, and whether the panel still holds its inputs.
+  const bodyShown =
+    shown !== null && shown.source.kind === "body"
+      ? {
+          body: shown.body,
+          multipleStars: shown.source.multipleStars,
+          held: samePlanet(shown.inputs, inputs),
+        }
       : null;
   return (
     <section className="panel planet-inputs" aria-labelledby={titleId}>
       <h2 className="panel__title" id={titleId}>
         INPUTS
       </h2>
+      <BodyField
+        shownBody={bodyShown?.body ?? null}
+        status={statusOf("open")}
+        heldBack={heldBack}
+        heldBackId={heldBackId}
+        onOpen={viewer.openBody}
+      />
+      {bodyShown !== null && bodyShown.multipleStars && bodyShown.held ? (
+        <p className="planet-inputs__note">
+          <StatusText text="MULTIPLE STARS: the inputs hold its host alone" />
+        </p>
+      ) : null}
       <div className="planet-inputs__groups">
         {GROUPS.map((group) => (
           <fieldset key={group.title} className="planet-inputs__group">

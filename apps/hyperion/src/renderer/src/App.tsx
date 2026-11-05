@@ -7,6 +7,7 @@ import { GraphicsPanel } from "./components/GraphicsPanel";
 import { UniverseProvider } from "./components/UniverseProvider";
 import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
 import { PlanetViewerDisplay } from "./displays/planet/PlanetViewerDisplay";
+import { opensInViewer, type PlanetViewerOpening } from "./displays/planet/usePlanetViewer";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
 import {
   type InspectionOpening,
@@ -63,6 +64,18 @@ interface DisplayInputs {
   readonly openSystem: (target: SystemTarget) => void;
   /** Opens a body in `VIEW`'s body inspection, from `SYSTEM`'s `VIEW BODY` (the owner's request). */
   readonly viewBody: (inspection: BodyInspection) => void;
+  /**
+   * Opens a body in the `PLANET VIEWER`, from `SYSTEM`'s `OPEN IN PLANET VIEWER` (plan R15, T5),
+   * where the launch offers the viewer; else `undefined`.
+   */
+  readonly planetViewer: ((inspection: BodyInspection) => void) | undefined;
+  /**
+   * Opens `VIEW`'s body inspection's planet in the `PLANET VIEWER`, from its `SCENE` bar, where the
+   * launch offers the viewer and the inspection is of a planet; else `undefined`.
+   */
+  readonly inspectionToViewer: (() => void) | undefined;
+  /** The latest planet handed over to the `PLANET VIEWER`, or `null` before the first. */
+  readonly planetOpening: PlanetViewerOpening | null;
   /** `VIEW`'s engine on a `--views-check` launch (R07.T20), and its terrain run's seam, else `null`. */
   readonly checkedView: CheckedView | null;
   /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
@@ -269,7 +282,13 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       content = <GalaxyDisplay onOpenSystem={inputs.openSystem} />;
       break;
     case "system":
-      content = <SystemDisplay opening={inputs.systemOpening} onViewBody={inputs.viewBody} />;
+      content = (
+        <SystemDisplay
+          opening={inputs.systemOpening}
+          onViewBody={inputs.viewBody}
+          onPlanetViewer={inputs.planetViewer}
+        />
+      );
       break;
     case "view":
       content = (
@@ -283,6 +302,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           performanceThreads={inputs.performanceThreads}
           geometry={inputs.geometry}
           atmosphereLevers={inputs.atmosphereLevers}
+          onPlanetViewer={inputs.inspectionToViewer}
         />
       );
       break;
@@ -294,6 +314,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           performanceThreads={inputs.performanceThreads}
           geometry={inputs.geometry}
           atmosphereLevers={inputs.atmosphereLevers}
+          opening={inputs.planetOpening}
         />
       );
       break;
@@ -430,6 +451,23 @@ export function App() {
     setActiveDisplay("system");
   }, []);
   const [inspection, setInspection] = useState<InspectionOpening | null>(null);
+  // The body VIEW's inspection shows, which its OPEN IN PLANET VIEWER hands over (plan R15, T5).
+  const [inspected, setInspected] = useState<BodyInspection | null>(null);
+  const [planetOpening, setPlanetOpening] = useState<PlanetViewerOpening | null>(null);
+  const viewerOffered = displays.some(({ id }) => id === "planet");
+  const openInViewer = useCallback((body: BodyInspection): void => {
+    setPlanetOpening((previous) => ({ inspection: body, sequence: (previous?.sequence ?? 0) + 1 }));
+    setActiveDisplay("planet");
+  }, []);
+  const inspectionToViewer = useMemo(
+    () =>
+      viewerOffered && inspected !== null && opensInViewer(inspected)
+        ? () => {
+            openInViewer(inspected);
+          }
+        : undefined,
+    [viewerOffered, inspected, openInViewer],
+  );
   const viewBody = useCallback(
     (body: BodyInspection): void => {
       // Made here, as the operator opens it, not in a render.
@@ -442,6 +480,7 @@ export function App() {
         return outcome;
       });
       setInspection((previous) => ({ option, sequence: (previous?.sequence ?? 0) + 1, survey }));
+      setInspected(body);
       setActiveDisplay("view");
     },
     [requests],
@@ -469,6 +508,9 @@ export function App() {
     systemOpening,
     openSystem,
     viewBody,
+    planetViewer: viewerOffered ? openInViewer : undefined,
+    inspectionToViewer,
+    planetOpening,
     checkedView: probes === null ? null : checkedViewOf(probes),
     setting: window.hyperion.setting,
     platform: window.hyperion.platform,

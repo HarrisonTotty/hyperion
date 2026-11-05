@@ -16,6 +16,7 @@ import { bodySymbol } from "../../lib/system/bodySymbols";
 import { bodyKindLabel } from "../../lib/system/bodyWords";
 import type { SpatialScene } from "../../spatial/marks";
 import type { BodyInspection } from "../../view/scenes/inspectionScene";
+import { opensInViewer } from "../planet/usePlanetViewer";
 import type { ZoneLayers } from "./bodyMap";
 import { DISPLAY_TIME_LABEL, DISPLAY_TIME_WIDTH_CH } from "./displayTime";
 import { type BodyLegendEntry, OrbitLegend } from "./OrbitLegend";
@@ -42,6 +43,9 @@ export const FOCUS_KEY = "C";
 
 /** The key of `VIEW BODY`, which opens the focused body in `VIEW` (the owner's request). */
 export const VIEW_BODY_KEY = "V";
+
+/** The key of `OPEN IN PLANET VIEWER`, which opens the focused planet there (plan R15, T5). */
+export const PLANET_VIEWER_KEY = "P";
 
 /** The zones' annuli the map can switch, in the order offered, with their labels. */
 const ZONE_TOGGLES: ReadonlyArray<{ readonly layer: keyof ZoneLayers; readonly label: string }> = [
@@ -82,6 +86,11 @@ export interface OrbitMapPanelProps {
   readonly view: SystemViewState;
   /** Opens a body in `VIEW` (`App`'s), as `VIEW BODY` asks (the owner's request, 2026-11-01). */
   readonly onViewBody: (inspection: BodyInspection) => void;
+  /**
+   * Opens a body in the `PLANET VIEWER` (`App`'s), as `OPEN IN PLANET VIEWER` asks, where the
+   * launch offers the viewer (plan R15, T5); absent, and the control with it, where it does not.
+   */
+  readonly onPlanetViewer?: ((inspection: BodyInspection) => void) | undefined;
 }
 
 /**
@@ -101,8 +110,10 @@ export interface OrbitMapPanelProps {
  * to `SYSTEM BARYCENTRIC` (P14.T42.b). `VIEW BODY`, key `V`, opens the focused planet, or a
  * selected moon of it, in `VIEW`'s body inspection, photorealistic (the owner's request,
  * 2026-11-01); it is held back with its reason, `NO BODY FOCUSED` before a body is focused, whose
- * line is hidden while `FOCUS BODY`'s stands, so that the head holds one line of reasons. The zones'
- * switches stand only in the system frame. Until there is an answer the panel
+ * line is hidden while `FOCUS BODY`'s stands, so that the head holds one line of reasons. Where the
+ * launch offers the `PLANET VIEWER`, `OPEN IN PLANET VIEWER`, key `P`, opens the body `VIEW BODY`
+ * would open there (plan R15, T5), held back as it is and also, as `NOT A PLANET`, for a moon. The
+ * zones' switches stand only in the system frame. Until there is an answer the panel
  * reads the request's state in words and draws nothing; a system not yet formed reads
  * `NOT YET FORMED`; a system with nothing to draw reads `NO BODIES`; an answer the display cannot
  * use reads `SYSTEM DATA INVALID` with `RETRY`. A newer request's state stands in the panel's head,
@@ -124,10 +135,11 @@ export interface OrbitMapPanelProps {
  * and one naming what the granted detail level withholds, so that the space round the stars is not
  * read as empty (ruling 113.2).
  */
-export function OrbitMapPanel({ view, onViewBody }: OrbitMapPanelProps) {
+export function OrbitMapPanel({ view, onViewBody, onPlanetViewer }: OrbitMapPanelProps) {
   const titleId = useId();
   const focusHeldId = useId();
   const viewHeldId = useId();
+  const planetHeldId = useId();
   const { target, status, model, fault, stale, plane, fitRadiusAu, zoom, displayTime } = view;
   const { chooseZoom, toggleFocus, hasBelts, sceneAt } = view;
   // While the display time runs, the map alone follows it frame by frame (P14.T44.b).
@@ -146,6 +158,14 @@ export function OrbitMapPanel({ view, onViewBody }: OrbitMapPanelProps) {
       onViewBody(inspection);
     }
   }, [inspection, onViewBody]);
+  // The viewer opens a planet alone; a moon VIEW BODY would open has none of its inputs.
+  const planetHeld =
+    inspectionHeld ?? (inspection !== null && !opensInViewer(inspection) ? "NOT A PLANET" : null);
+  const openInViewer = useCallback((): void => {
+    if (inspection !== null && planetHeld === null) {
+      onPlanetViewer?.(inspection);
+    }
+  }, [inspection, planetHeld, onPlanetViewer]);
 
   // The zoom keys act from anywhere on the display but a text field, as the view's own keys do.
   useEffect(() => {
@@ -170,6 +190,11 @@ export function OrbitMapPanel({ view, onViewBody }: OrbitMapPanelProps) {
         viewBody();
         return;
       }
+      if (key === PLANET_VIEWER_KEY && onPlanetViewer !== undefined) {
+        event.preventDefault();
+        openInViewer();
+        return;
+      }
       const preset = ZOOM_PRESETS.find((control) => control.key === key);
       if (preset === undefined || (preset.name === "belts" && !hasBelts)) {
         return;
@@ -181,7 +206,7 @@ export function OrbitMapPanel({ view, onViewBody }: OrbitMapPanelProps) {
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [drawn, chooseZoom, toggleFocus, viewBody, hasBelts]);
+  }, [drawn, chooseZoom, toggleFocus, viewBody, openInViewer, onPlanetViewer, hasBelts]);
 
   const centre = cylindrical(target.positionLy);
   const onAxis = !(centre.radiusLy > AXIS_TOLERANCE_LY);
@@ -307,6 +332,22 @@ export function OrbitMapPanel({ view, onViewBody }: OrbitMapPanelProps) {
             </button>
           </fieldset>
         ) : null}
+        {drawn && onPlanetViewer !== undefined ? (
+          // Its own item of the head, so that the head wraps it whole onto a line of its own.
+          <button
+            type="button"
+            className="control orbit-map__zoom-button"
+            aria-keyshortcuts={PLANET_VIEWER_KEY}
+            aria-disabled={planetHeld === null ? undefined : "true"}
+            // VIEW BODY's reason, where it is held back, holds this one back too.
+            aria-describedby={
+              planetHeld === null ? undefined : inspectionHeld === null ? planetHeldId : viewHeldId
+            }
+            onClick={openInViewer}
+          >
+            <span className="control__key">{PLANET_VIEWER_KEY}</span> OPEN IN PLANET VIEWER
+          </button>
+        ) : null}
         {drawn && focusHeld !== null ? (
           <p className="panel__inhibit" id={focusHeldId}>
             {focusHeld}
@@ -317,6 +358,11 @@ export function OrbitMapPanel({ view, onViewBody }: OrbitMapPanelProps) {
           // head holds one line of reasons.
           <p className="panel__inhibit" id={viewHeldId} hidden={focusHeld !== null}>
             {inspectionHeld}
+          </p>
+        ) : null}
+        {drawn && onPlanetViewer !== undefined && inspectionHeld === null && planetHeld !== null ? (
+          <p className="panel__inhibit" id={planetHeldId}>
+            {planetHeld}
           </p>
         ) : null}
         {drawn && !focused && (view.bodies?.zones.length ?? 0) > 0 ? (

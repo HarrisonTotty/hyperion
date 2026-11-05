@@ -257,6 +257,70 @@ describe("the SYSTEM display", () => {
     expect(screen.getByRole("status", { name: "Mode" })).toHaveTextContent("TRAINING");
   });
 
+  describe("OPEN IN PLANET VIEWER (plan R15, T5)", () => {
+    /** Charts the fixture's system, opens it, and focuses the populated answer's planet `/256`. */
+    async function focusPlanet() {
+      vi.stubGlobal("hyperion", { ...window.hyperion, planetViewer: true });
+      const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
+      await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+      await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
+      await answerSummaries(socket);
+      await server(() => {
+        socket.serverAnswers("system_bodies", () => populatedBodies());
+      });
+      const tree = screen.getByRole("tree", { name: "Bodies" });
+      await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+      await user.keyboard("c");
+      return { user, socket };
+    }
+
+    it("hands the focused planet over to the PLANET VIEWER, which asks its inputs", async () => {
+      const { user, socket } = await focusPlanet();
+      await user.keyboard("p");
+      expect([
+        within(navigation())
+          .getByRole("button", { name: "F5 Planet Viewer" })
+          .getAttribute("aria-current"),
+        socket.requestsOfKind("viewer_inputs").map(({ body }) => body.body),
+      ]).toEqual(["page", [RINGED_PLANET]]);
+    });
+
+    it("is offered on VIEW's SCENE bar only where the launch offers the viewer", async () => {
+      const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
+      await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+      await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
+      await answerSummaries(socket);
+      await server(() => {
+        socket.serverAnswers("system_bodies", () => populatedBodies());
+      });
+      const tree = screen.getByRole("tree", { name: "Bodies" });
+      await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+      await user.keyboard("c");
+      await user.keyboard("v");
+      const scenes = screen.getByRole("group", { name: "Scene" });
+      expect(within(scenes).queryByRole("button", { name: "OPEN IN PLANET VIEWER" })).toBeNull();
+    });
+
+    it("is not offered on VIEW's SCENE bar for a moon, which has none of the viewer's inputs", async () => {
+      const { user } = await focusPlanet();
+      const tree = screen.getByRole("tree", { name: "Bodies" });
+      await user.click(within(tree).getByRole("treeitem", { name: /\/257,/ }));
+      await user.keyboard("v");
+      const scenes = screen.getByRole("group", { name: "Scene" });
+      expect(within(scenes).queryByRole("button", { name: "OPEN IN PLANET VIEWER" })).toBeNull();
+    });
+
+    it("hands VIEW's body inspection's planet over from its SCENE bar", async () => {
+      const { user, socket } = await focusPlanet();
+      await user.keyboard("v");
+      const scenes = screen.getByRole("group", { name: "Scene" });
+      await user.click(within(scenes).getByRole("button", { name: "OPEN IN PLANET VIEWER" }));
+      expect(socket.requestsOfKind("viewer_inputs").map(({ body }) => body.body)).toEqual([
+        RINGED_PLANET,
+      ]);
+    });
+  });
+
   it("surveys the body it opens in VIEW whole through the server's survey pass, marked for training (the owner's request)", async () => {
     const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
     await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));

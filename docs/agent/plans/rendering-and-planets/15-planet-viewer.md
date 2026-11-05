@@ -200,3 +200,17 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   name `0 ORBIT` where it is offered, and the key legend follows the `CONTROLS` view's preset.
 - R15.T4 (lean, 2026-11-05): `ORBIT` also names a preset now, beside the `SYSTEM` panel and the
   legend entry of that name. The owner may want another name for the preset.
+- R15.T5 (built): the panel's `BODY` and `OPEN BODY` (`BodyField`) ask `viewer_inputs`, then
+  `resolve_system` and `system_bodies` at the epoch. `SYSTEM`'s orbit map has
+  `P OPEN IN PLANET VIEWER` and `VIEW`'s `SCENE` bar has `OPEN IN PLANET VIEWER`, each handing `App`
+  an inspection (`PlanetViewerOpening`) that the viewer opens with `viewer_inputs` alone, at that
+  display's time. `ShownPlanet.source` tells a generated planet from the galaxy's.
+- R15.T5 (lean, 2026-11-05): `OPEN BODY`, not the plan's `OPEN`, which already names an
+  instrument view's command. It shows the galaxy's own planet, and its inputs, read back, go on the
+  panel. `GENERATE` then makes a viewer planet of them, whose other draws differ. A system
+  of more stars than one is noted `MULTIPLE STARS`, since the inputs hold one host.
+- R15.T5 (lean, 2026-11-05): the viewer opens planets and dwarf planets. A moon's
+  `OPEN IN PLANET VIEWER` is held back on `SYSTEM` (`NOT A PLANET`) and not offered on `VIEW`'s bar,
+  which has no room for a reason. A belt member the server refuses shows its refusal.
+- R15.T5 (lean, 2026-11-05): a hand-over counts as handled once its outcome is reported or a newer
+  command cuts it short. One cut short by the display hidden is opened again when it is next shown.

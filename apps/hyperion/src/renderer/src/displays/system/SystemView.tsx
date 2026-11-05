@@ -11,6 +11,8 @@ export interface SystemViewProps {
   readonly target: SystemTarget;
   /** Opens a body in `VIEW`, as the orbit map's `VIEW BODY` asks (the owner's request). */
   readonly onViewBody: (inspection: BodyInspection) => void;
+  /** Opens a body in the `PLANET VIEWER` where the launch offers it (plan R15, T5). */
+  readonly onPlanetViewer?: ((inspection: BodyInspection) => void) | undefined;
 }
 
 /**
@@ -24,12 +26,12 @@ export interface SystemViewProps {
  * display time, so they stand under it. The list and the readout are paired with the map, as the
  * chart's are, and stand beside it.
  */
-export function SystemView({ target, onViewBody }: SystemViewProps) {
+export function SystemView({ target, onViewBody, onPlanetViewer }: SystemViewProps) {
   const view = useSystemView(target);
   return (
     <div className="system">
       <div className="system__column system__column--map">
-        <OrbitMapPanel view={view} onViewBody={onViewBody} />
+        <OrbitMapPanel view={view} onViewBody={onViewBody} onPlanetViewer={onPlanetViewer} />
         <TimeControl time={view.displayTime} />
         <EventsPanel view={view} />
       </div>

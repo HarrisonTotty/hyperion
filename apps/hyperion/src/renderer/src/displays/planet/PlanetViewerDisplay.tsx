@@ -11,7 +11,7 @@ import { ViewSceneProvider } from "../view/ViewSceneProvider";
 import { GENERATE_KEY, PlanetInputsPanel } from "./PlanetInputsPanel";
 import { PlanetViewerBar, RANDOMIZE_KEY } from "./PlanetViewerBar";
 import { SunControl } from "./SunControl";
-import { usePlanetViewer } from "./usePlanetViewer";
+import { type PlanetViewerOpening, usePlanetViewer } from "./usePlanetViewer";
 import { heldSunStatement } from "./viewerScene";
 
 /** Props of {@link PlanetViewerDisplay}: what `App` hands `VIEW`, which the viewer draws with. */
@@ -21,6 +21,11 @@ export interface PlanetViewerDisplayProps {
   readonly performanceThreads: number | null;
   readonly geometry: GeometryOverride | undefined;
   readonly atmosphereLevers: AtmosphereLeversOverride | undefined;
+  /**
+   * The latest planet handed over by `SYSTEM`'s or `VIEW`'s `OPEN IN PLANET VIEWER` (`App`'s), or
+   * `null` before the first.
+   */
+  readonly opening: PlanetViewerOpening | null;
 }
 
 /**
@@ -29,10 +34,13 @@ export interface PlanetViewerDisplayProps {
  *
  * @remarks
  * - Its `INPUTS` panel stands on the left ({@link PlanetInputsPanel}), and on the right its bar of
- *   `RANDOMIZE` and `SHARE` ({@link PlanetViewerBar}) above `VIEW`'s whole display: its engine, terrain session, atmosphere cache, exposure, styles and instrument
- *   views, held by a `ViewSceneProvider` of its own whose one scene is the planet's body inspection,
+ *   `RANDOMIZE` and `SHARE` ({@link PlanetViewerBar}) above `VIEW`'s whole display: its engine,
+ *   terrain session, atmosphere cache, exposure, styles and instrument views, held by a
+ *   `ViewSceneProvider` of its own whose one scene is the planet's body inspection,
  *   with no `SCENE` selector and no subscription to the server's scene. Each planet shown is a new
  *   opening, its camera framed afresh.
+ * - A planet handed over by `OPEN IN PLANET VIEWER` is opened as the display is next shown, the
+ *   galaxy's own, its inputs read back onto the panel (plan R15, T5).
  * - Until a planet is shown the view's place says how to show one. While `SUN` is `HELD` the
  *   view's label block says where (`heldSunStatement`), since the light is not the records'.
  * - `G` generates and `N` randomizes from anywhere on the display but a text field and a view's
@@ -46,11 +54,12 @@ function PlanetViewerPanels({
   performanceThreads,
   geometry,
   atmosphereLevers,
+  opening,
 }: PlanetViewerDisplayProps) {
   const heldBackId = useId();
   const link = useServerLink();
   const universe = useUniverse().open?.id ?? null;
-  const viewer = usePlanetViewer(link.requests, universe);
+  const viewer = usePlanetViewer(link.requests, universe, opening);
   const heldBack =
     universe === null
       ? "no universe open, open one on the GALAXY display"
@@ -125,7 +134,7 @@ function PlanetViewerPanels({
         />
         {shown === null ? (
           <p className="panel__empty planet-viewer__empty">
-            <StatusText text="NO PLANET: GENERATE the inputs, or RANDOMIZE a planet of the galaxy" />
+            <StatusText text="NO PLANET: GENERATE the inputs, OPEN BODY by its ID, or RANDOMIZE a planet of the galaxy" />
           </p>
         ) : (
           <ViewSceneProvider active={false} knownSystem={shown.place} inspection={shown.opening}>

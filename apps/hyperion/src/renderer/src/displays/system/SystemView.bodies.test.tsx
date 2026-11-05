@@ -73,7 +73,10 @@ async function server(play: () => void): Promise<void> {
   });
 }
 
-function renderView(onViewBody: (inspection: BodyInspection) => void = () => undefined) {
+function renderView(
+  onViewBody: (inspection: BodyInspection) => void = () => undefined,
+  onPlanetViewer?: (inspection: BodyInspection) => void,
+) {
   const user = userEvent.setup();
   stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -82,7 +85,11 @@ function renderView(onViewBody: (inspection: BodyInspection) => void = () => und
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(HEIGHT_PX);
   render(
     <ServerLinkHarness>
-      <SystemView target={aSystemTarget()} onViewBody={onViewBody} />
+      <SystemView
+        target={aSystemTarget()}
+        onViewBody={onViewBody}
+        onPlanetViewer={onPlanetViewer}
+      />
     </ServerLinkHarness>,
   );
   const socket = FakeWebSocket.latest();
@@ -2341,6 +2348,59 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
       await user.click(viewBody());
 
       expect(opened.mock.calls.map(([inspection]) => inspection.body)).toEqual([PLANET_ID]);
+    });
+  });
+
+  describe("OPEN IN PLANET VIEWER (plan R15, T5)", () => {
+    /** The orbit map's `OPEN IN PLANET VIEWER`, or `null`. */
+    function openInViewer(): HTMLElement | null {
+      return within(mapPanel()).queryByRole("button", { name: "P OPEN IN PLANET VIEWER" });
+    }
+
+    it("is not offered where the launch offers no PLANET VIEWER", async () => {
+      const { user, socket } = renderView();
+      await answer(socket, populatedBodies());
+      await selectRow(user, /\/256,/);
+      await user.keyboard("c");
+      expect(openInViewer()).toBeNull();
+    });
+
+    it("opens the focused planet with P", async () => {
+      const opened = vi.fn<(inspection: BodyInspection) => void>();
+      const { user, socket } = renderView(undefined, opened);
+      await answer(socket, populatedBodies());
+      await selectRow(user, /\/256,/);
+      await user.keyboard("c");
+      await user.keyboard("p");
+      expect(opened.mock.calls.map(([inspection]) => inspection.body)).toEqual([PLANET_ID]);
+    });
+
+    it("is held back with VIEW BODY's reason while VIEW BODY is", async () => {
+      const { user, socket } = renderView(undefined, () => undefined);
+      await answer(socket, populatedBodies());
+      await selectRow(user, /\/256,/);
+      expect(openInViewer()).toHaveAccessibleDescription("NO BODY FOCUSED");
+    });
+
+    it("is held back for a moon, which has none of the viewer's inputs", async () => {
+      const opened = vi.fn<(inspection: BodyInspection) => void>();
+      const { user, socket } = renderView(undefined, opened);
+      await answer(socket, populatedBodies());
+      await selectRow(user, /\/257,/);
+      await user.keyboard("c");
+      await user.keyboard("p");
+      expect([openInViewer()?.getAttribute("aria-disabled"), opened.mock.calls.length]).toEqual([
+        "true",
+        0,
+      ]);
+    });
+
+    it("says NOT A PLANET of a moon", async () => {
+      const { user, socket } = renderView(undefined, () => undefined);
+      await answer(socket, populatedBodies());
+      await selectRow(user, /\/257,/);
+      await user.keyboard("c");
+      expect(openInViewer()).toHaveAccessibleDescription("NOT A PLANET");
     });
   });
 

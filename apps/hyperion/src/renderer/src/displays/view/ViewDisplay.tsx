@@ -424,6 +424,12 @@ interface ViewDisplayProps {
    * statements, stable in identity: the `PLANET VIEWER`'s held sun (plan R15, T4); none by default.
    */
   readonly hostStatements?: ReadonlyArray<LabelStatement> | undefined;
+  /**
+   * Opens the body inspection's planet in the `PLANET VIEWER`, as the `SCENE` bar's
+   * `OPEN IN PLANET VIEWER` asks (`App`'s; plan R15, T5), where the launch offers the viewer and
+   * the inspection is of a planet; absent, and the control with it, otherwise.
+   */
+  readonly onPlanetViewer?: (() => void) | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -2905,6 +2911,7 @@ function ViewPanels({
   opticsWorkers = startOpticsWorker,
   sceneBar = true,
   hostStatements = NO_SCENE_STATEMENTS,
+  onPlanetViewer,
 }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
@@ -3179,6 +3186,15 @@ function ViewPanels({
                   >
                     CLOSE
                   </button>
+                  {onPlanetViewer === undefined ? null : (
+                    <button
+                      type="button"
+                      className="control preset-buttons__button"
+                      onClick={onPlanetViewer}
+                    >
+                      OPEN IN PLANET VIEWER
+                    </button>
+                  )}
                 </span>
               )}
             </fieldset>

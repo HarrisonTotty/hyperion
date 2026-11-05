@@ -15,9 +15,14 @@ interface SystemDisplayProps {
    * owner's request, 2026-11-01).
    */
   readonly onViewBody: (inspection: BodyInspection) => void;
+  /**
+   * Opens a body in the `PLANET VIEWER`, as `OPEN IN PLANET VIEWER` asks (`App`'s, stable in
+   * identity; plan R15, T5), where the launch offers the viewer; absent where it does not.
+   */
+  readonly onPlanetViewer?: ((inspection: BodyInspection) => void) | undefined;
 }
 
-function SystemPanels({ opening, onViewBody }: SystemDisplayProps) {
+function SystemPanels({ opening, onViewBody, onPlanetViewer }: SystemDisplayProps) {
   const titleId = useId();
   const { open } = useUniverse();
   // A system of a universe no longer open is not the display's to show.
@@ -37,7 +42,14 @@ function SystemPanels({ opening, onViewBody }: SystemDisplayProps) {
       </div>
     );
   }
-  return <SystemView key={target.sequence} target={target.target} onViewBody={onViewBody} />;
+  return (
+    <SystemView
+      key={target.sequence}
+      target={target.target}
+      onViewBody={onViewBody}
+      onPlanetViewer={onPlanetViewer}
+    />
+  );
 }
 
 /**
