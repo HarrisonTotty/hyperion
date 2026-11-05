@@ -1101,7 +1101,112 @@ impl TubeEnvelope {
     pub const fn member_speed_bound(&self) -> KilometresPerSecond {
         self.speed_bound
     }
+
+    /// The boxes an envelope holds: 32, each of 16 knot segments of one arm.
+    pub const BOXES: usize = ENVELOPE_BOXES;
+
+    /// What an envelope's boxes mean, for a caller that stores them where it keeps no table: 1.
+    ///
+    /// It is raised whenever the boxes or what they must hold change (the segments a box holds,
+    /// the slack and margin they are padded by, a segment's reach or the cells' test), so that a
+    /// caller keying what it stores by it, as a server keeps a galaxy's envelopes on disk across
+    /// its restarts, reads nothing an older build stored as a bound it no longer is: no generator
+    /// version moves with them, as no output does. The tests pin a synthetic tube's envelope,
+    /// which fails when its boxes move.
+    pub const FORMAT: u32 = 1;
+
+    /// Each box's least corner and greatest, ly in the galactic frame.
+    ///
+    /// The boxes are in order: the trailing arm's segments, 16 a box, then the leading arm's.
+    /// With the [`member_speed_bound`](Self::member_speed_bound), they are what a caller stores of
+    /// the envelope and [`from_parts`](Self::from_parts) rebuilds it from.
+    #[must_use]
+    pub const fn boxes_ly(&self) -> &[[[f64; 3]; 2]; Self::BOXES] {
+        &self.boxes_ly
+    }
+
+    /// The envelope whose stored parts are `boxes_ly` and `speed_bound`, bit for bit.
+    ///
+    /// The parts are its [`boxes_ly`](Self::boxes_ly) and
+    /// [`member_speed_bound`](Self::member_speed_bound): for a caller that keeps a galaxy's
+    /// envelopes where it keeps no table, as a server keeps them on disk across its restarts, so
+    /// that a cold query need not build a table only to find that its sphere misses the tube
+    /// (perf-range-envelopes-on-disk).
+    ///
+    /// Whose tube the envelope bounds, and under which [`FORMAT`](Self::FORMAT), is not in its
+    /// parts: the caller keeps each apart by its galaxy, its stream and the format, since another
+    /// tube's envelope would make a source pass by a stream whose cells it should read.
+    ///
+    /// # Errors
+    ///
+    /// [`RestoreEnvelopeError::Corners`] for a box with a coordinate that is not finite or a least
+    /// corner past its greatest, and [`RestoreEnvelopeError::SpeedBound`] for a speed bound that
+    /// is negative or not finite.
+    ///
+    /// # Examples
+    ///
+    /// Not run: the table needs the full potential and a spray of some seconds.
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::global_list::testing::pal5_like;
+    /// use hyperion_sim::galaxy::global_list::{TubeEnvelope, TubeTable};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    ///
+    /// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
+    ///     .with_full_potential();
+    /// let table = TubeTable::build(&galaxy, &pal5_like(galaxy.potential()))?;
+    /// let own = TubeEnvelope::of(&table);
+    /// let (boxes_ly, speed_bound) = (*own.boxes_ly(), own.member_speed_bound());
+    /// // Read back after a restart, with no table built, it is the table's own envelope.
+    /// assert_eq!(TubeEnvelope::from_parts(boxes_ly, speed_bound)?, own);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn from_parts(
+        boxes_ly: [[[f64; 3]; 2]; Self::BOXES],
+        speed_bound: KilometresPerSecond,
+    ) -> Result<Self, RestoreEnvelopeError> {
+        for (index, [low, high]) in boxes_ly.iter().enumerate() {
+            if !(0..3).all(|axis| {
+                low[axis].is_finite() && high[axis].is_finite() && low[axis] <= high[axis]
+            }) {
+                return Err(RestoreEnvelopeError::Corners { index });
+            }
+        }
+        let speed = speed_bound.value();
+        if !(speed.is_finite() && speed >= 0.0) {
+            return Err(RestoreEnvelopeError::SpeedBound);
+        }
+        Ok(Self {
+            boxes_ly,
+            speed_bound,
+        })
+    }
 }
+
+/// A [`TubeEnvelope`] could not be rebuilt from its parts ([`TubeEnvelope::from_parts`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RestoreEnvelopeError {
+    /// A box has a coordinate that is not finite, or a least corner past its greatest.
+    Corners {
+        /// The box, from 0.
+        index: usize,
+    },
+    /// The speed bound is negative or not finite.
+    SpeedBound,
+}
+
+impl fmt::Display for RestoreEnvelopeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Corners { index } => write!(f, "an envelope's box {index} is not a box"),
+            Self::SpeedBound => f.write_str("an envelope's speed bound is not a speed"),
+        }
+    }
+}
+
+impl Error for RestoreEnvelopeError {}
 
 /// The knot segments of one arm a [`TubeEnvelope`]'s box holds: 16, so that an arm's 255 take 16
 /// boxes. Over the server tests' galaxy's 321 tubes, boxes of 16 keep the Sun-like 50 ly query's

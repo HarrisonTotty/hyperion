@@ -186,6 +186,21 @@ impl GlobalListModels {
         }
     }
 
+    /// Keeps `envelope` as stream `number`'s, unless one is kept already.
+    ///
+    /// For a caller that has rebuilt it from its stored parts ([`TubeEnvelope::from_parts`]), as
+    /// a server reads a galaxy's from disk when it builds the list again after a restart, so that
+    /// a cold query builds only the tables it may touch (perf-range-envelopes-on-disk). A number
+    /// the list lacks is passed by. It must be the envelope of that stream's table in the galaxy of
+    /// the list these are the models of, which the caller's keys keep apart: another's would make
+    /// a source pass by a stream it should read.
+    pub fn keep_stored_envelope(&self, number: StreamNumber, envelope: TubeEnvelope) {
+        if let Some(kept) = self.envelopes.get(usize::from(number.get())) {
+            // One kept already is the same table's envelope, or the caller's keys are wrong.
+            let _ = kept.set(envelope);
+        }
+    }
+
     /// Whether these are the models of `list`'s debris, by its counts of cores and streams.
     #[must_use]
     fn fit(&self, list: &GlobalList) -> bool {

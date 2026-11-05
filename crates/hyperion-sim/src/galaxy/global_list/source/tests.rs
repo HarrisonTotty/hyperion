@@ -400,13 +400,62 @@ fn numbers(streams: &[StreamNumber]) -> std::collections::BTreeSet<u16> {
     streams.iter().map(|number| number.get()).collect()
 }
 
+/// Keeps every envelope of `tubes` in `models`: every other one from its parts, as a server reads
+/// them from disk after a restart, each then its table's own (perf-range-envelopes-on-disk).
+fn keep_every_envelope(models: &GlobalListModels, tubes: &[Arc<TubeTable>]) {
+    for (k, tube) in tubes.iter().enumerate() {
+        let own = TubeEnvelope::of(tube);
+        if k % 2 == 0 {
+            let read = TubeEnvelope::from_parts(*own.boxes_ly(), own.member_speed_bound())
+                .expect("its own parts");
+            models.keep_stored_envelope(tube.stream(), read);
+        } else {
+            models.keep_envelope(tube);
+        }
+        let kept = models.envelope(tube.stream()).expect("kept");
+        assert_eq!(kept, &own, "stream {}", tube.stream().get());
+    }
+}
+
+/// A stored envelope is kept only where none is kept already, and one of a number the list lacks
+/// is passed by (perf-range-envelopes-on-disk).
+#[test]
+fn a_stored_envelope_replaces_none_and_one_past_the_list_is_passed_by() {
+    let galaxy = galaxy();
+    let tubes = &lookup().tubes;
+    let list = GlobalList::of_parts(galaxy, tables(), streams(), Vec::new());
+    let models = GlobalListModels::new(galaxy, &list);
+    let (first, second) = (&tubes[0], &tubes[1]);
+    models.keep_envelope(first);
+    let other = TubeEnvelope::of(second);
+    let other = TubeEnvelope::from_parts(*other.boxes_ly(), other.member_speed_bound())
+        .expect("its own parts");
+    assert_ne!(other, TubeEnvelope::of(first));
+    models.keep_stored_envelope(first.stream(), other.clone());
+    assert_eq!(
+        models.envelope(first.stream()),
+        Some(&TubeEnvelope::of(first))
+    );
+    let past = StreamNumber::new(u16::try_from(list.debris().streams().len()).expect("three"))
+        .expect("below the limit");
+    models.keep_stored_envelope(past, other);
+    assert_eq!(models.envelope(past), None);
+    assert_eq!(
+        models.envelope(second.stream()),
+        None,
+        "none kept for the second"
+    );
+}
+
 /// A source whose list's models keep every stream's envelope counts and finds what a source that
 /// keeps none does, bit for bit, and its census is the cells' sums by hand, list order kept
 /// (perf-range-census-streams); it reads only the tables of streams whose envelopes its spheres
 /// meet, which [`GlobalListSource::streams_read_with`] names, and passes some by. Over
 /// [`envelope_spheres`], at the epoch and a millennium on; below 300 ly, its hits and the sky's
 /// members over each window too, the sky reading only the tables
-/// [`GlobalListSource::streams_seen_with`] names (perf-range-cold-tables).
+/// [`GlobalListSource::streams_seen_with`] names (perf-range-cold-tables). Every other envelope
+/// is kept from its parts, as a server reads them from disk after a restart, and is its table's
+/// own (perf-range-envelopes-on-disk).
 #[test]
 fn kept_envelopes_pass_tables_by_and_move_no_count_or_hit() {
     let galaxy = galaxy();
@@ -419,9 +468,7 @@ fn kept_envelopes_pass_tables_by_and_move_no_count_or_hit() {
         handed: AtomicUsize::new(0),
     };
     let models = GlobalListModels::new(galaxy, &streams.list);
-    for tube in &streams.tubes {
-        models.keep_envelope(tube);
-    }
+    keep_every_envelope(&models, &streams.tubes);
     let enveloped = Enveloped {
         lookup: &streams,
         models,
@@ -1186,7 +1233,8 @@ fn a_drawn_galaxy_s_source_holds_the_centre_s_and_resolves_its_members() {
 /// 131,072 ly, and 58,000 ly above the centre, is the old path's bit for bit: each stream's cells'
 /// means summed by hand ([`expected_members`] over [`TubeTable::cells_touching`]) and added in list
 /// order. So it is through a source that keeps no envelope and through one whose models keep every
-/// envelope, which reads 10 of the 121 tables whose shells the Sun-like 50 ly sphere meets.
+/// envelope, rebuilt from its parts as a server stores them (perf-range-envelopes-on-disk), which reads 10 of the
+/// 121 tables whose shells the Sun-like 50 ly sphere meets.
 #[test]
 #[ignore = "slow: builds a drawn galaxy's 321 tube tables and sums the widest query's 377 million \
             cells by hand, some 10 CPU-minutes"]
@@ -1207,9 +1255,23 @@ fn a_drawn_galaxy_s_census_is_the_old_path_s_bit_for_bit() {
         rebuild: false,
         handed: AtomicUsize::new(0),
     };
+    // Each envelope kept from its parts, as a server reads them from disk after a restart, is its
+    // table's own, bit for bit (perf-range-envelopes-on-disk).
     let models = GlobalListModels::new(&galaxy, &lookup.list);
+    let spelt = |envelope: &TubeEnvelope| -> Vec<u64> {
+        let boxes = envelope.boxes_ly().iter().flatten().flatten().copied();
+        boxes
+            .chain([envelope.member_speed_bound().value()])
+            .map(hyperion_testkit::float::bits)
+            .collect()
+    };
     for tube in &lookup.tubes {
-        models.keep_envelope(tube);
+        let own = TubeEnvelope::of(tube);
+        let read = TubeEnvelope::from_parts(*own.boxes_ly(), own.member_speed_bound())
+            .expect("its own parts");
+        models.keep_stored_envelope(tube.stream(), read);
+        let kept = models.envelope(tube.stream()).expect("kept");
+        assert_eq!(spelt(kept), spelt(&own), "{}", tube.stream().get());
     }
     let enveloped = Enveloped {
         lookup: &lookup,

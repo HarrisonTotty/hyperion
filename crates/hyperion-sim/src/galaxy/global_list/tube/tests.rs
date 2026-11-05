@@ -1023,6 +1023,69 @@ fn an_envelope_misses_a_sphere_only_where_the_table_finds_no_cell() {
     );
 }
 
+/// An envelope rebuilt from its parts, as a server stores them, is the table's own bit for bit,
+/// and parts that hold what is not a box or a speed are refused (perf-range-envelopes-on-disk).
+/// The synthetic tube's envelope is pinned, so that a change to what the boxes hold, which moves
+/// no output and no generator version, fails here until `TubeEnvelope::FORMAT` is raised and the
+/// pin taken again.
+#[test]
+fn an_envelope_rebuilt_from_its_parts_is_the_table_s_own_bit_for_bit() {
+    let tube = table(&circle(600, 2));
+    let envelope = TubeEnvelope::of(&tube);
+    let (boxes_ly, speed_bound) = (*envelope.boxes_ly(), envelope.member_speed_bound());
+    let read = TubeEnvelope::from_parts(boxes_ly, speed_bound).expect("its own parts");
+    assert_eq!(read, envelope);
+    // Every value's bits, the boxes' in order and then the speed bound's.
+    let spelt = |envelope: &TubeEnvelope| -> Vec<u64> {
+        let boxes = envelope.boxes_ly().iter().flatten().flatten().copied();
+        boxes
+            .chain([envelope.member_speed_bound().value()])
+            .map(hyperion_testkit::float::bits)
+            .collect()
+    };
+    assert_eq!(spelt(&read), spelt(&envelope), "bit for bit");
+    assert_eq!(read.member_speed_bound(), tube.member_speed_bound());
+    let values: Vec<f64> = envelope
+        .boxes_ly()
+        .iter()
+        .flatten()
+        .flatten()
+        .copied()
+        .chain([envelope.member_speed_bound().value()])
+        .collect();
+    // A generator version that moves the tube goldens' knots moves this too, and needs only the
+    // pin taken again: the server keys what it stores by that version as well.
+    assert_eq!(
+        (
+            TubeEnvelope::FORMAT,
+            hyperion_testkit::golden::f64_digest(&values)
+        ),
+        (1, 0x1995_0b6e_b9f4_b7e4),
+        "the synthetic tube's envelope moved: raise TubeEnvelope::FORMAT, unless a generator \
+         version moved the tube's knots, and pin it again"
+    );
+
+    for (b, corner, axis, value) in [
+        (3, 0, 0, f64::NAN),
+        (5, 1, 0, f64::INFINITY),
+        (31, 0, 1, 1e30),
+    ] {
+        let mut spoiled = boxes_ly;
+        spoiled[b][corner][axis] = value;
+        assert_eq!(
+            TubeEnvelope::from_parts(spoiled, speed_bound),
+            Err(RestoreEnvelopeError::Corners { index: b }),
+            "box {b}"
+        );
+    }
+    for speed in [-1.0, f64::NAN] {
+        assert_eq!(
+            TubeEnvelope::from_parts(boxes_ly, KilometresPerSecond::new(speed)),
+            Err(RestoreEnvelopeError::SpeedBound)
+        );
+    }
+}
+
 /// Every point within the cut lies within its segment's reach of the segment's centre line, the
 /// premise of the scan of the segments, at the cut's corners too.
 #[test]
