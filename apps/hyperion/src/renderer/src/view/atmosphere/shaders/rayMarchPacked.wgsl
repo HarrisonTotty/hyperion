@@ -58,8 +58,10 @@ fn main(
   }
   let uv = (vec2f(texel) + 0.5) / vec2f(size);
   let full = vec2u(view.output.xy);
-  let depthTexel = min(vec2u(uv * vec2f(full)), full - 1u);
-  let depth = textureLoad(sceneDepth, depthTexel, 0);
+  // Never nearer than the ray's own point at half resolution, as the footprint's entry point
+  // (fix-disc-air-rows; R08.T17, the one pixel this read before drew a giant's disc from 5e8 m with
+  // dark columns where f32 put uv * full just under a pixel's edge).
+  let depth = marchTexelDepthOf(sceneDepth, uv, view.output.z, full);
   let reach = view.tables.y;
   var tSurface = 3.4e38;
   if (depth > 0.0) {

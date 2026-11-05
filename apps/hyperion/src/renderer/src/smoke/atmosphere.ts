@@ -80,6 +80,7 @@ import {
   type MarchBand,
   type LimbRays,
   type MarchCover,
+  type MarchForm,
   type MarchSourceTransmittance,
   marchSourcesOf,
   marchOneBandFor,
@@ -4067,13 +4068,71 @@ function bodyMeshOf(engine: RenderEngine, camera: AtmosphereCamera): MeshHandle 
 }
 
 /**
+ * {@link checkMarchOverBody}'s frame marched as a view marches it (R08.T17): over the air's area on
+ * the device's shared kernels, its far limb's node rays packed, as both settings' `limbRays` take
+ * them (`settings.ts`'s ATMOSPHERE_SETTINGS), so that every texel but the limb's packed ones is the
+ * packed entry point's (`rayMarchPacked.wgsl`); its march's target read back, and whether the frame
+ * made the packed lists.
+ */
+async function viewMarchOverBody(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+  sizes: TableSizes,
+  camera: AtmosphereCamera,
+  sun: SunState,
+  surface: SceneSurface,
+): Promise<{ readonly rayMarch: Float32Array; readonly packed: boolean }> {
+  let form: MarchForm = "general";
+  if (marchSpecialisedFor(tables)) {
+    form = "special";
+  } else if (marchOneBandFor(tables)) {
+    form = "one band";
+  }
+  const kernels = await createAtmosphereFrameKernels(engine, {
+    reads: "shared read",
+    packed: [form],
+  });
+  const atmosphere = HillaireAtmosphere.over(engine, tables, sizes, kernels, {
+    ...PER_PIXEL_LEVERS,
+    limbRays: "packed",
+  });
+  atmosphere.setMarchCover("area");
+  try {
+    await drawComposite(
+      engine,
+      atmosphere,
+      camera,
+      [sun],
+      { label: "march over a body, packed", surface, preExposure: SMOKE_EXPOSURE_SCALE },
+      () => Promise.resolve(null),
+    );
+    const { rayMarch, limbCounts } = atmosphere.frameTables;
+    if (rayMarch === null) {
+      throw new Error("the ray march drew no target");
+    }
+    return {
+      rayMarch: halfTexels(await engine.readTexture(rayMarch, 0, undefined, "tolerance")),
+      packed: limbCounts !== null,
+    };
+  } finally {
+    atmosphere.dispose();
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
  * fix-disc-air-rows: low's half-resolution march over a body drawn with depth, R05's Earth on a
  * sphere seen from 1.6 radii, its disc some 86 px across, each pixel at the sphere's own depth.
  * Each texel's centre ray passes through the corner of four pixels; one pixel's depth nearer than
  * the ray's own ground ended it in the air above the body, in rows and columns of dark texels
  * (pod-looks' captures, 2026-11-03). Held: the march's both targets against their twin over the
  * GPU's tables (R08.T6.b's bound), and every texel over the body, its footprint not blending,
- * against the twin's texel whose ray ends on the ground, past the body, to the same bound.
+ * against the twin's texel whose ray ends on the ground, past the body, to the same bound. Since
+ * R08.T17 the same frame marched as a view marches it too ({@link viewMarchOverBody}), every texel
+ * over the body to the same bound: the packed entry point still read the texel's one pixel, and
+ * drew `TEST JUPITER`'s disc from 5 × 10⁸ m with dark columns on low and a dark band and rows on
+ * high's stepped floor (check-giant-disc-colour's captures, 2026-11-04).
  */
 export async function checkMarchOverBody(engine: RenderEngine, checks: Checks): Promise<void> {
   const figure = sphereFigure(BODY_FRAME_RADIUS_M);
@@ -4097,6 +4156,8 @@ export async function checkMarchOverBody(engine: RenderEngine, checks: Checks): 
   };
   const mesh = bodyMeshOf(engine, camera);
   const material = engine.createMaterial(flatSpec("march over a body"));
+  const surface: SceneSurface = () =>
+    drawOf(mesh, material, [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1]);
   try {
     const planet = await planetOf(engine, atmosphere, R05_EARTH_REFERENCE, figure);
     if (planet.kind !== "sphere") {
@@ -4107,11 +4168,7 @@ export async function checkMarchOverBody(engine: RenderEngine, checks: Checks): 
       atmosphere,
       camera,
       [sun],
-      {
-        label: "march over a body",
-        surface: () => drawOf(mesh, material, [SURFACE_GREY, SURFACE_GREY, SURFACE_GREY, 1]),
-        preExposure: SMOKE_EXPOSURE_SCALE,
-      },
+      { label: "march over a body", surface, preExposure: SMOKE_EXPOSURE_SCALE },
       () => Promise.resolve(null),
     );
     const gpu = await readFrameOutputs(engine, atmosphere);
@@ -4129,10 +4186,8 @@ export async function checkMarchOverBody(engine: RenderEngine, checks: Checks): 
     const shells = farLimbShellsOf(planet.twin, view);
     const { widthTexels: w, heightTexels: h } = matched;
     const { widthPx: fullW, heightPx: fullH } = BODY_FRAME_SIZE;
-    // The grounded twin over the body's texels, the GPU's own elsewhere, so that the bound reads
-    // those alone.
-    const overBody = Float64Array.from(gpu.rayMarch);
-    let over = 0;
+    // The texels over the body, each a texel's first channel's index.
+    const overBody: number[] = [];
     for (let y = 0; y < h; y += 1) {
       for (let x = 0; x < w; x += 1) {
         const u = (x + 0.5) / w;
@@ -4152,11 +4207,19 @@ export async function checkMarchOverBody(engine: RenderEngine, checks: Checks): 
         ) {
           continue;
         }
-        over += 1;
-        const at = (y * w + x) * 4;
-        overBody.set(grounded.texels.subarray(at, at + 4), at);
+        overBody.push((y * w + x) * 4);
       }
     }
+    // The grounded twin over the body's texels, a march's own elsewhere, so that the bound reads
+    // those alone.
+    const groundedOver = (march: Float32Array): Float64Array => {
+      const texels = Float64Array.from(march);
+      for (const at of overBody) {
+        texels.set(grounded.texels.subarray(at, at + 4), at);
+      }
+      return texels;
+    };
+    const over = overBody.length;
     const label =
       "fix-disc-air-rows R05's Earth from 1.6 radii, low's half-resolution march over its disc";
     recordAgreement(checks, `${label}: the ray march`, twinAgreement(gpu.rayMarch, matched, true));
@@ -4170,11 +4233,26 @@ export async function checkMarchOverBody(engine: RenderEngine, checks: Checks): 
       transmittance.worst <= 1 && transmittance.above > 0,
       `worst ${transmittance.at}; ${String(transmittance.above)} channels above 10⁻⁶ of the largest, ${String(transmittance.over)} over the bound`,
     );
-    const grounding = twinAgreement(gpu.rayMarch, { ...matched, texels: overBody }, true);
+    const grounding = twinAgreement(
+      gpu.rayMarch,
+      { ...matched, texels: groundedOver(gpu.rayMarch) },
+      true,
+    );
     checks.check(
       `${label}: every texel over the body ends its ray on its ground, as the twin's past the body does, to 10⁻³`,
       over > 1_000 && grounding.worst <= 1,
       `${String(over)} texels over the body; worst ${grounding.at}, ${String(grounding.over)} channels over the bound`,
+    );
+    const viewed = await viewMarchOverBody(engine, atmosphere.tables, sizes, camera, sun, surface);
+    const viewGrounding = twinAgreement(
+      viewed.rayMarch,
+      { ...matched, texels: groundedOver(viewed.rayMarch) },
+      true,
+    );
+    checks.check(
+      `R08.T17 ${label}, over the air's area with its far limb's node rays packed, as a view marches it: every texel over the body ends its ray on its ground, as the twin's past the body does, to 10⁻³`,
+      viewed.packed && over > 1_000 && viewGrounding.worst <= 1,
+      `${String(over)} texels over the body; worst ${viewGrounding.at}, ${String(viewGrounding.over)} channels over the bound; ${viewed.packed ? "the packed lists made" : "no packed lists made"}`,
     );
   } finally {
     atmosphere.dispose();

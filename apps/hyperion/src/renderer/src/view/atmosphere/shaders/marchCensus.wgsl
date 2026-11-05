@@ -56,8 +56,7 @@ fn main(
   if (texel.x < size.x && texel.y < size.y) {
     let uv = (vec2f(texel) + 0.5) / vec2f(size);
     let full = vec2u(view.output.xy);
-    let depthTexel = min(vec2u(uv * vec2f(full)), full - 1u);
-    let depth = textureLoad(sceneDepth, depthTexel, 0);
+    let depth = marchTexelDepthOf(sceneDepth, uv, view.output.z, full);
     var tSurface = 3.4e38;
     if (depth > 0.0) {
       tSurface = distanceAtDepth(view, uv, depth);

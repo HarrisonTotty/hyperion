@@ -25091,3 +25091,9 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - _Pending_: the generated Saturn's disc reads blue in its reference (reflectance R/B 0.42–0.66,
     scalar), against Saturn's tan. That is plan 14's column, not the route (the lane's
     `findings.txt`).
+- **The packed limb's march over a drawn body** (R08.T17's fix lane, 2026-11-05).
+  - `rayMarchPacked.wgsl` (both settings' `limbRays`) and `marchCensus.wgsl` read a texel's depth
+    by `marchTexelDepthOf`, as fix-disc-air-rows' entry points do: the one pixel under `uv × full`
+    ended `TEST JUPITER`'s march above its floor from 5 × 10⁸ m on low's and high's stepped half
+    resolution, in columns where `f32` put it on the nearer pixel. Smoke part 12 holds the frame
+    marched as a view marches it (`viewMarchOverBody`).
