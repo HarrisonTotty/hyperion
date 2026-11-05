@@ -225,12 +225,17 @@ mod tests {
 
     /// The census's black-hole primaries beside low-mass companions under every 27 hold, by their
     /// fallback (complete first) and their end, as measured (2026-11-01, at generator version 25,
-    /// and again at 26, where two complete fallbacks' pairs come unbound).
+    /// and again at 26, where two complete fallbacks' pairs came unbound; 2026-11-05, at 27, where
+    /// one does). The one of 27, `0x822a_b3df_a000_0000`'s 12.14 + 1.24 M☉ pair, comes unbound at
+    /// its primary's collapse at 19.5 Myr into a 3.57 M☉ hole with no kick. The history's first
+    /// commit, at 26 (2026-11-03), measures the same complete fallbacks, one unbound and 16
+    /// detached: the pin of two was stale before it. Neither the segment cap of 256 nor the floored
+    /// step's stop at the pin moves them.
     const ENDS: [((bool, End), usize); 10] = [
         ((true, End::MergedBeforeInEnvelope), 21),
         ((true, End::MergedBeforeOtherwise), 17),
-        ((true, End::Unbound), 2),
-        ((true, End::Detached), 15),
+        ((true, End::Unbound), 1),
+        ((true, End::Detached), 16),
         ((false, End::MergedBeforeInEnvelope), 50),
         ((false, End::MergedBeforeOtherwise), 18),
         ((false, End::Unbound), 33),
