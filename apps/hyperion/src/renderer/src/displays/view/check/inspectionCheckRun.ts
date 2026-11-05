@@ -27,8 +27,9 @@
  *    `AUTO` has settled and a few frames are drawn the page is captured as
  *    `inspection-<system>-<index>`; then with `MAXIMIZE VIEW` on, the panels hidden and the stage
  *    the display's whole body, as `inspection-<system>-<index>-maximized` (the owner's request,
- *    2026-11-01), and with it off again; then with the `STYLE` panel's `GRID` at `OFF`, the image
- *    bare, as `inspection-<system>-<index>-grid-off`.
+ *    2026-11-01), and with it off again; then with the `STYLE` panel's `GRID` at `ON`, the
+ *    symbology over the image, as `inspection-<system>-<index>-grid-on`, and `OFF` again, the
+ *    image bare as it opens (the owner's request, 2026-11-05).
  * 5. Over surveyed ground the camera then closes in along its line of sight, the flight key `W`
  *    held on the primary's canvas in short holds at a rate step (`PageUp`, `PageDown`) whose one
  *    step flies at most half of what is left, each read back from the `POSITION` line once its coast
@@ -198,8 +199,8 @@ export interface InspectionCheckDeps {
 /** What the run captured, and what the primary's label block said as it was, for its tests. */
 export interface InspectionCapture {
   /**
-   * The capture's label, with `GRID` at `ON`; the maximized one's adds `-maximized`, and the one
-   * with `GRID` at `OFF` `-grid-off`.
+   * The capture's label, with `GRID` at `OFF`, as the inspection opens; the maximized one's adds
+   * `-maximized`, and the one with `GRID` at `ON` `-grid-on`.
    */
   readonly label: string;
   readonly frame: string | null;
@@ -964,16 +965,27 @@ async function inspect(
   await deps.api.capture(`${label}-maximized`);
   pressKey(document.body, MAXIMIZE_KEY);
   await until("MAXIMIZE VIEW did not show the panels again", () => !maximized());
-  const gridOff = (): HTMLButtonElement | null =>
+  /** The `STYLE` panel's `GRID` button `setting`. */
+  const gridButton = (setting: "ON" | "OFF") => (): HTMLButtonElement | null =>
     [...document.querySelectorAll<HTMLButtonElement>(".view-style__grid button")].find(
-      (button) => button.textContent.trim() === "OFF",
+      (button) => button.textContent.trim() === setting,
     ) ?? null;
-  await press(gridOff, "the STYLE panel's GRID OFF");
-  await until("GRID did not go OFF", () => gridOff()?.getAttribute("aria-pressed") === "true");
-  const gridOffFromMs = await framesDrawn();
-  shown("the inspection with GRID OFF", plate(), gridOffFromMs);
+  /** Sets the `GRID` at `setting` by its button, as an operator does, and waits for it. */
+  const setGrid = async (setting: "ON" | "OFF"): Promise<void> => {
+    const button = gridButton(setting);
+    await press(button, `the STYLE panel's GRID ${setting}`);
+    await until(
+      `GRID did not go ${setting}`,
+      () => button()?.getAttribute("aria-pressed") === "true",
+    );
+  };
+  // The symbology over the image on demand, captured, and the image bare again, as it opened.
+  await setGrid("ON");
+  const gridOnFromMs = await framesDrawn();
+  shown("the inspection with GRID ON", plate(), gridOnFromMs);
   stopped();
-  await deps.api.capture(`${label}-grid-off`);
+  await deps.api.capture(`${label}-grid-on`);
+  await setGrid("OFF");
   const orbit = {
     label,
     frame: said.line("FRAME"),

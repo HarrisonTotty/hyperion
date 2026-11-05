@@ -224,6 +224,128 @@ describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
   });
 });
 
+/** Each mark a frame drew: its target and its label's kind, `null` for none. */
+function marks(drawn: ViewFrameDrawn | null): ReadonlyArray<readonly [string, string | null]> {
+  return (drawn?.anchors ?? []).map((anchor) => [
+    anchor.target.kind === "body" ? anchor.target.body : anchor.target.craft,
+    anchor.label?.kind ?? null,
+  ]);
+}
+
+describe("a view's photorealistic frame with its GRID at OFF, the picture alone (the owner's request, 2026-11-05)", () => {
+  /**
+   * The phase scene's run with another craft 10⁸ m along the camera's line of sight, and its second
+   * planet, in view, shrunk to 1 m, drawn as its symbol: a scene with a mark of each label's kind.
+   */
+  function markedRun(): ViewRun {
+    const run = phaseRun(false);
+    const pose = runPose(run);
+    if (pose.frame.kind !== "system") {
+      throw new Error("the phase scene's camera is not in its system's frame");
+    }
+    const craft = aViewCraft({
+      id: "other",
+      designation: "OTHER",
+      pose: {
+        position: {
+          kind: "system",
+          system: pose.frame.system,
+          m: add(pose.positionM, scale(rotate(pose.orientation, vec3(0, 0, -1)), 1e8)),
+        },
+        attitude: NO_TURN,
+      },
+    });
+    const [, small] = PHASE_PLANETS;
+    return {
+      ...run,
+      scene: {
+        ...run.scene,
+        bodies: run.scene.bodies.map((body) =>
+          body.id === small ? Object.assign({}, body, { radiusM: 1 }) : body,
+        ),
+        craft: [...run.scene.craft, craft],
+      },
+    };
+  }
+
+  /**
+   * What a drawer whose pipelines are made drew of `run` at `grid`, its readout's point as given:
+   * its passes and its frame.
+   */
+  async function drawnAt(
+    run: ViewRun,
+    grid: boolean,
+    lineOfSightPoint?: ViewFrameInputs["lineOfSightPoint"],
+  ): Promise<{ readonly passes: ReadonlyArray<string>; readonly drawn: ViewFrameDrawn | null }> {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    const inputs: ViewFrameInputs = {
+      run,
+      size: { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style: "photorealistic",
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      grid,
+      ...(lineOfSightPoint === undefined ? {} : { lineOfSightPoint }),
+    };
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputs);
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const from = view.frames.length;
+    const drawn = drawer.draw(inputs);
+    drawer.dispose();
+    return { passes: view.frames.slice(from).map((frame) => frame.label), drawn };
+  }
+
+  it("draws no symbology pass over a frame that holds no stand-in", async () => {
+    const { passes, drawn } = await drawnAt(phaseRun(false), false);
+    expect([drawn?.drawnStyle, passes.includes(PHOTOREAL_PASS_LABELS.symbology)]).toEqual([
+      "photorealistic",
+      false,
+    ]);
+  });
+
+  it("draws the symbology pass over that frame at ON", async () => {
+    const { passes } = await drawnAt(phaseRun(false), true);
+    expect(passes.at(-1)).toBe(PHOTOREAL_PASS_LABELS.symbology);
+  });
+
+  it("marks no line of sight over the picture alone, so that no survey edge keeps its ticks clear of it", async () => {
+    const { drawn } = await drawnAt(phaseRun(false), false, { hasPoint: true, rangeM: null });
+    expect([drawn?.drawnStyle, drawn?.lineOfSight]).toEqual(["photorealistic", null]);
+  });
+
+  it("draws the symbology pass for a craft's stand-in over the image", async () => {
+    const { passes } = await drawnAt(markedRun(), false);
+    expect(passes.at(-1)).toBe(PHOTOREAL_PASS_LABELS.symbology);
+  });
+
+  it("labels no mark, and leaves out a body drawn as its symbol, keeping each disc and craft to pick", async () => {
+    const on = marks((await drawnAt(markedRun(), true)).drawn);
+    const off = marks((await drawnAt(markedRun(), false)).drawn);
+    expect({
+      kinds: [...new Set(on.map(([, kind]) => String(kind)))].toSorted((a, b) =>
+        a.localeCompare(b),
+      ),
+      off,
+    }).toEqual({
+      kinds: ["null", "symbol", "target"],
+      off: on.filter(([, kind]) => kind !== "symbol").map(([target]) => [target, null] as const),
+    });
+  });
+});
+
 describe("a view's hand-over at its frame's internal scale (R10.T10.g)", () => {
   /** The presented size: 1080 rows, which the low setting renders at 720. */
   const PRESENTED = { widthPx: 1920, heightPx: 1080 };

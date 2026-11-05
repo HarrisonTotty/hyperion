@@ -55,6 +55,7 @@ import {
   initialGraphicsStatus,
 } from "../../view/engine/status";
 import type { FrameSubmission } from "../../view/engine/types";
+import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
 import { METER_CLASS } from "../../view/post/meter";
 import { precisionScene } from "../../view/scenes/precision";
 import { lineScale } from "../../lib/strokes";
@@ -66,6 +67,7 @@ import {
 } from "../../view/wireframe/drawList";
 import { linearColour } from "../../view/wireframe/submit";
 import type { ViewEngineSource } from "./useViewEngine";
+import { GRID_KEY } from "./displayKeys";
 import { ViewDisplay } from "./ViewDisplay";
 import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import { ViewSceneProvider } from "./ViewSceneProvider";
@@ -847,6 +849,9 @@ describe("the VIEW display", () => {
     view.advance(100);
     await settle();
     view.advance(300);
+    // Its marks' labels over the image on demand, the picture alone as it opens (2026-11-05).
+    await view.user.keyboard(GRID_KEY);
+    view.advance(300);
     view.advance(100);
     const label = planetLabel();
     const before = label?.style.visibility;
@@ -1400,12 +1405,31 @@ describe("the VIEW display's style (R07.T8.a)", () => {
     advance(100);
     await settle();
     advance(300);
+    // The symbology over the image on demand: the picture alone as it opens (2026-11-05).
+    await user.keyboard(GRID_KEY);
+    advance(300);
     expect([
       screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC/ }).tagName,
       labelBlock().includes("BODY PHOTOMETRY: NOT YET MODELLED"),
       labelBlock().includes("LIGHTING:"),
       lastFrame()?.label,
-    ]).toEqual(["CANVAS", true, false, "symbology"]);
+    ]).toEqual(["CANVAS", true, false, PHOTOREAL_PASS_LABELS.symbology]);
+  });
+
+  it("draws no symbology pass over PHASE TEST's image as the photorealistic style opens (2026-11-05)", async () => {
+    const { user, advance, lastFrame } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    advance(100);
+    await settle();
+    advance(300);
+    if (screen.queryByRole("application", { name: /^VIEW, PHOTOREALISTIC/ }) === null) {
+      throw new Error("the view draws PHOTOREALISTIC");
+    }
+    expect(lastFrame()?.label).not.toBe(PHOTOREAL_PASS_LABELS.symbology);
   });
 
   it("switches to the photorealistic style from its control", async () => {
@@ -1576,6 +1600,9 @@ describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
     await view.user.keyboard("4");
     view.advance(100);
     await settle();
+    view.advance(300);
+    // Its marks' labels over the image on demand (2026-11-05).
+    await view.user.keyboard(GRID_KEY);
     view.advance(300);
     const overlay =
       screen.getByRole("application", { name: /^VIEW, PHOTOREALISTIC, PRIMARY/ })

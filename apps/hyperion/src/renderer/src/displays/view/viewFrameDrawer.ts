@@ -35,7 +35,7 @@ import {
   renderViewport,
   spritesAtScale,
 } from "../../view/photoreal/internalScale";
-import { overlaySubmission } from "../../view/photoreal/overlay";
+import { overlayDrawsAt, overlaySubmission } from "../../view/photoreal/overlay";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
 import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
@@ -182,9 +182,12 @@ export interface ViewFrameInputs {
    */
   readonly lineOfSightPoint?: LineOfSightPoint | undefined;
   /**
-   * The view's `GRID` (the owner's request, 2026-10-31): `false` (`OFF`) leaves each body's limb
-   * and graticule out of the photorealistic overlay, every mark kept (`overlayDrawList`); `ON`
-   * unless given. The wireframe style draws its grid whatever it is.
+   * The view's `GRID` (the owner's requests, 2026-10-31 and 2026-11-05): `false` (`OFF`) draws its
+   * photorealistic frame as the picture alone, its overlay keeping only the stand-ins and survey
+   * edges (`overlayDrawList`), its symbology pass drawn only for them ({@link overlayDrawsAt}), no
+   * line-of-sight mark, and its marks those the picture draws, unlabelled
+   * ({@link ViewFrameDrawn.anchors}); `ON` unless given, the whole of R02's list cased over it. The
+   * wireframe style draws its list whatever it is.
    */
   readonly grid?: boolean | undefined;
   /**
@@ -199,7 +202,10 @@ export interface ViewFrameInputs {
 
 /** What a frame drew. */
 export interface ViewFrameDrawn {
-  /** The marks where the frame drew them, device px. */
+  /**
+   * The marks where the frame drew them, device px; over a photorealistic image with its `GRID` at
+   * `OFF`, only those the picture draws, unlabelled (`bareAnchors`).
+   */
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style it was drawn in: the wireframe while the photorealistic pipelines compile. */
   readonly drawnStyle: RenderStyle;
@@ -243,6 +249,30 @@ export interface ViewFrameDrawn {
    * R08, R08.T10.b), for its label block; `null` without {@link ViewFrameInputs.atmosphere}.
    */
   readonly atmosphere: AtmosphereViewReport | null;
+}
+
+/**
+ * A photorealistic frame's marks with its view's `GRID` at `OFF`, the picture alone (the owner's
+ * request and its UX ruling, 2026-11-05): those the picture draws, a body's disc drawn larger than
+ * its symbol and a craft on its silhouette, each picked where it stands and none labelled; a body
+ * drawn as its symbol is left out, so that no press picks what is not drawn.
+ */
+function bareAnchors(anchors: ReadonlyArray<DrawAnchor>): ReadonlyArray<DrawAnchor> {
+  const drawn: DrawAnchor[] = [];
+  for (const anchor of anchors) {
+    if (anchor.label === null) {
+      drawn.push(anchor);
+      continue;
+    }
+    switch (anchor.label.kind) {
+      case "symbol":
+        break;
+      case "target":
+        drawn.push({ ...anchor, label: null });
+        break;
+    }
+  }
+  return drawn;
 }
 
 /**
@@ -519,9 +549,11 @@ export class ViewFrameDrawer {
         // (R10.T16.g).
         datumInside: style === "photorealistic",
         // The tripod at the picture's centre where the readout has a point, and its give-way's
-        // state from the frame before (R10.T12).
+        // state from the frame before (R10.T12); none over the picture alone at GRID OFF, whose
+        // survey edges then keep no ticks clear of it (2026-11-05).
         lineOfSight:
-          inputs.lineOfSightPoint === undefined
+          inputs.lineOfSightPoint === undefined ||
+          (style === "photorealistic" && inputs.grid === false)
             ? null
             : { ...inputs.lineOfSightPoint, yielded: this.#lineOfSightYielded },
         ...(inputs.ownHull === undefined ? {} : { ownHull: inputs.ownHull }),
@@ -601,7 +633,7 @@ export class ViewFrameDrawer {
       );
     }
     return {
-      anchors: list.anchors,
+      anchors: drawn && inputs.grid === false ? bareAnchors(list.anchors) : list.anchors,
       drawnStyle: drawn ? "photorealistic" : "wireframe",
       sceneStars,
       terrain,
@@ -664,6 +696,7 @@ export class ViewFrameDrawer {
     readonly decorated: boolean;
   } {
     const { sky, run } = inputs;
+    const grid = inputs.grid ?? true;
     const { presentedPx: viewport, selectionPx } = sizes;
     const airView = inputs.atmosphere?.view;
     const reportAirFailure =
@@ -729,17 +762,13 @@ export class ViewFrameDrawer {
           terrain,
           // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), the
           // craft on their silhouettes (R07.T16.e), and each handed-over body's datum giving way
-          // over its surveyed ground, built once the renderer has the plan (R10.T16.f).
-          overlay: (surveyed) =>
-            overlaySubmission(
-              this.#wireframe,
-              list,
-              tokens,
-              camera,
-              viewport,
-              surveyed,
-              inputs.grid ?? true,
-            ),
+          // over its surveyed ground, built once the renderer has the plan (R10.T16.f); at GRID OFF
+          // the stand-ins and survey edges alone, and no pass where there are none (the owner's
+          // request, 2026-11-05).
+          overlay: overlayDrawsAt(list, grid)
+            ? (surveyed) =>
+                overlaySubmission(this.#wireframe, list, tokens, camera, viewport, surveyed, grid)
+            : null,
           atmospheres: inputs.atmosphere?.tablesOf,
           // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).
           groundFields: inputs.atmosphere?.groundFieldOf,

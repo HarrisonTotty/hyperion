@@ -10139,3 +10139,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   opening, kept apart from the display's own (`meterChoice.ts`). Leans (2026-11-01): no body to
   read at reads `NO LIGHT`; only a shadow as wide as the body counts (`shadowsWhole`); a scene lit
   by its sky reads `null`, not yet metered, until its sky is held; the remedy is `choose AVG`.
+- **The photorealistic view opens bare (the owner's request, 2026-11-05; photoreal-clean-view).**
+  - `GRID` is `OFF` as a view opens and each time its style becomes `PHOTOREALISTIC`
+    (`GRID_AT_OPEN`, `gridAfterStyle` in `styleRefusals.ts`), the primary's and each instrument's
+    own; `ViewFrameInputs.grid` still defaults to `ON` where absent (the descent spike's views).
+  - At `OFF` `overlayDrawList` keeps only `LineBatch.keptAtGridOff` batches (hull edges, a ring's
+    two edges, survey edges), which replaces `LineBatch.grid`; `overlayDrawsAt` skips the symbology
+    pass where none stands; `ViewFrameDrawn.anchors` drops bodies drawn as symbols and every label.
+  - The views check's inspection now captures `-grid-on` in place of `-grid-off`; its first
+    capture, and its profile's orbit window, are at `GRID OFF`.

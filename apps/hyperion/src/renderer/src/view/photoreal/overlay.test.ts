@@ -29,7 +29,13 @@ import {
   type WireframeDrawList,
 } from "../wireframe/drawList";
 import { linearColour, type SurveyedDatumFrame, WireframeRenderer } from "../wireframe/submit";
-import { overlayDrawList, overlaySubmission, type SurveyedPlan, surveyedDatumsOf } from "./overlay";
+import {
+  overlayDrawList,
+  overlayDrawsAt,
+  overlaySubmission,
+  type SurveyedPlan,
+  surveyedDatumsOf,
+} from "./overlay";
 
 /** The guide's tokens, as `readTokens` reads them from the stylesheet. */
 const TOKENS: ColourTokens = {
@@ -139,48 +145,63 @@ describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
   });
 });
 
-describe("the photorealistic overlay with the view's GRID at OFF (the owner's request, 2026-10-31)", () => {
-  it("leaves out every body's limb and graticule, the batches that name their body", () => {
-    const overlay = overlayDrawList(wireframeList(), TOKENS, false);
-    expect(overlay.lines.filter((line) => line.body !== undefined)).toEqual([]);
+describe("the photorealistic overlay with the view's GRID at OFF (the owner's request, 2026-11-05)", () => {
+  it("keeps only the stand-ins, each hull and the ring's two edges, which the image does not draw yet", () => {
+    const off = overlayDrawList(wireframeList(), TOKENS, false);
+    expect(off.lines.map((line) => line.id)).toEqual([`ring:${FIXTURE_PLANET}`, "hull:other"]);
   });
 
-  it("keeps every other batch: the marks, hulls, orbits, predicted paths and rings", () => {
-    expect(batchKinds(overlayDrawList(wireframeList(), TOKENS, false))).toEqual([
-      "hull",
-      "mark",
-      "orbit",
-      "predicted",
-      "ring",
-    ]);
+  it("leaves out every limb and graticule, orbit, ring tick, predicted path and mark", () => {
+    const list = wireframeList();
+    const kept = new Set(overlayDrawList(list, TOKENS, false).lines.map((line) => line.id));
+    expect(
+      [
+        ...new Set(
+          list.lines
+            .filter((line) => !kept.has(line.id))
+            .map((line) => line.id.split(":")[0] ?? ""),
+        ),
+      ].toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual(["body", "mark", "orbit", "predicted", "ring"]);
   });
 
-  it("leaves out a ring's radial ticks, its grid, and keeps its two edges, which stand for it (R08.T17)", () => {
-    const rings = (grid: boolean): ReadonlyArray<string> =>
-      overlayDrawList(wireframeList(), TOKENS, grid)
-        .lines.filter((line) => line.id.startsWith("ring:"))
-        .map((line) => line.id);
-    expect({ on: rings(true), off: rings(false) }).toEqual({
-      on: [`ring:${FIXTURE_PLANET}`, `ring:${FIXTURE_PLANET}:ticks`],
-      off: [`ring:${FIXTURE_PLANET}`],
-    });
-  });
-
-  it("keeps every occluder and mark anchor, so that a mark behind a body stays hidden", () => {
+  it("keeps every occluder and each hull's silhouette, so that a stand-in behind a body stays hidden", () => {
     const list = wireframeList();
     const overlay = overlayDrawList(list, TOKENS, false);
     expect([
       overlay.occluderSpheres === list.occluderSpheres,
       shape(overlay.occluderMeshes),
-      overlay.anchors === list.anchors,
-    ]).toEqual([true, shape(list.occluderMeshes), true]);
+      [...new Set(overlay.occluderMeshes.map((mesh) => mesh.fill))],
+    ]).toEqual([true, shape(list.occluderMeshes), [TOKENS.surface0]]);
   });
 
-  it("draws the limb and graticule at ON, as a view starts", () => {
+  it("draws every batch at ON", () => {
     const list = wireframeList();
     expect(overlayDrawList(list, TOKENS, true).lines.map((line) => line.id)).toEqual(
-      overlayDrawList(list, TOKENS).lines.map((line) => line.id),
+      list.lines.map((line) => line.id),
     );
+  });
+});
+
+describe("whether the overlay's pass is drawn (the owner's request, 2026-11-05)", () => {
+  /** The scene's list with only the batches `GRID OFF` leaves out: no hull, ring or survey edge. */
+  function bareList(): WireframeDrawList {
+    const list = wireframeList();
+    return { ...list, lines: list.lines.filter((line) => line.keptAtGridOff !== true) };
+  }
+
+  it("is drawn at ON, whatever its list holds", () => {
+    expect([overlayDrawsAt(wireframeList(), true), overlayDrawsAt(bareList(), true)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("is drawn at OFF only where a stand-in or survey edge stands in the list", () => {
+    expect([overlayDrawsAt(wireframeList(), false), overlayDrawsAt(bareList(), false)]).toEqual([
+      true,
+      false,
+    ]);
   });
 });
 

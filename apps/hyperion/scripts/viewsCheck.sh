@@ -100,11 +100,11 @@
 # --inspection --universe <ID> --body <ID> runs the inspection run instead (the owner's request,
 # 2026-11-01): on a running server, the universe opened on GALAXY, the body's system on SYSTEM, the
 # body selected, FOCUS BODY and VIEW BODY pressed, and VIEW's photorealistic body inspection of it,
-# on AUTO and its ground surveyed, captured once AUTO has settled, as
+# on AUTO and its ground surveyed, captured once AUTO has settled with GRID OFF, as it opens, as
 # between-inspection-<system>-<index>.png, then with MAXIMIZE VIEW on as
-# between-inspection-<system>-<index>-maximized.png, then with GRID OFF as
-# between-inspection-<system>-<index>-grid-off.png, and, over surveyed ground, closed in to 5% of
-# its radius above it as between-inspection-<system>-<index>-close.png, under
+# between-inspection-<system>-<index>-maximized.png, then with GRID ON as
+# between-inspection-<system>-<index>-grid-on.png, and, GRID OFF again, over surveyed ground,
+# closed in to 5% of its radius above it as between-inspection-<system>-<index>-close.png, under
 # target/views-check/inspection/. One setting, high unless given, and one body a launch; it exits 1
 # when a step does not take effect, VIEW BODY is held back, or a fault line stands on a capture.
 #

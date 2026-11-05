@@ -334,31 +334,40 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       expect(readingIn(primaryLabelBlock(), "STYLE")).toBe("PHOTOREALISTIC");
     });
 
-    it("sets the GRID OFF by its key over the photorealistic image", async () => {
+    it("sets the GRID ON by its key over the photorealistic image, which opens at OFF", async () => {
+      const view = await setup();
+      await pressMaximize(view);
+      await view.user.keyboard("4");
+      await playFor(view, 4);
+      await pressLabelBlock(view);
+      if (readingIn(primaryLabelBlock(), "GRID") !== "OFF") {
+        throw new Error("the primary opens its photorealistic style at GRID OFF");
+      }
+      await pressLabelBlock(view);
+      await view.user.keyboard(GRID_KEY);
+      view.advance(300);
+      await pressLabelBlock(view);
+      expect(readingIn(primaryLabelBlock(), "GRID")).toBeNull();
+    });
+
+    it("opens the GRID at OFF again each time the style becomes PHOTOREALISTIC, by its key", async () => {
       const view = await setup();
       await pressMaximize(view);
       await view.user.keyboard("4");
       await playFor(view, 4);
       await view.user.keyboard(GRID_KEY);
-      view.advance(300);
-      await pressLabelBlock(view);
-      expect(readingIn(primaryLabelBlock(), "GRID")).toBe("OFF");
-    });
-
-    it("leaves the GRID as it is by its key in the WIREFRAME, where its row does not stand", async () => {
-      const view = await setup();
-      await pressMaximize(view);
-      await view.user.keyboard(GRID_KEY);
+      await view.user.keyboard("4");
+      await playFor(view, 2);
       await view.user.keyboard("4");
       await playFor(view, 4);
       await pressLabelBlock(view);
       expect([
         readingIn(primaryLabelBlock(), "STYLE"),
         readingIn(primaryLabelBlock(), "GRID"),
-      ]).toEqual(["PHOTOREALISTIC", null]);
+      ]).toEqual(["PHOTOREALISTIC", "OFF"]);
     });
 
-    it("sets the CONTROLS instrument's GRID OFF by its key, the primary's kept", async () => {
+    it("sets the CONTROLS instrument's GRID ON by its key, the primary's kept", async () => {
       const view = await setup();
       await openInstrument(view);
       await view.user.click(
@@ -368,6 +377,9 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       );
       await view.user.keyboard("4");
       await playFor(view, 4);
+      if (readingIn(screen.getByRole("region", { name: "INSTRUMENT 1" }), "GRID") !== "OFF") {
+        throw new Error("INSTRUMENT 1 opens its photorealistic style at GRID OFF");
+      }
       await pressMaximize(view);
       await view.user.keyboard(GRID_KEY);
       view.advance(300);
@@ -375,7 +387,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       expect([
         readingIn(screen.getByRole("region", { name: "INSTRUMENT 1" }), "GRID"),
         readingIn(primaryLabelBlock(), "GRID"),
-      ]).toEqual(["OFF", null]);
+      ]).toEqual([null, null]);
     });
 
     it("selects the next target by its key", async () => {

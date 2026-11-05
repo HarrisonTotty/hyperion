@@ -21,11 +21,15 @@ export interface StyleBaseline {
 }
 
 /**
- * The `GRID` row's state and its callback (the owner's request, 2026-10-31): whether the view's
- * reference grid, each body's limb and graticule, is drawn over its photorealistic image.
+ * The `GRID` row's state and its callback (the owner's requests, 2026-10-31 and 2026-11-05):
+ * whether the view's symbology, its reference grid, marks and their labels, is drawn over its
+ * photorealistic image.
  */
 export interface StyleGrid {
-  /** Whether the view draws its grid over the image, `ON`; `true` as a view starts. */
+  /**
+   * Whether the view draws its symbology over the image, `ON`; `false` as a view opens and each
+   * time its style becomes `PHOTOREALISTIC` (`gridAfterStyle`).
+   */
   readonly on: boolean;
   /** Called with the setting chosen; a display control, so it acts at once. */
   readonly onGrid: (on: boolean) => void;
@@ -56,8 +60,8 @@ export interface StyleControlProps {
    */
   readonly baseline?: StyleBaseline | undefined;
   /**
-   * The `GRID` row's state (the owner's request, 2026-10-31): the panel's view's own, the row
-   * standing while the view's style is `PHOTOREALISTIC`; absent, the row is left out.
+   * The `GRID` row's state (the owner's requests, 2026-10-31 and 2026-11-05): the panel's view's
+   * own, the row standing while the view's style is `PHOTOREALISTIC`; absent, the row is left out.
    */
   readonly grid?: StyleGrid | undefined;
 }
@@ -149,8 +153,9 @@ function BaselineRow({ baseline }: BaselineRowProps) {
  * (`styleRefusals`). Mounted by R07.T8.a beside the camera controls.
  *
  * Under them, while the view's style is `PHOTOREALISTIC` and offered and `grid` is given, stands
- * the `GRID` row, whose `OFF` leaves each body's limb and graticule out of the image's overlay (the
- * owner's request, 2026-10-31). A style asked for and held back draws the wireframe, which has no
+ * the `GRID` row, whose `OFF`, as the style opens, leaves the image as the picture alone, with no
+ * symbology over it, and whose `ON` draws the symbology (the owner's requests, 2026-10-31 and
+ * 2026-11-05). A style asked for and held back draws the wireframe, which has no
  * image to clear, so the row never stands beside the reason, and the panel's tallest state, the
  * reason and `BASELINE`, keeps the full layout's least height (plan R10, R10.T12.d; lean,
  * 2026-10-31).

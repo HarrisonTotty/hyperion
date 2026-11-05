@@ -65,7 +65,7 @@ import {
 } from "./groundReadout";
 import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
 import { NONE_OPENED, toggledNote } from "./reasonFolds";
-import { availabilityOf, styleRefusals } from "./styleRefusals";
+import { availabilityOf, GRID_AT_OPEN, gridAfterStyle, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
 import {
   type CulledViewSky,
@@ -172,8 +172,9 @@ export interface Instrument {
   readonly style: RenderStyle;
   readonly selection: CameraTarget | null;
   /**
-   * Its `GRID` (the owner's request, 2026-10-31): whether its photorealistic image takes each
-   * body's limb and graticule over it, `ON` as it opens.
+   * Its `GRID` (the owner's requests, 2026-10-31 and 2026-11-05): whether its photorealistic image
+   * takes the symbology over it, `OFF` as it opens and each time its style becomes
+   * `PHOTOREALISTIC`.
    */
   readonly grid: boolean;
   /**
@@ -353,7 +354,7 @@ const CLOSED: SlotState = {
   open: false,
   style: "wireframe",
   selection: null,
-  grid: true,
+  grid: GRID_AT_OPEN,
   slopeBaselineM: GROUND_READOUT_OPTIONS.slopeBaselineM,
   reasonsOpened: NONE_OPENED,
   shown: null,
@@ -627,8 +628,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           open: true,
           style: run.camera.style,
           selection: null,
-          // Its own GRID, ON as it opens (the owner's request, 2026-10-31).
-          grid: true,
+          // Its own GRID, OFF as it opens (the owner's request, 2026-11-05).
+          grid: GRID_AT_OPEN,
           // Its own BASELINE, 2 m as it opens (R10.T12.d).
           slopeBaselineM: GROUND_READOUT_OPTIONS.slopeBaselineM,
           // Every note's reasons folded as it opens (the owner's request, 2026-11-01).
@@ -680,6 +681,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         withSlot(previous, slot, (state) => ({
           ...state,
           style: result.run.camera.style,
+          grid: gridAfterStyle(run.camera.style, result.run.camera.style, state.grid),
           selection: action.kind === "target" ? result.run.camera.target : state.selection,
           shown: state.shown === null ? null : { ...state.shown, run: result.run },
         })),
@@ -843,7 +845,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
                 },
           // Its own handle on the stage's atmosphere cache (R08.T10.b).
           atmosphere: loop.air.inputFor(each.atmosphere.cache, each.atmosphere.scene, each.nowMs),
-          // Its own reference grid over its photorealistic image, or none (the owner's request).
+          // Its own symbology over its photorealistic image, or none (the owner's requests).
           grid: inputs.grid,
           // Its tripod, while its page states the readout with its point (R10.T12.d).
           lineOfSightPoint: paged?.lineOfSightPoint,

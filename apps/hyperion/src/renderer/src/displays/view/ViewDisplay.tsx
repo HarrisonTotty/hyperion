@@ -91,6 +91,8 @@ import { litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import {
   availabilityOf,
+  GRID_AT_OPEN,
+  gridAfterStyle,
   gridRowStands,
   NO_VIEW_REFUSALS,
   type StyleRefusals,
@@ -631,8 +633,8 @@ interface LoopInputs {
    */
   readonly slopeBaselineM: SlopeBaselineM;
   /**
-   * The primary's `GRID` (the owner's request, 2026-10-31): whether its photorealistic image takes
-   * each body's limb and graticule over it, read at each frame.
+   * The primary's `GRID` (the owner's requests, 2026-10-31 and 2026-11-05): whether its
+   * photorealistic image takes the symbology over it, read at each frame.
    */
   readonly grid: boolean;
 }
@@ -941,8 +943,9 @@ function ViewStage({
   // the exposure's reading and the meter's status stand as one snapshot.
   const [metering, setMetering] = useState<Metering>(NOT_YET_DRAWN);
   const [selection, setSelection] = useState<CameraTarget | null>(null);
-  // The primary's GRID (the owner's request, 2026-10-31): ON as the stage mounts, its own.
-  const [grid, setGrid] = useState(true);
+  // The primary's GRID, its own: OFF as the stage mounts and each time its style becomes
+  // PHOTOREALISTIC (the owner's request, 2026-11-05).
+  const [grid, setGrid] = useState(GRID_AT_OPEN);
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
@@ -977,7 +980,7 @@ function ViewStage({
     universe,
     notePlayed,
     lineOfSightPoint: undefined,
-    grid: true,
+    grid: GRID_AT_OPEN,
     slopeBaselineM,
   });
 
@@ -1543,7 +1546,7 @@ function ViewStage({
               : { source: session, view: VIEW_ID, nowMs, intervals: poseIntervals },
           // The tripod, while the plate states the readout with its point (R10.T12).
           lineOfSightPoint: inputs.lineOfSightPoint,
-          // Its reference grid over the photorealistic image, or none (the owner's request).
+          // Its symbology over the photorealistic image, or none (the owner's requests).
           grid: inputs.grid,
           // Its bodies' air, through its handle on the stage's cache (R08.T10.b).
           atmosphere: air.inputFor(inputs.atmosphere, airScene, nowMs),
@@ -1691,8 +1694,10 @@ function ViewStage({
       if (result.kind === "refused") {
         return;
       }
+      const before = runRef.current.camera.style;
       runRef.current = result.run;
       setPublished((previous) => ({ ...previous, run: result.run }));
+      setGrid((on) => gridAfterStyle(before, result.run.camera.style, on));
       // Its readout at the loop's next publish, or where no loop runs through the command's hold.
       if (!loopRunsRef.current) {
         commandReadouts.offer(showCommanded);
@@ -2627,8 +2632,8 @@ function ViewStage({
             designator={operatedView === null ? PRIMARY_NAME : operatedView.slot.name}
             id={foldIds.style}
             hidden={folded("style")}
-            // The GRID row sets the CONTROLS view's own reference grid over its photorealistic
-            // image (the owner's request, 2026-10-31).
+            // The GRID row sets the CONTROLS view's own symbology over its photorealistic image
+            // (the owner's requests, 2026-10-31 and 2026-11-05).
             grid={
               operatedView === null
                 ? { on: grid, onGrid: setGrid }

@@ -102,10 +102,10 @@ describe("the inspection run (the owner's request)", () => {
     expect(CAPTURE_LABEL.test(label)).toBe(true);
   });
 
-  it("names its maximized and GRID OFF captures as a capture may be named (2026-11-01)", () => {
+  it("names its maximized and GRID ON captures as a capture may be named (2026-11-05)", () => {
     const label = inspectionCaptureLabel(BODY);
     expect(
-      [`${label}-maximized`, `${label}-grid-off`].map((each) => CAPTURE_LABEL.test(each)),
+      [`${label}-maximized`, `${label}-grid-on`].map((each) => CAPTURE_LABEL.test(each)),
     ).toEqual([true, true]);
   });
 

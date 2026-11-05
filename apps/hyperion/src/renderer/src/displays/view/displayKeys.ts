@@ -7,9 +7,9 @@ import type { KeyPress } from "../../view/camera/keys";
 import { STYLE_TOGGLE_KEY } from "../../view/photoreal/style";
 
 /**
- * The `GRID` row's key, `5`, after the style's `4` on the same panel: it turns the reference grid of
- * the view it acts on `ON` or `OFF` while that view's row stands. A digit, as every single key of
- * the view is, the letters being the flight keys'.
+ * The `GRID` row's key, `5`, after the style's `4` on the same panel: it turns the symbology over
+ * the image of the view it acts on `ON` or `OFF` while that view's row stands. A digit, as every
+ * single key of the view is, the letters being the flight keys'.
  */
 export const GRID_KEY = "5";
 

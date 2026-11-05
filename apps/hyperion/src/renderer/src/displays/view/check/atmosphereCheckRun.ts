@@ -1048,9 +1048,10 @@ export async function runAtmosphereCheck(
     return rangeM;
   };
   /**
-   * Sets the primary's `GRID` at `OFF` through its `STYLE` panel, the image bare, as the inspection
-   * run's last capture has it: each stage mounts at `ON`, and the datum's graticule over a disc
-   * hides the air's shading the looks judge.
+   * Holds the primary's `GRID` at `OFF` through its `STYLE` panel, the image bare, as the
+   * inspection run's first capture has it: each stage mounts at `OFF` (the owner's request,
+   * 2026-11-05), and the datum's graticule over a disc would hide the air's shading the looks
+   * judge.
    */
   const gridOff = async (): Promise<void> => {
     controls.unfoldPanel("view-style");

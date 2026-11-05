@@ -1760,6 +1760,11 @@ function gridRow(designator: string): HTMLElement {
   });
 }
 
+/** `INSTRUMENT 1`'s slot. */
+function instrumentOne(): HTMLElement {
+  return screen.getByRole("region", { name: "INSTRUMENT 1" });
+}
+
 /** The `GRID` the frames of the view `id` were drawn at over the next `ms`. */
 function gridsOver(view: ViewDisplayHarness, ms: number, id: string): ReadonlyArray<unknown> {
   return framesOver(view, ms)
@@ -1767,48 +1772,71 @@ function gridsOver(view: ViewDisplayHarness, ms: number, id: string): ReadonlyAr
     .map(({ inputs }) => inputs.grid);
 }
 
-describe("a view's GRID over its photorealistic image (the owner's request, 2026-10-31)", () => {
-  it("draws the primary's frames without its grid once OFF is pressed", async () => {
+describe("a view's GRID over its photorealistic image (the owner's requests, 2026-10-31 and 2026-11-05)", () => {
+  it("draws the primary's frames without its symbology as its style opens", async () => {
     const view = await terrainTestShown();
     await photorealistic(view, primaryLabelBlock);
-    await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "OFF" }));
     const grids = gridsOver(view, 600, PRIMARY_VIEW_ID);
     expect([grids.length > 0, grids.every((grid) => grid === false)]).toEqual([true, true]);
   });
 
-  it("states GRID OFF on the primary's label block while it is OFF", async () => {
+  it("draws the primary's frames with its symbology once ON is pressed", async () => {
     const view = await terrainTestShown();
     await photorealistic(view, primaryLabelBlock);
-    await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "OFF" }));
-    view.advance(300);
+    await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "ON" }));
+    const grids = gridsOver(view, 600, PRIMARY_VIEW_ID);
+    expect([grids.length > 0, grids.every((grid) => grid === true)]).toEqual([true, true]);
+  });
+
+  it("states GRID OFF on the primary's label block as its photorealistic style opens", async () => {
+    const view = await terrainTestShown();
+    await photorealistic(view, primaryLabelBlock);
     expect(readingIn(primaryLabelBlock(), "GRID")).toBe("OFF");
   });
 
-  it("keeps each view's own GRID: an instrument opens at ON, the primary's OFF kept", async () => {
+  it("keeps each view's own GRID: an instrument opens at OFF, the primary's ON kept", async () => {
     const view = await terrainTestShown();
     await photorealistic(view, primaryLabelBlock);
-    await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "OFF" }));
+    await view.user.click(within(gridRow("PRIMARY")).getByRole("button", { name: "ON" }));
     await controlInstrument(view);
     await photorealistic(view, () => screen.getByRole("region", { name: "INSTRUMENT 1" }));
+    const instrument = gridsOver(view, 600, instrumentViewId(1));
+    const primary = gridsOver(view, 600, PRIMARY_VIEW_ID);
+    expect([
+      instrument.length > 0 && instrument.every((grid) => grid === false),
+      primary.length > 0 && primary.every((grid) => grid === true),
+    ]).toEqual([true, true]);
+  });
+
+  it("draws an instrument's frames with its symbology once its ON is pressed, the primary's kept OFF", async () => {
+    const view = await terrainTestShown();
+    await controlInstrument(view);
+    await photorealistic(view, instrumentOne);
+    if (readingIn(instrumentOne(), "GRID") !== "OFF") {
+      throw new Error("INSTRUMENT 1 opens its photorealistic style at GRID OFF");
+    }
+    await view.user.click(within(gridRow("INSTRUMENT 1")).getByRole("button", { name: "ON" }));
     const instrument = gridsOver(view, 600, instrumentViewId(1));
     const primary = gridsOver(view, 600, PRIMARY_VIEW_ID);
     expect([
       instrument.length > 0 && instrument.every((grid) => grid === true),
       primary.length > 0 && primary.every((grid) => grid === false),
-    ]).toEqual([true, true]);
+      readingIn(instrumentOne(), "GRID"),
+    ]).toEqual([true, true, null]);
   });
 
-  it("draws an instrument's frames without its grid, and states GRID OFF, once its OFF is pressed", async () => {
+  it("opens an instrument's GRID at OFF again each time its style becomes PHOTOREALISTIC", async () => {
     const view = await terrainTestShown();
     await controlInstrument(view);
-    await photorealistic(view, () => screen.getByRole("region", { name: "INSTRUMENT 1" }));
-    await view.user.click(within(gridRow("INSTRUMENT 1")).getByRole("button", { name: "OFF" }));
-    const instrument = gridsOver(view, 600, instrumentViewId(1));
-    const primary = gridsOver(view, 600, PRIMARY_VIEW_ID);
+    await photorealistic(view, instrumentOne);
+    await view.user.click(within(gridRow("INSTRUMENT 1")).getByRole("button", { name: "ON" }));
+    await view.user.keyboard("4");
+    await playFor(view, 2);
+    await photorealistic(view, instrumentOne);
+    const grids = gridsOver(view, 600, instrumentViewId(1));
     expect([
-      instrument.length > 0 && instrument.every((grid) => grid === false),
-      primary.every((grid) => grid === true),
-      readingIn(screen.getByRole("region", { name: "INSTRUMENT 1" }), "GRID"),
-    ]).toEqual([true, true, "OFF"]);
+      readingIn(instrumentOne(), "GRID"),
+      grids.length > 0 && grids.every((grid) => grid === false),
+    ]).toEqual(["OFF", true]);
   });
 });

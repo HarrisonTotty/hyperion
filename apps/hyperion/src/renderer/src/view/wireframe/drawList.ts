@@ -238,11 +238,13 @@ export interface LineBatch {
    */
   readonly body?: string;
   /**
-   * Whether the batch is a reference grid that is no body's datum: a ring's radial ticks (plan R02,
-   * Design note 13), which the photorealistic overlay leaves out with the view's `GRID` at `OFF`,
-   * as it does a body's limb and graticule (R08.T17); absent for every other batch.
+   * Whether the photorealistic overlay keeps the batch with the view's `GRID` at `OFF`, the picture
+   * otherwise bare (the owner's request and its UX ruling, 2026-11-05): a craft's hull edges and a
+   * ring's two edges, which stand for what the image does not draw yet (Design note 17), and a
+   * survey edge, which tells unsurveyed ground from surveyed; absent for every other batch, which
+   * `GRID OFF` leaves out.
    */
-  readonly grid?: true;
+  readonly keptAtGridOff?: true;
   /**
    * The centre, from the camera, `f32` m along the camera frame's axes, of the body whose ground
    * the batch is drawn on (plan R10, R10.T16.c): the survey edge's, each of whose fragments is
@@ -866,13 +868,14 @@ export function buildWireframeDrawList(
     const token = selected ? "text" : "textMuted";
     const widthPx = drawnPx(selected ? STROKE_PX.selected : STROKE_PX.thin);
     const { edges, ticks } = ringEllipse({ ...ring, centreM }, projection, viewport);
-    lines.push(batch(`ring:${ring.body}`, "view", packPolylines(edges), token, widthPx));
-    // Its ticks a batch of their own, its grid, which the overlay's `GRID` may leave out (R08.T17).
+    // Its two edges stand for it over the image until R11 draws it, whatever the view's `GRID`.
+    lines.push({
+      ...batch(`ring:${ring.body}`, "view", packPolylines(edges), token, widthPx),
+      keptAtGridOff: true,
+    });
+    // Its ticks a batch of their own, which the overlay's `GRID` at `OFF` leaves out (R08.T17).
     if (ticks.length > 0) {
-      lines.push({
-        ...batch(`ring:${ring.body}:ticks`, "view", packPolylines(ticks), token, widthPx),
-        grid: true,
-      });
+      lines.push(batch(`ring:${ring.body}:ticks`, "view", packPolylines(ticks), token, widthPx));
     }
   }
 
@@ -923,8 +926,8 @@ export function buildWireframeDrawList(
     ) {
       sightHulls.push(hullOnView(craft.hull, craft.pose.attitude, originM, projection, viewport));
     }
-    lines.push(
-      batch(
+    lines.push({
+      ...batch(
         `hull:${craft.id}`,
         "view",
         packPolylines(edges.map(([a, b]) => [a, b])),
@@ -936,7 +939,9 @@ export function buildWireframeDrawList(
         // photorealistic image the overlay cases it (R07.T16.a), within the faces' slope term.
         0,
       ),
-    );
+      // The craft's stand-in over the image until the image draws craft, whatever the `GRID`.
+      keptAtGridOff: true,
+    });
     const faces = hullFaces(craft.hull, craft.pose.attitude);
     const triangles = new Float32Array(faces.length * 9);
     faces.forEach((corners, i) => {
@@ -1112,6 +1117,8 @@ export function buildWireframeDrawList(
         ...batch(`survey-edge:${edge.body}`, "view", segments, "text", drawnPx(STROKE_PX.thin)),
         // On the body's ground: its depth pulled towards the camera over it (R10.T16.c).
         groundCentreF32: Float32Array.from([edge.centreM.x, edge.centreM.y, edge.centreM.z]),
+        // Unsurveyed ground never looks surveyed, whatever the `GRID` (the guide's survey edge).
+        keptAtGridOff: true,
       });
     }
     surveyEdges.push({ body: edge.body, nearestRangeM: mark.nearestRangeM });

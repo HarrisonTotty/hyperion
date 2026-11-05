@@ -33,12 +33,15 @@
  * covers the image beyond the body, an atmosphere's glow above the limb included; a body too small
  * to stroke inside has no datum over the image (`datumOverImage`). The wireframe centres its limb.
  *
- * A view's `GRID` (the owner's request, 2026-10-31) at `OFF` leaves the reference grid out of the
- * overlay: every body's datum lines, its limb and graticule (the batches that name their body,
- * `LineBatch.body`), and since R08.T17 a ring's radial ticks (`LineBatch.grid`), so that the image
- * of the body shows unmarked; every mark stays, the occluders that hide marks behind a body among
- * them, and a ring's two edges, which stand for it until R11 draws it (Design note 17; lean,
- * 2026-11-05).
+ * A view's `GRID` (the owner's requests, 2026-10-31 and 2026-11-05), `OFF` as its photorealistic
+ * style opens, leaves the image as the picture alone: the overlay keeps only the batches marked
+ * {@link LineBatch.keptAtGridOff}, each craft's hull edges on its silhouette and a ring's two
+ * edges, which stand for what the image does not draw yet (Design note 17), and the survey edge,
+ * which tells unsurveyed ground from surveyed; every body's datum lines, orbit, ring tick,
+ * predicted path, the line-of-sight mark and every symbol, reticle and chevron are left out, and
+ * the occluders stay, so that a stand-in behind a body stays hidden (the UX ruling, 2026-11-05).
+ * Where none of them is in the list, the view draws no symbology pass at all
+ * ({@link overlayDrawsAt}).
  */
 import type { ColourTokens } from "../../spatial/paint";
 import type { BodyFigure } from "../appearance/fromWire";
@@ -68,8 +71,8 @@ function cased(line: LineBatch, casingPx: number): LineBatch {
  * R02's draw list as the overlay draws it over the image: every line batch cased in its
  * `--surface-0` casing colour at `CASING_PX` times the list's stroke scale ({@link casingDevicePx}), the
  * hull edges included; every hull's opaque faces filled in `--surface-0`, its silhouette
- * (R07.T16.e); no star sprite; and, with the view's `GRID` at `OFF`, no body's datum lines and no
- * ring's ticks.
+ * (R07.T16.e); no star sprite; and, with the view's `GRID` at `OFF`, only the batches it keeps
+ * there ({@link LineBatch.keptAtGridOff}).
  *
  * @remarks
  * Its list is built with the datum inside the figure (`DrawOptions.datumInside`; plan R10,
@@ -78,9 +81,8 @@ function cased(line: LineBatch, casingPx: number): LineBatch {
  *
  * @param tokens - The tokens the list was built with, whose `--surface-0` its casings take: the
  *   silhouette is one surface with them (decision-r07-t16a, item 3).
- * @param grid - The view's `GRID`: `true` (`ON`, as a view starts) draws each body's limb and
- *   graticule and each ring's ticks over the image; `false` leaves them out and keeps every other
- *   batch.
+ * @param grid - The view's `GRID`: `true` (`ON`) draws every batch over the image; `false`
+ *   (`OFF`, as a view's photorealistic style opens) only the stand-ins and survey edges.
  */
 export function overlayDrawList(
   list: WireframeDrawList,
@@ -93,10 +95,20 @@ export function overlayDrawList(
     ...list,
     occluderMeshes: list.occluderMeshes.map(silhouette),
     lines: list.lines
-      .filter((line) => grid || (line.body === undefined && line.grid !== true))
+      .filter((line) => grid || line.keptAtGridOff === true)
       .map((line) => cased(line, casingPx)),
     sprites: [],
   };
+}
+
+/**
+ * Whether a view's overlay draws anything over its photorealistic image, and so its symbology's
+ * pass is drawn: at `GRID` `ON` always, as R07 built it; at `OFF` only where the list holds a batch
+ * kept there ({@link LineBatch.keptAtGridOff}), so that the picture alone costs no pass (the
+ * owner's request, 2026-11-05).
+ */
+export function overlayDrawsAt(list: Pick<WireframeDrawList, "lines">, grid: boolean): boolean {
+  return grid || list.lines.some((line) => line.keptAtGridOff === true);
 }
 
 /**
