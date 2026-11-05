@@ -73,6 +73,7 @@ use crate::time::{Span, UniverseTime};
 use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M};
 use crate::units::{GravitationalParameter, Megayears, Radians, SolarMasses, Years};
 
+use super::co_chandrasekhar::ChandrasekharPath;
 use super::detached::last_living;
 use super::dwarf_limit::CoreSource;
 use super::evolve::{Engine, LiveOrbit, OwnMainSequenceEnd, Pin, PreTest, clock_resolution_years};
@@ -101,7 +102,8 @@ pub(super) enum SwollenDeath {
     ElectronCapture,
     /// A carbon–oxygen core that dies with its envelope on where the track's would not ignite
     /// carbon: carbon ignites in the degenerate core at `Mc,SN` and nothing is left (HPT section 6,
-    /// [`DeathKind::ThermonuclearDisruption`]).
+    /// [`DeathKind::ThermonuclearDisruption`]), a Type Ia candidate from 30 (P11.T4's
+    /// `co_chandrasekhar`).
     Disruption,
 }
 
@@ -316,9 +318,10 @@ impl Engine {
             .remnant_clock()
             .map_or(Phase::NoRemnant, |(phase, ..)| phase);
         let core = death.progenitor().co_core_mass();
-        let ending = SwollenDeath::of(self.dwarf_cores[i], death.kind(), core, phase);
+        let source = self.dwarf_cores[i];
+        let ending = SwollenDeath::of(source, death.kind(), core, phase);
         #[cfg(test)]
-        if self.dwarf_cores[i] != CoreSource::Other {
+        if source != CoreSource::Other {
             ending.count();
         }
         let member = match ending {
@@ -346,12 +349,19 @@ impl Engine {
                 return;
             }
             SwollenDeath::Disruption => {
-                self.set_member(i, Member::Gone);
-                let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);
-                self.explode(i, before, nothing, None);
+                let masses = self.ignition_masses(i, core, before);
+                self.end_at_the_chandrasekhar_mass(
+                    i,
+                    before,
+                    ChandrasekharPath::KeptCoreAtDeath,
+                    masses,
+                );
                 return;
             }
         };
+        if source == CoreSource::CarbonOxygenDwarf {
+            self.own_carbon_ignition(i, death.kind(), core, before);
+        }
         let left = self.members_mass_left_msun(&member, &remnant);
         self.set_member(i, member);
         if !death.kind().is_sudden() || matches!(ending, SwollenDeath::WhiteDwarf(_)) {

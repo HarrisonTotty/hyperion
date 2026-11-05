@@ -7743,3 +7743,21 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
 - **P11.T4.d's 150 M☉ bound (2026-11-05).** A merger's product over 150 M☉ is placed at 150 M☉
   (`track_mass`), the excess lost at the merger (lean, 2026-11-05). The slow check reads
   min(M₁ + M₂, 150 M☉); `LEAST_KEPT_UNDER_THE_ARM` is re-pinned at 28.
+- **P11.T4: a carbon–oxygen dwarf or core at M_Ch ends one way, held at 30** (lane
+  `p15-t9b-ia-yield`, 2026-11-05; nothing moves at 28–29).
+  - _The hold._ `CO_CHANDRASEKHAR_VERSION` = 30, `StellarRules::co_chandrasekhar`, and new
+    `StellarRules`/`GalaxyRules::every_30_hold`. One choke point, `Engine::end_at_the_chandrasekhar_mass`
+    by `ChandrasekharPath` (seven paths); the brief's gate reads its `fitted_tables_hold`.
+  - _From 30._ Every path disrupts, leaves nothing and pools one `Accretion` candidate: the dwarf
+    or core at ignition, beside its companion (none after a merger). ONe keeps its AIC.
+  - _Leans (2026-11-05)._ A helium dwarf at its collapse mass disrupts too (BSE's `evolv2.f`). A
+    track's own carbon ignition in a core that is no dwarf's pools none (plan 09's single-star rule).
+  - _Lean (2026-11-05): research-leans-38 kept._ A kept core whose track collapses an iron core still
+    collapses. That is P15.T9.b's 1.12 M☉ dwarf (golden `0x62005957fe000024`, galaxy 1234): a CO
+    dwarf merged with a helium star, a neutron star at 28, 29 and 30 alike.
+  - _For the bump to 30._ Delete `Held`, `ChandrasekharPath::held_ending`, the field, the brief's
+    read and the tripwire; refit the pair-light and reach tables. The census figures are in
+    `co_chandrasekhar_hold.rs` and `ns_accretion_hold.rs` (members 1,834 → 1,658 at 30).
+  - _Landed over 29's folds (land-pod-r2, 2026-11-06)._ No `KeptCoreAtLimit` path: since the 29
+    folds a kept carbon–oxygen core has no limit of its own, so seven paths; the tests' "every 29
+    hold" is the version's rules.

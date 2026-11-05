@@ -40,11 +40,11 @@ use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
 use crate::stellar::remnant::structure::{white_dwarf_collapse_mass, white_dwarf_radius};
 use crate::stellar::remnant::white_dwarf::WhiteDwarfCore;
-use crate::stellar::remnant::{CompactRemnant, RemnantKind};
 use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts};
 use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
+use super::co_chandrasekhar::{ChandrasekharPath, CoChandrasekharRules};
 use super::dwarf_limit::{self, CoreSource, ProductTyping, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
 use super::params::BinaryParams;
@@ -800,10 +800,20 @@ impl Engine {
                     Phase::CarbonOxygenWhiteDwarf
                 };
                 // `finish_merger` collapses a dwarf at the Chandrasekhar mass (P11.T4's fix), but for
-                // a pinned primary's, which collapses at once at it as before the fix.
+                // a pinned primary's, which collapses at once at it as before the fix, and from 30
+                // disrupts unless it is oxygen–neon (`co_chandrasekhar`).
                 if self.pin_pending(0) && dwarf_limit::collapses(total) {
                     self.finish_merger(self.white_dwarf(phase, total).into());
-                    self.accretion_induced_collapse(0, total);
+                    if phase == Phase::OxygenNeonWhiteDwarf {
+                        self.accretion_induced_collapse(0, total);
+                    } else {
+                        self.end_at_the_chandrasekhar_mass(
+                            0,
+                            total,
+                            ChandrasekharPath::PinnedMerger,
+                            [SolarMasses::new(total), SolarMasses::ZERO],
+                        );
+                    }
                     return;
                 }
                 self.white_dwarf(phase, total).into()
@@ -851,16 +861,19 @@ impl Engine {
 
     /// Records the merger: `product` in the primary's place, nothing in the secondary's, no orbit.
     ///
-    /// A white dwarf product at or above the Chandrasekhar mass collapses at once, as an accreting
-    /// one does (`Engine::accretor_events`): a Type Ia candidate is pooled unless it is oxygen–neon,
-    /// with the two stars' masses before the merger, and the dwarf collapses by accretion-induced
-    /// collapse (P11.T4's fix, `dwarf_limit::collapses`); a pinned primary's product is left to its
-    /// pin ([`Engine::pin_pending`], P11.T4's dwarf limit), and an unplaced product's
-    /// iron core ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]), as does
-    /// its oxygen–neon core by electron capture ([`Product::ElectronCapture`],
-    /// [`Engine::capture_collapse`]), and its disruption leaves nothing ([`Product::Disruption`]);
-    /// none pools a candidate. A product whose core is a carbon–oxygen or oxygen–neon dwarf's keeps
-    /// that kind ([`Engine::dwarf_cores`]).
+    /// A white dwarf product at or above the Chandrasekhar mass ends at once, as an accreting one
+    /// does (`Engine::accretor_events`): an oxygen–neon one by accretion-induced collapse, and any
+    /// other as the stellar rules' `co_chandrasekhar` arm ends it
+    /// ([`Engine::end_at_the_chandrasekhar_mass`]), its Type Ia candidate pooled first: under the
+    /// held arm with the two stars' masses before the merger, then its accretion-induced collapse
+    /// (P11.T4's fix, `dwarf_limit::collapses`), and from 30 with the product's mass alone, then a
+    /// disruption that leaves nothing. A pinned primary's product is left to its pin
+    /// ([`Engine::pin_pending`], P11.T4's dwarf limit), and an unplaced product's iron core
+    /// ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]), as does its
+    /// oxygen–neon core by electron capture ([`Product::ElectronCapture`],
+    /// [`Engine::capture_collapse`]), with no candidate, and its disruption leaves nothing
+    /// ([`Product::Disruption`]), with a candidate of its mass alone from 30. A product whose core
+    /// is a carbon–oxygen or oxygen–neon dwarf's keeps that kind ([`Engine::dwarf_cores`]).
     fn finish_merger(&mut self, product: Product) {
         let (product, source, ending) = match product {
             Product::Member(member, source) => (member, source, None),
@@ -901,21 +914,25 @@ impl Engine {
             Some(Product::ElectronCapture { co_core, mass }) => {
                 self.capture_collapse(0, co_core, mass);
             }
-            Some(Product::Disruption { mass }) => {
-                let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);
-                self.explode(0, mass.value(), nothing, None);
-            }
+            Some(Product::Disruption { mass }) => self.end_at_the_chandrasekhar_mass(
+                0,
+                mass.value(),
+                ChandrasekharPath::UnplacedProduct,
+                [mass, SolarMasses::ZERO],
+            ),
             Some(Product::Member(..)) | None => {}
         }
         if let (Some((phase, m)), Some(masses)) = (dwarf, masses) {
-            if phase != Phase::OxygenNeonWhiteDwarf {
-                self.pool(PooledIaEvent::new(
-                    Years::new(self.age),
-                    IaPoolChannel::Accretion,
-                    masses,
-                ));
+            if phase == Phase::OxygenNeonWhiteDwarf {
+                self.accretion_induced_collapse(0, m);
+            } else {
+                // From 30 the candidate is the product's alone, so that it can detonate.
+                let masses = match self.ctx.rules().co_chandrasekhar {
+                    CoChandrasekharRules::Held => masses,
+                    CoChandrasekharRules::Disrupted => [SolarMasses::new(m), SolarMasses::ZERO],
+                };
+                self.end_at_the_chandrasekhar_mass(0, m, ChandrasekharPath::MergedDwarf, masses);
             }
-            self.accretion_induced_collapse(0, m);
         }
     }
 

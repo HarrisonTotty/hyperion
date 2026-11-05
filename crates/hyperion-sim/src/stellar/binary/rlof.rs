@@ -88,6 +88,7 @@ use crate::stellar::remnant::{
 use crate::stellar::sse::{self, NewStar, Structure, Track};
 use crate::units::{SolarMasses, Years};
 
+use super::co_chandrasekhar::ChandrasekharPath;
 use super::detached::{Snapshot, orbital_momentum, semi_major_axis};
 use super::dwarf_limit;
 use super::evolve::{Engine, roche_lobe};
@@ -1252,21 +1253,17 @@ impl Engine {
                 ));
                 false
             }
-            // An oxygen–neon dwarf collapses at its capture mass (P11.T4's kept-core endings).
+            // An oxygen–neon dwarf collapses at its capture mass (P11.T4's kept-core endings), any
+            // other from 30 disrupts.
             Kind::HeliumWhiteDwarf | Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf
                 if white_dwarf_phase(ka)
                     .is_some_and(|phase| ma >= self.collapse_mass(phase).value()) =>
             {
-                if ka != Kind::OxygenNeonWhiteDwarf {
-                    let masses = masses_now(self);
-                    self.pool(PooledIaEvent::new(
-                        Years::new(self.age),
-                        IaPoolChannel::Accretion,
-                        [masses[a_idx], masses[d]],
-                    ));
-                }
+                let masses = masses_now(self);
                 self.close_segment();
-                self.accretion_induced_collapse(a_idx, ma);
+                let oxygen_neon = ka == Kind::OxygenNeonWhiteDwarf;
+                let path = (!oxygen_neon).then_some(ChandrasekharPath::Transfer);
+                self.end_dwarf_at_its_collapse(a_idx, ma, path, [masses[a_idx], masses[d]]);
                 true
             }
             Kind::NeutronStar if ma > MAX_NEUTRON_STAR_MASS.value() => {
@@ -1464,23 +1461,24 @@ impl Engine {
     }
 
     /// Member `i`, a white dwarf a wind has fed to the Chandrasekhar mass in a detached phase,
-    /// collapses as a dwarf fed by stable transfer does there ([`Engine::accretor_events`]; P11.T4's
-    /// `dwarf_limit`): a Type Ia candidate pooled unless it is oxygen–neon,
-    /// with the two stars' masses, and then its accretion-induced collapse.
+    /// ends as a dwarf fed by stable transfer does there ([`Engine::accretor_events`]; P11.T4's
+    /// `dwarf_limit`): an oxygen–neon one by its accretion-induced collapse, and any other as the
+    /// stellar rules' `co_chandrasekhar` arm ends it ([`Engine::end_at_the_chandrasekhar_mass`]),
+    /// its Type Ia candidate of the two stars' masses then pooled first: under the held arm by its
+    /// accretion-induced collapse, and from 30 by a disruption that leaves nothing.
     pub(super) fn collapse_fed_dwarf(&mut self, i: usize) {
         let (m, _) = self.current(i);
         let (other, _) = self.current(1 - i);
-        if let Member::Remnant { phase, .. } = &self.members[i]
-            && *phase != Phase::OxygenNeonWhiteDwarf
-        {
-            self.pool(PooledIaEvent::new(
-                Years::new(self.age),
-                IaPoolChannel::Accretion,
-                [SolarMasses::new(m), SolarMasses::new(other)],
-            ));
-        }
+        let oxygen_neon = matches!(
+            &self.members[i],
+            Member::Remnant {
+                phase: Phase::OxygenNeonWhiteDwarf,
+                ..
+            }
+        );
         self.close_segment();
-        self.accretion_induced_collapse(i, m);
+        let path = (!oxygen_neon).then_some(ChandrasekharPath::Wind);
+        self.end_dwarf_at_its_collapse(i, m, path, [m, other].map(SolarMasses::new));
     }
 
     /// Member `i`, a white dwarf of mass `m` at the Chandrasekhar mass, collapses to a neutron star

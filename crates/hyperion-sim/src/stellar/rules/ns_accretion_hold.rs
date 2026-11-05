@@ -7,7 +7,8 @@
 //!   every 27 hold it keeps under a tenth and stays a neutron star.
 //! - The same pair twice gives the same timeline.
 //! - Slow: a census of 10⁷ slab records under the version's rules, which the white-dwarf union's
-//!   29 folds moved (P11.T4's swollen dwarf, dwarf limit and kept-core endings).
+//!   29 folds moved (P11.T4's swollen dwarf, dwarf limit and kept-core endings), and one under
+//!   every 30 hold, which P11.T4's `co_chandrasekhar` moves.
 
 use hyperion_testkit::pins::Tolerance;
 
@@ -290,4 +291,31 @@ fn assert_the_figures(f: CompactFigures, pinned: CompactFigures) {
             && (f.most_gained - pinned.most_gained).abs() < 1e-12,
         "{f:?}"
     );
+}
+
+/// The census's figures under every 30 hold, as measured (2026-11-05, at generator version 28
+/// under every 29 hold; 432 s, pod, 16 vCPU), against [`CENSUS_FIGURES`]: 1,834 → 1,658 members
+/// (1,818 → 1,642 neutron stars), −176, P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass
+/// (`co_chandrasekhar`), which disrupt and leave nothing where under the version's rules they
+/// collapse into the 1.26 M☉ neutron stars of accretion-induced collapses beside their donors. The
+/// black holes, the grown, the median black hole and the most gained stay the version's.
+const CENSUS_FIGURES_30: CompactFigures = CompactFigures {
+    members: 1_658,
+    black_holes: 12,
+    grown: 2,
+    grown_by_dwarfs: 1,
+    median_black_hole: 3.053_147_766_835_219,
+    neutron_stars: 1_642,
+    most_gained: 0.175_378_456_071_606_3,
+};
+
+/// The census of 10⁷ slab records' X-ray binaries ([`slab_census`]) under every 30 hold: the
+/// figures of [`census_of_the_neutron_star_accretion`], pinned as measured
+/// ([`CENSUS_FIGURES_30`]).
+#[test]
+#[ignore = "slow: 10⁷ grid records' pairs run through the binary engine"]
+fn census_of_the_neutron_star_accretion_under_every_30_hold() {
+    let (scanned, f) = census(GalaxyRules::every_30_hold());
+    println!("every 30 hold: {scanned:?} records by band, {f:?}");
+    assert_the_figures(f, CENSUS_FIGURES_30);
 }

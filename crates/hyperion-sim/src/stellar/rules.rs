@@ -30,15 +30,23 @@
 //! - [`kick_rank`](StellarRules::kick_rank), the ordinary kick's rank table. No version holds a
 //!   second table yet, so every version takes the committed one. The tests reach a test-only
 //!   second table through it, to show that every reader goes through the choke point.
+//! - [`co_chandrasekhar`](StellarRules::co_chandrasekhar), at [`CO_CHANDRASEKHAR_VERSION`] (plan
+//!   11, P11.T4's fix): how a carbon–oxygen white dwarf or core at the Chandrasekhar mass ends, in a
+//!   disruption that leaves nothing with one Type Ia candidate from 30, read by the binary engine
+//!   through its input's rules (`Engine::end_at_the_chandrasekhar_mass`). The fitted tables keep
+//!   the version's rules until the bump refits them (`stellar/rules/co_chandrasekhar_hold.rs`).
 //!
 //! The 27 folds put P11's 27 holds on the record, and the 29 folds P11.T4's white-dwarf union and
-//! P11.T12's wind reach.
+//! P11.T12's wind reach; `co_chandrasekhar` is at 30.
+//!
+//! [`CO_CHANDRASEKHAR_VERSION`]: crate::stellar::binary::co_chandrasekhar::CO_CHANDRASEKHAR_VERSION
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
 
 use crate::GeneratorVersion;
+use crate::stellar::binary::co_chandrasekhar::CoChandrasekharRules;
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -49,27 +57,42 @@ pub(crate) struct StellarRules {
     ///
     /// [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
     pub(crate) kick_rank: KickRankRules,
+    /// How a carbon–oxygen white dwarf or core at the Chandrasekhar mass ends, the hold of
+    /// [`CO_CHANDRASEKHAR_VERSION`](crate::stellar::binary::co_chandrasekhar::CO_CHANDRASEKHAR_VERSION).
+    pub(crate) co_chandrasekhar: CoChandrasekharRules,
 }
 
 impl StellarRules {
     /// Each field's arm at `version`: the new arm from its `*_VERSION`, the held arm below it.
     ///
-    /// Every version takes the committed kick-rank table, and no field is held now.
+    /// Every version takes the committed kick-rank table; the carbon–oxygen dwarfs' ending at the
+    /// Chandrasekhar mass is held below 30.
     #[must_use]
-    pub(crate) const fn of_version(_version: GeneratorVersion) -> Self {
+    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
             kick_rank: KickRankRules::Committed,
+            co_chandrasekhar: CoChandrasekharRules::of_version(version),
         }
     }
 
+    /// Every stellar hold at 30 in force, for a test that asserts a 30 figure without a galaxy:
+    /// P11.T4's `co_chandrasekhar`. The stellar part of `GalaxyRules::every_30_hold()`, so a later
+    /// hold at 30 joins both with nothing to edit; the 30 bump deletes it with it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_30_hold() -> Self {
+        Self::of_version(GeneratorVersion::new(30))
+    }
+
     /// The test-only second table in place of the committed one
-    /// ([`KickRankRules::Probe`]), which no version takes: the tests' door to every reader's
-    /// choke point.
+    /// ([`KickRankRules::Probe`]), which no version takes, under the version's other rules: the
+    /// tests' door to every reader's choke point.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn probe() -> Self {
         Self {
             kick_rank: KickRankRules::Probe,
+            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 }
@@ -80,6 +103,8 @@ mod awd_donors_hold;
 mod binary_kicks_hold;
 #[cfg(test)]
 mod classes_hold;
+#[cfg(test)]
+mod co_chandrasekhar_hold;
 #[cfg(test)]
 mod collapses_hold;
 #[cfg(test)]
