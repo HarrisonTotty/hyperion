@@ -127,7 +127,7 @@ import { toHalfArray } from "../sky/half";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import type { SpriteRecord } from "../wireframe/drawList";
 import { sphereOutsideView, type SurveyedDatumFrame, WIREFRAME_MESHES } from "../wireframe/submit";
-import { surveyedDatumsOf } from "./overlay";
+import { type OverlayHider, overlayHidersOf, surveyedDatumsOf } from "./overlay";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 import { withVisibilityIds } from "../clusters/resolve";
 import {
@@ -164,6 +164,13 @@ export interface FrameTerrain {
    * (R07.T8.h); `false` where it gives none.
    */
   surveyedWhole(body: BodyIdHex): boolean;
+  /**
+   * R_occ of `body`'s terrain, m: the sphere about its centre inside every surface it can draw, its
+   * polar radius and its lowest height (`terrain/cull.ts`' `horizonCone`), behind whose ground the
+   * overlay's marks may lie hidden (`GeometrySettings`' `hiddenMarks`); `null` for a body with no
+   * pass. Absent, as on a fake, no mark is taken as hidden.
+   */
+  innerRadiusM?(body: BodyIdHex): number | null;
   /**
    * The draws of the terrain of each body `plan` hands over (`LitRegime` `terrain`, a
    * `MeshBodyPlan` whose `role` is `handed-over`, its record its lights), opaque with depth, drawn
@@ -269,10 +276,18 @@ export interface FrameAtmosphere {
  * and the rotation its reference surface was discarded with, so that the datum gives way on the
  * same mask, where the frame terrain's `surveyCoverage`, read again after its draws, might answer
  * otherwise.
+ *
+ * With `GeometrySettings`' `hiddenMarks` `culled` it is given the bodies among those whose mask
+ * holds every cell (`overlayHidersOf`, its role's `whole`) and whose terrain names the sphere inside
+ * all its ground (`FrameTerrain.innerRadiusM`), behind whose ground it leaves out the marks hidden
+ * there (`hiddenMarksCulled`); a submission that says no draw of it tests depth (`depthTested`
+ * `false`) is drawn with none of the terrain's depth before it, and one that does not say is drawn
+ * with it.
  */
 export type PhotorealOverlay = (
   surveyed: ReadonlyMap<string, SurveyedDatumFrame>,
-) => FrameSubmission;
+  hiders: ReadonlyArray<OverlayHider>,
+) => FrameSubmission & { readonly depthTested?: boolean };
 
 /** What one photorealistic frame draws. */
 export interface PhotorealFrame {
@@ -1181,12 +1196,18 @@ export class PhotorealRenderer {
       // Each handed-over body's datum gives way where its reference surface did (R10.T16.f), and
       // the terrain's depth goes first, so that nearer ground hides the marks drawn after it
       // (R10.T16.c): the scene's, where its size is the canvas's and the terrain asks it (plan
-      // R14, R14.T1.e), else the terrain's own.
-      const overlay = frame.overlay(surveyedDatumsOf(plan, frame.bodies));
+      // R14, R14.T1.e), else the terrain's own; none where no mark left tests it (`hiddenMarks`).
+      const surveyed = surveyedDatumsOf(plan, frame.bodies);
       const terrain = frame.terrain;
+      const radiusOf = terrain?.innerRadiusM?.bind(terrain);
+      const hiders =
+        radiusOf !== undefined && geometry.hiddenMarks === "culled"
+          ? overlayHidersOf(plan, radiusOf)
+          : [];
+      const { depthTested, ...overlay } = frame.overlay(surveyed, hiders);
       const sceneDepth = resources.target.depth;
       let depth: ReadonlyArray<DrawItem> = [];
-      if (terrain !== undefined) {
+      if (terrain !== undefined && depthTested !== false) {
         depth =
           terrain.sceneDepth() &&
           sceneDepth !== null &&

@@ -272,6 +272,8 @@ export interface GeometryOverride {
    * camera's cap, or the masks strided too.
    */
   readonly standInStrides?: "off" | "own-grids" | "all";
+  /** R10.T16.c: the overlay's marks a body's ground hides drawn, or culled with the ground's depth. */
+  readonly hiddenMarks?: "drawn" | "culled";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

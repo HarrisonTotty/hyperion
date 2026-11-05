@@ -60,6 +60,7 @@ import { uvToSt } from "./cube";
 import {
   cascadeBodyIndex,
   type FrameTerrainPass,
+  HIDING_CLEARANCE_M,
   LiveFrameTerrain,
   morePressingAnnunciation,
   surveyEdgeViewsOf,
@@ -410,6 +411,8 @@ function fakeSource(
     readonly overlayMode?: FrameTerrainPass["geometry"]["overlayDepth"];
     readonly strides?: FrameTerrainPass["geometry"]["strides"];
     readonly whole?: boolean;
+    /** The pass's R_occ, m, absent as on a pass that names none. */
+    readonly innerRadiusM?: number;
     /** The pass's late draws (plan R14, R14.T3.d). */
     readonly late?: ReadonlyArray<DrawItem>;
   } = {},
@@ -432,6 +435,7 @@ function fakeSource(
     heights: new ResidentHeights(),
     viewIds: new Set([VIEW]),
     faulted: false,
+    ...(options.innerRadiusM === undefined ? {} : { innerRadiusM: options.innerRadiusM }),
   };
   const frame: TerrainViewFrame = {
     draws: options.draws ?? [DRAW],
@@ -681,6 +685,38 @@ describe("a view's frame terrain (R10.T16.c)", () => {
       whole({ whole: true, ready: false }),
       whole({ whole: true, hasPass: false }),
     ]).toEqual([true, false, false, false]);
+  });
+
+  it("gives a body's terrain's inner radius from its pass once its draws give the symbology its depth, and none before them, without a pass or its depth, or where the pass names none (hiddenMarks)", () => {
+    const { plan, body } = handed();
+    const radius = (options: Parameters<typeof fakeSource>[0], draw = true): number | null => {
+      const terrain = frameTerrain(fakeSource(options).source);
+      if (draw) {
+        terrain.draws(plan, [body]);
+      }
+      return terrain.innerRadiusM(BODY);
+    };
+    expect([
+      radius({ innerRadiusM: 6.3e6 }),
+      radius({ innerRadiusM: 6.3e6 }, false),
+      radius({ innerRadiusM: 6.3e6, hasPass: false }),
+      radius({ innerRadiusM: 6.3e6, depth: null }),
+      radius({}),
+    ]).toEqual([6.3e6, null, null, null, null]);
+  });
+
+  it("gives no inner radius where the camera stands within HIDING_CLEARANCE_M of the drawn ground at its nadir", () => {
+    const radiusAt = (heightM: number): number | null => {
+      const body = bodyAt(A + heightM);
+      const plan = planOf(body);
+      const terrain = frameTerrain(fakeSource({ innerRadiusM: 1.7e6 }).source);
+      terrain.draws(plan, [body]);
+      return terrain.innerRadiusM(BODY);
+    };
+    expect([radiusAt(HIDING_CLEARANCE_M - 100), radiusAt(HIDING_CLEARANCE_M + 100)]).toEqual([
+      null,
+      1.7e6,
+    ]);
   });
 
   it("keeps the annunciation of the bodies it drew, none before its draws", () => {

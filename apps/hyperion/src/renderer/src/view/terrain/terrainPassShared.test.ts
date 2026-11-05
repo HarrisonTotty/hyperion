@@ -24,6 +24,7 @@ import { uvToSt, vertexDir, xyzToFaceUv } from "./cube";
 import { allocationTally } from "./gpu/allocationTally";
 import { normalsAtlasOf } from "./gpu/resources";
 import { CLASS_MORPH, INSTANCE_RECORD_BYTES, NO_PARENT_SLOT } from "./gpu/uniforms";
+import { horizonCone } from "./cull";
 import { craftContact, datumGroundUnder, finestPatchSizeM } from "./grounded";
 import {
   cornerNeighbours,
@@ -476,6 +477,18 @@ describe("the shared pass's level table (R10.T16.b)", () => {
     expect(made.pass.step({ views, grounded: [] }).reselected).toBe(true);
     expect(inputs.at(-1)?.planet.levels).toEqual(widened);
     expect(made.pass.planet.levels).toEqual(widened);
+  });
+
+  it("names its horizon's sphere, the cull's R_occ, inside every surface on the widened table too (hiddenMarks)", async () => {
+    const made = await sharedPass("high");
+    const before = made.pass.innerRadiusM;
+    const widened = goldenLevelTable("off").map((value, n) => (n % 4 === 3 ? value : 2 * value));
+    made.pass.setLevels(widened);
+    const occluder = (): number => horizonCone(made.pass.planet, vec3(0, 0, 2e7)).occluderRadiusM;
+    expect([before < made.pass.planet.figure.polarRadiusM, made.pass.innerRadiusM]).toEqual([
+      true,
+      occluder(),
+    ]);
   });
 
   it("selects again on a new σ by level with the table, and not on the same one (R10.T4.b)", async () => {

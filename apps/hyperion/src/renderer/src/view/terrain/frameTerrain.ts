@@ -245,6 +245,11 @@ export interface FrameTerrainPass {
   /** The resident bakes' heights (`TerrainPass.heights`). */
   readonly heights: ResidentHeightsView;
   /**
+   * R_occ of the body's terrain, m (`TerrainPass.innerRadiusM`), the sphere inside all its ground;
+   * absent on a fake, behind whose ground no mark is taken as hidden.
+   */
+  readonly innerRadiusM?: number;
+  /**
    * The ground view `view` drew at its last frame (`TerrainPass.drawnGround`; R10.T16.c after
    * R10.T16.i), its heights as the shader mixed them; absent on a fake that draws none.
    */
@@ -257,6 +262,15 @@ export interface FrameTerrainPass {
    */
   readonly faulted: boolean;
 }
+
+/**
+ * The least height of the camera above a body's drawn ground at its nadir, m, at which its ground
+ * hides the overlay's marks behind it (`GeometrySettings`' `hiddenMarks`): below it the camera may
+ * stand within the drawn mesh's departure from the resident heights it is read by (a cell's relief,
+ * and CDLOD's morph), where its triangles' back faces, culled, would hide nothing. A lean
+ * (perf-ground-gpu, 2026-11-05): the lever's windows stand 4 km and more above the ground.
+ */
+export const HIDING_CLEARANCE_M = 500;
 
 /** What a view's frame terrain reads of its source: `TerrainSession`'s, structurally. */
 export interface FrameTerrainSource {
@@ -365,6 +379,11 @@ export class LiveFrameTerrain implements FrameTerrain {
   #opaque: DrawItem[] = [];
   /** The bodies the last {@link LiveFrameTerrain.draws} drew with the two-pass occlusion. */
   #occluded: BodyIdHex[] = [];
+  /**
+   * The bodies whose terrain's depth the last {@link LiveFrameTerrain.draws} gave the symbology's
+   * pass, the camera at least {@link HIDING_CLEARANCE_M} over their drawn ground at its nadir.
+   */
+  #hiders: ReadonlySet<BodyIdHex> = new Set();
 
   constructor(source: FrameTerrainSource, input: LiveFrameTerrainInput) {
     this.#source = source;
@@ -405,6 +424,17 @@ export class LiveFrameTerrain implements FrameTerrain {
    */
   surveyedWhole(body: BodyIdHex): boolean {
     return this.surveyCoverage(body) !== null && this.#source.coverageWhole(body);
+  }
+
+  /**
+   * R_occ of `body`'s terrain, m: its pass's horizon sphere (`horizonCone`), inside every surface it
+   * can draw, behind whose ground the overlay's marks may lie hidden (`GeometrySettings`'
+   * `hiddenMarks`); `null` for a body with no pass, or a pass that names none, and for one whose
+   * terrain's depth the last {@link LiveFrameTerrain.draws} gave the symbology's pass none of, or
+   * over whose drawn ground the camera stood less than {@link HIDING_CLEARANCE_M} at its nadir.
+   */
+  innerRadiusM(body: BodyIdHex): number | null {
+    return this.#hiders.has(body) ? (this.#source.pass(body)?.innerRadiusM ?? null) : null;
   }
 
   /**
@@ -479,7 +509,8 @@ export class LiveFrameTerrain implements FrameTerrain {
     );
     const cascades = drawable[cascadeBodyIndex(drawable)]?.index ?? -1;
     const occluded: BodyIdHex[] = [];
-    for (const [index, { record, view: terrainView, detailShare }] of handed.entries()) {
+    const hiders = new Set<BodyIdHex>();
+    for (const [index, { record, figure, view: terrainView, detailShare }] of handed.entries()) {
       const lit = terrainLightingOf(record, terrainView.rotation, exposureScale);
       // The plan's share of the terrain's own detail near the hand-over, with the disc's normal map
       // it fades from (R10.T15.b.2): a fade only where it is under way and the disc has the map.
@@ -538,8 +569,21 @@ export class LiveFrameTerrain implements FrameTerrain {
         if (overlay !== null) {
           depth.push(...overlay.clusters.map(sloped));
         }
+        const heights = pass?.heights;
+        const aglM =
+          heights === undefined
+            ? null
+            : heightAboveGroundM(
+                rotateToBodyFixed(terrainView.rotation, terrainView.cameraM),
+                figure,
+                (direction) => heights.groundHeightAtM(direction),
+              );
+        if (aglM !== null && aglM >= HIDING_CLEARANCE_M) {
+          hiders.add(record.body);
+        }
       }
     }
+    this.#hiders = hiders;
     this.#annunciation = annunciation;
     this.#decorated = decorated;
     this.#occluded = occluded;

@@ -71,6 +71,23 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     ]);
   });
 
+  it("reads and writes the overlay's hidden marks, last in the fields' order (R10.T16.c)", () => {
+    const override = parseGeometryOverride("hiddenMarks=drawn,terrainBudget=patches");
+    expect([override, geometryText(override), parseGeometryOverride("hiddenMarks=culled")]).toEqual(
+      [
+        { hiddenMarks: "drawn", terrainBudget: "patches" },
+        "terrainBudget=patches,hiddenMarks=drawn",
+        { hiddenMarks: "culled" },
+      ],
+    );
+  });
+
+  it("refuses hidden marks other than drawn or culled (R10.T16.c)", () => {
+    for (const text of ["hiddenMarks=hidden", "hiddenMarks=on", "hiddenMarks="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("hiddenMarks is drawn or culled");
+    }
+  });
+
   it("refuses a lit selection's budget other than patches or triangles (R14.T3.e)", () => {
     for (const text of ["terrainBudget=frames", "terrainBudget=on", "terrainBudget="]) {
       expect(() => parseGeometryOverride(text)).toThrow("terrainBudget is patches or triangles");

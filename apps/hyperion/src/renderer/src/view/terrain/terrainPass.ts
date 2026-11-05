@@ -210,7 +210,7 @@ import {
 import { MAX_LEVEL, type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { type StrideEdgePatch, StrideEdges } from "./strideEdges";
 import { StrideHoldFades } from "./strideHoldFades";
-import { type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
+import { lowestHeightM, type PlanetGeometry, planetGeometry, surfacePoint } from "./planet";
 import { type MorphSpans, TimeMorph } from "./timeMorph";
 import {
   finestPatchSizeM,
@@ -2286,6 +2286,15 @@ export class TerrainPass {
   /** The planet selection reads: the body's figure and its field's latest level table. */
   get planet(): PlanetGeometry {
     return this.#planet;
+  }
+
+  /**
+   * R_occ, m: the horizon's sphere about the body's centre (`horizonCone`'s), its polar radius and
+   * its field's lowest height, inside every surface the pass can draw, behind whose ground the
+   * overlay's marks may lie hidden (`GeometrySettings`' `hiddenMarks`).
+   */
+  get innerRadiusM(): number {
+    return this.#planet.figure.polarRadiusM + lowestHeightM(this.#planet);
   }
 
   /** Whether every block's rebakes have landed: the body's mask may take every cell given. */

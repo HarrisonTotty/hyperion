@@ -65,6 +65,7 @@ import {
 } from "../quality/qualitySetting";
 import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
 import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/submit";
+import type { OverlayHider } from "./overlay";
 import {
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
@@ -1929,6 +1930,66 @@ describe("the photorealistic renderer's overlay", () => {
         .find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)
         ?.draws.map((draw) => draw.material.name),
     ).toEqual(["terrain-depth-baked-offsets", "occluderSphere", "lines"]);
+    renderer.dispose();
+  });
+
+  it("gives the overlay each body handed over with a whole mask, with its terrain's inner radius, and draws none of the terrain's depth where the overlay says no mark tests it (hiddenMarks)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const handed = handedOverFrame();
+    await renderer.prepare(VIEWPORT, "high", "eye", handed.camera);
+    const [planet] = handed.bodies;
+    if (planet?.surveyCoverage === undefined) {
+      throw new Error("the frame hands over no body with a mask");
+    }
+    const whole: PhotorealFrame = {
+      ...handed,
+      bodies: [{ ...planet, surveyCoverage: { ...planet.surveyCoverage, whole: true } }],
+    };
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => MASK,
+      surveyedWhole: () => true,
+      innerRadiusM: () => 6.3e6,
+      draws: () => [],
+      symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    const given: Array<ReadonlyArray<OverlayHider>> = [];
+    const symbology = (frame: PhotorealFrame, depthTested: boolean): ReadonlyArray<string> => {
+      view.frames.length = 0;
+      const overlay: PhotorealOverlay = (_surveyed, hiders) => {
+        given.push(hiders);
+        return { ...SYMBOLOGY, draws: [drawOf("lines")], depthTested };
+      };
+      renderer.render(view, { ...frame, overlay, terrain });
+      return (
+        view.frames
+          .find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)
+          ?.draws.map((draw) => draw.material.name) ?? []
+      );
+    };
+    const drawn = { ...SETTINGS.high.geometry, hiddenMarks: "drawn" as const };
+    expect([
+      symbology(whole, false),
+      symbology(whole, true),
+      symbology({ ...whole, geometry: drawn }, true),
+      symbology(handed, true),
+    ]).toEqual([
+      ["lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+    ]);
+    expect(given).toEqual([
+      [{ body: planet.id, innerRadiusM: 6.3e6 }],
+      [{ body: planet.id, innerRadiusM: 6.3e6 }],
+      [],
+      [],
+    ]);
     renderer.dispose();
   });
 

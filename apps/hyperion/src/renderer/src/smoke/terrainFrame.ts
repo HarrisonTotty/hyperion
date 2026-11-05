@@ -836,6 +836,83 @@ async function sceneFrame(
   return { colour: halfTexels(colour), depth: new Float32Array(depthBytes), late, byIds };
 }
 
+/**
+ * One frame of `of`'s view through its renderer at the low setting's geometry with `hiddenMarks`
+ * over it (`GeometrySettings.hiddenMarks`), its symbology `marks` over the image, the body's mask
+ * taken as holding every cell: the canvas's fingerprint and its marks' magenta pixels, whether the
+ * body was handed over, and whether the overlay said a draw of it tests depth, where the pass draws
+ * the terrain's.
+ */
+async function hiddenMarksFrame(
+  of: SceneOf,
+  wireframe: WireframeRenderer,
+  marks: WireframeDrawList,
+  hiddenMarks: GeometrySettings["hiddenMarks"],
+): Promise<{
+  readonly handedOver: boolean;
+  readonly depthTested: boolean;
+  readonly marked: number;
+  readonly digest: string;
+}> {
+  const { photoreal, canvas, pass, mask, view } = of;
+  const frame = steppedFrame(pass, mask, view, performance.now());
+  const coverage = frame.body.surveyCoverage;
+  if (coverage === undefined) {
+    throw new Error("the view's body was given no coverage mask");
+  }
+  const camera = {
+    pose: {
+      frame: { kind: "body" as const, body: frame.body.id },
+      positionM: view.cameraM,
+      orientation: view.camera.orientation,
+    },
+    fovXRad: view.camera.fovXRad,
+  };
+  let depthTested = true;
+  const overlay: PhotorealOverlay = (surveyed, hiders) => {
+    const submission = overlaySubmission(
+      wireframe,
+      marks,
+      TOKENS,
+      camera,
+      VIEWPORT,
+      surveyed,
+      true,
+      hiders,
+    );
+    depthTested = submission.depthTested;
+    return submission;
+  };
+  const plan = photoreal.render(canvas, {
+    camera: view.camera,
+    viewport: VIEWPORT,
+    presentedPx: VIEWPORT,
+    role: "eye",
+    setting: "low",
+    geometry: { ...SETTINGS.low.geometry, hiddenMarks },
+    exposureScale: EXPOSURE,
+    sky: [],
+    starSprites: [],
+    hostDraws: new Map(),
+    glareSources: [],
+    lights: [{ disc: sunLikeHostDisc(), centreM: add(frame.body.centreM, scale(view.sun, AU_M)) }],
+    bodies: [{ ...frame.body, surveyCoverage: { ...coverage, whole: true } }],
+    depthWriters: [],
+    previousRegimes: new Map([[frame.body.id, "terrain"]]),
+    terrain: frame.terrain,
+    overlay,
+    meter: null,
+  });
+  // Read in the task that drew it (`checkPhotorealFrame`'s note).
+  const read = await canvas.readBack();
+  return {
+    handedOver: plan?.regimes.get(frame.body.id) === "terrain",
+    depthTested,
+    marked: markedRows(read).reduce((sum, count) => sum + count, 0),
+    digest: bytesDigest(read),
+  };
+}
+
 /** A frame and its pass's counters: the last of nine drawn alike. */
 interface CountedFrame {
   readonly frame: SceneFrame;
@@ -2032,7 +2109,8 @@ export async function checkTerrainFrame(
  * one lit pass on the low setting over the place, its changes cut at their first draw, as that
  * check's are. Its frame by the visibility buffer, composed as the renderer draws it, against the
  * forward frame (T2.a's), from the same selection and residents, at stride 1; then through the
- * renderer at the low setting's geometry, over the place and at a 2° graze.
+ * renderer at the low setting's geometry, over the place and at a 2° graze; and, over its pass,
+ * R10.T16.c's marks a whole survey's ground hides, culled and drawn (`GeometrySettings.hiddenMarks`).
  */
 export async function checkVisibilityFrame(
   engine: RenderEngine,
@@ -2057,6 +2135,7 @@ export async function checkVisibilityFrame(
   let made: TerrainPass | null = null;
   const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
   const photoreal = new PhotorealRenderer(engine, "visibility frame smoke");
+  const wireframe = new WireframeRenderer(engine);
   const canvas = engine.createView(addCanvas(), "visibility frame smoke");
   canvas.resize(VIEWPORT);
   try {
@@ -2234,8 +2313,53 @@ export async function checkVisibilityFrame(
           : `settled ${String(settledThere.done)}; bodies ${String(runApart.terrain)} px: ${String(runApart.within)} within ⅓ stop (${((100 * runApart.within) / runApart.terrain).toFixed(3)}%), ${String(runApart.differing)} differing at all, the largest ${runApart.largestStops.toFixed(4)} stops; beyond ⅓ stop, forward → by IDs of the brightest: ${run.byIds === null ? "—" : beyondThirdStop(run.forward.colour, run.byIds.colour, VIEWPORT.widthPx)}; the depth ${runDepth ? "the same bytes" : "differs"}; digests ${bytesDigest(run.forward.colour)} forward, ${run.byIds === null ? "—" : bytesDigest(run.byIds.colour)} by IDs`,
       );
     }
+
+    // The marks a whole survey's ground hides (R10.T16.c; perf-ground-gpu's
+    // `GeometrySettings.hiddenMarks`), here beside the pass part 15's frame check, which stood at 347
+    // s of its 360 s on a pod (2026-11-05), takes: a mark 10,000 km out along two of the view's rays
+    // to the surveyed ground, far behind the moon, over the mask taken as whole. Culled, the
+    // overlay leaves it out and says no draw tests depth, so that the symbology's pass draws none
+    // of the terrain's depth; drawn, the ground hides it: the same canvas, byte for byte.
+    const moon = bodyOf(pose);
+    const distanceM = norm(moon.centreM);
+    const sphereM = occluderRadius(MOON_LIKE.polarRadiusM, distanceM);
+    const farAlong = (y: number): Vec3 =>
+      scale(normalise(sub(datumAt(OVER, 48, y).p, pose.cameraM)), 1e7);
+    const farList: WireframeDrawList = {
+      ...emptyDrawList(viewStrokesAt(1)),
+      occluderSpheres: [
+        {
+          id: moon.id,
+          centreF32: Float32Array.from([moon.centreM.x, moon.centreM.y, moon.centreM.z]),
+          radiusM: sphereM,
+          altitudeM: distanceM - sphereM,
+        },
+      ],
+      lines: [markBatch("far behind the ground", farAlong(15), farAlong(27))],
+    };
+    // At stride 1, as part 15's marks are drawn, whose frames hold still; drawn, culled and drawn
+    // again, so that a frame still moving between them, whose two drawn frames differ, is told apart.
+    relief.setGeometry(LOW_AT_STRIDE_1);
+    const farSettled = await settled(relief, pool, mask, pose);
+    const of = { engine, photoreal, canvas, pass: relief, mask, view: pose };
+    const drawnFar = await hiddenMarksFrame(of, wireframe, farList, "drawn");
+    const culledFar = await hiddenMarksFrame(of, wireframe, farList, "culled");
+    const drawnAgain = await hiddenMarksFrame(of, wireframe, farList, "drawn");
+    checks.check(
+      "R10.T16.c over the image the marks a whole survey's ground hides, culled, draw the canvas they draw drawn, byte for byte, with none of the terrain's depth",
+      farSettled.done &&
+        culledFar.handedOver &&
+        !culledFar.depthTested &&
+        drawnFar.depthTested &&
+        culledFar.marked === 0 &&
+        drawnFar.marked === 0 &&
+        drawnAgain.digest === drawnFar.digest &&
+        culledFar.digest === drawnFar.digest,
+      `settled ${String(farSettled.done)}; handed over ${String(culledFar.handedOver)}; culled: depth tested ${String(culledFar.depthTested)}, marked ${String(culledFar.marked)} px; drawn: depth tested ${String(drawnFar.depthTested)}, marked ${String(drawnFar.marked)} px; digests ${drawnFar.digest} drawn, ${culledFar.digest} culled, ${drawnAgain.digest} drawn again`,
+    );
   } finally {
     canvas.dispose();
+    wireframe.dispose();
     photoreal.dispose();
     renderer.dispose();
     made?.dispose();

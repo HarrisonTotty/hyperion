@@ -163,6 +163,7 @@ describe("the spike report's check", () => {
         shading: "forward",
         terrainBudget: "patches",
         standInStrides: "off",
+        hiddenMarks: "drawn",
       },
       segments: [
         {
@@ -181,7 +182,8 @@ describe("the spike report's check", () => {
     // A report from before plan R14's T4 lacks its consumers' levers, which read as off, the page
     // pool's bytes (T5.b), which read as 0, the meshes' tolerance (T5.f), 0 px, the edge patches'
     // lever (T1.g), off, the camera's strides (T3.c), off, the occlusion (T3.d), off, the lit
-    // selection's budget (T3.e), its patches, and the stand-ins' strides (T3.c's stand-ins), off.
+    // selection's budget (T3.e), its patches, the stand-ins' strides (T3.c's stand-ins), off, and
+    // the overlay's hidden marks (R10.T16.c), drawn.
     const {
       figureClusters: _figureClusters,
       hullClusters: _hullClusters,
@@ -193,6 +195,7 @@ describe("the spike report's check", () => {
       occlusion: _occlusion,
       terrainBudget: _terrainBudget,
       standInStrides: _standInStrides,
+      hiddenMarks: _hiddenMarks,
       ...beforeT4
     } = geometry.settings;
     expect([

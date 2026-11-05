@@ -234,6 +234,16 @@ export interface GeometrySettings {
    * casters). `off`, as before: every stand-in at stride 1. Read where the strides are on.
    */
   readonly standInStrides: "off" | "own-grids" | "all";
+  /**
+   * R10.T16.c's marks over the photorealistic image that a body's ground hides. `drawn`, the way
+   * back: every mark drawn, the terrain's depth before them. `culled`: where a body's survey is
+   * whole and its terrain draws all the ground its mask discards, its datum's lines, which give
+   * way everywhere, and every segment of a solid view-space mark that lies wholly behind the sphere
+   * inside all its ground, stroke and all, are left out of the overlay (`photoreal/overlay.ts`'
+   * `hiddenMarksCulled`), and the symbology's pass draws no terrain depth where no mark that tests
+   * depth is left: the same canvas, bit for bit. `culled` on both settings.
+   */
+  readonly hiddenMarks: "drawn" | "culled";
 }
 
 /**
@@ -263,6 +273,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   shading: "forward",
   terrainBudget: "patches",
   standInStrides: "off",
+  hiddenMarks: "drawn",
 };
 
 /**
@@ -443,6 +454,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       shading: "forward",
       terrainBudget: "triangles",
       standInStrides: "all",
+      hiddenMarks: "culled",
     },
     decoration: true,
     scatterDensity: 1,
@@ -494,6 +506,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       shading: "forward",
       terrainBudget: "triangles",
       standInStrides: "own-grids",
+      hiddenMarks: "culled",
     },
     decoration: false,
     scatterDensity: 0,

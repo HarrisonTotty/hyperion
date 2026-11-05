@@ -30,8 +30,12 @@ import {
 } from "../wireframe/drawList";
 import { linearColour, type SurveyedDatumFrame, WireframeRenderer } from "../wireframe/submit";
 import {
+  depthObserved,
+  hiddenMarksCulled,
   overlayDrawList,
   overlayDrawsAt,
+  type OverlayHider,
+  overlayHidersOf,
   overlaySubmission,
   type SurveyedPlan,
   surveyedDatumsOf,
@@ -557,5 +561,263 @@ describe("the datums that give way over the image, from the frame's plan (R10.T1
       [A, MASK, [...rotationColumns(TURNED)], 2.44e6 / 2.43e6],
       [C, OTHER_MASK, [...rotationColumns(IDENTITY_ROTATION)], 1],
     ]);
+  });
+});
+
+/** The hidden marks' camera: at the origin, looking down −z, 60° across. */
+const HIGH_CAMERA: DrawCamera = {
+  pose: {
+    frame: { kind: "system", system: FIXTURE_SYSTEM },
+    positionM: vec3(0, 0, 0),
+    orientation: NO_TURN,
+  },
+  fovXRad: Math.PI / 3,
+};
+
+/** The planet below it: its centre 30 Mm down the view's axis, its ground outside 6.39 Mm. */
+const BELOW_M = 3e7;
+const INNER_RADIUS_M = 6.39e6;
+const HIDER: OverlayHider = { body: "planet", innerRadiusM: INNER_RADIUS_M };
+
+/** The cone's half-angle about the planet from the camera, rad. */
+const HALF_ANGLE_RAD = Math.asin(INNER_RADIUS_M / BELOW_M);
+
+/** A solid view-space batch of `segments`, six numbers each, 2 px wide in a 2 px casing. */
+function batchOf(
+  id: string,
+  segments: ReadonlyArray<number>,
+  extra: Partial<LineBatch> = {},
+): LineBatch {
+  return {
+    id,
+    space: "view",
+    originF32: new Float32Array(3),
+    segments: Float32Array.from(segments),
+    token: "text",
+    colour: TOKENS.text,
+    widthPx: 2,
+    casingWidthPx: 2,
+    casingColour: TOKENS.surface0,
+    dash: null,
+    ...extra,
+  };
+}
+
+/** An overlay's list of `lines` over the planet, whose occluder gives its centre. */
+function hiddenList(
+  lines: ReadonlyArray<LineBatch>,
+  occluderMeshes: WireframeDrawList["occluderMeshes"] = [],
+): WireframeDrawList {
+  return {
+    occluderSpheres: [
+      {
+        id: "planet",
+        centreF32: Float32Array.of(0, 0, -BELOW_M),
+        radiusM: 6.4e6,
+        altitudeM: BELOW_M - 6.4e6,
+      },
+    ],
+    occluderMeshes,
+    lines,
+    sprites: [],
+    anchors: [],
+    strokeScale: 1,
+    markStrokePx: 2,
+    occluderSlopePx: 1,
+    surveyEdges: [],
+    lineOfSight: null,
+  };
+}
+
+/** A segment 1e11 m away from `fromRad` to `toRad` off the view's axis, across x. */
+function far(fromRad: number, toRad: number): number[] {
+  const d = 1e11;
+  return [d * Math.tan(fromRad), 0, -d, d * Math.tan(toRad), 0, -d];
+}
+
+/** Each batch's id and its segments' count. */
+function counts(list: WireframeDrawList): ReadonlyArray<readonly [string, number]> {
+  return list.lines.map((line) => [line.id, line.segments.length / 6]);
+}
+
+describe("the overlay's marks a body's ground hides (perf-ground-gpu; GeometrySettings.hiddenMarks)", () => {
+  it("leaves out a segment wholly behind the planet's ground, and keeps one before it and one beyond its limb", () => {
+    const list = hiddenList([
+      batchOf("orbit:far", far(-0.01, 0.01)),
+      batchOf("orbit:near", [-10, 0, -1000, 10, 0, -1000]),
+      batchOf("orbit:limb", far(0, 0.35)),
+    ]);
+    expect(counts(hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, [HIDER]))).toEqual([
+      ["orbit:near", 1],
+      ["orbit:limb", 1],
+    ]);
+  });
+
+  it("keeps a segment within its stroke's reach of the limb, and leaves out one past it", () => {
+    // The stroke reaches 1 + 2 + 2 px past its segment, 5 px of about 0.6 mrad.
+    const list = hiddenList([
+      batchOf("within", far(0, HALF_ANGLE_RAD - 1e-3)),
+      batchOf("past", far(0, HALF_ANGLE_RAD - 1e-2)),
+    ]);
+    expect(counts(hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, [HIDER]))).toEqual([
+      ["within", 1],
+    ]);
+  });
+
+  it("tests a segment's part within the view alone, so that one running past the view's edge behind the ground is left out, its off-view end beyond the limb or not", () => {
+    // From 1.5 Mm up the planet's cone, 79° about the view's axis, is wider than the view's 30°.
+    const nearBelowM = 6.5e6;
+    const nearList: WireframeDrawList = {
+      ...hiddenList([
+        batchOf("orbit:past-the-edge", far(-0.1, 1.2)),
+        batchOf("orbit:past-the-limb", far(-0.1, 1.5)),
+        batchOf("orbit:in-view", far(-0.1, 0.1)),
+      ]),
+      occluderSpheres: [
+        {
+          id: "planet",
+          centreF32: Float32Array.of(0, 0, -nearBelowM),
+          radiusM: 6.4e6,
+          altitudeM: nearBelowM - 6.4e6,
+        },
+      ],
+    };
+    expect([
+      Math.asin(INNER_RADIUS_M / nearBelowM) > 1.2 && Math.asin(INNER_RADIUS_M / nearBelowM) < 1.5,
+      counts(hiddenMarksCulled(nearList, HIGH_CAMERA, VIEWPORT, [HIDER])),
+    ]).toEqual([true, []]);
+  });
+
+  it("keeps a batch's other segments where only some lie hidden, in their order", () => {
+    const list = hiddenList([
+      batchOf("orbit:mixed", [...far(0, 0.35), ...far(-0.01, 0.01), ...far(0.3, 0.35)]),
+    ]);
+    const [kept] = hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, [HIDER]).lines;
+    expect([...(kept?.segments ?? [])]).toEqual([
+      ...Float32Array.from([...far(0, 0.35), ...far(0.3, 0.35)]),
+    ]);
+  });
+
+  it("leaves out the hider's datum lines, which its whole mask discards, and keeps another body's", () => {
+    const list = hiddenList([
+      batchOf("body:planet:major", [-10, 0, -1000, 10, 0, -1000], { body: "planet" }),
+      batchOf("body:moon:major", [-10, 0, -1000, 10, 0, -1000], { body: "moon" }),
+    ]);
+    expect(counts(hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, [HIDER]))).toEqual([
+      ["body:moon:major", 1],
+    ]);
+  });
+
+  it("keeps the hider's datum lines where the list holds no occluder sphere of it, which the packer masks them by", () => {
+    const list = {
+      ...hiddenList([
+        batchOf("body:planet:major", [-10, 0, -1000, 10, 0, -1000], { body: "planet" }),
+      ]),
+      occluderSpheres: [],
+    };
+    expect(counts(hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, [HIDER]))).toEqual([
+      ["body:planet:major", 1],
+    ]);
+  });
+
+  it("keeps a dashed path, a mark on a body's ground and a screen mark whole, hidden or not", () => {
+    const hidden = far(-0.01, 0.01);
+    const list = hiddenList([
+      batchOf("predicted:craft", hidden, { dash: { onPx: 6, offPx: 4 } }),
+      batchOf("survey-edge:planet", hidden, { groundCentreF32: Float32Array.of(0, 0, -BELOW_M) }),
+      batchOf("mark:bracket:0", [0, 0, 0, 10, 10, 0], { space: "screen" }),
+    ]);
+    expect(hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, [HIDER])).toEqual(list);
+  });
+
+  it("keeps every segment with no hider, or one whose occluder the list does not hold", () => {
+    const list = hiddenList([batchOf("orbit:far", far(-0.01, 0.01))]);
+    expect([
+      hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, []),
+      hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, [{ body: "moon", innerRadiusM: 1e6 }]),
+    ]).toEqual([list, list]);
+  });
+
+  it("says no draw tests depth once the hidden marks are out, and that one does where a mark is in view or a hull is filled", () => {
+    const behind = batchOf("orbit:behind-camera", [-10, 0, 1000, 10, 0, 1000]);
+    const silhouette = {
+      id: "craft",
+      originF32: Float32Array.of(0, 0, -100),
+      triangles: new Float32Array(9),
+      twoSided: true,
+      fill: TOKENS.surface0,
+    } as const;
+    const culled = (list: WireframeDrawList): boolean =>
+      depthObserved(hiddenMarksCulled(list, HIGH_CAMERA, VIEWPORT, [HIDER]), HIGH_CAMERA, VIEWPORT);
+    expect([
+      culled(hiddenList([batchOf("orbit:far", far(-0.01, 0.01)), behind])),
+      culled(hiddenList([batchOf("mark:bracket:0", [0, 0, 0, 10, 10, 0], { space: "screen" })])),
+      culled(hiddenList([batchOf("orbit:near", [-10, 0, -1000, 10, 0, -1000])])),
+      culled(hiddenList([], [silhouette])),
+      depthObserved(hiddenList([batchOf("orbit:far", far(-0.01, 0.01))]), HIGH_CAMERA, VIEWPORT),
+    ]).toEqual([false, false, true, true, true]);
+  });
+
+  it("gives the symbology's pass as it was, and that it tests depth, with no hider, or one whose datum does not give way in it; with one, the hidden marks left out and that none does", async () => {
+    const renderer = new WireframeRenderer(await countingRenderEngine());
+    const list = hiddenList([batchOf("orbit:far", far(-0.01, 0.01))]);
+    const surveyed = new Map([
+      ["planet", { mask: MASK, axes: rotationColumns(TURNED), stretch: 1 }],
+    ]);
+    const passOf = (
+      hiders: ReadonlyArray<OverlayHider>,
+      over: ReadonlyMap<string, SurveyedDatumFrame>,
+    ): readonly [number, boolean] => {
+      const pass = overlaySubmission(
+        renderer,
+        list,
+        TOKENS,
+        HIGH_CAMERA,
+        VIEWPORT,
+        over,
+        true,
+        hiders,
+      );
+      return [
+        pass.draws.filter((draw) => draw.material.name === "wireframe:lines").length,
+        pass.depthTested,
+      ];
+    };
+    expect([passOf([], surveyed), passOf([HIDER], surveyed), passOf([HIDER], new Map())]).toEqual([
+      [2, true],
+      [0, false],
+      [2, true],
+    ]);
+    renderer.dispose();
+  });
+});
+
+/** The planet's terrain's inner radius, and a moon's, m. */
+function innerRadiusOf(body: string): number | null {
+  return body === FIXTURE_PLANET ? 6.3e6 : 1e6;
+}
+
+describe("the bodies behind whose ground the overlay's marks may lie hidden, from the frame's plan", () => {
+  const plan = (whole: boolean): SurveyedPlan => ({
+    meshes: [
+      {
+        index: 0,
+        role: {
+          kind: "handed-over",
+          coverage: { mask: MASK, rotation: IDENTITY_ROTATION, whole },
+          detailShare: 1,
+        },
+      },
+      { index: 1, role: { kind: "promoted" } },
+    ],
+    discs: [{ body: FIXTURE_PLANET }, { body: "e101" }],
+  });
+
+  it("gives a body handed over with a whole mask, with its terrain's inner radius, and no other", () => {
+    expect([
+      overlayHidersOf(plan(true), innerRadiusOf),
+      overlayHidersOf(plan(false), innerRadiusOf),
+      overlayHidersOf(plan(true), () => null),
+    ]).toEqual([[{ body: FIXTURE_PLANET, innerRadiusM: 6.3e6 }], [], []]);
   });
 });

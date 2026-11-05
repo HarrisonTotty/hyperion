@@ -26,6 +26,7 @@ import type {
 } from "../../view/terrain/frameTerrain";
 import { PoseIntervals } from "../../view/terrain/poseInterval";
 import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
+import { SETTINGS } from "../../view/quality/qualitySetting";
 import type { TerrainViewFrameInput } from "../../view/terrain/terrainPass";
 import { heightAboveGroundM } from "../../view/terrain/terrainWire";
 import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
@@ -1152,6 +1153,70 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
       "photorealistic",
       ["wireframe:linesSurveyed", "wireframe:occluderSphereSurveyed"],
       true,
+    ]);
+  });
+
+  it("leaves out over the image the datum of a body handed over with a whole survey, its occluder still drawn, by the geometry's hiddenMarks, and keeps it drawn at its way back", async () => {
+    const pass: FrameTerrainPass = {
+      maskReadyFor: () => true,
+      symbologyDepthMaterial: { kind: "material", name: "terrain-depth-baked-offsets" },
+      geometry: { overlayDepth: "redraw", strides: "off" },
+      heights: DATUM,
+      viewIds: new Set([VIEW]),
+      faulted: false,
+      innerRadiusM: 1,
+    };
+    const { source } = wireSource(DATUM, {
+      pass: (body) => (body === HANDED ? pass : null),
+      coverageWhole: (body) => body === HANDED,
+      // Its lit terrain drawn, whose depth the symbology's pass takes.
+      drawTerrain: (_view, body) =>
+        body === HANDED
+          ? {
+              draws: [WIRE_DRAW],
+              opaqueDraws: 0,
+              patches: { interior: 0, edge: 1, fins: 0 },
+              conditions: { streaming: false, detailLimited: false },
+              annunciation: null,
+              fault: null,
+              missing: false,
+              standingIn: false,
+              maskReady: true,
+              cascades: null,
+              overlayDepth: null,
+              visibility: null,
+              decorated: false,
+            }
+          : null,
+    });
+    const symbologyOf = async (
+      hiddenMarks: "drawn" | "culled",
+    ): Promise<ReadonlyArray<string> | undefined> => {
+      const inputs: ViewFrameInputs = {
+        ...inputsOver(source, "photorealistic"),
+        size: { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 },
+        reliefs: { reliefM: () => 1e9 },
+        geometry: { ...SETTINGS.high.geometry, hiddenMarks },
+      };
+      const engine = await countingRenderEngine();
+      const view = new RecordingView("view");
+      const drawer = new ViewFrameDrawer(engine, view, "view");
+      // The first photorealistic frame draws the wireframe while its pipelines compile.
+      drawer.draw(inputs);
+      await vi.waitFor(() => {
+        expect(drawer.photorealStatus).toBe("ready");
+      });
+      drawer.draw(inputs);
+      drawer.dispose();
+      const names = view.frames
+        .findLast((frame) => frame.label === PHOTOREAL_PASS_LABELS.symbology)
+        ?.draws.map((draw) => draw.material.name)
+        .filter((name) => name.endsWith("Surveyed"));
+      return names === undefined ? undefined : [...new Set(names)].toSorted();
+    };
+    expect([await symbologyOf("culled"), await symbologyOf("drawn")]).toEqual([
+      ["wireframe:occluderSphereSurveyed"],
+      ["wireframe:linesSurveyed", "wireframe:occluderSphereSurveyed"],
     ]);
   });
 

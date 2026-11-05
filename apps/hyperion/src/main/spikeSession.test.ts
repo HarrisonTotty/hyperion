@@ -272,6 +272,7 @@ const GEOMETRY_SETTINGS = {
   shading: "forward",
   terrainBudget: "patches",
   standInStrides: "off",
+  hiddenMarks: "drawn",
 } as const;
 
 /** A smoke's report: 10 s of frames at 60 Hz from 1,000 ms, its trace in three windows. */

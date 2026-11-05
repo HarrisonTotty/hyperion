@@ -766,8 +766,17 @@ export class ViewFrameDrawer {
           // the stand-ins and survey edges alone, and no pass where there are none (the owner's
           // request, 2026-11-05).
           overlay: overlayDrawsAt(list, grid)
-            ? (surveyed) =>
-                overlaySubmission(this.#wireframe, list, tokens, camera, viewport, surveyed, grid)
+            ? (surveyed, hiders) =>
+                overlaySubmission(
+                  this.#wireframe,
+                  list,
+                  tokens,
+                  camera,
+                  viewport,
+                  surveyed,
+                  grid,
+                  hiders,
+                )
             : null,
           atmospheres: inputs.atmosphere?.tablesOf,
           // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).

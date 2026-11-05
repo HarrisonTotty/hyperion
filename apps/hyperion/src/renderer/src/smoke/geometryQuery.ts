@@ -40,6 +40,8 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     standInText === "off" || standInText === "own-grids" || standInText === "all"
       ? standInText
       : undefined;
+  const hiddenText = parameters.get("geometry-hiddenMarks");
+  const hiddenMarks = hiddenText === "drawn" || hiddenText === "culled" ? hiddenText : undefined;
   const rate = parameters.get("geometry-farCascadeRate");
   const farCascadeRate = rate === "1" ? 1 : rate === "2" ? 2 : rate === "4" ? 4 : undefined;
   const toleranceText = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(
@@ -69,5 +71,6 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(shading === undefined ? {} : { shading }),
     ...(terrainBudget === undefined ? {} : { terrainBudget }),
     ...(standInStrides === undefined ? {} : { standInStrides }),
+    ...(hiddenMarks === undefined ? {} : { hiddenMarks }),
   };
 }
