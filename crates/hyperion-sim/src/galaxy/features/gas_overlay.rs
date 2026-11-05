@@ -392,8 +392,8 @@ impl FeatureGasIndex {
     /// # Panics
     ///
     /// - If the slabs are not `galaxy`'s, or not every x in order.
-    /// - If a feature reaches within [`REACH_MARGIN_LY`] of [`MAX_FEATURE_REACH`], where the
-    ///   index's lookup is no longer the cells' (module documentation).
+    /// - If a feature reaches within 2 ly of [`MAX_FEATURE_REACH`], where the index's lookup would
+    ///   no longer be the cells' (module documentation).
     /// - If the slabs hold more than `u32::MAX` features, or the bins more than `u32::MAX` entries.
     #[must_use]
     pub fn assemble(galaxy: &Galaxy, slabs: impl IntoIterator<Item = FeatureGasSlab>) -> Self {
