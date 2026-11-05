@@ -2,7 +2,7 @@
  * R08.T16.a.2's second absorbing envelope case (plan R08; research-leans-43 §2): the committed
  * `saturn-envelope.case.json` is the case `test/saturnEnvelopeCase.ts` writes now from the hand
  * Saturn's medium, through `bless.ts`; it stands under the disc and the limb from orbit, above its
- * split at the hand Saturn's envelope floor, whose medium above absorbs in every channel and lies
+ * split at the hand Saturn's envelope floor, whose medium above absorbs in green and blue and lies
  * deeper in blue than `jupiter-envelope`'s, past the envelope's route range.
  *
  * @remarks
@@ -78,14 +78,16 @@ describe("the hand Saturn's absorbing envelope case", { timeout: BUILD_MS }, () 
     expect(nearest).toBeGreaterThan(LEAST_SUN_DISTANCE_DEG - 1e-9);
   });
 
-  it("splits at the hand Saturn's envelope floor, its medium above absorbing in every channel", () => {
+  // At 27's chromophore the medium above absorbs in green and blue alone, red's τ (1 − ω̄) 0.025, as
+  // `jupiter-envelope`'s at 27.
+  it("splits at the hand Saturn's envelope floor, its medium above absorbing in green and blue", () => {
     const { referenceCase, split } = saturnEnvelopeCase();
     const above = regimeChannels(upperMediumOf(referenceCase.medium, split.altitudeM));
     expect([
       split.floor,
       referenceCase.medium.groundAlbedo,
       above.map((c) => c.opticalDepth * (1 - c.singleScatteringAlbedo) > 0.05),
-    ]).toEqual(["envelope", [0, 0, 0], [true, true, true]]);
+    ]).toEqual(["envelope", [0, 0, 0], [false, true, true]]);
   });
 
   it("names one of its geometries by each of its counts", () => {
