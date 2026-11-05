@@ -222,10 +222,12 @@ fn the_pinned_system_is_deterministic() {
 }
 
 /// `n` engine mergers of the stellar merger class in `galaxy`, drawn on 16 streams at once and
-/// joined in stream order, as `tests/common/binaries.rs` draws them.
+/// joined in stream order, as `tests/common/binaries.rs` draws them (on wasm32-wasip1, which has no
+/// threads, one stream after another).
 fn members(galaxy: &Galaxy, n: usize) -> Vec<MergerMember> {
     let share = n.div_ceil(16);
     let mut out = Vec::with_capacity(n + 16);
+    #[cfg(not(target_family = "wasm"))]
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..16_u64)
             .map(|s| {
@@ -238,6 +240,15 @@ fn members(galaxy: &Galaxy, n: usize) -> Vec<MergerMember> {
             out.extend(handle.join().expect("a member draw finishes"));
         }
     });
+    #[cfg(target_family = "wasm")]
+    for s in 0..16_u64 {
+        out.extend(brute_force_merger_members_in(
+            galaxy,
+            CarvedClass::StellarMerger,
+            share,
+            s,
+        ));
+    }
     out.truncate(n);
     out
 }

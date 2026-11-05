@@ -1148,26 +1148,31 @@ fn ejected_census(galaxy: &Galaxy) -> [f64; 4] {
             }
         }
     };
-    let workers: Vec<[f64; 4]> = std::thread::scope(|scope| {
-        let column = &column;
-        let handles: Vec<_> = (0..16)
-            .map(|worker| {
-                scope.spawn(move || {
-                    let mut sums = [0.0; 4];
-                    for x in (-128..128).filter(|x: &i32| x.rem_euclid(16) == worker) {
-                        for y in -128..128 {
-                            column(x, y, &mut sums);
-                        }
-                    }
-                    sums
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("a census worker"))
-            .collect()
-    });
+    let share = |worker: i32| {
+        let mut sums = [0.0; 4];
+        for x in (-128..128).filter(|x: &i32| x.rem_euclid(16) == worker) {
+            for y in -128..128 {
+                column(x, y, &mut sums);
+            }
+        }
+        sums
+    };
+    // wasm32-wasip1 has no threads, so there the sixteen shares run in turn on this one, summed in
+    // the same order.
+    let workers: Vec<[f64; 4]> = if cfg!(target_family = "wasm") {
+        (0..16).map(share).collect()
+    } else {
+        std::thread::scope(|scope| {
+            let share = &share;
+            let handles: Vec<_> = (0..16)
+                .map(|worker| scope.spawn(move || share(worker)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("a census worker"))
+                .collect()
+        })
+    };
     workers.iter().fold([0.0; 4], |mut total, w| {
         for (t, v) in total.iter_mut().zip(w) {
             *t += v;

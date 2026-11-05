@@ -885,8 +885,8 @@ mod tests {
 
     /// The census of `query` (whose caps are forced) in `galaxy` over every shell of its plan, its
     /// cells and, if `members`, its feature members through a [`FeatureMemberSource`] in
-    /// [`PARTS`] parts a shell, on threads that take the jobs in turn, each with its own context,
-    /// merged to the plan's whole completeness.
+    /// [`PARTS`] parts a shell, on threads that take the jobs in turn, each with its own context
+    /// (on wasm32-wasip1 on this one), merged to the plan's whole completeness.
     fn census(galaxy: &Galaxy, query: &SkyQuery, members: bool) -> SkyCensus {
         let tables = LuminosityTables::dark(galaxy);
         let envelope = milky_way_envelope();
@@ -910,56 +910,56 @@ mod tests {
         let interiors = KeepInteriors::new(galaxy);
         let next = AtomicUsize::new(0);
         let parts = Mutex::new(Vec::new());
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(16));
-        std::thread::scope(|scope| {
-            for _ in 0..threads {
-                scope.spawn(|| {
-                    let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
-                    let sources: [&dyn SkySource; 1] = [&source];
-                    let mut ctx = SkyContext {
-                        tables: &tables,
-                        envelope,
-                        offsets: &offsets,
-                        noise: NoiseCache::with_capacity(1 << 14),
-                        cells: &NoSkyCellCache,
-                        sources: if members { &sources } else { &[] },
-                        modifiers: &NoModifiers,
-                    };
-                    loop {
-                        let k = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(job) = jobs.get(k) else { break };
-                        let mut stars = Vec::new();
-                        let tallies = match job {
-                            Job::Cells(slab) => {
-                                let mut tallies: Option<CensusTallies> = None;
-                                for key in slab.cells() {
-                                    let cell =
-                                        census_cell(galaxy, &mut ctx, key, query, &mut stars);
-                                    match &mut tallies {
-                                        Some(sum) => sum.add(&cell),
-                                        None => tallies = Some(cell),
-                                    }
-                                }
-                                let Some(tallies) = tallies else { continue };
-                                tallies
+        let worker = || {
+            let source = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+            let sources: [&dyn SkySource; 1] = [&source];
+            let mut ctx = SkyContext {
+                tables: &tables,
+                envelope,
+                offsets: &offsets,
+                noise: NoiseCache::with_capacity(1 << 14),
+                cells: &NoSkyCellCache,
+                sources: if members { &sources } else { &[] },
+                modifiers: &NoModifiers,
+            };
+            loop {
+                let k = next.fetch_add(1, Ordering::Relaxed);
+                let Some(job) = jobs.get(k) else { break };
+                let mut stars = Vec::new();
+                let tallies = match job {
+                    Job::Cells(slab) => {
+                        let mut tallies: Option<CensusTallies> = None;
+                        for key in slab.cells() {
+                            let cell = census_cell(galaxy, &mut ctx, key, query, &mut stars);
+                            match &mut tallies {
+                                Some(sum) => sum.add(&cell),
+                                None => tallies = Some(cell),
                             }
-                            Job::Members(shell, part) => census_members(
-                                galaxy,
-                                &mut ctx,
-                                &plan,
-                                (*shell, *part),
-                                query,
-                                &mut stars,
-                            ),
-                        };
-                        parts
-                            .lock()
-                            .expect("no job panics")
-                            .push((k, stars, tallies));
+                        }
+                        let Some(tallies) = tallies else { continue };
+                        tallies
                     }
-                });
+                    Job::Members(shell, part) => {
+                        census_members(galaxy, &mut ctx, &plan, (*shell, *part), query, &mut stars)
+                    }
+                };
+                parts
+                    .lock()
+                    .expect("no job panics")
+                    .push((k, stars, tallies));
             }
-        });
+        };
+        // wasm32-wasip1 has no threads, so there the jobs run in turn on this one.
+        if cfg!(target_family = "wasm") {
+            worker();
+        } else {
+            let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(16));
+            std::thread::scope(|scope| {
+                for _ in 0..threads {
+                    scope.spawn(worker);
+                }
+            });
+        }
         let mut parts = parts.into_inner().expect("no job panics");
         parts.sort_by_key(|(k, _, _)| *k);
         merge_shells(
