@@ -1,2 +1,2 @@
 # Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
-the_lists_hold_their_expected_hosts.globular_x_ray_binaries = 366
+the_lists_hold_their_expected_hosts.globular_x_ray_binaries = 374

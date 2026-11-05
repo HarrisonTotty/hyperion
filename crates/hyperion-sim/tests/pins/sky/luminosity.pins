@@ -1,4 +1,4 @@
 # Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
-parallel_build_equals_serial.full_serial = 7081036500654820775
-parallel_build_equals_serial.pair_serial = 16551502786168860145
-parallel_build_equals_serial.serial = 17385115653911861382
+parallel_build_equals_serial.full_serial = 15096512434257053208
+parallel_build_equals_serial.pair_serial = 12451058614716314061
+parallel_build_equals_serial.serial = 3276150912962315354

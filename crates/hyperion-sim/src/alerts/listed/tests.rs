@@ -673,6 +673,21 @@ fn seed_9() -> &'static Galaxy {
     })
 }
 
+/// Seed 11's galaxy (`Galaxy::new`'s parameters) under the version's rules, with its kinematic
+/// tables, built once: the lists' merger's. From 29 seed 9's 252 listed stellar mergers hold none
+/// within the clock window (the binary classes' refit re-draws the lists' entries), and seed 11's
+/// 343 hold one ([`LISTED_MERGER`]); seed 10's 161 hold none.
+fn seed_11() -> &'static Galaxy {
+    static LISTED: OnceLock<Galaxy> = OnceLock::new();
+    LISTED.get_or_init(|| {
+        let params = GalaxyParams::from_seed(
+            Seed::new(11),
+            crate::galaxy::imf::MassFunctionKind::default(),
+        );
+        galaxy(11, params, listed())
+    })
+}
+
 /// The member of the nursery 49 of feature cell [−4, 6, 0] in seed 9's galaxy whose core collapse
 /// goes off 234.797 years after the epoch at [−12,727.7, 26,883.1, 204.0] ly, some 12,750 ly
 /// spinward of the Sun-like point (the first-millennium census's): the lists' supernova.
@@ -889,9 +904,13 @@ fn brute_force(galaxy: &Galaxy, query: &AlertQuery) -> Vec<Detection> {
 /// building none. A background scan's slabs give the lists' detections in any order and count the
 /// candidates the interactive walk's lists drew. Returns 29's detections of `host`, pinned in the
 /// golden `name`.
-fn listed_beside_the_cells(query: &AlertQuery, host: SystemId, name: &str) -> Vec<Detection> {
+fn listed_beside_the_cells(
+    new: &Galaxy,
+    query: &AlertQuery,
+    host: SystemId,
+    name: &str,
+) -> Vec<Detection> {
     let class = class_of(query);
-    let new = seed_9();
     let after = alerts(new, query, &NoListedHostsCache);
     let kept = KeepLists::default();
     assert_eq!(
@@ -969,11 +988,15 @@ fn pinned(listed: Vec<Detection>, host: SystemId, name: &str) -> Vec<Detection> 
 /// A background scan of `query`'s class, whose census sends it to the background whatever its
 /// reach, sees `host`'s detections on the lists slab by slab (module documentation), each named on
 /// the list's member; the slabs' lists find what every list near enough finds whole
-/// ([`brute_force`]), in any order of the slabs. Returns the detections of `host`, pinned in the
-/// golden `name`.
-fn listed_in_the_background(query: &AlertQuery, host: SystemId, name: &str) -> Vec<Detection> {
+/// ([`brute_force`]), in any order of the slabs, in `new`. Returns the detections of `host`, pinned
+/// in the golden `name`.
+fn listed_in_the_background(
+    new: &Galaxy,
+    query: &AlertQuery,
+    host: SystemId,
+    name: &str,
+) -> Vec<Detection> {
     let class = class_of(query);
-    let new = seed_9();
     let census = alerts(new, query, &NoListedHostsCache);
     let status = census.class_census(class).map(ClassCensus::status);
     assert!(
@@ -1005,7 +1028,7 @@ fn from_29_a_listed_supernova_is_seen_beside_the_cells() {
         700.0,
     );
     let query = sensor_query(ClassId::CORE_COLLAPSE, at, v, (200, 300));
-    let seen = listed_beside_the_cells(&query, host, "alerts/listed_supernova");
+    let seen = listed_beside_the_cells(seed_9(), &query, host, "alerts/listed_supernova");
     let [onset] = seen.as_slice() else {
         panic!("one onset of the listed supernova: {seen:?}");
     };
@@ -1030,7 +1053,7 @@ fn from_29_a_listed_type_ia_is_seen_beside_the_cells() {
         700.0,
     );
     let query = sensor_query(ClassId::TYPE_IA, at, v, (700, 800));
-    let seen = listed_beside_the_cells(&query, host, "alerts/listed_type_ia");
+    let seen = listed_beside_the_cells(seed_9(), &query, host, "alerts/listed_type_ia");
     let [onset] = seen.as_slice() else {
         panic!("one onset of the listed Type Ia: {seen:?}");
     };
@@ -1051,7 +1074,7 @@ fn from_29_a_listed_magnetar_bursts_beside_the_cells() {
     let at = GalacticPosition::from_light_years([201.853, 25_409.364, -165.497]).unwrap();
     let x = reaching(AlertBand::XRay, TransientKind::MagnetarBurst, 500.0);
     let query = sensor_query(ClassId::CORE_COLLAPSE, at, x, (0, 100));
-    let seen = listed_beside_the_cells(&query, host, "alerts/listed_magnetar");
+    let seen = listed_beside_the_cells(seed_9(), &query, host, "alerts/listed_magnetar");
     assert_eq!(seen.len(), 18, "the listed magnetar bursts: {seen:?}");
     assert!(
         seen.iter().all(|d| d.kind() == TransientKind::MagnetarBurst
@@ -1250,13 +1273,14 @@ fn a_cell_s_lists_are_its_features_lists() {
 /// [1,058.7, 9,229.2, 12.0] ly: the lists' variable.
 const LISTED_VARIABLE: u64 = 0xe849_e318_7000_0001;
 
-/// The member of the globular 2 of feature cell [1, −1, −1] in seed 9's galaxy whose stars merge
-/// 427.430 years before the epoch at [5,897.7, −2,698.4, −121.1] ly: the lists' stellar merger.
-const LISTED_MERGER: u64 = 0xe8bd_e001_7000_015d;
+/// The member of the feature 0 of feature cell [−4, 14, −3] in seed 11's galaxy ([`seed_11`])
+/// whose stars merge 457.796 years after the epoch at [−15,877.9, 57,674.5, −8,996.4] ly, in the
+/// halo: the lists' stellar merger.
+const LISTED_MERGER: u64 = 0xe679_a000_7000_010d;
 
 /// The member of the open cluster 15 of feature cell [−6, 3, 0] in seed 9's galaxy, a fast
-/// accreting white dwarf whose nova begins 82.172 years after the epoch at
-/// [−23,339.4, 16,014.8, 486.6] ly: the lists' fast nova.
+/// accreting white dwarf whose nova begins 295.987 years before the epoch at
+/// [−23,339.3, 16,015.0, 486.6] ly: the lists' fast nova.
 const LISTED_FAST_NOVA: u64 = 0xe54e_0007_f000_0001;
 
 /// The member of the globular 0 of feature cell [−3, −2, −5] in seed 9's galaxy, a slow accreting
@@ -1265,20 +1289,21 @@ const LISTED_FAST_NOVA: u64 = 0xe54e_0007_f000_0001;
 const LISTED_SLOW_NOVA: u64 = 0xe6b9_6000_7000_0057;
 
 /// The member of the globular 0 of feature cell [−3, 1, −1] in seed 9's galaxy, a neutron-star
-/// transient whose one outburst of the clock window begins 129.399 years before the epoch at
-/// [−11,565.9, 7,330.7, −232.6] ly: the lists' X-ray binary.
-const LISTED_TRANSIENT: u64 = 0xe6c5_e000_7000_0014;
+/// transient whose outburst begins 103.409 years before the epoch at [−11,565.9, 7,330.7, −232.6]
+/// ly, the later of its two in the clock window's past: the lists' X-ray binary.
+const LISTED_TRANSIENT: u64 = 0xe6c5_e000_7000_0015;
 
 /// The point `ahead` light-years above `site` along +z.
 fn above(site: [f64; 3], ahead: f64) -> GalacticPosition {
     GalacticPosition::from_light_years([site[0], site[1], site[2] + ahead]).unwrap()
 }
 
-/// From 29 `query`'s walk sees one onset of `kind` of the listed `host`, on its list's member,
-/// beside the cells', arriving at `arrival` years, which the golden `name` pins: in the
+/// From 29 `query`'s walk in `galaxy` sees one onset of `kind` of the listed `host`, on its list's
+/// member, beside the cells', arriving at `arrival` years, which the golden `name` pins: in the
 /// interactive walk ([`listed_beside_the_cells`]), or for a class its census sends to the
 /// background in a background scan's ([`listed_in_the_background`]).
 fn one_listed_onset(
+    galaxy: &Galaxy,
     query: &AlertQuery,
     (host, kind): (u64, TransientKind),
     arrival: f64,
@@ -1286,10 +1311,13 @@ fn one_listed_onset(
 ) {
     let class = class_of(query);
     let host = SystemId::from_raw(host).unwrap();
-    let seen = if class == ClassId::STELLAR_MERGER {
-        listed_in_the_background(query, host, name)
+    let status = alerts(galaxy, query, &NoListedHostsCache)
+        .class_census(class)
+        .map(ClassCensus::status);
+    let seen = if status == Some(ClassStatus::Complete) {
+        listed_beside_the_cells(galaxy, query, host, name)
     } else {
-        listed_beside_the_cells(query, host, name)
+        listed_in_the_background(galaxy, query, host, name)
     };
     let [onset] = seen.as_slice() else {
         panic!("one onset of the listed {kind:?}: {seen:?}");
@@ -1314,36 +1342,37 @@ fn from_29_a_listed_variable_erupts_beside_the_cells() {
     );
     let query = sensor_query(ClassId::LUMINOUS_BLUE_VARIABLE, at, v, (100, 200));
     let host = (LISTED_VARIABLE, TransientKind::GiantEruption);
-    one_listed_onset(&query, host, 177.863, "alerts/listed_variable");
+    one_listed_onset(seed_9(), &query, host, 177.863, "alerts/listed_variable");
 }
 
-/// The lists' stellar merger, 1 ly above where its stars merge, through a V sensor that reaches
-/// 1,000 ly over [−500, −400) years, the brightest red nova's reach (its own V peak is 4 × 10⁻⁵ of
-/// the kind's bound): from 29 its luminous red nova is seen, on its list's member, beside the
-/// cells', a year after the merger, in a background scan, since the class's census, some 4 × 10⁷
-/// candidates in a cell of its grid, is over the host limit at any reach.
+/// The lists' stellar merger, in seed 11's galaxy, 1 ly above where its stars merge in the halo,
+/// through a V sensor that reaches 1,000 ly over [400, 500) years, the brightest red nova's reach:
+/// from 29 its luminous red nova is seen, on its list's member, beside the cells', a year after the
+/// merger, in the interactive walk, since the halo's cells leave the class's census complete there
+/// (seed 9's disc site, until 29, sent it to a background scan).
 #[test]
 fn from_29_a_listed_merger_is_seen_beside_the_cells() {
-    let at = above([5_897.660, -2_698.375, -121.097], 1.0);
+    let at = above([-15_877.903, 57_674.544, -8_996.437], 1.0);
     let v = reaching(
         AlertBand::Photometric(Band::V),
         TransientKind::LuminousRedNova,
         1_000.0,
     );
-    let query = sensor_query(ClassId::STELLAR_MERGER, at, v, (-500, -400));
+    let query = sensor_query(ClassId::STELLAR_MERGER, at, v, (400, 500));
     let host = (LISTED_MERGER, TransientKind::LuminousRedNova);
-    one_listed_onset(&query, host, -426.430, "alerts/listed_merger");
+    one_listed_onset(seed_11(), &query, host, 458.824, "alerts/listed_merger");
 }
 
-/// The lists' fast nova, 1 ly above it, through a V sensor that reaches 50 ly over [80, 90) years:
-/// from 29 its onset is seen, on its list's member, beside the cells', a year after it begins.
+/// The lists' fast nova, 1 ly above it, through a V sensor that reaches 50 ly over [−300, −290)
+/// years: from 29 its onset is seen, on its list's member, beside the cells', a year after it
+/// begins.
 #[test]
 fn from_29_a_listed_fast_nova_is_seen_beside_the_cells() {
-    let at = above([-23_339.431, 16_014.774, 486.560], 1.0);
+    let at = above([-23_339.250, 16_015.037, 486.572], 1.0);
     let v = reaching(AlertBand::Photometric(Band::V), TransientKind::Nova, 50.0);
-    let query = sensor_query(ClassId::ACCRETING_WHITE_DWARF, at, v, (80, 90));
+    let query = sensor_query(ClassId::ACCRETING_WHITE_DWARF, at, v, (-300, -290));
     let host = (LISTED_FAST_NOVA, TransientKind::Nova);
-    one_listed_onset(&query, host, 83.172, "alerts/listed_fast_nova");
+    one_listed_onset(seed_9(), &query, host, -294.987, "alerts/listed_fast_nova");
 }
 
 /// The lists' slow nova, 1 ly above it, through a V sensor that reaches 50 ly over [700, 800)
@@ -1355,7 +1384,7 @@ fn from_29_a_listed_slow_nova_is_seen_beside_the_cells() {
     let v = reaching(AlertBand::Photometric(Band::V), TransientKind::Nova, 50.0);
     let query = sensor_query(ClassId::ACCRETING_WHITE_DWARF_SLOW, at, v, (700, 800));
     let host = (LISTED_SLOW_NOVA, TransientKind::Nova);
-    one_listed_onset(&query, host, 765.574, "alerts/listed_slow_nova");
+    one_listed_onset(seed_9(), &query, host, 765.574, "alerts/listed_slow_nova");
 }
 
 /// The lists' X-ray transient, 1 ly above it, through an X-ray sensor that reaches 50 ly over
@@ -1363,9 +1392,15 @@ fn from_29_a_listed_slow_nova_is_seen_beside_the_cells() {
 /// cells', a year after it begins.
 #[test]
 fn from_29_a_listed_x_ray_transient_is_seen_beside_the_cells() {
-    let at = above([-11_565.893, 7_330.728, -232.559], 1.0);
+    let at = above([-11_565.882, 7_330.721, -232.555], 1.0);
     let x = reaching(AlertBand::XRay, TransientKind::XrayTransient, 50.0);
     let query = sensor_query(ClassId::XRAY_BINARY, at, x, (-200, -100));
     let host = (LISTED_TRANSIENT, TransientKind::XrayTransient);
-    one_listed_onset(&query, host, -128.399, "alerts/listed_x_ray_transient");
+    one_listed_onset(
+        seed_9(),
+        &query,
+        host,
+        -102.413,
+        "alerts/listed_x_ray_transient",
+    );
 }

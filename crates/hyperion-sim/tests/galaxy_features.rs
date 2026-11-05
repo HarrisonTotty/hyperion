@@ -440,7 +440,6 @@ fn a_ray_through_a_cloud_gains_the_plummer_column() {
 #[test]
 fn a_point_in_a_bubble_reads_its_interior() {
     let galaxy = milky_way();
-    let clock = *galaxy.feature_shares().supernova_clock();
     let gas = galaxy.gas();
     let (feature, bubble) = disc_cells()
         .flat_map(|cell| FeatureCatalogue::cell(&galaxy, cell).features().to_vec())
@@ -448,19 +447,14 @@ fn a_point_in_a_bubble_reads_its_interior() {
             let FeatureMarks::Nursery(marks) = f.marks() else {
                 return None;
             };
-            Superbubble::of(
-                marks,
-                marks.age_at_epoch(),
-                gas.mean_density(f.position()),
-                gas.params().neutral_height(),
-                &clock,
-            )
-            .map(|b| (f, b))
+            Superbubble::in_galaxy(&galaxy, f.position(), marks, marks.age_at_epoch())
+                .map(|b| (f, b))
         })
         .expect("the disc holds bubbles");
     let [x, y, z] = feature.position().to_light_years_f64();
+    // Within its hot core, inside the wall of the gas it swept up (P09.T5).
     let inside =
-        GalacticPosition::from_light_years([x + 0.3 * bubble.radius().value(), y, z]).unwrap();
+        GalacticPosition::from_light_years([x + 0.3 * bubble.core_radius().value(), y, z]).unwrap();
     let source = FeatureGas::new(&galaxy, &NoFeatureCache, Years::ZERO);
     let mut mods = Vec::new();
     source.modifiers_near_segment(&inside, &inside, &mut mods);

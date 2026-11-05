@@ -733,10 +733,11 @@ mod tests {
             .map(|id| resolve(galaxy(), id).unwrap())
             .collect();
         // A system whose pair can have changed its primary, whose model holds its whole system
-        // (P11.T11.a).
+        // (P11.T11.a), another than the six (from 29 one of them is paired).
         records.push(
             systems(400)
                 .into_iter()
+                .skip(6)
                 .map(|id| resolve(galaxy(), id).unwrap())
                 .find(|record| BriefModel::new(galaxy(), record).route() == BriefRoute::Paired)
                 .expect("a paired system among 400 of layer C"),

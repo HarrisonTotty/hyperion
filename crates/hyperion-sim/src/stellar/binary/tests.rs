@@ -6383,11 +6383,13 @@ fn the_steps_of_t4o_are_the_same_whatever_age_they_are_run_to() {
 /// back to it, a segment each. Where its helium main sequence ends, the pair's second common
 /// envelope merges it at 294.85 Myr, in the 64th segment, where the cap stops the engine. That
 /// segment holds the merger's 1.63 M☉ helium Hertzsprung-gap star on its own track, no star the
-/// binary carries on its main sequence, and the track makes it a 1.44 M☉ oxygen–neon white dwarf at
-/// 295.58 Myr. With the cap raised the run takes that birth as a 65th segment and stops there. Up
-/// to the cap the two runs are the same segment for segment, and from the birth on they hold the
-/// same states, with the same records and merger. No companion is left whose gravitational-wave
-/// merger could lie past the cap.
+/// binary carries on its main sequence, whose oxygen–neon core collapses by electron capture at
+/// 295.58 Myr, from 29 (P11.T4's kept-core endings), to a 1.26 M☉ neutron star; until 29 the track
+/// made it a 1.44 M☉ oxygen–neon white dwarf there. With the cap raised the run takes that birth as
+/// a 65th segment, the collapse its one supernova, and stops there. Up to the cap the two runs are
+/// the same segment for segment, and from the birth on they hold the same states, with the same
+/// pooled Type Ia records and merger; the capped run, stopped at the cap, records no supernova. No
+/// companion is left whose gravitational-wave merger could lie past the cap.
 ///
 /// Between the cap and the birth, 0.72 Myr, both hold the star living, but the capped run's keeps
 /// its mass at the cap, 1.63 M☉, where the raised run's wind takes it to 1.44 M☉ and strips it in
@@ -6458,7 +6460,19 @@ fn the_last_capped_sample_ends_as_it_does_with_the_cap_raised() {
         let age = Years::new(age);
         assert_eq!(capped.state_at(age), raised.state_at(age), "at {age:?}");
     }
-    assert_eq!(capped.supernovae(), raised.supernovae());
+    assert_eq!(capped.supernovae(), []);
+    let [collapse] = raised.supernovae() else {
+        panic!("one collapse: {:?}", raised.supernovae());
+    };
+    assert!(
+        (collapse.age().value() / born - 1.0).abs() < 1e-12,
+        "{collapse:?}"
+    );
+    assert_eq!(
+        collapse.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::NeutronStar,
+        "{collapse:?}"
+    );
     assert_eq!(capped.pooled_ia(), raised.pooled_ia());
     assert_eq!(capped.merger_age(), raised.merger_age());
     assert!(
@@ -6470,7 +6484,7 @@ fn the_last_capped_sample_ends_as_it_does_with_the_cap_raised() {
     assert_eq!(end.orbit(), None);
     assert_eq!(
         end.stars().map(|s| s.phase()),
-        [Phase::OxygenNeonWhiteDwarf, Phase::NoRemnant]
+        [Phase::NeutronStar, Phase::NoRemnant]
     );
 }
 

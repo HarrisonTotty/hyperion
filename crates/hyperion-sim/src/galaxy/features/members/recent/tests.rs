@@ -325,8 +325,10 @@ fn no_globular_entry_ever_reports_a_shell() {
 /// suite compares it. Re-pinned at generator version 25 (it was `0x2d20_df50_dbeb_fb49` at 24): the
 /// train's potential and kicks move the entries; at 26 (it was `0x150c_65bd_43f3_008c`); and at 27
 /// (it was `0xbdcb_30ed_518b_5520`), whose galaxy the fixture is, every 27 hold's, and every 26
-/// hold's with its retargets until the bump.
-const ENTRIES_DIGEST: u64 = 0xef9f_f326_11cc_59a2;
+/// hold's with its retargets until the bump; and at 29 (it was `0xef9f_f326_11cc_59a2`), where the
+/// binary classes' tables refitted on the generator's own pairs (P15.T10.b) move the classes'
+/// claims.
+const ENTRIES_DIGEST: u64 = 0x1153_f3eb_e57a_0cfd;
 
 /// The new arm's bits, pinned before the bump: the kept entries of the first eight nurseries in
 /// the catalogue's walk that keep any, through [`FeatureLevelList::recent_entries`], each the
