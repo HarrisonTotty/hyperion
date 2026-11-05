@@ -24997,8 +24997,10 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     crashed (exit 139) compiling the shared read's general thick march with both ways, so the thick
     read has no such form and no twins.
   - `RAY_MARCH_THICK_KERNEL` and its forms keep their bytes (the deck and thermal bases).
-  - Exact: every lever kernel finds the altitude row once a sample (`withThickRowOnce`,
-    `thickSampleRow.wgsl`); the sky view and the aerial perspective still search a source.
+  - Exact: every thick march but over a deck finds the altitude row once a sample
+    (`withThickRowOnce`, `thickSampleRow.wgsl`; about 1% off on the pod): the lever kernels and the
+    march per step, `RAY_MARCH_THICK_ROW_KERNEL` and its forms under the bases' names. The sky view
+    and the aerial perspective still search a source.
   - `LimbKernels.pair(march, read, form)`; `FrameKernelsAhead.thick` `"with the table"` and
     `.thickPacked`; `ThickKernels.tabledRayMarch`.
   - Catalogue: `ATMOSPHERE_THICK_LEVER_ENTRIES` (14, smoke part 17). VIEW's kernel bound 97 → 111.

@@ -38,13 +38,13 @@ import {
   RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
   RAY_MARCH_SLOTS_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THERMAL_KERNEL,
-  RAY_MARCH_SLOTS_THICK_KERNEL,
-  RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL,
   RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
   RAY_MARCH_SPECIAL_KERNEL,
   RAY_MARCH_THERMAL_KERNEL,
-  RAY_MARCH_THICK_KERNEL,
-  RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_ROW_KERNEL,
+  RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
   RAY_MARCH_THICK_TABLE_KERNEL,
   RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
   RAY_MARCH_THICK_THERMAL_KERNEL,
@@ -252,17 +252,18 @@ export const ATMOSPHERE_LIMB_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 /**
  * R08.T14.c's per-frame atmosphere over the thick multiple-scattering table (`hillaire.ts`'s
  * `withThickRead`): the sky view, the aerial perspective and both marches' footprints, each with
- * its form specialised for one band and no layer edge; and R08.T14.d.4's sky-irradiance build over
+ * its form specialised for one band and no layer edge, the marches with their altitude row once a
+ * sample (perf-thick-march); and R08.T14.d.4's sky-irradiance build over
  * it (`tables.ts`'s `IRRADIANCE_THICK_KERNEL`). The smoke page compiles them in a part of their own
  * (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
  */
 export const ATMOSPHERE_THICK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   SKY_VIEW_THICK_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
-  RAY_MARCH_THICK_KERNEL,
-  RAY_MARCH_SLOTS_THICK_KERNEL,
-  RAY_MARCH_THICK_SPECIAL_KERNEL,
-  RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_ROW_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_KERNEL,
+  RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL,
   IRRADIANCE_THICK_KERNEL,
 ].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
 

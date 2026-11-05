@@ -1524,7 +1524,9 @@ export const SKY_VIEW_THICK_KERNEL = withThickRead(SKY_VIEW_KERNEL);
 export const AERIAL_PERSPECTIVE_THICK_KERNEL = withThickRead(AERIAL_PERSPECTIVE_KERNEL);
 /**
  * {@link RAY_MARCH_KERNEL} reading the thick table (R08.T14.c), each step's sources per step: made
- * from {@link RAY_MARCH_PER_STEP_KERNEL} (R08.T8.e's table).
+ * from {@link RAY_MARCH_PER_STEP_KERNEL} (R08.T8.e's table). The base of the deck's, the thermal
+ * and the row-once forms ({@link RAY_MARCH_THICK_ROW_KERNEL}, which a frame dispatches since
+ * perf-thick-march); no frame dispatches it.
  */
 export const RAY_MARCH_THICK_KERNEL = withThickRead(RAY_MARCH_PER_STEP_KERNEL);
 /** {@link RAY_MARCH_SLOTS_KERNEL} reading the thick table (R08.T14.c), from its march per step. */
@@ -1598,6 +1600,21 @@ function thickFromTable(pair: KernelPair, name: string): KernelPair {
   }
   return { ...tabled, name };
 }
+
+/**
+ * {@link RAY_MARCH_THICK_KERNEL} with its altitude row found once a sample (plan R08, R08.T14.c's
+ * read; perf-thick-march's step 4; {@link withThickRowOnce}), its name kept: the thick read's march
+ * per step a frame dispatches, exact, the base keeping its bytes for the deck and thermal forms.
+ */
+export const RAY_MARCH_THICK_ROW_KERNEL = withThickRowOnce(RAY_MARCH_THICK_KERNEL);
+/** {@link RAY_MARCH_SLOTS_THICK_KERNEL} with its row once a sample likewise. */
+export const RAY_MARCH_SLOTS_THICK_ROW_KERNEL = withThickRowOnce(RAY_MARCH_SLOTS_THICK_KERNEL);
+/** {@link RAY_MARCH_THICK_SPECIAL_KERNEL} with its row once a sample likewise. */
+export const RAY_MARCH_THICK_ROW_SPECIAL_KERNEL = withThickRowOnce(RAY_MARCH_THICK_SPECIAL_KERNEL);
+/** {@link RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL} with its row once a sample likewise. */
+export const RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL = withThickRowOnce(
+  RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+);
 
 /**
  * The thick read's march of `pair`, a thin march per step, with its row once a sample, named
@@ -2631,9 +2648,12 @@ type FrameMarch =
 interface ThickKernels {
   readonly skyView: ComputeHandle;
   readonly aerial: ComputeHandle;
-  /** The march over the shared read ({@link RAY_MARCH_THICK_KERNEL}). */
+  /**
+   * The march over the shared read ({@link RAY_MARCH_THICK_ROW_KERNEL}: {@link RAY_MARCH_THICK_KERNEL}
+   * with its row once a sample).
+   */
   readonly rayMarch: () => ThickMarchKernels;
-  /** The march by slot ({@link RAY_MARCH_SLOTS_THICK_KERNEL}). */
+  /** The march by slot ({@link RAY_MARCH_SLOTS_THICK_ROW_KERNEL}). */
   readonly rayMarchSlots: () => ThickMarchKernels;
   /**
    * The march over the shared read from the sources' table alone ({@link RAY_MARCH_THICK_TABLE_KERNEL};
@@ -2703,9 +2723,12 @@ function thickKernelsOf(
         skyView: engine.createCompute(as(SKY_VIEW_THICK_KERNEL)),
         aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_THICK_KERNEL)),
         rayMarch: () =>
-          (shared ??= marchOf(RAY_MARCH_THICK_KERNEL, RAY_MARCH_THICK_SPECIAL_KERNEL)),
+          (shared ??= marchOf(RAY_MARCH_THICK_ROW_KERNEL, RAY_MARCH_THICK_ROW_SPECIAL_KERNEL)),
         rayMarchSlots: () =>
-          (slots ??= marchOf(RAY_MARCH_SLOTS_THICK_KERNEL, RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL)),
+          (slots ??= marchOf(
+            RAY_MARCH_SLOTS_THICK_ROW_KERNEL,
+            RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL,
+          )),
         tabledRayMarch: () =>
           (tabledShared ??= marchOf(
             RAY_MARCH_THICK_TABLE_KERNEL,
@@ -2757,11 +2780,11 @@ async function thickKernelsAhead(
   const [skyView, aerial, rayMarch, rayMarchSlots, tabledRayMarch] = await Promise.all([
     engine.createComputeAsync(SKY_VIEW_THICK_KERNEL),
     engine.createComputeAsync(AERIAL_PERSPECTIVE_THICK_KERNEL),
-    marchOf(reads !== "by slot", RAY_MARCH_THICK_KERNEL, RAY_MARCH_THICK_SPECIAL_KERNEL),
+    marchOf(reads !== "by slot", RAY_MARCH_THICK_ROW_KERNEL, RAY_MARCH_THICK_ROW_SPECIAL_KERNEL),
     marchOf(
       reads !== "shared read",
-      RAY_MARCH_SLOTS_THICK_KERNEL,
-      RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+      RAY_MARCH_SLOTS_THICK_ROW_KERNEL,
+      RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL,
     ),
     marchOf(
       tabled && reads !== "by slot",

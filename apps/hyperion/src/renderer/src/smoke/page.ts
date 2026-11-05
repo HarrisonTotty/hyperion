@@ -615,7 +615,7 @@ async function run(
     checkMarchTableBySlot(engine, checks, summary.fallback),
   );
   // perf-thick-march's thick read's march by slot, in part 9: with it part 8 took 292 s of its
-  // 360 s on a pod (32 vCPU), part 9 134 s without it.
+  // 360 s on a pod (32 vCPU), and part 9 takes 210 s with it.
   await group(9, "perf-thick-march the thick read's march levers by slot", () =>
     checkThickMarchLeversBySlot(engine, checks, summary.fallback),
   );
@@ -777,7 +777,7 @@ async function run(
     checkMarchTableShared(engine, checks, summary.fallback),
   );
   // perf-thick-march's thick read's shared read, in part 10: with it part 12 took 330 s of its
-  // 360 s on a pod (32 vCPU), part 10 117 s without it.
+  // 360 s on a pod (32 vCPU), and part 10 takes 223 s with it.
   await group(10, "perf-thick-march the thick read's march levers over the shared read", () =>
     checkThickMarchLeversShared(engine, checks, summary.fallback),
   );

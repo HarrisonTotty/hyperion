@@ -34,6 +34,10 @@ import {
   RAY_MARCH_PACKED_KERNEL,
   RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
   RAY_MARCH_THICK_KERNEL,
+  RAY_MARCH_THICK_ROW_KERNEL,
+  RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
   RAY_MARCH_THICK_TABLE_KERNEL,
   RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
@@ -163,7 +167,15 @@ describe("the thick read's march levers' kernels (perf-thick-march)", () => {
     expect(RAY_MARCH_THICK_KERNEL.reference).not.toContain("thickSampleRow");
   });
 
-  it.each(LEVER_MARCHES.map((pair) => [pair.name, pair.reference]))(
+  it.each(
+    [
+      ...LEVER_MARCHES,
+      RAY_MARCH_THICK_ROW_KERNEL,
+      RAY_MARCH_SLOTS_THICK_ROW_KERNEL,
+      RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+      RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL,
+    ].map((pair) => [pair.name, pair.reference]),
+  )(
     "finds the altitude row in %s through the step's one search, which each step clears",
     (_name, source) => {
       const functions = wgslFunctions(source);
@@ -246,6 +258,7 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
     readonly bound: string[][];
     readonly table: Array<string | undefined>;
     readonly made: string[];
+    readonly sources: string[];
   }> {
     vi.useFakeTimers();
     const engine = await countingRenderEngine();
@@ -303,6 +316,9 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
       bound: march.map((d) => boundNames(d.bindings)),
       table: march.map((d) => d.bindings.sampled[SOURCE_TABLE_KERNEL_TEXTURE]?.name),
       made: engine.kernelPairs.map((pair) => pair.name),
+      sources: march.map(
+        (d) => engine.kernelPairs.findLast((pair) => pair.name === d.kernel)?.reference ?? "",
+      ),
     };
   }
 
@@ -310,6 +326,14 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
   const packedSpecial = THICK_LIMB_KERNELS.filter(
     (pair) => pair.name.endsWith("edge-free") && !pair.name.includes("table"),
   ).map((pair) => pair.name);
+
+  it("marches per step by the thick read's march with its row once a sample, its base's name", async () => {
+    const { kernels, sources } = await marched({});
+    expect([kernels, sources[0] === RAY_MARCH_THICK_ROW_SPECIAL_KERNEL.reference]).toEqual([
+      [RAY_MARCH_THICK_SPECIAL_KERNEL.name],
+      true,
+    ]);
+  });
 
   it("marches per step and per texel by the thick read's own march on the way back, binding no table", async () => {
     const { kernels, table } = await marched({});
