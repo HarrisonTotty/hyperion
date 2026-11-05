@@ -74,7 +74,9 @@ pub use census::{
 };
 pub use centre::{TAIL_TEMPERATURE, centre_detections};
 pub use light::{band_share, binary_luminosity, binary_peak, supernova_luminosity, supernova_peak};
-pub use listed::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache, listed_scan_slab};
+pub use listed::{
+    ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache, ToldEntries, listed_scan_slab,
+};
 pub use local::{LocalEventsCache, local_events};
 pub use oneshot::{
     NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, OneShotLight, one_shot_detections,

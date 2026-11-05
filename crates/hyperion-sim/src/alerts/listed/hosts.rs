@@ -11,9 +11,10 @@
 //!   (`FeatureLevelList::class_counts_of`), as the census reads them;
 //! - each class's hosts, found when a walk of the class first reads the list: the core
 //!   collapses' deaths' times and kicks, read first from their lifetimes (`FeatureStars::
-//!   core_collapse_death`), whose entries a walk builds only where its cut takes them
-//!   (`FeatureLevelList::core_collapse_told`); the Type Ia's deaths, built whole; the luminous blue
-//!   variables' hosts; plan 11's binaries' scan marks, and the mergers' events.
+//!   core_collapse_death`), whose entries a walk builds only once its cut takes one of them, every
+//!   one at once (`FeatureLevelList::core_collapse_told`, [`ToldEntries`]), and a cache keeps
+//!   apart, charged as it is built (perf-alert-walks-cpu); the Type Ia's deaths, built whole; the
+//!   luminous blue variables' hosts; plan 11's binaries' scan marks, and the mergers' events.
 //!
 //! The galactic centre's list is kept the same way ([`ListedHosts::of_centre`]), its core
 //! collapses' deaths built whole, as the walks read its few hundred. A feature cell's lists are kept
@@ -27,6 +28,7 @@ use std::sync::{Arc, OnceLock};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::binary::feature::ListedBinary;
 use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId};
+use crate::galaxy::features::FeatureId;
 use crate::galaxy::features::FeatureProcess;
 use crate::galaxy::features::catalogue::{FeatureCellCache, FeatureCellContents, FeatureRecord};
 use crate::galaxy::features::centre::events::victims::victim_count;
@@ -56,15 +58,16 @@ use super::Death;
 ///
 /// # Examples
 ///
-/// A cache for one galaxy that keeps every list it builds, so that a second walk of the same
-/// sphere, or another class's, builds none:
+/// A cache for one galaxy that keeps every list it builds, and every feature's told deaths'
+/// entries, so that a second walk of the same sphere, or another class's, builds none:
 ///
 /// ```
 /// use std::collections::BTreeMap;
 /// use std::sync::{Arc, Mutex, OnceLock};
 ///
-/// use hyperion_sim::alerts::{ListedCell, ListedHosts, ListedHostsCache};
+/// use hyperion_sim::alerts::{ListedCell, ListedHosts, ListedHostsCache, ToldEntries};
 /// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::features::FeatureId;
 /// use hyperion_sim::galaxy::features::catalogue::FeatureCellCache;
 /// use hyperion_sim::id::FeatureCell;
 ///
@@ -72,6 +75,7 @@ use super::Death;
 /// struct KeepLists {
 ///     cells: Mutex<BTreeMap<[i32; 3], Arc<ListedCell>>>,
 ///     centre: OnceLock<Arc<ListedHosts>>,
+///     told: Mutex<BTreeMap<FeatureId, Arc<ToldEntries>>>,
 /// }
 ///
 /// impl ListedHostsCache for KeepLists {
@@ -90,6 +94,16 @@ use super::Death;
 ///
 ///     fn centre(&self, galaxy: &Galaxy) -> Arc<ListedHosts> {
 ///         Arc::clone(self.centre.get_or_init(|| Arc::new(ListedHosts::of_centre(galaxy))))
+///     }
+///
+///     fn told_entries(
+///         &self,
+///         _galaxy: &Galaxy,
+///         feature: FeatureId,
+///         build: &mut dyn FnMut() -> ToldEntries,
+///     ) -> Arc<ToldEntries> {
+///         let mut kept = self.told.lock().expect("no keeper panics");
+///         Arc::clone(kept.entry(feature).or_insert_with(|| Arc::new(build())))
 ///     }
 /// }
 /// # let _ = KeepLists::default();
@@ -111,6 +125,20 @@ pub trait ListedHostsCache {
     ///
     /// As [`ListedHosts::of_centre`].
     fn centre(&self, galaxy: &Galaxy) -> Arc<ListedHosts>;
+
+    /// The entries of the core collapses told on the list of `feature` in `galaxy`, every one
+    /// built: exactly what `build` makes ([`ToldEntries`]). By default built afresh each time,
+    /// every told death's entry of the feature where a walk without a cache built only those its
+    /// cut took; a cache that keeps them keys them by galaxy and feature, calls `build` once for
+    /// each, and charges them as they are built (perf-alert-walks-cpu).
+    fn told_entries(
+        &self,
+        _galaxy: &Galaxy,
+        _feature: FeatureId,
+        build: &mut dyn FnMut() -> ToldEntries,
+    ) -> Arc<ToldEntries> {
+        Arc::new(build())
+    }
 }
 
 /// The cache that keeps nothing: each lookup builds its cell's lists, or the centre's.
@@ -236,6 +264,51 @@ pub(super) struct ToldDeath {
     pub(super) index: u16,
     pub(super) death: UniverseTime,
     pub(super) kick: Option<NatalKick>,
+}
+
+/// The entries of a feature's core collapses whose deaths its list tells, read first from their
+/// lifetimes, every one built, in index order, each with the time its death was told
+/// (perf-alert-walks-cpu).
+///
+/// A walk builds them the first time its cut takes one of the feature's told deaths, and a caller's
+/// [`ListedHostsCache`] may keep them, so that each later walk filters them by its own window and
+/// builds none: they are a pure function of the galaxy and the feature, and what a cache holds
+/// changes no walk's answer. A cache charges them as it keeps them ([`heap_bytes`](Self::heap_bytes)).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ToldEntries {
+    entries: Box<[(UniverseTime, Death)]>,
+}
+
+impl ToldEntries {
+    /// The entries of `told`, `feature`'s told deaths in `galaxy`, from its own list: each that is
+    /// one, in index order. Its entries' places read its profile's table
+    /// (`FeatureLevelList::core_collapse_told`).
+    #[must_use]
+    pub(super) fn of(galaxy: &Galaxy, feature: &FeatureRecord, told: &[ToldDeath]) -> Self {
+        let list = FeatureLevelList::of(galaxy, feature);
+        let entries = told
+            .iter()
+            .filter_map(|told| {
+                list.core_collapse_told(galaxy, told.index, (told.death, told.kick))
+                    .and_then(|entry| Death::of_feature(galaxy, &entry))
+                    .map(|death| (told.death, death))
+            })
+            .collect();
+        Self { entries }
+    }
+
+    /// Each entry, with the time its death was told, in index order.
+    #[must_use]
+    pub(super) fn entries(&self) -> &[(UniverseTime, Death)] {
+        &self.entries
+    }
+
+    /// The bytes it owns on the heap, its entries' buffer: what a caller's byte-bounded cache
+    /// charges it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.entries.len() * size_of::<(UniverseTime, Death)>()
+    }
 }
 
 /// One class's hosts on a list as the walks read them (module documentation), in index order.

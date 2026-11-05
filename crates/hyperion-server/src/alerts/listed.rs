@@ -17,13 +17,23 @@
 //! wait for it (a cold whole-cube walk otherwise built each cell up to eight times over). A galaxy
 //! without its kinematic tables lists nothing and never reads the cache: its key is its
 //! full-potential twin's, whose lists it must not be lent.
+//!
+//! Beside the lists it keeps each feature's told deaths' entries ([`ToldEntries`]), built the first
+//! time a walk's cut takes one of them, as entries of their own charged as they are built
+//! (perf-alert-walks-cpu). Charged within each list whether built or not, they overflowed the
+//! budget: a whole-cube walk of the core collapses at 29 (V 10⁻¹² W m⁻², 1,000 yr, the Milky
+//! Way-like seed `0x0926_0000`) kept 750 cells in 99.7 MB with 806 evictions, and its warm walk
+//! rose from 116 to 167 CPU-s on 16 workers. Kept apart, the walk keeps 1,627 entries in 66.8 MB
+//! with none, and its warm walk takes 106 CPU-s against 108 (pod, 32 vCPU, release,
+//! 2026-11-05).
 
 use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use hyperion_sim::alerts::{ListedCell, ListedHosts, ListedHostsCache};
+use hyperion_sim::alerts::{ListedCell, ListedHosts, ListedHostsCache, ToldEntries};
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::FeatureId;
 use hyperion_sim::galaxy::features::catalogue::FeatureCellCache;
 use hyperion_sim::id::FeatureCell;
 
@@ -32,11 +42,13 @@ use crate::cache::LruCounters;
 use crate::cache::{HeapBytes, SharedByteLru};
 use crate::compute::GalaxyKey;
 
-/// What the cache keys an entry by: a feature cell's lists, or a galaxy's centre's.
+/// What the cache keys an entry by: a feature cell's lists, a galaxy's centre's, or a feature's
+/// told deaths' entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ListedKey {
     Cell(GalaxyKey, FeatureCell),
     Centre(GalaxyKey),
+    Told(GalaxyKey, FeatureId),
 }
 
 /// What the cache holds of one key.
@@ -44,6 +56,7 @@ enum ListedKey {
 enum HeldLists {
     Cell(Arc<ListedCell>),
     Centre(Arc<ListedHosts>),
+    Told(Arc<ToldEntries>),
 }
 
 impl HeapBytes for HeldLists {
@@ -54,6 +67,7 @@ impl HeapBytes for HeldLists {
         match self {
             Self::Cell(cell) => size_of::<ListedCell>() + cell.heap_bytes(),
             Self::Centre(centre) => size_of::<ListedHosts>() + centre.heap_bytes(),
+            Self::Told(told) => size_of::<ToldEntries>() + told.heap_bytes(),
         }
     }
 }
@@ -126,7 +140,7 @@ impl SharedListedHostsCache {
         // A cell's key holds a cell's lists; anything else would be built again, to the same bits.
         match held.as_ref() {
             HeldLists::Cell(lists) => Arc::clone(lists),
-            HeldLists::Centre(_) => build(),
+            HeldLists::Centre(_) | HeldLists::Told(_) => build(),
         }
     }
 
@@ -151,7 +165,39 @@ impl SharedListedHostsCache {
         // bits.
         match held.as_ref() {
             HeldLists::Centre(centre) => Arc::clone(centre),
-            HeldLists::Cell(_) => build(),
+            HeldLists::Cell(_) | HeldLists::Told(_) => build(),
+        }
+    }
+
+    /// The entries of the core collapses told on `feature`'s list in `galaxy`, the galaxy `key`
+    /// names: the cache's, or what `build` makes and stored ([`ToldEntries`]).
+    ///
+    /// # Panics
+    ///
+    /// As [`cell`](Self::cell).
+    fn told_entries(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        feature: FeatureId,
+        build: &mut dyn FnMut() -> ToldEntries,
+    ) -> Arc<ToldEntries> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a listed hosts cache handle lends the lists of one galaxy, and this is another's"
+        );
+        if galaxy.kinematics().is_none() {
+            return Arc::new(build());
+        }
+        let held = self.held(ListedKey::Told(key, feature), || {
+            HeldLists::Told(Arc::new(build()))
+        });
+        // A feature's key holds its told entries; anything else would be built again, to the
+        // same bits.
+        match held.as_ref() {
+            HeldLists::Told(told) => Arc::clone(told),
+            HeldLists::Cell(_) | HeldLists::Centre(_) => Arc::new(build()),
         }
     }
 
@@ -218,6 +264,20 @@ impl ListedHostsCache for ListedHostsHandle<'_> {
     /// As [`cell`](Self::cell), and as [`ListedHosts::of_centre`].
     fn centre(&self, galaxy: &Galaxy) -> Arc<ListedHosts> {
         self.cache.centre(self.galaxy, galaxy)
+    }
+
+    /// Lends the entries of `feature`'s told deaths, building them if the cache has not got them.
+    ///
+    /// # Panics
+    ///
+    /// As [`cell`](Self::cell).
+    fn told_entries(
+        &self,
+        galaxy: &Galaxy,
+        feature: FeatureId,
+        build: &mut dyn FnMut() -> ToldEntries,
+    ) -> Arc<ToldEntries> {
+        self.cache.told_entries(self.galaxy, galaxy, feature, build)
     }
 }
 
@@ -297,5 +357,56 @@ mod tests {
             other.cell(&galaxy, cell, &NoFeatureCache)
         }));
         assert!(refused.is_err());
+    }
+
+    /// A feature's told deaths' entries are built once, lent from the cache and charged as built,
+    /// as their own entry beside the cell's lists; a galaxy without its kinematic tables builds
+    /// them every time and stores none.
+    #[test]
+    fn a_feature_s_told_entries_are_built_once_lent_and_charged() {
+        let (galaxy, key) = galaxy();
+        let cache = SharedListedHostsCache::new(64 << 20);
+        let handle = cache.handle(key);
+        let cell = FeatureCell::new([0, 6, -1]).unwrap();
+        let feature = NoFeatureCache
+            .contents(&galaxy, cell)
+            .features()
+            .first()
+            .expect("the cell holds features")
+            .id();
+        let mut builds = 0;
+        let mut build = || {
+            builds += 1;
+            ToldEntries::default()
+        };
+        let told = handle.told_entries(&galaxy, feature, &mut build);
+        let again = handle.told_entries(&galaxy, feature, &mut build);
+        assert!(Arc::ptr_eq(&told, &again));
+        let counters = cache.counters();
+        assert_eq!((counters.entries(), counters.misses()), (1, 1));
+        assert_eq!(
+            counters.bytes(),
+            size_of::<ToldEntries>()
+                + told.heap_bytes()
+                + size_of::<HeldLists>()
+                + crate::cache::ENTRY_OVERHEAD_BYTES
+        );
+        let bare = Galaxy::from_params_at_version(
+            galaxy.seed(),
+            hyperion_sim::galaxy::params::GalaxyParams::from_seed(
+                galaxy.seed(),
+                hyperion_sim::galaxy::imf::MassFunctionKind::default(),
+            ),
+            hyperion_sim::GeneratorVersion::new(29),
+        )
+        .unwrap();
+        let unkept = handle.told_entries(&bare, feature, &mut build);
+        assert!(!Arc::ptr_eq(&unkept, &told));
+        assert_eq!(builds, 2, "built once kept, and once for the bare galaxy");
+        assert_eq!(
+            cache.counters().entries(),
+            1,
+            "a bare galaxy stores nothing"
+        );
     }
 }

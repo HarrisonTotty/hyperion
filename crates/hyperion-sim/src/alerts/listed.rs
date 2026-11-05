@@ -79,7 +79,6 @@ use crate::galaxy::features::catalogue::{
     EDGE, FeatureCatalogue, FeatureCellCache, FeatureRecord, MAX_FEATURE_REACH, bulk_velocity,
 };
 use crate::galaxy::features::centre::profile::REACH;
-use crate::galaxy::features::members::FeatureLevelList;
 use crate::galaxy::features::members::recent::RecentEntry;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::{QuerySphere, UNBOUND_PAD_SPEED};
@@ -105,7 +104,7 @@ use super::{AlertContext, AlertQuery, Detection, SourceStatus};
 mod hosts;
 
 use hosts::ClassHosts;
-pub use hosts::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache};
+pub use hosts::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache, ToldEntries};
 
 /// The relative margin on a pad, over the rounding of its products.
 const PAD_MARGIN: f64 = 1e-9;
@@ -632,14 +631,17 @@ impl ListedWalk {
             let Some(hosts) = cell.hosts(feature) else {
                 continue;
             };
-            self.read_feature(galaxy, (query, reaches, class), (feature, &balls), hosts);
+            let read = (feature, &balls);
+            self.read_feature(galaxy, lists, (query, reaches, class), read, hosts);
         }
     }
 
-    /// Reads `feature`'s list, `hosts`, whose hosts can reach a kind's sphere from `balls`.
+    /// Reads `feature`'s list, `hosts`, whose hosts can reach a kind's sphere from `balls`, its
+    /// told deaths' entries through `lists`.
     fn read_feature(
         &mut self,
         galaxy: &Galaxy,
+        lists: &dyn ListedHostsCache,
         (query, reaches, class): (&AlertQuery, &Reaches, ClassId),
         (feature, balls): (&FeatureRecord, &Balls),
         hosts: &ListedHosts,
@@ -652,16 +654,21 @@ impl ListedWalk {
         };
         if let ClassHosts::Told(told) = found {
             let wanted = balls.wanted(query);
-            let mut taken = told.iter().filter(|told| wanted(told.death)).peekable();
-            if taken.peek().is_none() {
+            if !told.iter().any(|told| wanted(told.death)) {
                 return;
             }
-            // Its entries' places read its profile's table, made for the deaths the cut takes.
-            let list = FeatureLevelList::of(galaxy, feature);
-            self.deaths.extend(taken.filter_map(|told| {
-                list.core_collapse_told(galaxy, told.index, (told.death, told.kick))
-                    .and_then(|entry| Death::of_feature(galaxy, &entry))
-            }));
+            // Every told death's entry, built at once and kept apart from the list, taken by its
+            // told time as the cut takes its told death.
+            let built = lists.told_entries(galaxy, feature.id(), &mut || {
+                ToldEntries::of(galaxy, feature, told)
+            });
+            self.deaths.extend(
+                built
+                    .entries()
+                    .iter()
+                    .filter(|&&(death, _)| wanted(death))
+                    .map(|(_, entry)| entry.clone()),
+            );
             return;
         }
         self.take(query, balls, reaches, found);

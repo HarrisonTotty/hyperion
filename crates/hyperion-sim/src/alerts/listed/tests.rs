@@ -10,6 +10,7 @@ use hyperion_testkit::order::assert_order_independent;
 
 use super::*;
 use crate::Seed;
+use crate::alerts::ToldEntries;
 use crate::alerts::local::LocalEventsCache;
 use crate::alerts::recurrent::RecurrentProcess;
 use crate::alerts::{
@@ -26,9 +27,11 @@ use crate::galaxy::catalogue_classes::type_ia::TypeIaProcess;
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, cells_in_slab, entries_when, occupied_cells,
 };
+use crate::galaxy::features::FeatureId;
 use crate::galaxy::features::catalogue::{FeatureCellContents, NoFeatureCache};
 use crate::galaxy::features::centre::events::victims::victim_count;
 use crate::galaxy::features::centre::recent::CentreRecent;
+use crate::galaxy::features::members::FeatureLevelList;
 use crate::galaxy::features::members::recent::{FeatureClassesRules, RecentClass};
 use crate::galaxy::gas::ccm::Band;
 use crate::galaxy::gas::modifiers::NoModifiers;
@@ -89,14 +92,19 @@ impl FeatureCellCache for KeepCells {
 /// A cell's lists, built once.
 type BuiltOnce = Arc<OnceLock<Arc<ListedCell>>>;
 
-/// A listed hosts cache that keeps every cell's lists and the centre's it is asked for, for one
-/// galaxy and many threads, each built once while the threads that ask for it wait, counting the
-/// lists it builds.
+/// A feature's told deaths' entries, built once.
+type ToldOnce = Arc<OnceLock<Arc<ToldEntries>>>;
+
+/// A listed hosts cache that keeps every cell's lists, the centre's and every feature's told
+/// deaths' entries it is asked for, for one galaxy and many threads, each built once while the
+/// threads that ask for it wait, counting the lists and the told entries it builds.
 #[derive(Debug, Default)]
 struct KeepLists {
     cells: Mutex<BTreeMap<[i32; 3], BuiltOnce>>,
     centre: OnceLock<Arc<ListedHosts>>,
+    told: Mutex<BTreeMap<FeatureId, ToldOnce>>,
     built: AtomicU64,
+    told_built: AtomicU64,
 }
 
 impl KeepLists {
@@ -105,8 +113,14 @@ impl KeepLists {
         self.built.load(Ordering::Relaxed)
     }
 
+    /// How many features' told deaths' entries it has built.
+    fn told(&self) -> u64 {
+        self.told_built.load(Ordering::Relaxed)
+    }
+
     /// The bytes its lists own and take themselves, as a byte-bounded cache would charge them
-    /// without its entries' overhead: each kept cell's lists' and the centre's.
+    /// without its entries' overhead: each kept cell's lists', the centre's and each feature's
+    /// told entries'.
     fn bytes(&self) -> usize {
         let cells = self.cells.lock().unwrap_or_else(PoisonError::into_inner);
         let lists = cells
@@ -114,7 +128,16 @@ impl KeepLists {
             .filter_map(|slot| slot.get())
             .map(|cell| size_of::<ListedCell>() + cell.heap_bytes())
             .sum::<usize>();
+        let told = self
+            .told
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .filter_map(|slot| slot.get())
+            .map(|told| size_of::<ToldEntries>() + told.heap_bytes())
+            .sum::<usize>();
         lists
+            + told
             + self
                 .centre
                 .get()
@@ -146,6 +169,25 @@ impl ListedHostsCache for KeepLists {
         Arc::clone(self.centre.get_or_init(|| {
             self.built.fetch_add(1, Ordering::Relaxed);
             NoListedHostsCache.centre(galaxy)
+        }))
+    }
+
+    fn told_entries(
+        &self,
+        _galaxy: &Galaxy,
+        feature: FeatureId,
+        build: &mut dyn FnMut() -> ToldEntries,
+    ) -> Arc<ToldEntries> {
+        let slot = Arc::clone(
+            self.told
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(feature)
+                .or_default(),
+        );
+        Arc::clone(slot.get_or_init(|| {
+            self.told_built.fetch_add(1, Ordering::Relaxed);
+            Arc::new(build())
         }))
     }
 }
@@ -378,7 +420,9 @@ fn the_whole_cube_s_core_collapses_with_the_lists_measured() {
         let bursts = whole_cube(&galaxy, &magnetars, (&features, &lists), true);
         let cold = lists.built();
         let explosions = whole_cube(&galaxy, &supernovae, (&features, &lists), true);
+        let told = lists.told();
         let again = whole_cube(&galaxy, &magnetars, (&features, &lists), false);
+        assert_eq!(lists.told(), told, "the warm walk builds no told entries");
         assert_eq!(again.lists, bursts.lists, "a warm walk finds the cold's");
         assert_eq!(again.drawn, bursts.drawn);
         assert!(bursts.cells.iter().all(|d| !is_listed(d.host())));
@@ -1018,6 +1062,35 @@ fn listed_in_the_background(
 /// The lists' supernova, 0.2 ly spinward of its site, through a V sensor that reaches 700 ly over
 /// [200, 300) years: from 29 its onset is seen, on its list's member, beside the cells', 0.2 years
 /// after its explosion, which its explosion event names.
+/// The lists' told deaths' entries, kept between walks of other windows, change no walk's answer,
+/// in any order (perf-alert-walks-cpu): the core collapses about the listed supernova through a V
+/// sensor that reaches 700 ly, over three centuries, walked forwards, backwards, shuffled and alone
+/// through one cache that keeps every list and every told death's entries, each walk the one that
+/// builds them afresh.
+#[test]
+fn kept_told_entries_change_no_walk_in_any_order() {
+    let at = GalacticPosition::from_light_years([-12_727.473, 26_883.128, 204.046]).unwrap();
+    let v = reaching(
+        AlertBand::Photometric(Band::V),
+        TransientKind::CoreCollapse,
+        700.0,
+    );
+    let queries: Vec<_> = [(0, 100), (200, 300), (600, 700)]
+        .into_iter()
+        .map(|window| sensor_query(ClassId::CORE_COLLAPSE, at, v.clone(), window))
+        .collect();
+    let galaxy = seed_9(true);
+    let kept = KeepLists::default();
+    assert_order_independent(&queries, |query| alerts(galaxy, query, &kept));
+    for query in &queries {
+        assert_eq!(
+            alerts(galaxy, query, &kept),
+            alerts(galaxy, query, &NoListedHostsCache)
+        );
+    }
+    assert!(kept.told() > 0, "told entries kept");
+}
+
 #[test]
 fn from_29_a_listed_supernova_is_seen_beside_the_cells() {
     let host = SystemId::from_raw(LISTED_SUPERNOVA).unwrap();
