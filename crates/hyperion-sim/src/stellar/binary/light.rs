@@ -1820,6 +1820,13 @@ mod tests {
         least_room: f64,
         /// Pairs holding a departing star or product, among those checked.
         departing: u64,
+        /// `Detached` pairs the engine contradicts through their wind alone ([`wind_fed_by`]):
+        /// from generator version 27 a wide pair's main-sequence star takes its partner's wind
+        /// (P11.T12), which the closed form's `Detached` reaches only at 28 (its wind reach,
+        /// retargeted; train 27's findings), so they are counted apart, not held to the rule; and
+        /// the brightest V of a departing star among them, mag.
+        wind_fed: u64,
+        wind_fed_brightest: f64,
         violations: Vec<String>,
         /// Pairs on which the engine's debug assertions fired (release builds skip them).
         engine_panics: Vec<String>,
@@ -1830,6 +1837,7 @@ mod tests {
             Self {
                 least_room: f64::INFINITY,
                 thin_least_room: f64::INFINITY,
+                wind_fed_brightest: f64::INFINITY,
                 ..Self::default()
             }
         }
@@ -1852,6 +1860,8 @@ mod tests {
             self.bright_held += other.bright_held;
             self.least_room = self.least_room.min(other.least_room);
             self.departing += other.departing;
+            self.wind_fed += other.wind_fed;
+            self.wind_fed_brightest = self.wind_fed_brightest.min(other.wind_fed_brightest);
             self.violations.extend(other.violations);
             self.engine_panics.extend(other.engine_panics);
         }
@@ -1926,11 +1936,26 @@ mod tests {
                     held.departing_mag < m.value()
                 }
             };
-            if violated {
+            if violated && verdict == PairLight::Detached && wind_fed_by(input, w1) {
+                self.wind_fed += 1;
+                self.wind_fed_brightest = self.wind_fed_brightest.min(held.departing_mag);
+            } else if violated {
                 self.violations
                     .push(format!("{}; held {held:?}", describe()));
             }
         }
+    }
+
+    /// Whether the pair of `input` can interact by `age` (years) through its wind alone, as the
+    /// pre-test reads it ([`can_interact`]): the lobe and decay tests pass it over on its stars'
+    /// own tracks, and its main-sequence star takes its partner's wind past the threshold by then
+    /// (P11.T12's fix, `wind_accretion::onset`), as `no_detached_pair_interacts` counts its
+    /// wind-fed pairs. A `Detached` pair the engine contradicts so is the 28 retarget's, not the
+    /// closed form's lobe and decay terms.
+    fn wind_fed_by(input: &BinaryInput, age: f64) -> bool {
+        let members = own_members(input, age, None);
+        !super::super::evolve::interacts(input, &members, age)
+            && super::super::wind_accretion::onset(input, &members, age).is_some()
     }
 
     /// Checks each of `pairs` over a window in the old class (about its own age at +H) and in the
@@ -1985,9 +2010,9 @@ mod tests {
         total
     }
 
-    /// Prints one set's tallies, and returns its violations.
-    fn report(layer: Layer, set: &str, tallies: &[Checked; 2]) -> usize {
-        let mut violations = 0;
+    /// Prints one set's tallies, and returns its violations and its wind-fed `Detached` pairs.
+    fn report(layer: Layer, set: &str, tallies: &[Checked; 2]) -> (usize, u64) {
+        let (mut violations, mut wind_fed) = (0, 0);
         for (class, t) in ["old", "young"].iter().zip(tallies) {
             let shares = |counts: &[u64; 5]| {
                 let total = counts.iter().sum::<u64>().max(1);
@@ -2033,7 +2058,8 @@ mod tests {
                 "layer {layer:?}, {set}, {class}: census windows {}; wide windows {}; thin none \
                  {:?} (census, wide), of which holding a V {}, least room {:.4} mag without the \
                  rule, {} brighter; Bright's M at 10/25/50/75/90% {}; departing {}; Bright \
-                 holding a V {}, least room {:.4} mag; {} violations; {} engine panics",
+                 holding a V {}, least room {:.4} mag; {} wind-fed Detached (brightest departing \
+                 V {:.2}); {} violations; {} engine panics",
                 shares(&t.census),
                 shares(&t.wide),
                 t.thin,
@@ -2044,6 +2070,8 @@ mod tests {
                 t.departing,
                 t.bright_held,
                 t.least_room,
+                t.wind_fed,
+                t.wind_fed_brightest,
                 t.violations.len(),
                 t.engine_panics.len()
             );
@@ -2061,15 +2089,20 @@ mod tests {
                 t.engine_panics.len()
             );
             violations += t.violations.len();
+            wind_fed += t.wind_fed;
         }
-        violations
+        (violations, wind_fed)
     }
 
     /// P11.T17.c's slow test: the verdicts against the engine, over ≥ 10⁵ realised pairs of each
     /// of C, D and E, as P11.T16's `hierarchy_bound` lists them, near the Sun and in the bulge,
     /// and pairs of theirs with a star below 0.1 M☉, each in an old and a young window, on a seed
     /// of its own:
-    /// - no `Detached` pair interacts before the window's end, or holds a departing star;
+    /// - no `Detached` pair interacts before the window's end, or holds a departing star, but those
+    ///   whose wind alone does ([`wind_fed_by`]; P11.T12, which `Detached` reaches only at 28):
+    ///   counted apart, a finding pinned as measured at 27, 15,652 windows (C 7,537, D 7,985,
+    ///   E 130, every one old but D's 35), a departing star among them as bright as
+    ///   M<sub>V</sub> −6.38;
     /// - no `Unchanged` pair holds a departing living star or a living product in the window;
     /// - no `Remnants` pair holds a living star or product in the window;
     /// - no `Bright(M)` pair holds a departing star or product brighter than M, which the census
@@ -2080,7 +2113,7 @@ mod tests {
         let galaxy = super::super::testing::milky_way(VERDICT_SEED);
         let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).expect("in the cube");
         let bulge = GalacticPosition::from_light_years([0.0, 2_000.0, 300.0]).expect("in the cube");
-        let mut violations = 0;
+        let (mut violations, mut wind_fed) = (0, 0);
         for (salt, layer) in (0x0c_u64..).zip([Layer::C, Layer::D, Layer::E]) {
             let near_sun = listed_pairs(&galaxy, layer, &sun, SUN_PAIRS);
             let in_bulge = listed_pairs(&galaxy, layer, &bulge, BULGE_PAIRS);
@@ -2091,9 +2124,16 @@ mod tests {
                 ("in the bulge", &in_bulge, 0x200),
                 ("a star below 0.1 M_sun", &light, 0x300),
             ] {
-                violations += report(layer, set, &checked(pairs, salt ^ k));
+                let (v, w) = report(layer, set, &checked(pairs, salt ^ k));
+                violations += v;
+                wind_fed += w;
             }
         }
+        println!("{wind_fed} wind-fed Detached pairs counted apart; {violations} violations");
+        assert_eq!(
+            wind_fed, 15_652,
+            "Detached pairs the engine contradicts through their wind alone"
+        );
         assert_eq!(violations, 0, "verdicts the engine contradicts");
     }
 
