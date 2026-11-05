@@ -166,7 +166,7 @@ impl ServedQuery {
     ///
     /// The list is built on the pool before the query, since a job never waits on another, so the
     /// caller takes it from the [`GlobalListService`](super::GlobalListService) first, with the
-    /// tables of the streams the query reads ([`GlobalListSource::streams_read`]).
+    /// tables of the streams the query reads ([`GlobalListSource::streams_read_with`]).
     #[must_use]
     pub fn with_list(self, list: ListedTubes) -> Self {
         Self {

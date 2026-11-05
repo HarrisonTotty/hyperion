@@ -15,7 +15,7 @@ use hyperion_protocol::{
     SystemsInRangeRequest, TargetExtinction,
 };
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::global_list::GlobalListSource;
+use hyperion_sim::galaxy::global_list::{GlobalListSource, StreamSpec};
 use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemKind, SystemOrigin};
 use hyperion_sim::galaxy::query::{QueryMode, RangeQuery, RangeResult, SystemHit};
 use hyperion_sim::id::SystemIdKind;
@@ -476,15 +476,20 @@ fn row_origins<'a>(members: FeatureMembers, reads: &RowReads<'a>) -> RowOrigins<
 
 /// The global list a range query of `query` in `galaxy`, the galaxy `key` names, reads from
 /// `lists`, the server's service and its tube tables, with the table of every stream it reads built
-/// on the pool's workers and kept first ([`GlobalListSource::streams_read`]): from generator
+/// on the pool's workers and kept first ([`GlobalListSource::streams_read_with`]): from generator
 /// version 27, whose query takes the list's members, the galactic centre's among them (P10.T10.b's
 /// registration, P09.T37.b), and `None` below it or while `members` holds the feature members back,
 /// when the query takes none.
 ///
 /// The list is built at bulk priority on its first request, as the list's handlers build it, and
-/// the tables at interactive priority, as `stream_track` builds one: some 0.2–0.5 s a stream on the
-/// pool, each once, and none for a query a warm-up has gone before. The query then reads every
-/// table warm, since a job never waits on another.
+/// the tables at interactive priority, as `stream_track` builds one, a few at once
+/// ([`GlobalListService::tubes`](crate::compute::GlobalListService::tubes)): some 0.2–0.5 s a
+/// stream on the pool, each once, and none for a query a warm-up has gone before. The query then
+/// reads every table warm, since a job never waits on another. The query's source keeps each
+/// table's envelope with the list's models as it reads it, and the warm-up as it builds it, so a
+/// stream whose shell a later query meets and whose envelope it misses (111 of the 121 about the
+/// Sun-like point, perf-range-census-streams) needs no table, even one the cache has evicted
+/// since.
 ///
 /// # Errors
 ///
@@ -501,16 +506,19 @@ pub(crate) async fn list_for(
         return Ok(None);
     }
     let held = lists.get(key).await?;
-    for number in GlobalListSource::streams_read(galaxy, held.list(), query) {
-        let spec = held
-            .list()
-            .stream(number)
-            .expect("the list names its own streams");
-        lists
-            .tube((galaxy, key), spec, Priority::Interactive)
-            .await
-            .map_err(|error| tube_refused(number, &error))?;
-    }
+    let read = GlobalListSource::streams_read_with(galaxy, held.list(), held.models(), query);
+    let specs: Vec<&StreamSpec> = read
+        .iter()
+        .map(|&number| {
+            held.list()
+                .stream(number)
+                .expect("the list names its own streams")
+        })
+        .collect();
+    lists
+        .tubes((galaxy, key), &specs, Priority::Interactive)
+        .await
+        .map_err(|(number, error)| tube_refused(number, &error))?;
     Ok(Some(ListedTubes::new(
         (Arc::clone(galaxy), key),
         held,

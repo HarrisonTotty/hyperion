@@ -178,11 +178,13 @@ pub const MAX_FEATURE_CELLS: u64 = 512;
 /// ([`GALAXY_CACHE_ENTRIES`]) with room.
 pub const GALAXY_FEATURES_CACHE_BYTES: usize = 1 << 20;
 
-/// The byte budget of plan 10's global lists, kept per galaxy (P10.T10.a): some 310 streams and
-/// cores of about 200 bytes each and as many entries of 40, under 100 kB a galaxy, so this holds
-/// every galaxy the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room for the 1,500 streams of the
-/// largest.
-pub const GLOBAL_LIST_CACHE_BYTES: usize = 4 << 20;
+/// The byte budget of plan 10's global lists, kept per galaxy (P10.T10.a): some 320 streams and
+/// cores of about 200 bytes each and as many entries of 40, under 100 kB a galaxy, and the list's
+/// models, about 2.1 kB a stream with its band shares and its tube envelope: 683 kB for the server
+/// tests' galaxy's 321 streams (perf-range-census-streams, 2026-11-05). So this holds every galaxy
+/// the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room for the 1,500 streams of the largest,
+/// some 3.3 MB.
+pub const GLOBAL_LIST_CACHE_BYTES: usize = 8 << 20;
 
 /// The byte budget of plan 10's tube tables, one per stream of every galaxy the server holds
 /// (P10.T10.b's `TubeTableCache`): some 90 kB a table, a Milky Way galaxy's 310 or so some 28 MB,

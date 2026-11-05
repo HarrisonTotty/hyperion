@@ -696,9 +696,13 @@ impl GlobalListService {
     }
 
     /// The tube tables of `specs`' streams in `galaxy`, the galaxy `key` names, that the cache
-    /// lacks, built a few at once at bulk priority as the warm-up builds them ([`tables_in_flight`]),
-    /// each joining a build in flight for its stream: what a sky's handler asks for a step's streams
-    /// before that step's members' jobs read them (rendering plan R06, R06.T16.a's cost).
+    /// lacks, built a few at once at `priority` as the warm-up builds them ([`tables_in_flight`]),
+    /// each joining a build in flight for its stream: what a sky's handler asks at bulk priority
+    /// for a step's streams before that step's members' jobs read them (rendering plan R06,
+    /// R06.T16.a's cost), and a range query's at interactive priority for the streams it reads
+    /// (P10.T10.b). One at a time, the 121 tables of a cold Sun-like 50 ly query took 20.1 s on
+    /// eight workers, three at a time 10.0 s (perf-range-census-streams, the test profile, pod, 16
+    /// vCPU, 2026-11-05).
     ///
     /// # Errors
     ///
@@ -711,6 +715,7 @@ impl GlobalListService {
         &self,
         (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
         specs: &[&StreamSpec],
+        priority: Priority,
     ) -> Result<(), (StreamNumber, BuildTubeOnPoolError)> {
         let fewest = specs
             .iter()
@@ -726,7 +731,7 @@ impl GlobalListService {
                     break;
                 };
                 building.push(async move {
-                    let built = self.lists.tube((galaxy, key), spec, Priority::Bulk).await;
+                    let built = self.lists.tube((galaxy, key), spec, priority).await;
                     (spec.number(), built)
                 });
             }
@@ -969,7 +974,9 @@ impl Lists {
     /// pool's workers take the next table's shares as the last's run out (module documentation,
     /// "Kept"). Each table in flight is charged as the next would be, and none is started beside
     /// another before one table's charge is known, so the warm-up stops where a build one table at
-    /// a time stops, and evicts none of its galaxy's tables.
+    /// a time stops, and evicts none of its galaxy's tables. Each table's envelope is kept with the
+    /// list's models, held or built, so that a query whose sphere misses it never reads it again
+    /// ([`GlobalListModels::keep_envelope`]).
     async fn warm(&self, key: GalaxyKey) -> Result<WarmedTubes, ComputeError> {
         let list = self.get(key).await?;
         let galaxy = self.galaxies.get(key).await?;
@@ -981,6 +988,7 @@ impl Lists {
         let (mut held_bytes, mut next_charge) = streams
             .iter()
             .filter_map(|spec| self.tubes.get(&(key, spec.number())))
+            .inspect(|table| list.models().keep_envelope(table))
             .map(|table| ByteLru::<TubeKey, TubeTable>::charge(&table))
             .fold((0, 0), |(sum, most), charge| {
                 (usize::saturating_add(sum, charge), usize::max(most, charge))
@@ -1027,6 +1035,8 @@ impl Lists {
             };
             match built {
                 Ok(table) => {
+                    // So that a query whose sphere misses it reads it no more, even once evicted.
+                    list.models().keep_envelope(&table);
                     warmed.built += 1;
                     next_charge = ByteLru::<TubeKey, TubeTable>::charge(&table);
                     held_bytes = held_bytes.saturating_add(next_charge);
@@ -1388,7 +1398,8 @@ mod tests {
 
     /// P10.T10.b: a warm-up builds the galaxy's tables in number order, and stops before one that
     /// would take them past the cache's budget, so that it evicts none of its own: here, with room
-    /// for two, after the second. A second warm-up finds the two held and builds nothing.
+    /// for two, after the second; it keeps the two tables' envelopes. A second warm-up finds the
+    /// two held and builds nothing.
     #[tokio::test]
     async fn a_warm_up_builds_in_number_order_until_the_cache_is_full() {
         let charge = a_table_s_charge().await;
@@ -1415,6 +1426,41 @@ mod tests {
             .map(|spec| service.is_ready(key(), spec.number()))
             .collect();
         assert_eq!(held, [true, true, false, false]);
+        // It keeps each table's envelope with the list's models, so that a query whose sphere
+        // meets a stream's shell and misses its envelope is not given its table to build
+        // (perf-range-census-streams).
+        let kept: Vec<bool> = list.list().debris().streams()[..4]
+            .iter()
+            .map(|spec| list.models().envelope(spec.number()).is_some())
+            .collect();
+        assert_eq!(kept, [true, true, false, false]);
+        let galaxy = within(service.lists.galaxies.get(key()))
+            .await
+            .expect("the galaxy");
+        let first = list.list().debris().streams()[0].number();
+        let shell = list.list().stream_entry(first).expect("listed").shell();
+        // Inside the shell, and inside the root cube, where a query's centre lies.
+        let r = f64::midpoint(shell.inner().value(), shell.outer().value().min(60_000.0));
+        let passed_by = [[r, 0.0, 0.0], [-r, 0.0, 0.0], [0.0, r, 0.0], [0.0, -r, 0.0]]
+            .into_iter()
+            .chain([[0.0, 0.0, r], [0.0, 0.0, -r]])
+            .filter_map(|p| {
+                let centre = hyperion_sim::coords::GalacticPosition::from_light_years(p)?;
+                RangeQuery::builder(centre, LightYears::new(50.0))
+                    .build()
+                    .ok()
+            })
+            .any(|query| {
+                let (list, models) = (list.list(), list.models());
+                GlobalListSource::streams_read(&galaxy, list, &query).contains(&first)
+                    && !GlobalListSource::streams_read_with(&galaxy, list, models, &query)
+                        .contains(&first)
+            });
+        assert!(
+            passed_by,
+            "a sphere on stream {}'s shell misses its tube",
+            first.get()
+        );
         let again = within(service.lists.warm(key()))
             .await
             .expect("the warm-up's jobs run");
@@ -1435,7 +1481,7 @@ mod tests {
             .expect("the galaxy");
         let streams = list.list().debris().streams();
         let specs: Vec<&StreamSpec> = streams[..3].iter().collect();
-        within(service.tubes((&galaxy, key()), &specs))
+        within(service.tubes((&galaxy, key()), &specs, Priority::Bulk))
             .await
             .expect("the tables build");
         assert!(
@@ -1445,7 +1491,7 @@ mod tests {
         );
         assert!(!service.is_ready(key(), streams[3].number()));
         let (entries, misses) = (cache.counters().entries(), cache.counters().misses());
-        within(service.tubes((&galaxy, key()), &specs))
+        within(service.tubes((&galaxy, key()), &specs, Priority::Bulk))
             .await
             .expect("the tables are held");
         assert_eq!(

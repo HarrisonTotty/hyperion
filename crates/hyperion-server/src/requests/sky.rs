@@ -409,7 +409,7 @@ async fn step_tables(
             .collect();
         state
             .global_lists
-            .tubes((galaxy, key), &specs)
+            .tubes((galaxy, key), &specs, Priority::Bulk)
             .await
             .map_err(|(number, error)| tube_refused(number, &error))?;
         built.built_through(k);
