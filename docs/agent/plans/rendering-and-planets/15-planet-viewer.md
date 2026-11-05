@@ -224,9 +224,10 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   panel's inputs at mount. It zooms by the wheel to 400 km and then 300 m above the ground at the
   line of sight, or above the datum where the ground is below it, and tilts to the horizon under
   `R`. Each capture is taken of the whole tab and again under `MAXIMIZE VIEW`.
-- R15.T6 (lean, 2026-11-05): the first captures showed the tab overflowing 1280×720, so `SOURCE`
-  (the `BODY` row) is folded at mount, as `VOLATILES · RANK` is, and the commands' labels keep to
-  one line.
+- R15.T6 (lean, 2026-11-05): the first captures showed the tab overflowing 1280×720, so `SHOWN`
+  (the `BODY` row) stands beside the title, folded at mount, `GENERATE`'s label keeps to one line,
+  and the held-back reason stands in the bar. `SHOWN`, not `SOURCE`, which names the exposure
+  meter's source on the same display.
 - R15.T6 (lean, 2026-11-05): the run fails where the tab overflows the window (the console's frame
   taller than it), and it captures before it judges, so that a failed run keeps its picture.
 - R15.T6 (lean, 2026-11-05): the inspection run's lit-body guard now counts the bodies pass's late

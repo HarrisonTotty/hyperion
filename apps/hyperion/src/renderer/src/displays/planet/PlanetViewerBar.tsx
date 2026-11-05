@@ -26,7 +26,7 @@ export interface PlanetViewerBarProps {
   readonly lastDraw: SeedHex | null;
   /** Why the commands are held back (no universe open, the link down), or `null`. */
   readonly heldBack: string | null;
-  /** The ID of the words that say why, which the panel shows. */
+  /** The ID of the words that say why, which the bar shows and the panel's commands cite. */
   readonly heldBackId: string;
   readonly onRandomize: () => void;
   /** The viewer's last command, whose state stands here while it is a draw. */
@@ -41,8 +41,9 @@ export interface PlanetViewerBarProps {
  * - `RANDOMIZE` (`N`) puts a real planet's inputs, drawn from the galaxy with `DRAW SEED`, on the
  *   panel and shows them; once the planet is shown, `LAST DRAW` says which seed draws it again and
  *   `DRAW SEED` moves on by one, so that each press draws another planet. Its `PENDING`, then its
- *   outcome, stand beside it. It is held back with the panel's reason while no universe is open or
- *   the link is down.
+ *   outcome, stand beside it. It is held back while no universe is open or the link is down, as the
+ *   panel's `GENERATE` and `OPEN BODY` are, with the reason the bar states under its rows for all
+ *   three, across the view's width rather than in the panel's narrow column.
  * - `SHARE` holds the panel's inputs' string, which reproduces the planet in any universe of this
  *   generator version: selected whole as it takes the focus, to copy; or paste one and `LOAD` it
  *   (`Enter`), which puts its inputs on the panel, refusing a string it cannot read with what is
@@ -99,6 +100,11 @@ export function PlanetViewerBar({
         )}
       </div>
       <ShareField inputs={inputs} onLoad={onLoad} />
+      {heldBack === null ? null : (
+        <p className="planet-viewer__held" id={heldBackId}>
+          <StatusText text={`NOT AVAILABLE: ${heldBack}`} />
+        </p>
+      )}
     </div>
   );
 }

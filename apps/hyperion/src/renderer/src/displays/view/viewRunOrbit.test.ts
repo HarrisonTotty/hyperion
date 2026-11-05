@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { norm, sub as sub3, type Vec3 } from "../../geometry/vec3";
 import { sliceEarthInspection } from "../../test/inspectionFixture";
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
-import { orbitAltitudeM, orbitRadiusM } from "../../view/camera/orbit";
+import { ORBIT_FLOOR_M, orbitAltitudeM, orbitRadiusM } from "../../view/camera/orbit";
 import { offeredPresets } from "../../view/camera/state";
 import { rotateToBodyFixed } from "../../view/coords/rotation";
 import { cameraSceneOf, sceneOrigins } from "../../view/scene/model";
@@ -132,5 +132,41 @@ describe("the ORBIT camera about an inspected body", () => {
     // The ground turned under the galactic axes, about 0.5 km at the frame's distance in 0.1 s: the
     // camera moved with it.
     expect(norm(sub3(later.camera.pose.positionM, run.camera.pose.positionM))).toBeGreaterThan(100);
+  });
+});
+
+/** The slice's Earth as the camera holds it: its spheroid, polar radius under equatorial. */
+function earthDatum(run: ViewRun) {
+  const datum = cameraSceneOf(run.scene).orbitBodies.find((body) => body.id === FIXTURE_EARTH);
+  if (datum === undefined) {
+    throw new Error("the slice's Earth is not among the orbit's bodies");
+  }
+  return datum;
+}
+
+describe("the ORBIT camera about an oblate body", () => {
+  it("holds the Earth's spheroid, its polar radius under its equatorial, about its pole", () => {
+    const datum = earthDatum(
+      startRun(orbiting(inspectionScene(sliceEarthInspection()), FIXTURE_EARTH)),
+    );
+    expect([datum.polarRadiusM < datum.equatorialRadiusM, datum.pole !== null]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("comes down to its floor above the spheroid along its line, off the equator too", () => {
+    const run = startRun(orbiting(inspectionScene(sliceEarthInspection()), FIXTURE_EARTH));
+    // Up the arrows to well off the equator, where the datum stands kilometres under the equator's.
+    const north = after(run, 0.25, new Set(["ArrowUp"]));
+    const datum = earthDatum(north);
+    const off = datum.equatorialRadiusM - orbitRadiusM(datum, north.camera.pose.positionM);
+    expect(off).toBeGreaterThan(1_000);
+    const floor = commandRun(north, { kind: "zoom", steps: 400 }, CUT);
+    if (floor.kind !== "done") {
+      throw new Error("the wheel was refused in ORBIT");
+    }
+    const pose = floor.run.camera.pose;
+    expect(orbitAltitudeM(pose, orbitRadiusM(datum, pose.positionM))).toBeCloseTo(ORBIT_FLOOR_M, 3);
   });
 });

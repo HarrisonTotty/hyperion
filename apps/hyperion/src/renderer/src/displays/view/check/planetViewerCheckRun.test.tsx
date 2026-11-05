@@ -1,8 +1,11 @@
+import { RequestClient } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
 import type { FrameSubmission } from "../../../view/engine/types";
 import {
   consoleOverflowPx,
+  PLANET_VIEWER_CHECK_TIMING,
+  runPlanetViewerCheck,
   PrimaryDraws,
   elevationM,
   goalAltitudeM,
@@ -74,11 +77,59 @@ describe("the primary's draws a failure names", () => {
   });
 });
 
+/** A request client whose server lists no universe. */
+function noUniverses(): RequestClient {
+  const client: RequestClient = new RequestClient((message) => {
+    if (message.type === "request") {
+      queueMicrotask(() => {
+        client.handleServerMessage({
+          type: "response",
+          id: message.id,
+          body: { kind: "list_universes", universes: [], server_generator_version: 28 },
+        });
+      });
+    }
+    return true;
+  });
+  return client;
+}
+
+describe("the planet viewer run", () => {
+  it("fails, saying so, where the server lists no universe", async () => {
+    const capture = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    await expect(
+      runPlanetViewerCheck({
+        api: { capture },
+        views: { drawTimes: () => [], watch: () => () => undefined },
+        requests: noUniverses(),
+        document,
+        nowMs: () => 0,
+        sleep: () => Promise.resolve(),
+        signal: new AbortController().signal,
+        timing: PLANET_VIEWER_CHECK_TIMING,
+      }),
+    ).rejects.toThrow("views check: the server lists no universe");
+    expect(capture).not.toHaveBeenCalled();
+  });
+});
+
 describe("the planet viewer run's ending", () => {
   it("ends the check passed once its captures are taken", async () => {
     const end = vi.fn<(outcome: unknown) => Promise<void>>(() => Promise.resolve());
     await recordPlanetViewerCheck({ end }, () => Promise.resolve([]), new AbortController().signal);
     expect(end).toHaveBeenCalledWith({ status: "pass" });
+  });
+
+  it("ends nothing once the run was stopped", async () => {
+    const end = vi.fn<(outcome: unknown) => Promise<void>>(() => Promise.resolve());
+    const stop = new AbortController();
+    stop.abort();
+    await recordPlanetViewerCheck(
+      { end },
+      () => Promise.reject(new Error("views check: stopped")),
+      stop.signal,
+    );
+    expect(end).not.toHaveBeenCalled();
   });
 
   it("ends it failed with the reason the run threw", async () => {

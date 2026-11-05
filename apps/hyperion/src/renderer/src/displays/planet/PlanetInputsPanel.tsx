@@ -46,14 +46,23 @@ function volatilesSummary(inputs: PlanetInputs): string {
 }
 
 /**
- * What the folded `SOURCE` says of the planet on show: `GENERATED` from the inputs, `BODY` and the
- * galaxy's planet's ID, or `NONE` before the first.
+ * What the folded `SHOWN` says of the planet on show: `GENERATED` from the inputs, `BODY` and the
+ * galaxy's planet's ID, set in the monospaced face as the field sets it, or `NONE` before the first.
  */
-function sourceSummary(shown: PlanetViewer["shown"]): string {
+function ShownSummary({ shown }: { readonly shown: PlanetViewer["shown"] }) {
+  let summary: ReactNode;
   if (shown === null) {
-    return "NONE";
+    summary = "NONE";
+  } else if (shown.source.kind === "generated") {
+    summary = "GENERATED";
+  } else {
+    summary = (
+      <>
+        BODY <span className="planet-inputs__id">{shown.body.toUpperCase()}</span>
+      </>
+    );
   }
-  return shown.source.kind === "generated" ? "GENERATED" : `BODY ${shown.body.toUpperCase()}`;
+  return <span className="planet-inputs__summary">{summary}</span>;
 }
 
 /** The key that generates the panel's inputs from anywhere on the display but a text field. */
@@ -64,7 +73,7 @@ export interface PlanetInputsPanelProps {
   readonly viewer: PlanetViewer;
   /** Why the commands are held back (no universe open, the link down), or `null`. */
   readonly heldBack: string | null;
-  /** The ID the words saying why take, which the bar's `RANDOMIZE` is described by too. */
+  /** The ID of the bar's words saying why, by which `GENERATE` and `OPEN BODY` are described. */
   readonly heldBackId: string;
   /** What stands after the inputs and before the seed: the viewer's `SUN` (`SunControl`). */
   readonly sun: ReactNode;
@@ -92,22 +101,24 @@ function samePlanet(a: PlanetInputs, b: PlanetInputs): boolean {
  *   which says how many are given, so that the panel stands whole at 1280×720; a refusal of one
  *   opens it.
  * - `GENERATE` (`G`), beside `SEED`, shows the panel's inputs as a planet, its `PENDING`, then its
- *   outcome, under it. It and the bar's `RANDOMIZE` are held back with the reason while no universe
- *   is open or the link is down.
- * - `SOURCE` heads the panel, folded as it opens, so that the panel stands whole at 1280×720, and
- *   saying what the planet on show is: `GENERATED`, or `BODY` and its ID. Opened, its `BODY`
- *   ({@link BodyField}) and `OPEN BODY` show a planet of the galaxy by its ID and put its inputs,
- *   read back, on the panel; `OPEN BODY`'s `PENDING` or its refusal opens it. While the panel holds
- *   the inputs of a planet whose system has more stars than one, a note says that they hold its
- *   host alone.
+ *   outcome, under it. It and the bar's `RANDOMIZE` are held back with the reason, which the bar
+ *   states, while no universe is open or the link is down.
+ * - `SHOWN` stands beside the panel's title, folded as it opens, so that the panel stands whole at
+ *   1280×720, saying what the planet on show is: `GENERATED`, `BODY` and its ID, or `NONE`. Opened,
+ *   its `BODY` ({@link BodyField}) and `OPEN BODY` show a planet of the galaxy by its ID and put its
+ *   inputs, read back, on the panel. While the panel holds the inputs of a planet whose system has
+ *   more stars than one, a note says that they hold its host alone.
+ * - A new refusal of a folded rank opens the volatiles, and a new `OPEN BODY` (a hand-over from
+ *   `OPEN IN PLANET VIEWER` among them) opens `SHOWN`, once each, so that its state stands under its
+ *   field; the operator may fold either again.
  */
 export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetInputsPanelProps) {
   const titleId = useId();
   const statusId = useId();
   const volatilesId = useId();
-  const sourceId = useId();
+  const shownId = useId();
   const [volatilesOpen, setVolatilesOpen] = useState(false);
-  const [sourceOpen, setSourceOpen] = useState(false);
+  const [shownOpen, setShownOpen] = useState(false);
   const { inputs, command, shown } = viewer;
   const refused = command?.state.kind === "rejected" ? refusedInput(command.field) : null;
   const drawnShown = shown !== null && samePlanet(shown.inputs, inputs) ? shown.drawn : null;
@@ -127,8 +138,6 @@ export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetI
       }}
     />
   );
-  // A refusal of a folded rank opens its group, so that it stands under its field.
-  const volatilesShown = volatilesOpen || VOLATILES.some((name) => refusalOf(name) !== null);
   const statusOf = (kind: ViewerCommand["kind"]) =>
     command !== null && command.kind === kind && command.state.kind !== "shown"
       ? command.state
@@ -144,42 +153,49 @@ export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetI
         }
       : null;
   const openStatus = statusOf("open");
-  // OPEN BODY's PENDING or its refusal opens the group, so that it stands under the field.
-  const sourceShown = sourceOpen || openStatus !== null;
+  // A new command state opens the group its state stands in, once, adjusting state as it renders
+  // (React's pattern for state that follows a prop), so that the operator may fold it again.
+  const commandState = command?.state ?? null;
+  const [seenState, setSeenState] = useState(commandState);
+  if (commandState !== seenState) {
+    setSeenState(commandState);
+    if (VOLATILES.some((name) => refusalOf(name) !== null)) {
+      setVolatilesOpen(true);
+    }
+    if (openStatus !== null) {
+      setShownOpen(true);
+    }
+  }
   return (
     <section className="panel planet-inputs" aria-labelledby={titleId}>
-      <h2 className="panel__title" id={titleId}>
-        INPUTS
-      </h2>
+      <div className="planet-inputs__head">
+        <h2 className="panel__title" id={titleId}>
+          INPUTS
+        </h2>
+        <button
+          type="button"
+          className="control disclosure"
+          aria-expanded={shownOpen}
+          aria-controls={shownId}
+          onClick={() => {
+            setShownOpen(!shownOpen);
+          }}
+        >
+          <DisclosureGlyph expanded={shownOpen} />
+          SHOWN
+        </button>
+        {shownOpen ? null : <ShownSummary shown={shown} />}
+      </div>
+      <div className="planet-inputs__shown" id={shownId} hidden={!shownOpen}>
+        <BodyField
+          shownBody={bodyShown?.body ?? null}
+          status={openStatus}
+          heldBack={heldBack}
+          heldBackId={heldBackId}
+          onOpen={viewer.openBody}
+        />
+      </div>
       <div className="planet-inputs__groups">
-        <fieldset className="planet-inputs__group">
-          <legend className="planet-inputs__legend">
-            <button
-              type="button"
-              className="control disclosure"
-              aria-expanded={sourceShown}
-              aria-controls={sourceId}
-              onClick={() => {
-                setSourceOpen(!sourceShown);
-              }}
-            >
-              <DisclosureGlyph expanded={sourceShown} />
-              SOURCE
-            </button>
-            {sourceShown ? null : (
-              <span className="planet-inputs__summary">{sourceSummary(shown)}</span>
-            )}
-          </legend>
-          <div id={sourceId} hidden={!sourceShown}>
-            <BodyField
-              shownBody={bodyShown?.body ?? null}
-              status={openStatus}
-              heldBack={heldBack}
-              heldBackId={heldBackId}
-              onOpen={viewer.openBody}
-            />
-          </div>
-        </fieldset>
         {bodyShown !== null && bodyShown.multipleStars && bodyShown.held ? (
           <p className="planet-inputs__note">
             <StatusText text="MULTIPLE STARS: the inputs hold its host alone" />
@@ -196,20 +212,20 @@ export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetI
             <button
               type="button"
               className="control disclosure"
-              aria-expanded={volatilesShown}
+              aria-expanded={volatilesOpen}
               aria-controls={volatilesId}
               onClick={() => {
-                setVolatilesOpen(!volatilesShown);
+                setVolatilesOpen(!volatilesOpen);
               }}
             >
-              <DisclosureGlyph expanded={volatilesShown} />
+              <DisclosureGlyph expanded={volatilesOpen} />
               VOLATILES · RANK
             </button>
-            {volatilesShown ? null : (
+            {volatilesOpen ? null : (
               <span className="planet-inputs__summary">{volatilesSummary(inputs)}</span>
             )}
           </legend>
-          <div id={volatilesId} hidden={!volatilesShown}>
+          <div id={volatilesId} hidden={!volatilesOpen}>
             {VOLATILES.map(row)}
           </div>
         </fieldset>
@@ -242,11 +258,6 @@ export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetI
           <span className="control__key">{GENERATE_KEY.toUpperCase()}</span> GENERATE
         </button>
       </div>
-      {heldBack === null ? null : (
-        <p className="planet-inputs__held" id={heldBackId}>
-          <StatusText text={`NOT AVAILABLE: ${heldBack}`} />
-        </p>
-      )}
       {generateStatus === null ? null : (
         <RequestStatus state={generateStatus} id={statusId} subject="GENERATE" />
       )}

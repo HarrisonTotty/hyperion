@@ -180,17 +180,17 @@ function readAnswer(multipleStars = false): ResponseFor<"viewer_inputs"> {
   };
 }
 
-/** Opens the panel's `SOURCE`, folded as the display mounts, unless it is open. */
-async function openSource(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  const source = screen.getByRole("button", { name: "SOURCE" });
-  if (source.getAttribute("aria-expanded") !== "true") {
-    await user.click(source);
+/** Opens the panel's `SHOWN`, folded as the display mounts, unless it is open. */
+async function openShown(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const shown = screen.getByRole("button", { name: "SHOWN" });
+  if (shown.getAttribute("aria-expanded") !== "true") {
+    await user.click(shown);
   }
 }
 
-/** Types `id` into `BODY`, under `SOURCE`, and presses `OPEN BODY`. */
+/** Types `id` into `BODY`, under `SHOWN`, and presses `OPEN BODY`. */
 async function openTyped(user: ReturnType<typeof userEvent.setup>, id: string): Promise<void> {
-  await openSource(user);
+  await openShown(user);
   const field = screen.getByRole("textbox", { name: "BODY" });
   await user.clear(field);
   await user.type(field, id);
@@ -546,9 +546,9 @@ describe("nextDrawSeed", () => {
       await settle();
       expect([
         screen.queryByText(/NO PLANET/u),
-        screen.queryByText(`BODY ${FIXTURE_EARTH.toUpperCase()}`) !== null,
+        screen.getByRole("textbox", { name: "BODY" }).getAttribute("value"),
         socket.requestsOfKind("resolve_system").length,
-      ]).toEqual([null, true, 0]);
+      ]).toEqual([null, FIXTURE_EARTH.toUpperCase(), 0]);
     });
 
     it("is opened again when the display is shown, where hiding it cut the hand-over short", async () => {
@@ -589,7 +589,7 @@ describe("nextDrawSeed", () => {
   describe("BODY's field", () => {
     it("states the form it takes while it is empty", async () => {
       const { user } = await renderViewer();
-      await openSource(user);
+      await openShown(user);
       expect(screen.getByRole("textbox", { name: "BODY" })).toHaveAccessibleDescription(
         "a body's ID: 16 hexadecimal digits, a full stop and 4 more",
       );
@@ -618,14 +618,14 @@ describe("nextDrawSeed", () => {
     });
   });
 
-  describe("SOURCE", () => {
+  describe("SHOWN", () => {
     it("is folded as the display mounts, saying no planet is shown", async () => {
       await renderViewer();
       expect([
-        screen.getByRole("button", { name: "SOURCE" }).getAttribute("aria-expanded"),
+        screen.getByRole("button", { name: "SHOWN" }).getAttribute("aria-expanded"),
         screen.queryByRole("textbox", { name: "BODY" }),
-        screen.queryByText("NONE") !== null,
-      ]).toEqual(["false", null, true]);
+      ]).toEqual(["false", null]);
+      expect(screen.getByText("NONE")).toBeInTheDocument();
     });
 
     it("says a generated planet is shown", async () => {
@@ -633,7 +633,55 @@ describe("nextDrawSeed", () => {
       await openUniverse(socket, user);
       await user.click(screen.getByRole("button", { name: "G GENERATE" }));
       await showPlanet(socket, toInputsDto(DEFAULT_INPUTS));
-      expect(screen.queryByText("GENERATED")).not.toBeNull();
+      expect(screen.getByText("GENERATED")).toBeInTheDocument();
     });
+
+    it("opens as a planet is handed over, so that OPEN BODY's PENDING stands under its field", async () => {
+      const { handOver } = await renderViewer();
+      handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+      await settle();
+      expect(wholeText("OPEN BODY PENDING")).toHaveLength(1);
+    });
+
+    it("folds under its press while OPEN BODY is pending", async () => {
+      const { user, handOver } = await renderViewer();
+      handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+      await settle();
+      await user.click(screen.getByRole("button", { name: "SHOWN" }));
+      expect([
+        screen.getByRole("button", { name: "SHOWN" }).getAttribute("aria-expanded"),
+        screen.queryByRole("textbox", { name: "BODY" }),
+      ]).toEqual(["false", null]);
+    });
+
+    it("says, folded, which planet of the galaxy is shown", async () => {
+      const { socket, user, handOver } = await renderViewer();
+      handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+      await act(async () => {
+        socket.serverAnswers("viewer_inputs", () => readAnswer());
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await settle();
+      await user.click(screen.getByRole("button", { name: "SHOWN" }));
+      expect(wholeText(`BODY ${FIXTURE_EARTH.toUpperCase()}`)).toHaveLength(1);
+    });
+  });
+
+  it("opens the volatile ranks once a refusal names one of them", async () => {
+    const { socket, user } = await renderViewer();
+    await openUniverse(socket, user);
+    await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+    const [asked] = socket.requestsOfKind("viewer_planet");
+    await act(async () => {
+      if (asked !== undefined) {
+        socket.serverRejects(asked.id, {
+          code: "bad_request",
+          message: "the water rank lies outside 0.001 to 0.999",
+          field: "inputs.water_rank",
+        });
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole("textbox", { name: "H2O" })).toHaveAttribute("aria-invalid", "true");
   });
 });

@@ -4277,8 +4277,21 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   font-size: 0.875rem;
 }
 
-.planet-inputs > .panel__title {
-  margin-bottom: 0.5rem;
+/* The title and SHOWN, its disclosure and what it says, on one line. */
+.planet-inputs__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.planet-inputs__head > .panel__title {
+  margin: 0;
+}
+
+.planet-inputs__shown {
+  margin-bottom: 0.25rem;
 }
 
 .planet-inputs__groups {
@@ -4353,19 +4366,32 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   margin-top: 0;
 }
 
-/* The panel's commands keep their key and name on one line, the field beside them giving way. */
-.planet-inputs__generate > .command {
+/*
+ * GENERATE keeps its key and name on one line, the seed's field beside it giving way; OPEN BODY may
+ * wrap, so that its field holds a body's whole ID.
+ */
+.planet-inputs > .planet-inputs__generate > .command {
   flex: none;
   white-space: nowrap;
 }
 
 /* A body's ID, an identifier read character by character: monospaced, from the left. */
-.planet-inputs__body {
+.planet-inputs__body,
+.planet-inputs__id {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-.planet-inputs__held,
+.planet-inputs__id {
+  letter-spacing: 0;
+}
+
+/* Why the commands are held back, on a line of its own under the bar's rows. */
+.planet-viewer__held {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .planet-inputs__note {
   margin: 0.25rem 0 0;
 }
