@@ -66,15 +66,6 @@ impl GalaxyRules {
             stellar: StellarRules::of_version(version),
         }
     }
-
-    /// Every galaxy and stellar hold at 29 in force, for a test that asserts a 29 figure: the
-    /// version's rules from 29, the stellar holds ([`StellarRules::every_29_hold`], none left).
-    /// The 29 bump deletes it with them.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_29_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(29))
-    }
 }
 
 #[cfg(test)]
@@ -157,12 +148,5 @@ mod tests {
                 StellarRules::of_version(GeneratorVersion::new(v))
             );
         }
-    }
-
-    /// The galaxy's every 29 hold takes the stellar holds at 29.
-    #[test]
-    fn every_29_hold_adds_the_stellar_holds_at_29() {
-        let every_29 = GalaxyRules::every_29_hold();
-        assert_eq!(every_29.stellar, StellarRules::every_29_hold());
     }
 }

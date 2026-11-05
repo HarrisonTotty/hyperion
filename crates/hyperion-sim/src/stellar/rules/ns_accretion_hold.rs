@@ -6,9 +6,8 @@
 //! - A pinned pair, a 1.5 M☉ main-sequence donor at its lobe beside a 1.35 M☉ neutron star: under
 //!   every 27 hold it keeps under a tenth and stays a neutron star.
 //! - The same pair twice gives the same timeline.
-//! - Slow: a census of 10⁷ slab records under every 27 hold, and one under every 29 hold, which
-//!   the white-dwarf union's holds at 29 move (P11.T4's `dwarf_limit`; its swollen dwarf and
-//!   kept-core endings are on the record).
+//! - Slow: a census of 10⁷ slab records under the version's rules, which the white-dwarf union's
+//!   29 folds moved (P11.T4's swollen dwarf, dwarf limit and kept-core endings).
 
 use hyperion_testkit::pins::Tolerance;
 
@@ -197,8 +196,8 @@ fn figures(census: &Census) -> CompactFigures {
 ///   which the held arm let grow on, now collapse at the Chandrasekhar mass (a pooled Type Ia
 ///   candidate, then the accretion-induced collapse) to 1.26 M☉ neutron stars beside their
 ///   donors, now helium dwarfs ground to about 0.01 M☉ at orbital periods of about an hour. Its
-///   lane's 399 → 1,190, on an older tree, counted the swollen helium dwarf too, which is held at
-///   29 and moves this census by nothing on this tree ([`CENSUS_FIGURES_29`]);
+///   lane's 399 → 1,190, on an older tree, counted the swollen helium dwarf too, which moves this
+///   census by nothing on this tree;
 /// - P11.T10's kicks at version 25, the heavy donors' corotation at the donor's radius held to its
 ///   lobe (BSE's `radx`), +1,350 (+1,343): neutron stars that a common envelope left beside a
 ///   2.8–5.9 M☉ main-sequence star (its initial mass, 10–90%), whose thermal-rate transfer no
@@ -209,19 +208,25 @@ fn figures(census: &Census) -> CompactFigures {
 /// - P11.T4's heavy donors' white dwarfs' wind, +77 (+77);
 /// - the accreting white dwarfs' samplers refitted under the Chandrasekhar mass (P15.T10.b), +1
 ///   (+1): a record the carve-out no longer takes;
-/// - the 27 folds, plan 08's displaced records among them, the bump and the segment cap of 256, 0.
+/// - the 27 folds, plan 08's displaced records among them, the bump and the segment cap of 256, 0;
+/// - the 29 folds, 1,816 (1,800) → 1,834 (1,818), +18 (+18), measured under every 29 hold
+///   (2026-11-05, at generator version 28) by hold, each added in turn: the galaxy's holds at 29
+///   (P09.T36's alert walks' lists and P09.T5's superbubbles), 0; P11.T4's swollen helium dwarf,
+///   0; P11.T4's dwarf limit made whole, 0; P11.T4's kept-core endings and the
+///   helium stars' electron capture, +18 (+18), not split further. The black holes, the grown, the
+///   median black hole and the most gained stay 28's.
 const CENSUS_FIGURES: CompactFigures = CompactFigures {
-    members: 1_816,
+    members: 1_834,
     black_holes: 12,
     grown: 2,
     grown_by_dwarfs: 1,
     median_black_hole: 3.053_147_766_835_219,
-    neutron_stars: 1_800,
+    neutron_stars: 1_818,
     most_gained: 0.175_378_456_071_606_3,
 };
 
-/// A census of 10⁷ slab records' X-ray binaries ([`slab_census`]) under every 27 hold. Under the
-/// held arm, which kept a neutron star's whole transfer, most of the black holes were born neutron
+/// A census of 10⁷ slab records' X-ray binaries ([`slab_census`]) under the version's rules. Under
+/// the held arm, which kept a neutron star's whole transfer, most of the black holes were born neutron
 /// stars that stable transfer grew past `MAX_NEUTRON_STAR_MASS`. Under every 27 hold:
 ///
 /// - none of the black holes was born a neutron star at generator version 24, against the brief's
@@ -242,7 +247,7 @@ const CENSUS_FIGURES: CompactFigures = CompactFigures {
 #[ignore = "slow: 10⁷ grid records' pairs run through the binary engine"]
 fn census_of_the_neutron_star_accretion() {
     let (scanned, f) = census(GalaxyRules::of_version(crate::GENERATOR_VERSION));
-    println!("every 27 hold: {scanned:?} records by band, {f:?}");
+    println!("the version's rules: {scanned:?} records by band, {f:?}");
     assert_the_figures(f, CENSUS_FIGURES);
 }
 
@@ -285,36 +290,4 @@ fn assert_the_figures(f: CompactFigures, pinned: CompactFigures) {
             && (f.most_gained - pinned.most_gained).abs() < 1e-12,
         "{f:?}"
     );
-}
-
-/// The census's figures under every 29 hold, as measured (2026-11-05, at generator version 28),
-/// against the version's 1,816 members and 1,800 neutron stars ([`CENSUS_FIGURES`], at 27 and 28
-/// alike): 1,834 (1,818), +18 (+18), by hold, each added in turn:
-///
-/// - the galaxy's holds at 29 (P09.T36's alert walks' lists and P09.T5's superbubbles), 0;
-/// - P11.T4's swollen helium dwarf, 0;
-/// - P11.T4's dwarf limit made whole (`dwarf_limit`), 0;
-/// - P11.T4's kept-core endings and the helium stars' electron capture, +18
-///   (+18), not split further.
-///
-/// The black holes, the grown, the median black hole and the most gained stay the version's.
-const CENSUS_FIGURES_29: CompactFigures = CompactFigures {
-    members: 1_834,
-    black_holes: 12,
-    grown: 2,
-    grown_by_dwarfs: 1,
-    median_black_hole: 3.053_147_766_835_219,
-    neutron_stars: 1_818,
-    most_gained: 0.175_378_456_071_606_3,
-};
-
-/// The census of 10⁷ slab records' X-ray binaries ([`slab_census`]) under every 29 hold, the
-/// white-dwarf union's holds on: the figures of [`census_of_the_neutron_star_accretion`], pinned as
-/// measured ([`CENSUS_FIGURES_29`]).
-#[test]
-#[ignore = "slow: 10⁷ grid records' pairs run through the binary engine"]
-fn census_of_the_neutron_star_accretion_under_every_29_hold() {
-    let (scanned, f) = census(GalaxyRules::every_29_hold());
-    println!("every 29 hold: {scanned:?} records by band, {f:?}");
-    assert_the_figures(f, CENSUS_FIGURES_29);
 }

@@ -7060,7 +7060,8 @@ fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
         engine.members
     };
     assert_eq!(swell(), swell());
-    let input = pair(1.1, 0.9, 100.0, 0.0, 0.004).with_rules(StellarRules::every_29_hold());
+    let input = pair(1.1, 0.9, 100.0, 0.0, 0.004)
+        .with_rules(StellarRules::of_version(crate::GENERATOR_VERSION));
     assert_eq!(evolve(&input, until), evolve(&input, until));
     for (phase, dwarf) in [
         (Phase::OxygenNeonWhiteDwarf, 1.07),
@@ -7072,14 +7073,15 @@ fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
         };
         assert_eq!(swollen_kind(), swollen_kind(), "{phase:?}");
     }
-    let input = pinned_pair_number(80).with_rules(StellarRules::every_29_hold());
+    let input =
+        pinned_pair_number(80).with_rules(StellarRules::of_version(crate::GENERATOR_VERSION));
     assert_eq!(evolve(&input, until), evolve(&input, until));
     let placed = || {
         let engine = placed_product_engine(
             Phase::OxygenNeonWhiteDwarf,
             1.07,
             0.02,
-            StellarRules::every_29_hold(),
+            StellarRules::of_version(crate::GENERATOR_VERSION),
         );
         (engine.members, engine.dwarf_cores)
     };
@@ -7279,7 +7281,7 @@ fn a_heavy_donor_s_helium_dwarf_becomes_no_helium_star() {
         let input = pair(m1, m2, period, 0.0, 0.004);
         for rules in [
             StellarRules::of_version(crate::GENERATOR_VERSION),
-            StellarRules::every_29_hold(),
+            StellarRules::of_version(crate::GENERATOR_VERSION),
         ] {
             let timeline = evolve(&input.clone().with_rules(rules), until);
             let helium_star = timeline.segments().iter().any(|s| {
@@ -7315,7 +7317,7 @@ fn a_swollen_oxygen_neon_dwarf_strips_back_to_its_kind() {
     let one = Phase::OxygenNeonWhiteDwarf;
     for rules in [
         StellarRules::of_version(crate::GENERATOR_VERSION),
-        StellarRules::every_29_hold(),
+        StellarRules::of_version(crate::GENERATOR_VERSION),
     ] {
         let timeline = evolve(&input.clone().with_rules(rules), Years::new(1.2e10));
         assert_eq!(
@@ -7454,7 +7456,12 @@ fn an_unplaced_product_of_a_swollen_dwarf_keeps_its_kind() {
         (Phase::CarbonOxygenWhiteDwarf, 1.25, true),
     ] {
         let case = format!("{phase:?} of {dwarf} M☉");
-        let mut engine = swollen_dwarf_engine(phase, dwarf, 0.02, StellarRules::every_29_hold());
+        let mut engine = swollen_dwarf_engine(
+            phase,
+            dwarf,
+            0.02,
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+        );
         let source = engine.dwarf_cores[0];
         assert_eq!(source.dwarf(), Some(phase), "{case}");
         let product = engine.product_member(
@@ -7701,7 +7708,7 @@ fn an_oxygen_neon_core_collapses_at_the_capture_mass() {
         Phase::OxygenNeonWhiteDwarf,
         1.07,
         0.02,
-        StellarRules::every_29_hold(),
+        StellarRules::of_version(crate::GENERATOR_VERSION),
     );
     assert_eq!(engine.core_limit_age(0), None);
     engine.reach_core_limit(0);
@@ -7726,7 +7733,7 @@ fn a_strip_keeps_a_dwarf_core_where_it_leaves_a_star() {
     use super::star::{Kind, Member};
     use crate::stellar::rules::StellarRules;
 
-    let every_29 = StellarRules::every_29_hold();
+    let every_29 = StellarRules::of_version(crate::GENERATOR_VERSION);
     let mut engine = fed_dwarf_engine(0.6, 0.02, every_29);
     let product = engine.product_member(
         CoalescedProduct::Star {
@@ -7778,7 +7785,7 @@ fn a_core_limit_stop_lands_where_the_core_reaches_the_capture_mass() {
             Phase::OxygenNeonWhiteDwarf,
             1.07,
             0.02,
-            StellarRules::every_29_hold(),
+            StellarRules::of_version(crate::GENERATOR_VERSION),
         );
         let at = engine
             .core_limit_age(0)
@@ -7816,7 +7823,7 @@ fn a_core_limit_stop_lands_where_the_core_reaches_the_capture_mass() {
         Phase::OxygenNeonWhiteDwarf,
         1.07,
         0.02,
-        StellarRules::every_29_hold(),
+        StellarRules::of_version(crate::GENERATOR_VERSION),
     );
     assert_eq!(engine.core_limit_age(0), None, "none at 1.37 M☉");
 }
@@ -8157,7 +8164,7 @@ fn an_unplaced_helium_giant_ends_by_its_mass_from_29() {
     let mut engine = fed_dwarf_engine(
         0.6,
         0.02,
-        crate::stellar::rules::StellarRules::every_29_hold(),
+        crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION),
     );
     engine.finish_merger_with(Product::Disruption { mass: msun(1.5) });
     let [death] = engine.supernovae.as_slice() else {
@@ -8184,7 +8191,11 @@ fn an_unplaced_oxygen_neon_helium_giant_captures_electrons_from_29() {
     use crate::stellar::remnant::collapse::electron_capture_remnant;
     use crate::stellar::rules::StellarRules;
 
-    let mut engine = fed_dwarf_engine(0.6, 0.02, StellarRules::every_29_hold());
+    let mut engine = fed_dwarf_engine(
+        0.6,
+        0.02,
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
     engine.finish_merger_with(Product::ElectronCapture {
         co_core: SolarMasses::new(1.0),
         mass: SolarMasses::new(2.0),
@@ -8315,7 +8326,7 @@ fn the_core_endings_arm_is_deterministic() {
     use crate::stellar::rules::StellarRules;
     use crate::stellar::sse::Track;
 
-    let every_29 = StellarRules::every_29_hold();
+    let every_29 = StellarRules::of_version(crate::GENERATOR_VERSION);
     let iron_core = || {
         let mut engine = fed_dwarf_engine(0.6, 0.02, every_29);
         let product = engine.product_member(
