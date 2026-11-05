@@ -114,7 +114,7 @@ use crate::galaxy::fields::VerticalProfile;
 pub const MAX_FEATURE_REACH: LightYears = LightYears::new(4_096.0);
 
 /// A feature cell's edge, ly.
-const EDGE: f64 = 4_096.0;
+pub(super) const EDGE: f64 = 4_096.0;
 
 /// A feature cell's index capacity: 2¹⁴ candidates.
 pub const INDEX_CAPACITY: u32 = 1 << 14;
@@ -200,6 +200,15 @@ impl FeatureRecord {
     #[must_use]
     pub const fn reach(&self) -> LightYears {
         self.reach
+    }
+
+    /// Whether its reach touches the sphere of `radius` about `centre`: the test by which
+    /// [`FeatureCatalogue::near`] finds it, which the features' gas index applies with the same
+    /// bits (P09.T40.a).
+    #[must_use]
+    pub(crate) fn touches_sphere(&self, centre: &GalacticPosition, radius: LightYears) -> bool {
+        self.position.distance_to(centre).value() / METRES_PER_LIGHT_YEAR
+            <= radius.value() + self.reach.value()
     }
 
     /// Its age at the epoch, or `None` for a cloud.
@@ -701,10 +710,13 @@ impl FeatureCatalogue {
             "a feature cell cache lent {:?} without the {last} it was asked for",
             cell.to_array()
         );
-        found.extend(contents.features().iter().copied().filter(|f| {
-            f.position.distance_to(centre).value() / METRES_PER_LIGHT_YEAR
-                <= radius.value() + f.reach.value()
-        }));
+        found.extend(
+            contents
+                .features()
+                .iter()
+                .copied()
+                .filter(|f| f.touches_sphere(centre, radius)),
+        );
     }
 
     /// The cells [`near`](Self::near) reads for the sphere of `radius` about `centre`, in the

@@ -631,7 +631,42 @@ impl Line {
         let (a, half_b, c) = self.sphere_quadratic(from_centre, radius);
         (a * t + 2.0 * half_b) * t + c < 0.0
     }
+
+    /// The fractions outside which [`inside_sphere`](Self::inside_sphere) is false at every `t` in
+    /// `[0, 1]`, rounding and all, for the sphere of `radius` about the point `from_centre` ly
+    /// behind the first point; `None` where it is false at every such `t`.
+    ///
+    /// The quadratic is `q(t) = a (t − v)² + m`, with `v = −half_b ÷ a` and `m = c − half_b² ÷ a`.
+    /// For `|t| ≤ 1`, `inside_sphere`'s three roundings move `q` by at most `4u` of its terms'
+    /// magnitudes, `S = a + 2|half_b| + |c| + half_b² ÷ a` bounding them, with `u` 2⁻⁵³; so `q` reads
+    /// negative only where it is below `margin = 10⁻⁹ S`, which is within `√((margin − m) ÷ a)` of
+    /// `v`. That width and `v` are widened by far more than their own roundings. A line of no
+    /// length, or terms that are not finite, gives the whole line.
+    #[must_use]
+    fn inside_bounds(&self, from_centre: [f64; 3], radius: f64) -> Option<(f64, f64)> {
+        let whole = Some((f64::NEG_INFINITY, f64::INFINITY));
+        let (a, half_b, c) = self.sphere_quadratic(from_centre, radius);
+        if !(a.is_finite() && a > 0.0) {
+            return whole;
+        }
+        let vertex = -half_b / a;
+        let lowest = c - half_b * half_b / a;
+        let scale = a + 2.0 * half_b.abs() + c.abs() + half_b * half_b / a;
+        let margin = INSIDE_MARGIN * scale;
+        if !(vertex.is_finite() && lowest.is_finite() && margin.is_finite()) {
+            return whole;
+        }
+        if lowest >= margin {
+            return None;
+        }
+        let width = ((margin - lowest) / a).sqrt() * (1.0 + 1e-6) + 1e-9 * (1.0 + vertex.abs());
+        Some((vertex - width, vertex + width))
+    }
 }
+
+/// [`Line::inside_bounds`]' margin on the quadratic, relative to its terms' magnitudes: some 10⁶
+/// times the `4u` its roundings can move it by.
+const INSIDE_MARGIN: f64 = 1e-9;
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -803,15 +838,37 @@ fn pieces(field: &GasField, line: &Line, mods: &[GasModifier]) -> Vec<Piece> {
     }
     cuts.sort_by(f64::total_cmp);
     cuts.dedup();
+    // The pieces' middles rise along the line, so a sweep keeps only the holes whose bounds hold
+    // the middle (`active`, in the list's order), and each piece tests those alone: the same holes
+    // pass, in the same order, as when every piece tested every hole. A profile from the Sun-like
+    // point through the centre, past 10,597 bubbles, took 174 ms so and takes 13.7 ms (P09.T40.a;
+    // pod, test build, 2026-11-05).
+    let mut rising: Vec<(usize, (f64, f64))> = holes
+        .iter()
+        .enumerate()
+        .filter_map(|(hole, &(from_centre, radius, _))| {
+            line.inside_bounds(from_centre, radius)
+                .map(|bounds| (hole, bounds))
+        })
+        .collect();
+    rising.sort_by(|(_, (left, _)), (_, (right, _))| left.total_cmp(right));
+    let mut rising = rising.into_iter().peekable();
+    let mut active: Vec<(usize, f64)> = Vec::new();
     let smooth = smooth_scales(field);
     let mut pieces = Vec::with_capacity(cuts.len() + 1);
     let mut t0 = 0.0;
     for t1 in cuts.into_iter().chain(core::iter::once(1.0)) {
         let middle = f64::midpoint(t0, t1);
-        let lowest = holes
+        while let Some((hole, (_, high))) = rising.next_if(|(_, (low, _))| *low <= middle) {
+            let at = active.partition_point(|&(earlier, _)| earlier < hole);
+            active.insert(at, (hole, high));
+        }
+        active.retain(|&(_, high)| high >= middle);
+        let lowest = active
             .iter()
-            .filter(|&&(from_centre, radius, _)| line.inside_sphere(from_centre, radius, middle))
-            .map(|&(_, _, interior)| interior)
+            .map(|&(hole, _)| holes[hole])
+            .filter(|&(from_centre, radius, _)| line.inside_sphere(from_centre, radius, middle))
+            .map(|(_, _, interior)| interior)
             .reduce(|lowest, interior| if interior < lowest { interior } else { lowest });
         let [_, _, z] = line.at_ly(middle);
         let kind = if let Some(interior) = lowest {
@@ -1170,6 +1227,95 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The sweep labels every piece with the hole every hole's own test gives it (P09.T40.a): the
+    /// same lowest interior, bit for bit, or none. The lines are long and short, and their holes
+    /// many, near and far, holding the whole line, and grazing it at a tangent, where the test's
+    /// roundings decide.
+    #[test]
+    fn the_sweep_labels_each_piece_as_testing_every_hole_does() {
+        let field = milky_way(Seed::new(3));
+        let mut lcg = Lcg::new(0x0940_a0d6);
+        let uniform = |lcg: &mut Lcg, scale: f64| scale * (2.0 * lcg.next_f64() - 1.0);
+        let mut grazing = 0;
+        for case in 0..60 {
+            let length = [10.0, 900.0, 30_000.0][case % 3];
+            let start = [0; 3].map(|_| uniform(&mut lcg, 3_000.0));
+            let direction = [0; 3].map(|_| uniform(&mut lcg, 1.0));
+            let norm = direction.iter().map(|c| c * c).sum::<f64>().sqrt();
+            let end: [f64; 3] = [0, 1, 2].map(|k| start[k] + length * direction[k] / norm);
+            let line = Line::new(&at(start), &at(end));
+            let mut mods = Vec::new();
+            for _ in 0..300 {
+                let t = 1.4 * lcg.next_f64() - 0.2;
+                let on = line.at_ly(t);
+                let offset = [0; 3].map(|_| uniform(&mut lcg, 1.0));
+                let reach = uniform(&mut lcg, 0.5 * length);
+                let miss = [0, 1, 2].map(|k| on[k] + reach * offset[k]);
+                let centre = at(miss);
+                let from_centre = centre
+                    .displacement_to(&line.start)
+                    .metres()
+                    .map(|m| m / METRES_PER_LIGHT_YEAR);
+                // A third graze the line: the radius is the centre's distance from it.
+                let (a, half_b, c) = line.sphere_quadratic(from_centre, 0.0);
+                let distance = (c - half_b * half_b / a).max(0.0).sqrt();
+                let radius = match lcg.next_below(3) {
+                    0 => {
+                        grazing += 1;
+                        distance
+                    }
+                    1 => distance * (0.5 + lcg.next_f64()),
+                    _ => length * (0.01 + 3.0 * lcg.next_f64()),
+                };
+                if radius > 0.0 {
+                    mods.push(GasModifier::Hole {
+                        centre,
+                        radius: LightYears::new(radius),
+                        interior: HydrogenPerCm3::new(0.001 + lcg.next_f64()),
+                    });
+                }
+            }
+            let holes: Vec<([f64; 3], f64, f64)> = mods
+                .iter()
+                .map(|modifier| match *modifier {
+                    GasModifier::Hole {
+                        centre,
+                        radius,
+                        interior,
+                    } => (
+                        centre
+                            .displacement_to(&line.start)
+                            .metres()
+                            .map(|m| m / METRES_PER_LIGHT_YEAR),
+                        radius.value(),
+                        interior.value(),
+                    ),
+                    GasModifier::Cloud { .. } => unreachable!("only holes"),
+                })
+                .collect();
+            let swept = pieces(&field, &line, &mods);
+            assert!(swept.len() > 2, "case {case}: the holes cut the line");
+            for piece in &swept {
+                let middle = f64::midpoint(piece.t0, piece.t1);
+                let every = holes
+                    .iter()
+                    .filter(|&&(from_centre, radius, _)| {
+                        line.inside_sphere(from_centre, radius, middle)
+                    })
+                    .map(|&(_, _, interior)| interior)
+                    .reduce(|lowest, interior| if interior < lowest { interior } else { lowest });
+                match (every, piece.kind) {
+                    (Some(lowest), PieceKind::Hole { interior }) => {
+                        assert_same_bits(interior, lowest);
+                    }
+                    (None, PieceKind::Outside | PieceKind::Stepped { .. }) => {}
+                    (every, kind) => panic!("case {case} at {middle}: {kind:?} against {every:?}"),
+                }
+            }
+        }
+        assert!(grazing > 5_000, "{grazing} grazing holes");
     }
 
     /// Full quality steps no longer than 32 ly, and a budget's noise is smoothed to twice its step.

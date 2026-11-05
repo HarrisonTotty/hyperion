@@ -4,14 +4,18 @@
 //! The windows on the clusters' lives, the core collapses inside features, the clouds' sizes, the
 //! superbubbles' radii and the central molecular zone are ruling 118's of 2026-09-22.
 
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::ages::SubDisc;
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::catalogue::{
-    FeatureCatalogue, FeatureMarks, FeatureRecord, NoFeatureCache,
+    FeatureCatalogue, FeatureCellCache, FeatureCellContents, FeatureMarks, FeatureRecord,
+    NoFeatureCache,
 };
-use hyperion_sim::galaxy::features::gas_overlay::FeatureGas;
+use hyperion_sim::galaxy::features::gas_overlay::{FeatureGas, FeatureGasIndex};
 use hyperion_sim::galaxy::features::kinds::nursery::{
     BLOW_OUT_HEIGHTS, BOUND_FRACTION, NurseryStage, Superbubble,
 };
@@ -33,6 +37,8 @@ use hyperion_sim::stellar::{Composition, lifetime};
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{LightYears, SolarMasses, Years};
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::lcg::Lcg;
+use hyperion_testkit::order::assert_order_independent;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
 const SEED: u64 = 0x0900_0005_0000_0000;
@@ -516,6 +522,123 @@ fn a_segment_s_modifiers_do_not_depend_on_its_direction() {
     source.modifiers_near_segment(&b, &a, &mut ba);
     assert_eq!(ab, ba);
     assert_ne!(ab, []);
+}
+
+/// A cache that keeps every cell it makes: the reference lookups' cells, made once.
+#[derive(Default)]
+struct KeepCells(Mutex<BTreeMap<[i32; 3], Arc<FeatureCellContents>>>);
+
+impl FeatureCellCache for KeepCells {
+    fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
+        let mut kept = self.0.lock().expect("no lookup panics");
+        Arc::clone(
+            kept.entry(cell.to_array())
+                .or_insert_with(|| Arc::new(FeatureCatalogue::cell(galaxy, cell))),
+        )
+    }
+}
+
+/// The features' gas index finds what the cells find (P09.T40.a): for rays from the Sun-like point
+/// to the root cube's edge, which cross the galaxy, and for segments of a light-year to ten
+/// thousand, through the disc, out of it, inside a bubble and of no length, the indexed source's
+/// modifiers are the cells' lookup's, the same modifiers in the same order, at the epoch and a
+/// million years on, and in any order. The index holds every nursery and cloud of the catalogue,
+/// in the cells' order.
+#[test]
+fn gas_index_finds_what_the_cells_find() {
+    let galaxy = milky_way();
+    let cells = KeepCells::default();
+    let index = FeatureGasIndex::build(&galaxy, &cells);
+    let held: Vec<FeatureRecord> = FeatureGasIndex::SLABS
+        .flat_map(|i| {
+            FeatureGasIndex::SLABS.flat_map(move |j| {
+                FeatureGasIndex::SLABS.map(move |k| FeatureCell::new([i, j, k]).unwrap())
+            })
+        })
+        .flat_map(|cell| cells.contents(&galaxy, cell).features().to_vec())
+        .filter(|f| matches!(f.process(), FeatureProcess::Nursery | FeatureProcess::Cloud))
+        .collect();
+    assert_eq!(index.features(), held.as_slice());
+    assert!(held.len() > 100_000, "{} nurseries and clouds", held.len());
+
+    let at = |ly: [f64; 3]| GalacticPosition::from_light_years(ly).unwrap();
+    let sun = [0.0, 26_000.0, 68.0];
+    let mut segments = Vec::new();
+    // Rays to the root cube's edge, the half-width 65,536 ly, along 13 axes and diagonals and 24
+    // directions drawn at random.
+    let mut lcg = Lcg::new(SEED ^ 0x40a);
+    let mut directions: Vec<[f64; 3]> = [
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+        [0.6, -0.8, 0.0],
+        [-0.6, -0.8, 0.0],
+        [0.7, -0.7, 0.1],
+        [1.0, 1.0, 1.0],
+        [-1.0, -1.0, -1.0],
+        [1.0, -1.0, 0.02],
+        [-0.3, -0.95, 0.001],
+    ]
+    .to_vec();
+    directions.extend((0..24).map(|_| [0; 3].map(|_| 2.0 * lcg.next_f64() - 1.0)));
+    for direction in directions {
+        let norm = direction.iter().map(|c| c * c).sum::<f64>().sqrt();
+        let along = direction.map(|c| c / norm);
+        let edge = (0..3)
+            .filter(|&k| along[k].abs() > 0.0)
+            .map(|k| (along[k].signum() * 65_536.0 - sun[k]) / along[k])
+            .fold(f64::INFINITY, f64::min);
+        segments.push((at(sun), at([0, 1, 2].map(|k| sun[k] + edge * along[k]))));
+    }
+    // Segments of 1 to 10,000 ly about the disc, and some inside a cloud or of no length.
+    for _ in 0..240 {
+        let length = math::exp10(4.0 * lcg.next_f64());
+        let from = [
+            40_000.0 * (2.0 * lcg.next_f64() - 1.0),
+            40_000.0 * (2.0 * lcg.next_f64() - 1.0),
+            1_500.0 * (2.0 * lcg.next_f64() - 1.0),
+        ];
+        let direction = [0; 3].map(|_| 2.0 * lcg.next_f64() - 1.0);
+        let norm = direction.iter().map(|c| c * c).sum::<f64>().sqrt();
+        segments.push((
+            at(from),
+            at([0, 1, 2].map(|k| from[k] + length * direction[k] / norm)),
+        ));
+    }
+    let cloud = find_cloud(&galaxy);
+    let [x, y, z] = cloud.position().to_light_years_f64();
+    segments.push((*cloud.position(), *cloud.position()));
+    segments.push((at([x - 3.0, y, z]), at([x + 3.0, y + 1.0, z])));
+
+    let mut found = 0;
+    for years in [0.0, 1e6] {
+        let looked_up = FeatureGas::new(&galaxy, &cells, Years::new(years));
+        let indexed = FeatureGas::indexed(&galaxy, &index, Years::new(years));
+        for (a, b) in &segments {
+            let (mut expected, mut got, mut back) = (Vec::new(), Vec::new(), Vec::new());
+            looked_up.modifiers_near_segment(a, b, &mut expected);
+            indexed.modifiers_near_segment(a, b, &mut got);
+            indexed.modifiers_near_segment(b, a, &mut back);
+            assert_eq!(got, expected, "{a:?} to {b:?} at {years} yr");
+            assert_eq!(back, expected, "{b:?} to {a:?} at {years} yr");
+            found += usize::from(!expected.is_empty());
+        }
+    }
+    assert!(
+        found > segments.len(),
+        "{found} of twice {} segments find gas",
+        segments.len()
+    );
+    // The server keeps the index for every job of every sky, which read it in any order.
+    let indexed = FeatureGas::indexed(&galaxy, &index, Years::ZERO);
+    assert_order_independent(&segments, |(a, b)| {
+        let mut out = Vec::new();
+        indexed.modifiers_near_segment(a, b, &mut out);
+        out
+    });
 }
 
 // --- P09.T3.b: the index's headroom ---
