@@ -102,25 +102,40 @@ const CITED_BEX_SHARE: f64 = 0.65;
 /// 2014, Nature 505, 378), is too faint in X-rays to be catalogued as one.
 const CITED_BLACK_HOLE_SHARE: f64 = 0.01;
 
-/// The young disc's high-mass hosts under every 27 hold, as measured: Be/X and supergiant neutron
-/// stars and black holes. Black holes are 0.005 of all, within [`CITED_BLACK_HOLE_SHARE`], since
-/// a Be star beside one makes no X-ray binary (main's ruling of 2026-11-01: before that rule 62
-/// of the 64 black holes, 0.145 of all, were beside Be stars). Be/X are 0.989 of the neutron stars'
-/// against [`CITED_BEX_SHARE`] (a finding: the census counts every neutron star beside a Be star,
-/// quiescent or not, where the catalogued share is of those seen; the Be/X phase outlasts the
-/// supergiant one some 10–100 times, so the Galaxy hides thousands of quiescent Be/X beside its
-/// tens of supergiant systems, Meurs and van den Heuvel 1989, A&A 226, 88, recalled; the spun-up
-/// Be/X's orbits are the observed ones, 301 of 360 at 10–330 days).
-const PINNED_HIGH_MASS: [usize; 3] = [373, 4, 2];
+/// The young disc's high-mass hosts under every 27 hold, as measured at 27 ([`PINNED_KINDS`]; 373,
+/// 4 and 2 as pinned on 2026-11-02): Be/X and supergiant neutron stars and black holes. No black
+/// hole is one (0.005 of all as pinned), within [`CITED_BLACK_HOLE_SHARE`], since a Be star beside
+/// one makes no X-ray binary (main's ruling of 2026-11-01: before that rule 62 of the 64 black
+/// holes, 0.145 of all, were beside Be stars). Be/X are 0.991 of the neutron stars' (0.989 as
+/// pinned) against [`CITED_BEX_SHARE`] (a finding: the census counts every neutron star beside a
+/// Be star, quiescent or not, where the catalogued share is of those seen; the Be/X phase outlasts
+/// the supergiant one some 10–100 times, so the Galaxy hides thousands of quiescent Be/X beside
+/// its tens of supergiant systems, Meurs and van den Heuvel 1989, A&A 226, 88, recalled; the
+/// spun-up Be/X's orbits are the observed ones, 301 of 360 at 10–330 days as pinned).
+const PINNED_HIGH_MASS: [usize; 3] = [324, 3, 0];
 
 /// The census's members of each kind under every 27 hold, in [`XrbHostKind::ALL`]'s order, in
-/// the slab and in the young disc, as measured (2026-11-02, with P11.T4's pinned white dwarfs, the
-/// symbiotic X-ray binaries' bounds and the helium disc's line): the floor of 10⁻¹² keeps 76 of
-/// the slab's 456 ultracompacts that 10⁻¹³ kept, and 180 of its 567 members; the bounds keep one
-/// symbiotic X-ray binary of the slab's five and one of the young disc's thirty.
+/// the slab and in the young disc, as measured at 27: 835 and 695 members. As pinned (2026-11-02,
+/// with P11.T4's pinned white dwarfs, the symbiotic X-ray binaries' bounds and the helium disc's
+/// line) they were `[1, 98, 1, 2, 1, 0, 76, 1, 0]` and `[2, 14, 32, 18, 373, 4, 27, 1, 2]`: the
+/// floor of 10⁻¹² kept 76 of the slab's 456 ultracompacts that 10⁻¹³ kept, and 180 of its 567
+/// members; the bounds kept one symbiotic X-ray binary of the slab's five and one of the young
+/// disc's thirty. The pin was stale at 26 already: the history's first commit runs 800 and 696
+/// members under every 27 hold, `[39, 661, 2, 8, 0, 0, 89, 1, 0]` and
+/// `[125, 98, 49, 52, 325, 3, 44, 0, 0]`. Since then the heavy donors' white dwarfs' wind (P11.T4)
+/// adds the slab's 2 persistent and 32 transient neutron stars and an ultracompact, 4.4% more, as
+/// it adds 77 to `ns_accretion_hold`'s census of 1,738, and the refit on 27's engine (P15.T10.b)
+/// takes a young Be/X; the segment cap of 256 moves none. Turned back one at a time on the
+/// history's first commit, in censuses of 2 × 10⁵ records each, the heavy donors' hold leaves 2 of
+/// the slab's 181 members, the neutron-star accretion's leaves 56 of its 161 neutron stars' and
+/// makes most of the rest black-hole transients (94 against 2), the dwarf limit's leaves 3 of its
+/// 17 ultracompacts, and the rest (the binary kicks, the collapses, the wind accretion, the pinned
+/// white dwarfs and the merger mass) move none. The slab's neutron stars' X-ray binaries are seven
+/// times the pin's, as `ns_accretion_hold`'s census rose from 413 to 1,738 members (a finding, for
+/// research).
 const PINNED_KINDS: [[usize; 9]; 2] = [
-    [1, 98, 1, 2, 1, 0, 76, 1, 0],
-    [2, 14, 32, 18, 373, 4, 27, 1, 2],
+    [41, 693, 2, 8, 0, 0, 90, 1, 0],
+    [125, 98, 49, 52, 324, 3, 44, 0, 0],
 ];
 
 /// The longest period of an ultracompact member under every 27 hold: 80 minutes, the
@@ -129,12 +144,13 @@ const PINNED_KINDS: [[usize; 9]; 2] = [
 const ULTRACOMPACT_MAX_PERIOD: Seconds = Seconds::new(80.0 * 60.0);
 
 /// The ultracompact members at [`ULTRACOMPACT_MAX_PERIOD`] or longer under every 27 hold, in the
-/// slab and in the young disc, as measured: none of the slab's, and ten of the young disc's, seven
-/// neutron stars and three black holes fed through their inner Lagrangian points by helium stars
-/// of 0.8–4.4 M☉, on their main sequence or in their Hertzsprung gap, 81 minutes to 3.1 days out
-/// at 9 × 10⁻¹² to 10⁻³ M☉ yr⁻¹ (a finding: kinded ultracompact by their helium donors, not by
-/// their periods).
-const PINNED_LONG_ULTRACOMPACTS: [usize; 2] = [0, 10];
+/// slab and in the young disc, as measured at 27 (the same fourteen at 26 under every 27 hold):
+/// none of the slab's, and fourteen of the young disc's, ten neutron stars and four black holes fed
+/// through their inner Lagrangian points by helium stars of 1.1–5.1 M☉, two on their main sequence
+/// and twelve in their Hertzsprung gap, 82 minutes to 19 hours out at 2 × 10⁻¹¹ to
+/// 3 × 10⁻⁶ M☉ yr⁻¹ (a finding: kinded ultracompact by their helium donors, not by their periods;
+/// pinned at ten on 2026-11-02, of 0.8–4.4 M☉, 81 minutes to 3.1 days out).
+const PINNED_LONG_ULTRACOMPACTS: [usize; 2] = [0, 14];
 
 /// The Milky Way fixture, under the version's rules.
 fn galaxy() -> &'static Galaxy {
@@ -432,7 +448,8 @@ static NEW_KINDS: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
 /// The census's and the catalogue's kinds over the slab, and the new kinds' marks, that miss under
 /// every 27 hold (findings): each a kind's share or a mark's name, as measured. The black-hole
 /// transients miss by design: the catalogue draws the observed 1,300 (`BLACK_HOLE_TRANSIENT_SHARE`,
-/// plan 11's design note 11), where the census holds some 190.
+/// plan 11's design note 11), where the census holds some 60 of 10⁴ hosts at 27 (P15.T10.b's
+/// census on 27's engine; some 190 before).
 const PINNED_KIND_MISSES: [&str; 1] = ["BlackHoleTransient share"];
 
 /// A new kind's mark as the catalogue's entries and the census's members give it: its name, its
@@ -445,8 +462,12 @@ type KindMark = (
 );
 
 /// The new kinds' marks [`the_catalogue_draws_the_census_s_kinds`] compares: those the census holds
-/// enough members of, the black-hole high-mass hosts' two too few.
-const NEW_KIND_MARKS: [KindMark; 5] = [
+/// enough members of, the ultracompact hosts'. The black-hole high-mass hosts' two were too few
+/// as pinned (2026-11-02), and the census holds none at 27. The symbiotic hosts' period and
+/// accretor mass were compared over the two members it held then; at 27 it holds one, the slab's
+/// (as at 26 already, [`PINNED_KINDS`]), too few: one member falls into one tenth of any law, its
+/// statistic per degree of freedom 1 against the bound's 0.97 whatever the catalogue draws.
+const NEW_KIND_MARKS: [KindMark; 3] = [
     (
         "ultracompact period, minutes",
         XrbHostKind::Ultracompact,
@@ -465,18 +486,6 @@ const NEW_KIND_MARKS: [KindMark; 5] = [
     (
         "ultracompact accretor mass",
         XrbHostKind::Ultracompact,
-        |s| s.accretor_mass().value(),
-        |m| Some(m.accretor_mass.value()),
-    ),
-    (
-        "symbiotic period, days",
-        XrbHostKind::Symbiotic,
-        |s| s.period().value() / 86_400.0,
-        |m| m.period.map(|p| p.value() / 86_400.0),
-    ),
-    (
-        "symbiotic accretor mass",
-        XrbHostKind::Symbiotic,
         |s| s.accretor_mass().value(),
         |m| Some(m.accretor_mass.value()),
     ),
