@@ -5,7 +5,7 @@
 //! inputs-sha256: 7b6481cc2abe295203ef521c333320d9048f62dc43cf60de8dc49a4fbce15dd0
 //! manifest: crates/hyperion-fit/manifests/kick_defaults.toml
 //! data: none
-//! sim-fingerprint: 9ba16f34618e917aa9c889a5549cf09c94607ee5bec6f20eed719b2b3767daae
+//! sim-fingerprint: da74d60969a417510ebe511bec24252bffe33252fab66ef6d8a54373ac449d09
 //! since-generator-version: 26
 //! source: the brainstorm's "Testing" list, through plan 06's kick-law tests (P06.T19.d,
 //!   `crates/hyperion-sim/tests/stellar_kick.rs`): Willcox et al. (2021, ApJ Letters 920, L37)

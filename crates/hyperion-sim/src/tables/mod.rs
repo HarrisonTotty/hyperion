@@ -142,7 +142,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_awd",
         revision: 0,
-        since_generator_version: 28,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
@@ -154,37 +154,37 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_pair_light_c",
         revision: 0,
-        since_generator_version: 27,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
         name: "binary_pair_light_d",
         revision: 0,
-        since_generator_version: 27,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
         name: "binary_pair_light_e",
         revision: 0,
-        since_generator_version: 27,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
         name: "binary_reach",
         revision: 0,
-        since_generator_version: 26,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
         name: "binary_wind_reach",
         revision: 0,
-        since_generator_version: 28,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
         name: "binary_xrb",
         revision: 0,
-        since_generator_version: 28,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
@@ -352,19 +352,19 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "sky_binary_light_c",
         revision: 0,
-        since_generator_version: 27,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
         name: "sky_binary_light_d",
         revision: 0,
-        since_generator_version: 27,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
         name: "sky_binary_light_e",
         revision: 0,
-        since_generator_version: 27,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {
@@ -376,7 +376,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "sky_phase_envelope",
         revision: 0,
-        since_generator_version: 26,
+        since_generator_version: 29,
         provisional: false,
     },
     TableInfo {

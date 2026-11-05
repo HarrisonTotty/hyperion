@@ -6,14 +6,14 @@
 //! inputs-sha256: 0bda1fb5858dec8176782d2329ca84461be30dbc43884c2a001b84d504e8c953
 //! manifest: crates/hyperion-fit/manifests/kick_rank.toml
 //! data: none
-//! sim-fingerprint: f96ebc2d48904f19f433c03fa19e57c108a9cc675ab3f4dd9738cd2e55e8f536
+//! sim-fingerprint: 258fea881b36865ce424ebe61f10b22d9c0eeb3cd2863b2a8cfaf514b40d95d3
 //! since-generator-version: 26
 //! source: Disberg and Mandel (2025, ApJ Letters 989, L8) for the log-normal of young isolated
 //!   pulsars; Mandel and Müller (2020, MNRAS 499, 3214) for the score; Disberg, Mandel and Hirai
 //!   (2026) for its 45% scatter; plan 06's tracks
 //! acceptance: 1000000 fresh scores through the table give ln(v ÷ km/s) of mean 5.5995 and
 //!   standard deviation 0.6775, rank clamped and untruncated; knots strictly increasing; largest
-//!   shift of a knot's rank from the committed table 0.00123
+//!   shift of a knot's rank from the committed table 0.00000
 //!
 //! The four defaults are the constants `stellar::remnant::KickLawParams::default` reads.
 //!
