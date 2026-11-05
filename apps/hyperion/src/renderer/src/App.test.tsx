@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vite
 
 import { App } from "./App";
 import { MAXIMIZE_KEY } from "./displays/view/displayKeys";
+import { FakeLinkWorker } from "./test/FakeLinkWorker";
 import { FakeWebSocket } from "./test/FakeWebSocket";
 import { aDensityMap, anOpenedUniverse, aUniverseList } from "./test/galaxyFixtures";
 import {
@@ -102,6 +103,21 @@ describe("App", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("reads the server link's socket in a worker, off the page's thread (fix-night-sky-stars)", () => {
+    FakeLinkWorker.instances = [];
+    vi.stubGlobal("Worker", FakeLinkWorker);
+
+    render(<App />);
+
+    // No socket of the page's own, whose frames a long task of the page's would leave unread until
+    // the server's write timeout closed the connection in the middle of a sky's reply.
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(FakeLinkWorker.instances.flatMap((worker) => worker.posted)).toContainEqual({
+      kind: "open",
+      url: TEST_SERVER_URL,
+    });
   });
 
   it("links to the server the client was launched to link to", () => {

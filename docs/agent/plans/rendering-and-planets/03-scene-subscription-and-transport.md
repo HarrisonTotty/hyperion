@@ -2231,3 +2231,8 @@ Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` bui
     through `drift` on the member (the "elsewhere" branch, which panicked at BASE), but its
     value is not read there. The bit-for-bit placement and the drift's value are the core's unit
     test above.
+- **Fixed in lane `fix-night-sky-stars` (2026-11-05): the link's socket is read on a worker's
+  thread.** `useServerConnection` opens `openLinkSocket` (`lib/linkSocket.ts`, its worker
+  `linkSocket.worker.ts`), so that a long task of the page's no longer leaves frames unread past
+  `WRITE_TIMEOUT`, dropping a sky mid-reply (Design note 10's receive path); without `Worker`, the
+  page's own `WebSocket`.

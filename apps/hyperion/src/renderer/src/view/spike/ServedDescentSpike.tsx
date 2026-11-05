@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
 import type { SurfaceEvents } from "../../displays/view/useTerrainSession";
 import { type ConnectionStatus, useServerConnection } from "../../lib/connection";
+import { openLinkSocket } from "../../lib/linkSocket";
 import { isRefusal } from "../../lib/refusal";
 import type { SceneModel } from "../../lib/scene/model";
 import { type SceneStatus, type SceneSurfaceEvent, useScene } from "../../lib/scene/useScene";
@@ -261,7 +262,8 @@ export function ServedDescentSpike({
   body,
   ...spike
 }: ServedDescentSpikeProps) {
-  const connection = useServerConnection(serverUrl, __APP_VERSION__);
+  // The app's link, read on a worker's thread (fix-night-sky-stars).
+  const connection = useServerConnection(serverUrl, __APP_VERSION__, openLinkSocket);
   const link = useServerLinkValue(connection);
   return (
     <ServerLinkContext value={link}>

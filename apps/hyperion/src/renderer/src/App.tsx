@@ -39,6 +39,7 @@ import type { TerrainSession } from "./view/terrain/session";
 import type { WorkerLike } from "./view/terrain/workers/pool";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
+import { openLinkSocket } from "./lib/linkSocket";
 import type { SystemPlace } from "./lib/scene/model";
 import { type DisplayId, stationDisplays } from "./lib/displays";
 import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
@@ -382,7 +383,9 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  */
 export function App() {
   const serverUrl = window.hyperion.serverUrl;
-  const connection = useServerConnection(serverUrl, __APP_VERSION__);
+  // Read on a worker's thread, so that a long task of the page's never leaves the server's frames
+  // unread past its write timeout (fix-night-sky-stars).
+  const connection = useServerConnection(serverUrl, __APP_VERSION__, openLinkSocket);
   useSurfaceModuleCheck(connection.serverGeneratorVersion);
   const link = useServerLinkValue(connection);
   const viewsCheck = window.hyperion.viewsCheck;

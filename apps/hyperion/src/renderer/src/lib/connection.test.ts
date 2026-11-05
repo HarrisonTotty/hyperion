@@ -3,8 +3,10 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { binaryFrame } from "../test/binaryFrames";
+import { FakeLinkWorker } from "../test/FakeLinkWorker";
 import { FakeWebSocket } from "../test/FakeWebSocket";
 import { useServerConnection } from "./connection";
+import { openLinkSocket } from "./linkSocket";
 
 const SERVER_URL = "ws://ship/ws";
 
@@ -284,5 +286,67 @@ describe("useServerConnection", () => {
         error: { code: "link_lost" },
       });
     });
+  });
+});
+
+describe("useServerConnection's socket off the page's thread (fix-night-sky-stars)", () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    FakeLinkWorker.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("Worker", FakeLinkWorker);
+  });
+
+  it("reads the server's frames through the app's worker socket, so that a busy page leaves none unread", async () => {
+    const { result, unmount } = renderHook(() =>
+      useServerConnection(SERVER_URL, "1.2.3", openLinkSocket),
+    );
+
+    // The socket is the worker's: the page opens none of its own, whose frames would wait for the
+    // page's thread while it is busy, until the server's write timeout closed the connection.
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    const worker = FakeLinkWorker.latest();
+    expect(worker.options).toMatchObject({ type: "module" });
+    expect(worker.posted).toEqual([{ kind: "open", url: SERVER_URL }]);
+
+    act(() => {
+      worker.reports({ kind: "open" });
+      worker.reports({
+        kind: "message",
+        data: JSON.stringify({
+          type: "welcome",
+          server_version: "9.9.9",
+          protocol_version: PROTOCOL_VERSION,
+          generator_version: 2,
+        }),
+      });
+    });
+    expect(worker.sent()).toEqual([{ type: "hello", client_version: "1.2.3" }]);
+    expect(result.current.status).toBe("connected");
+
+    const pending = result.current.requests.requestBulk({ kind: "list_universes" }, () => ({
+      chunks: 1,
+      bytes: 1,
+    }));
+    expect(worker.sent()).toContainEqual({
+      type: "request",
+      id: 1,
+      body: { kind: "list_universes" },
+    });
+    act(() => {
+      worker.reports({ kind: "message", data: binaryFrame(1, 0, 1, [7]) });
+      worker.reports({
+        kind: "message",
+        data: JSON.stringify({ type: "response", id: 1, body: LIST }),
+      });
+    });
+    await expect(pending.outcome).resolves.toMatchObject({ ok: true, response: LIST });
+
+    act(() => {
+      worker.reports({ kind: "close" });
+    });
+    expect(result.current.status).toBe("disconnected");
+    expect(worker.terminated).toBe(true);
+    unmount();
   });
 });
