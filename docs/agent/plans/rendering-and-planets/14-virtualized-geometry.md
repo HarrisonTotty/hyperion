@@ -2731,6 +2731,9 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     what still draws at stride 1 on both: their masks need fins and heads cut to the set (T1.g's).
   - Pending: the owner's Mac (`views-check --terrain --hidden --setting high|low`, with and
     without `--geometry standInStrides=off`) and RTX runs; Windows NOT RUN.
+- **R14.T3.c's shared bands, their cost** (research-next-work-40; the figures in the lane's
+  outbox): `StrideEdges.update` forms each patch's edge needs once an update, and a frame of the
+  last's inputs takes its bands back as it left them (`StrideEdges.reused`), bit for bit.
 - **R14.T2.e, the Mac batch's passes** (`tool-mac-batch-passes`, 2026-11-05; built):
   - `--count-gpu-calls` counts each render pass's attachments too (`GpuCallCounter.take()` gives
     `{ calls, attachments }`): by pass label, slot, view (format, size, samples), load and store,

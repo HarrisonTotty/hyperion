@@ -27,6 +27,12 @@
  *
  * An edge with no drawn patch beside it keeps its own blocks' needs. The corners lie at morph level
  * 3 on every side and never move.
+ *
+ * **Its cost** (research-next-work-40): an update forms each patch's own needs along its edges once,
+ * where both sides of every edge read them, and a frame whose inputs are the last's, field by field
+ * (each patch's key, level and scale, its errors by identity, and its level's largest errors), takes
+ * the last update's bands back as it left them, the same to the bit: the drawn set and the view's
+ * slewed τ′ hold still for most frames (74% of low's on the seamless probe).
  */
 
 import {
@@ -53,6 +59,12 @@ const EDGE_STEPS: ReadonlyArray<readonly [di: number, dj: number]> = [
 
 /** The strides an edge's band is held for, its morph levels 0 to 2. */
 const LEVELS = 3;
+
+/**
+ * The numbers of a patch's inputs `StrideEdges` compares from one update to the next: its key's
+ * four, its level, its scale's two and its level's largest three errors.
+ */
+const INPUT_WORDS = 10;
 
 /** What lies beside a coarse block along an edge, finer by one level or more (`#finerKind`). */
 const NO_FINER = 0;
@@ -95,27 +107,24 @@ function edgeBlock(edge: number, t: number): number {
   }
 }
 
-/** The middle of block `t`'s stretch of edge `edge`, a grid vertex of its patch. */
-function stretchMiddle(edge: number, t: number): readonly [number, number] {
-  const along = 8 * t + 4;
-  switch (edge) {
-    case 0:
-      return [0, along];
-    case 1:
-      return [64, along];
-    case 2:
-      return [along, 0];
-    default:
-      return [along, 64];
-  }
+/** The middle of block `t`'s stretch of edge `edge`, a grid vertex of its patch: its x. */
+function stretchMiddleX(edge: number, t: number): number {
+  return edge === 0 ? 0 : edge === 1 ? 64 : 8 * t + 4;
 }
 
-/** The edge and the block along it of the place (x, y) of a patch's grid on its boundary. */
-function edgeAt(x: number, y: number): readonly [edge: number, t: number] {
-  if (x === 0 || x === 64) {
-    return [x === 0 ? 0 : 1, Math.min(7, Math.floor(y / 8))];
-  }
-  return [y === 0 ? 2 : 3, Math.min(7, Math.floor(x / 8))];
+/** The middle of block `t`'s stretch of edge `edge`: its y. */
+function stretchMiddleY(edge: number, t: number): number {
+  return edge === 2 ? 0 : edge === 3 ? 64 : 8 * t + 4;
+}
+
+/** The edge the place (x, y) of a patch's grid on its boundary lies on. */
+function edgeOfPlace(x: number, y: number): number {
+  return x === 0 ? 0 : x === 64 ? 1 : y === 0 ? 2 : 3;
+}
+
+/** The block along its edge (`edgeOfPlace`) of the place (x, y) on a patch's boundary. */
+function blockOfPlace(x: number, y: number): number {
+  return Math.min(7, Math.floor((x === 0 || x === 64 ? y : x) / 8));
 }
 
 /** The shared bands of a view's drawn patches' edges (see the module's remarks), refilled each frame. */
@@ -135,7 +144,26 @@ export class StrideEdges {
    */
   readonly #finer: Float64Array;
   readonly #finerKind: Uint8Array;
+  /**
+   * Each patch's own needs along its edges, at `edgeBandIndex` as {@link bandsM}, and its level's
+   * largest errors' needs beside a patch that is not measured, three a patch: each formed once an
+   * update, where the edges read them often.
+   */
+  readonly #needs: Float64Array;
+  readonly #fallbacks: Float64Array;
   #coarsest = 0;
+  /**
+   * The last update's inputs and its {@link bandsM} as it left them, before any caller's writes:
+   * a frame of the same inputs takes them back, the same bands to the bit, as the drawn set and
+   * the view's τ′ hold still for many frames at a time. Each patch's key and level, its scale's two
+   * parts and its level's largest errors, `NaN` for none ({@link StrideEdges.update}), seven
+   * numbers and its errors a patch.
+   */
+  readonly #lastInputs: Float64Array;
+  readonly #lastErrors: Array<ArrayLike<number> | null>;
+  readonly #lastBands: Float64Array;
+  #lastCount = -1;
+  #reused = false;
 
   /** @param capacity - The most patches a view draws: the cache's slot count. */
   constructor(capacity: number) {
@@ -145,6 +173,16 @@ export class StrideEdges {
     this.bandsM = new Float64Array(capacity * EDGE_BANDS);
     this.#finer = new Float64Array(capacity * 32 * 2);
     this.#finerKind = new Uint8Array(capacity * 32);
+    this.#needs = new Float64Array(capacity * EDGE_BANDS);
+    this.#fallbacks = new Float64Array(capacity * LEVELS);
+    this.#lastInputs = new Float64Array(capacity * INPUT_WORDS);
+    this.#lastErrors = Array.from({ length: capacity }, () => null);
+    this.#lastBands = new Float64Array(capacity * EDGE_BANDS);
+  }
+
+  /** Whether the last {@link StrideEdges.update} took its bands back from the one before. */
+  get reused(): boolean {
+    return this.#reused;
   }
 
   /**
@@ -163,37 +201,46 @@ export class StrideEdges {
       throw new RangeError(`${String(count)} drawn patches exceed the stride edges' capacity`);
     }
     const out = this.bandsM;
+    // The same inputs as the last update's: its bands again, as it left them.
+    this.#reused = this.#sameInputs(patches, levelLargestM);
+    if (this.#reused) {
+      out.set(this.#lastBands.subarray(0, count * EDGE_BANDS));
+      return out;
+    }
     const finer = this.#finer;
     const kinds = this.#finerKind;
     const drawn = this.#drawn;
-    const need = (n: number, block: number, level: number): number => {
-      const measured = patches[n]?.measured ?? null;
-      return measured === null
-        ? NO_STRIDE_BAND
-        : strideNeedM(measured.scale, blockErrorM(measured.clusterErrors, block, level));
-    };
-    const fallback = (n: number, level: number): number => {
-      const patch = patches[n];
-      const measured = patch?.measured ?? null;
-      const largest = patch === undefined ? null : levelLargestM(patch.level);
-      return measured === null || largest === null
-        ? NO_STRIDE_BAND
-        : strideNeedM(measured.scale, largest[level] ?? Number.POSITIVE_INFINITY);
-    };
+    const needs = this.#needs;
+    const fallbacks = this.#fallbacks;
     let coarsest = MAX_LEVEL;
     for (let n = 0; n < count; n += 1) {
       const patch = patches[n];
+      const measured = patch?.measured ?? null;
       if (patch !== undefined) {
         drawn.set(patch.key, n);
         coarsest = Math.min(coarsest, patch.key.level);
       }
       for (let e = 0; e < 4; e += 1) {
         for (let t = 0; t < 8; t += 1) {
+          const block = edgeBlock(e, t);
           for (let l = 0; l < LEVELS; l += 1) {
-            out[n * EDGE_BANDS + edgeBandIndex(e, t, l)] = need(n, edgeBlock(e, t), l);
+            const at = n * EDGE_BANDS + edgeBandIndex(e, t, l);
+            const own =
+              measured === null
+                ? NO_STRIDE_BAND
+                : strideNeedM(measured.scale, blockErrorM(measured.clusterErrors, block, l));
+            needs[at] = own;
+            out[at] = own;
           }
           kinds[32 * n + 8 * e + t] = NO_FINER;
         }
+      }
+      const largest = patch === undefined ? null : levelLargestM(patch.level);
+      for (let l = 0; l < LEVELS; l += 1) {
+        fallbacks[LEVELS * n + l] =
+          measured === null || largest === null
+            ? NO_STRIDE_BAND
+            : strideNeedM(measured.scale, largest[l] ?? Number.POSITIVE_INFINITY);
       }
     }
     this.#coarsest = coarsest;
@@ -201,9 +248,10 @@ export class StrideEdges {
     for (let n = 0; n < count; n += 1) {
       const patch = patches[n];
       if (patch !== undefined) {
-        EDGE_STEPS.forEach(([di, dj], e) => {
-          this.#edge(patches, n, patch, e, di, dj, need, fallback);
-        });
+        for (let e = 0; e < 4; e += 1) {
+          const [di, dj] = EDGE_STEPS[e] ?? [0, 0];
+          this.#edge(patches, n, patch, e, di, dj);
+        }
       }
     }
     // Each coarse block with a finer patch beside it: the shared bands at its levels 0 and 1, the
@@ -223,7 +271,10 @@ export class StrideEdges {
               kind === MEASURED_FINER
                 ? (finer[2 * link + l] ?? NO_STRIDE_BAND)
                 : kind === UNMEASURED_FINER
-                  ? sharedStrideBandM(need(n, edgeBlock(e, t), l), fallback(n, l))
+                  ? sharedStrideBandM(
+                      needs[base + edgeBandIndex(e, t, l)] ?? NO_STRIDE_BAND,
+                      fallbacks[LEVELS * n + l] ?? NO_STRIDE_BAND,
+                    )
                   : NO_STRIDE_BAND;
           }
           out[base + edgeBandIndex(e, t, 2)] = NO_STRIDE_BAND;
@@ -233,7 +284,46 @@ export class StrideEdges {
     for (const patch of patches) {
       drawn.delete(patch.key);
     }
+    this.#lastBands.set(out.subarray(0, count * EDGE_BANDS));
     return out;
+  }
+
+  /**
+   * Whether `patches` and their levels' largest errors are the last update's, field by field and
+   * their errors by identity, and records them as the last where they are not.
+   */
+  #sameInputs(
+    patches: ReadonlyArray<StrideEdgePatch>,
+    levelLargestM: (level: number) => StrideErrorsM | null,
+  ): boolean {
+    const inputs = this.#lastInputs;
+    const errors = this.#lastErrors;
+    let same = patches.length === this.#lastCount;
+    const note = (at: number, word: number): void => {
+      same &&= Object.is(inputs[at], word);
+      inputs[at] = word;
+    };
+    for (let n = 0; n < patches.length; n += 1) {
+      const patch = patches[n];
+      const measured = patch?.measured ?? null;
+      const largest = patch === undefined ? null : levelLargestM(patch.level);
+      const at = INPUT_WORDS * n;
+      note(at, patch?.key.face ?? Number.NaN);
+      note(at + 1, patch?.key.level ?? Number.NaN);
+      note(at + 2, patch?.key.i ?? Number.NaN);
+      note(at + 3, patch?.key.j ?? Number.NaN);
+      note(at + 4, patch?.level ?? Number.NaN);
+      note(at + 5, measured?.scale.statedM ?? Number.NaN);
+      note(at + 6, measured?.scale.perErrorM ?? Number.NaN);
+      note(at + 7, largest?.[0] ?? Number.NaN);
+      note(at + 8, largest?.[1] ?? Number.NaN);
+      note(at + 9, largest?.[2] ?? Number.NaN);
+      const own = measured?.clusterErrors ?? null;
+      same &&= errors[n] === own;
+      errors[n] = own;
+    }
+    this.#lastCount = patches.length;
+    return same;
   }
 
   /** Patch `n`'s edges' bands from the last {@link StrideEdges.update}, m: a view of {@link bandsM}. */
@@ -249,12 +339,17 @@ export class StrideEdges {
     e: number,
     di: number,
     dj: number,
-    need: (n: number, block: number, level: number) => number,
-    fallback: (n: number, level: number) => number,
   ): void {
     const out = this.bandsM;
     const finer = this.#finer;
     const kinds = this.#finerKind;
+    const needs = this.#needs;
+    const fallbacks = this.#fallbacks;
+    // Patch `m`'s own need at block `t` of edge `edge` at level `level`, and its fallback's there.
+    const need = (m: number, edge: number, t: number, level: number): number =>
+      needs[m * EDGE_BANDS + edgeBandIndex(edge, t, level)] ?? NO_STRIDE_BAND;
+    const fallback = (m: number, level: number): number =>
+      fallbacks[LEVELS * m + level] ?? NO_STRIDE_BAND;
     const at = this.#besideOf(patch.key, di, dj);
     const other = at < 0 ? undefined : patches[at];
     if (other === undefined || other.level > patch.level) {
@@ -269,19 +364,25 @@ export class StrideEdges {
     // beside does not find from its own side: this side gives it its share.
     const subBeside = !own && theirs && patch.key.level > this.#beside.level;
     for (let t = 0; t < 8; t += 1) {
-      const [x, y] = stretchMiddle(e, t);
-      coarsePlaceInto(this.#place, patch.key, x, y, this.#beside);
-      const [eo, to] = edgeAt(this.#place.x, this.#place.y);
+      coarsePlaceInto(
+        this.#place,
+        patch.key,
+        stretchMiddleX(e, t),
+        stretchMiddleY(e, t),
+        this.#beside,
+      );
+      const eo = edgeOfPlace(this.#place.x, this.#place.y);
+      const to = blockOfPlace(this.#place.x, this.#place.y);
       if (step === 0) {
         for (let l = 0; l < LEVELS; l += 1) {
-          const mine = need(n, edgeBlock(e, t), l);
+          const mine = need(n, e, t, l);
           out[base + edgeBandIndex(e, t, l)] = sharedStrideBandM(
             mine,
-            theirs ? need(at, edgeBlock(eo, to), l) : fallback(n, l),
+            theirs ? need(at, eo, to, l) : fallback(n, l),
           );
           if (subBeside) {
             out[at * EDGE_BANDS + edgeBandIndex(eo, to, l)] = sharedStrideBandM(
-              need(at, edgeBlock(eo, to), l),
+              need(at, eo, to, l),
               fallback(at, l),
             );
           }
@@ -304,13 +405,9 @@ export class StrideEdges {
       }
       // The coarse block's stretch holds this block and its sibling along the edge, at the fine
       // levels 1 and 2, the coarse block's 0 and 1.
-      const sibling = edgeBlock(e, t ^ 1);
       for (let lc = 0; lc < 2; lc += 1) {
-        const fine = sharedStrideBandM(need(n, edgeBlock(e, t), lc + 1), need(n, sibling, lc + 1));
-        const shared = sharedStrideBandM(
-          fine,
-          theirs ? need(at, edgeBlock(eo, to), lc) : fallback(n, lc + 1),
-        );
+        const fine = sharedStrideBandM(need(n, e, t, lc + 1), need(n, e, t ^ 1, lc + 1));
+        const shared = sharedStrideBandM(fine, theirs ? need(at, eo, to, lc) : fallback(n, lc + 1));
         out[base + edgeBandIndex(e, t, lc + 1)] = shared;
         finer[2 * link + lc] = shared;
       }

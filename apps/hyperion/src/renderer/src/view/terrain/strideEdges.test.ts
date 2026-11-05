@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { seededRandom } from "../../test/seededRandom";
 import {
+  EDGE_BANDS,
   edgeBandIndex,
   heldEdgeBandsM,
   NO_STRIDE_BAND as NONE,
@@ -387,4 +388,45 @@ describe("a vertex two patches share (plan R14, R14.T3.c's shared bands)", () =>
       expect(beside).toBeGreaterThan(200);
     },
   );
+});
+
+/** Levels 3's and 4's largest errors, none for any other. */
+function frameLargest(level: number): StrideErrorsM | null {
+  return level === 3 ? [0.5, 1, 2] : level === 4 ? [0.25, 0.5, 1] : null;
+}
+
+describe("the shared bands from one frame to the next (research-next-work-40)", () => {
+  it("takes the last update's bands back to the bit for the same inputs, whatever was written into them since, and forms them anew where an input moves", () => {
+    const set = randomSet(0x5e7e);
+    const patches = set.map(({ patch }) => patch);
+    const bandsOf = (edges: StrideEdges, of: ReadonlyArray<StrideEdgePatch>): number[] =>
+      Array.from(edges.update(of, frameLargest).subarray(0, of.length * EDGE_BANDS));
+    const edges = new StrideEdges(set.length);
+    const first = bandsOf(edges, patches);
+    const firstReused = edges.reused;
+    // A caller's writes into them (the hold fades' level-2 bands), and next frame's own objects.
+    edges.bandsM.fill(123);
+    const again = bandsOf(
+      edges,
+      patches.map((patch) => Object.assign({}, patch)),
+    );
+    const againReused = edges.reused;
+    // One measured patch's scale moved by the slew.
+    const n = patches.findIndex((patch) => patch.measured !== null);
+    const moved = [...patches];
+    const was = patches[n];
+    if (was !== undefined && was.measured !== null) {
+      const { scale } = was.measured;
+      moved[n] = {
+        ...was,
+        measured: { ...was.measured, scale: { ...scale, perErrorM: scale.perErrorM * 1.01 } },
+      };
+    }
+    const afterMove = bandsOf(edges, moved);
+    const movedReused = edges.reused;
+    expect([firstReused, againReused, movedReused, n >= 0]).toEqual([false, true, false, true]);
+    expect(again).toEqual(first);
+    expect(afterMove).toEqual(bandsOf(new StrideEdges(set.length), moved));
+    expect(afterMove).not.toEqual(first);
+  });
 });
