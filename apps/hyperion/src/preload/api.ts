@@ -2258,6 +2258,36 @@ export interface InspectionGpuCall {
   readonly bytes: number;
 }
 
+/**
+ * React's commits over a profiled window of the inspection run (lane perf-render-thread-2;
+ * `reactCommits.ts`): how many, and each component's renders.
+ */
+export interface InspectionReactCommits {
+  readonly commits: number;
+  /** Every component's renders over the window, mounts among them. */
+  readonly renders: number;
+  /** The components that rendered, the most renders first, at most 80. */
+  readonly components: ReadonlyArray<InspectionReactComponent>;
+}
+
+/** One component's renders over a profiled window, by what changed for each. */
+export interface InspectionReactComponent {
+  /** Its function's or class's name, its `displayName` first, or `(anonymous)`. */
+  readonly name: string;
+  /** Its renders, its mounts among them. */
+  readonly renders: number;
+  readonly mounts: number;
+  /**
+   * Of its renders after a mount, those with every prop and state hook as its last render's had
+   * them: rendered for its parent's render, or for a context.
+   */
+  readonly unchanged: number;
+  /** Of its renders after a mount, those with a state hook's value changed. */
+  readonly stateChanged: number;
+  /** The props that changed, with the renders each changed in, the most first, at most 6. */
+  readonly propsChanged: ReadonlyArray<{ readonly prop: string; readonly renders: number }>;
+}
+
 /** What the renderer measured over one profiled window of the inspection run. */
 export interface InspectionTimingWindow {
   readonly name: InspectionTimingWindowName;
@@ -2287,6 +2317,11 @@ export interface InspectionTimingWindow {
    * or `null` on a launch that did not count them.
    */
   readonly gpuCalls: ReadonlyArray<InspectionGpuCall> | null;
+  /**
+   * React's commits over the window (lane perf-render-thread-2), or `null` where React did not take
+   * the profile's hook as it loaded.
+   */
+  readonly react: InspectionReactCommits | null;
   /**
    * The primary's terrain's cluster counters as the window ended (plan R14), or `null` where its
    * body has no lit pass or none came back.

@@ -54,13 +54,15 @@ const CENSUS: MarchCensus = {
 /**
  * A profiler over fakes, the clock moving by each wait, the primary drawing every `drawMs`, its
  * calls counted by `counter` where given, and each census asked of the probe answered by `census`
- * (none by default: no engine made) and its signals kept.
+ * (none by default: no engine made) and its signals kept, React's commits counted by `react`
+ * where given.
  */
 function profiler(
   drawMs: number,
   untimedUntilMs = Number.NEGATIVE_INFINITY,
   counter: InspectionProfileDeps["calls"] = null,
   census: () => Promise<MarchCensus> | null = () => null,
+  react: InspectionProfileDeps["react"] = null,
 ): {
   readonly profile: InspectionProfiler;
   readonly calls: string[];
@@ -124,6 +126,7 @@ function profiler(
     setting: "high",
     timing: INSPECTION_PROFILE_TIMING,
     calls: counter,
+    react,
     // The counters as read: one more cluster each read, so that a window's are its end's.
     clusters: () => {
       clusterReads.push(nowMs);
@@ -183,6 +186,28 @@ describe("the inspection run's frame profile (the owner's report)", () => {
     const uncounted = profiler(100);
     await uncounted.profile.measure("orbit", PLATE);
     expect(uncounted.profile.windows[0]?.gpuCalls).toBeNull();
+  });
+
+  it("counts React's commits over its draws alone, and none where React took no hook (lane perf-render-thread-2)", async () => {
+    const said: string[] = [];
+    const react: InspectionProfileDeps["react"] = {
+      begin: () => {
+        said.push("begin");
+      },
+      take: () => {
+        said.push("take");
+        return { commits: 2, renders: 0, components: [] };
+      },
+    };
+    const counted = profiler(100, 6_000, null, () => null, react);
+    await counted.profile.measure("orbit", PLATE);
+    const uncounted = profiler(100);
+    await uncounted.profile.measure("orbit", PLATE);
+    expect([said, counted.profile.windows[0]?.react, uncounted.profile.windows[0]?.react]).toEqual([
+      ["begin", "take"],
+      { commits: 2, renders: 0, components: [] },
+      null,
+    ]);
   });
 
   it("waits for its frames' late pass times, and no longer than its settle", async () => {

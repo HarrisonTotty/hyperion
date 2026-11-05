@@ -25,6 +25,8 @@ import type {
   HandoverResampleGaps,
   HandoverTexelRecord,
   InspectionGpuCall,
+  InspectionReactCommits,
+  InspectionReactComponent,
   InspectionTimingBytes,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
@@ -1390,6 +1392,64 @@ function gpuCalls(value: unknown): ReadonlyArray<InspectionGpuCall> | null | und
     : undefined;
 }
 
+/** One prop's changed renders (lane perf-render-thread-2): a name and a count above 0. */
+function changedProp(value: unknown): InspectionReactComponent["propsChanged"][number] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { prop, renders } = value;
+  return typeof prop === "string" && isCount(renders) && renders > 0 ? { prop, renders } : null;
+}
+
+/**
+ * One component's renders (lane perf-render-thread-2): its name, and no more mounts, renders with
+ * nothing changed, or renders with its state or a prop changed than its renders after a mount.
+ */
+function reactComponent(value: unknown): InspectionReactComponent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { name, renders, mounts, unchanged, stateChanged } = value;
+  const propsChanged = listOf(value["propsChanged"], changedProp);
+  if (
+    typeof name !== "string" ||
+    !isCount(renders) ||
+    !isCount(mounts) ||
+    !isCount(unchanged) ||
+    !isCount(stateChanged) ||
+    propsChanged === null ||
+    mounts > renders ||
+    unchanged + stateChanged > renders - mounts ||
+    propsChanged.some((each) => each.renders > renders - mounts)
+  ) {
+    return null;
+  }
+  return { name, renders, mounts, unchanged, stateChanged, propsChanged };
+}
+
+/**
+ * A window's React commits (lane perf-render-thread-2), or `null` for a window React did not
+ * report to; `undefined` where the value is neither, or lists a component twice or more renders
+ * than its total.
+ */
+function reactCommits(value: unknown): InspectionReactCommits | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { commits, renders } = value;
+  const components = listOf(value["components"], reactComponent);
+  return !isCount(commits) ||
+    !isCount(renders) ||
+    components === null ||
+    new Set(components.map((each) => each.name)).size !== components.length ||
+    components.reduce((sum, each) => sum + each.renders, 0) > renders
+    ? undefined
+    : { commits, renders, components };
+}
+
 /**
  * A window's march census (plan R08, R08.T8.d), or `undefined` where `value` is not one: its
  * kernel's name, the texels by node rays 0 to 10, and its counts, whole numbers, no more limb tiles
@@ -1437,8 +1497,8 @@ function timingClusters(value: unknown): InspectionTimingClusters | null | undef
 
 /**
  * One profiled window (the owner's report): its name, an end not before its start, and its times,
- * each pass's as many as the frames timed in full, each label once, its WebGPU calls or `null`, and
- * its cluster counters or `null`.
+ * each pass's as many as the frames timed in full, each label once, its WebGPU calls or `null`, its
+ * React commits or `null`, and its cluster counters or `null`.
  */
 function timingWindow(value: unknown): InspectionTimingWindow | null {
   if (!isRecord(value)) {
@@ -1455,6 +1515,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
   const statements = strings(value["statements"]);
   const memory = timingMemory(value["memory"]);
   const calls = gpuCalls(value["gpuCalls"]);
+  const react = reactCommits(value["react"]);
   const marchCensus = timingCensus(value["marchCensus"]);
   const clusters = timingClusters(value["clusters"]);
   const { startMs, endMs, untimedFrames, position, marchSamples } = value;
@@ -1475,6 +1536,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     !isCount(untimedFrames) ||
     memory === null ||
     calls === undefined ||
+    react === undefined ||
     clusters === undefined ||
     !isCount(marchSamples) ||
     marchSamples === 0 ||
@@ -1498,6 +1560,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     untimedFrames,
     memory,
     gpuCalls: calls,
+    react,
     clusters,
     marchSamples,
     position,

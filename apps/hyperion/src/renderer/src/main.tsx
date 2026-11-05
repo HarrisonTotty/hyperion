@@ -1,3 +1,8 @@
+// First, so that `react-dom` finds the frame profile's commit hook as it loads: a module run for
+// its effect alone, before any other.
+// oxlint-disable-next-line import/no-unassigned-import
+import "./reactCommitHook";
+
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 

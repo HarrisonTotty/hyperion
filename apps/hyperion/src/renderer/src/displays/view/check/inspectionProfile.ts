@@ -27,6 +27,7 @@ import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import type { QualitySetting } from "../../../view/quality/qualitySetting";
 import { PRIMARY_VIEW_NAME } from "../viewNames";
 import type { GpuCallCounter } from "./gpuCallCounter";
+import type { ReactCommitCounter } from "./reactCommits";
 import type { ViewsProbe } from "./viewsProbe";
 
 /** How long a profiled window lasts. */
@@ -78,6 +79,11 @@ export interface InspectionProfileDeps {
    */
   readonly calls: Pick<GpuCallCounter, "begin" | "take"> | null;
   /**
+   * The counter of React's commits (lane perf-render-thread-2), whose count over each window is the
+   * window's, or `null` where React did not take its hook.
+   */
+  readonly react: Pick<ReactCommitCounter, "begin" | "take"> | null;
+  /**
    * The primary's terrain's cluster counters (plan R14), switched on by the call, so that the one
    * at a window's start has them read back by its end; `null` where none have come back.
    */
@@ -120,6 +126,7 @@ export class InspectionProfiler {
     this.#deps.clusters();
     const startMs = this.#deps.nowMs();
     this.#deps.calls?.begin();
+    this.#deps.react?.begin();
     const done = (): boolean =>
       views.drawTimes(PRIMARY_VIEW_NAME, startMs, Number.POSITIVE_INFINITY).length >=
         timing.draws || this.#deps.nowMs() - startMs >= timing.maxMs;
@@ -132,12 +139,14 @@ export class InspectionProfiler {
     let ending = false;
     let endMs: number;
     let gpuCalls: InspectionTimingWindow["gpuCalls"] = null;
+    let react: InspectionTimingWindow["react"] = null;
     let said: ProfiledPlate;
     try {
       await waited();
       endMs = this.#deps.nowMs();
       // Over the window's draws alone, as its figures are, not the settling after them.
       gpuCalls = this.#deps.calls?.take() ?? null;
+      react = this.#deps.react?.take() ?? null;
       this.#deps.markWindow({ startMs, endMs });
       said = plate();
       // The last frames' pass times resolve a frame or more late.
@@ -184,6 +193,7 @@ export class InspectionProfiler {
       untimedFrames: figures.untimedFrames,
       memory: views.memoryTraffic(startMs, endMs),
       gpuCalls,
+      react,
       clusters: this.#deps.clusters(),
       // The floor's air at the low setting's sizes while it stands stepped (the owner's report).
       marchSamples:

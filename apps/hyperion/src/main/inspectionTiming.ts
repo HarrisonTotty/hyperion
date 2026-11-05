@@ -31,6 +31,7 @@ import type {
   AtmosphereLeversOverride,
   CompositeProbeName,
   InspectionGpuCall,
+  InspectionReactCommits,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
   InspectionTimingMemory,
@@ -55,9 +56,10 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
 /**
  * The schema's version; bumped with any change to the file's shape: 2 since each window's march
  * census, the run's march probe and its levers over the setting's (plan R08, R08.T8.d), 3 since the
- * run's lit probe (R08.T9.b), 4 since each window's terrain cluster counters (plan R14, R14.T3.d).
+ * run's lit probe (R08.T9.b), 4 since each window's terrain cluster counters (plan R14, R14.T3.d), 5
+ * since each window's React commits and each thread's React work (lane perf-render-thread-2).
  */
-export const INSPECTION_TIMING_VERSION = 4;
+export const INSPECTION_TIMING_VERSION = 5;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -99,6 +101,13 @@ export function inspectionTimingTraceConfig(): TraceConfig {
 /** The functions each thread lists, by self time and by inclusive time. */
 export const PROFILED_FUNCTIONS = 15;
 
+/**
+ * The functions each thread lists by inclusive time, more than by self time, so that a React
+ * component's sampled renders, its function's inclusive time, are among them where they count
+ * (lane perf-render-thread-2): React calls each component apart, its children after it.
+ */
+export const PROFILED_INCLUSIVE_FUNCTIONS = 100;
+
 /** The threads a window lists, the busiest first. */
 export const PROFILED_THREADS = 12;
 
@@ -126,9 +135,37 @@ export interface ProfiledThread {
   readonly sampledMs: number | null;
   /** Its hottest functions by self time, at most {@link PROFILED_FUNCTIONS}. */
   readonly self: ReadonlyArray<ProfiledFunction>;
-  /** Its hottest functions by time with their callees, at most {@link PROFILED_FUNCTIONS}. */
+  /**
+   * Its hottest functions by time with their callees, at most
+   * {@link PROFILED_INCLUSIVE_FUNCTIONS}.
+   */
   readonly inclusive: ReadonlyArray<ProfiledFunction>;
+  /**
+   * Its sampled time in React's work, with its callees, ms ({@link REACT_WORK_FUNCTIONS}), or
+   * `null` with no samples: on the renderer's main thread, every render and commit and their
+   * effects.
+   */
+  readonly reactMs: ReactWorkMs | null;
 }
+
+/**
+ * React's work, sampled (lane perf-render-thread-2): its renders with their commits and layout
+ * effects, and its passive effects, run apart, each with its callees, ms.
+ */
+export interface ReactWorkMs {
+  readonly renderAndCommit: number;
+  readonly passiveEffects: number;
+}
+
+/**
+ * The functions of `react-dom`'s production build whose inclusive time is React's work, by
+ * {@link ReactWorkMs}' parts: `performWorkOnRoot` renders a root's lanes and commits them, its
+ * layout effects among them; `flushPassiveEffects` runs the passive effects a commit left.
+ */
+export const REACT_WORK_FUNCTIONS: Readonly<Record<keyof ReactWorkMs, string>> = {
+  renderAndCommit: "performWorkOnRoot",
+  passiveEffects: "flushPassiveEffects",
+};
 
 /** A window's trace, reduced: its threads, the busiest first, at most {@link PROFILED_THREADS}. */
 export interface ProfileTraceFigures {
@@ -362,7 +399,9 @@ export class ProfileScan {
         gcMs: clippedUnionUs(this.#gc.get(key) ?? [], fromUs, toUs) / 1000,
         sampledMs: functions === null ? null : functions.sampledUs / 1000,
         self: functions === null ? [] : hottest(functions.self, PROFILED_FUNCTIONS),
-        inclusive: functions === null ? [] : hottest(functions.inclusive, PROFILED_FUNCTIONS),
+        inclusive:
+          functions === null ? [] : hottest(functions.inclusive, PROFILED_INCLUSIVE_FUNCTIONS),
+        reactMs: functions === null ? null : reactWorkOf(functions.inclusive),
       };
     });
     return {
@@ -422,6 +461,26 @@ function sampledFunctions(
     }
   }
   return { self, inclusive, sampledUs };
+}
+
+/**
+ * React's work in a thread's inclusive times by function ({@link REACT_WORK_FUNCTIONS}), ms: each
+ * part the sum over the functions of its name, whatever their script and line.
+ */
+function reactWorkOf(inclusive: ReadonlyMap<string, number>): ReactWorkMs {
+  const of = (name: string): number => {
+    let us = 0;
+    for (const [each, eachUs] of inclusive) {
+      if (each === name || each.startsWith(`${name} `)) {
+        us += eachUs;
+      }
+    }
+    return us / 1000;
+  };
+  return {
+    renderAndCommit: of(REACT_WORK_FUNCTIONS.renderAndCommit),
+    passiveEffects: of(REACT_WORK_FUNCTIONS.passiveEffects),
+  };
 }
 
 function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
@@ -714,6 +773,8 @@ export interface InspectionTimingWindowResults {
   readonly memory: InspectionTimingMemory;
   /** Its WebGPU calls a draw (`--count-gpu-calls`; plan R14), or `null` where none were counted. */
   readonly gpuCalls: GpuCallFigures | null;
+  /** React's commits over it (lane perf-render-thread-2), or `null` where React took no hook. */
+  readonly react: InspectionReactCommits | null;
   /** The far limb's census of the march the frame after the window dispatched, or `null`. */
   readonly marchCensus: InspectionTimingMarchCensus | null;
   /** The primary's terrain's cluster counters as the window ended (plan R14), or `null`. */
@@ -856,6 +917,7 @@ function windowResults(
     terrainShareOfGpu: gpu.meanMs === null || !(gpu.meanMs > 0) ? null : terrainMeanMs / gpu.meanMs,
     memory: window.memory,
     gpuCalls: window.gpuCalls === null ? null : gpuCallFigures(window.gpuCalls, draws),
+    react: window.react,
     marchCensus: window.marchCensus,
     clusters: window.clusters,
     trace: trace ?? missing("no trace was recorded over the window"),
@@ -1007,6 +1069,47 @@ function gpuCallsMarkdown(calls: GpuCallFigures | null): string[] {
   ];
 }
 
+/** The renderer's main thread's name in a trace, whose React work the summary states. */
+const RENDERER_MAIN_THREAD = "CrRendererMain";
+
+/**
+ * A window's React commits and work as lines of the summary (lane perf-render-thread-2): the
+ * commits and renders a draw, the renderer's main thread's sampled React work, and the components
+ * the most rendered, with what changed for each render; nothing where React took no hook.
+ */
+function reactMarkdown(window: InspectionTimingWindowResults): string[] {
+  const { react } = window;
+  if (react === null) {
+    return [];
+  }
+  const perDraw = (count: number): string =>
+    window.draws === 0 ? "—" : perDrawText(count / window.draws);
+  const main = window.trace.value?.threads.find(
+    (thread) => thread.thread === RENDERER_MAIN_THREAD && thread.reactMs !== null,
+  );
+  const work =
+    main?.reactMs === null || main?.reactMs === undefined
+      ? "—"
+      : `render and commit ${main.reactMs.renderAndCommit.toFixed(0)} ms (${perDraw(main.reactMs.renderAndCommit)} a draw), passive effects ${main.reactMs.passiveEffects.toFixed(0)} ms (${perDraw(main.reactMs.passiveEffects)} a draw)`;
+  return [
+    "### React (commits counted)",
+    "",
+    `- **Commits:** ${String(react.commits)} (${perDraw(react.commits)} a draw of the primary); **renders:** ${String(react.renders)} (${perDraw(react.renders)} a draw); the hook's own walk is in this window's times.`,
+    `- **React's work on the renderer's main thread (sampled):** ${work}`,
+    "",
+    "| Component | Renders | A draw | Sampled (ms) | Mounts | Nothing changed | State changed | Props changed (renders) |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...react.components.map((each) => {
+      // Its function's own time with its callees: React calls its children after it, not in it.
+      const sampled = main?.inclusive.find(
+        (fn) => fn.name === each.name || fn.name.startsWith(`${each.name} `),
+      );
+      return `| ${cell(each.name)} | ${String(each.renders)} | ${perDraw(each.renders)} | ${sampled === undefined ? "—" : sampled.ms.toFixed(0)} | ${String(each.mounts)} | ${String(each.unchanged)} | ${String(each.stateChanged)} | ${each.propsChanged.length === 0 ? "—" : cell(each.propsChanged.map(({ prop, renders }) => `${prop} ${String(renders)}`).join(", "))} |`;
+    }),
+    "",
+  ];
+}
+
 /**
  * A window's march census as lines of the summary (plan R08, R08.T8.d): the texels by their
  * footprints' node rays, the limb's tiles, and the rays against the lanes' rays, each tile's texels
@@ -1088,6 +1191,7 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
         ]),
     "",
     ...gpuCallsMarkdown(window.gpuCalls),
+    ...reactMarkdown(window),
     "### Threads (trace)",
     "",
     ...(trace.value === null

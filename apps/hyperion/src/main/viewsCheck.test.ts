@@ -654,6 +654,7 @@ describe("the inspection run's frame profile (the owner's report)", () => {
           uploads: [{ name: "view star sprites", count: 4, bytes: 2_097_152 }],
         },
         gpuCalls: null,
+        react: null,
         clusters: null,
         marchSamples: 36,
         position: "28.9 Mm 268° +49°",

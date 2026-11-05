@@ -39,6 +39,7 @@ import {
 } from "./softwareTiming";
 import { recordTerrainCheck, runTerrainCheck, TERRAIN_CHECK_TIMING } from "./terrainCheckRun";
 import type { InspectionClusters } from "./inspectionClusters";
+import { reactCommitCounterOf } from "./reactCommits";
 import type { TerrainProbe } from "./terrainProbe";
 import { recordViewsCheck, runViewsCheck, STOPPED, VIEWS_CHECK_TIMING } from "./viewsCheckRun";
 import type { ViewsProbe } from "./viewsProbe";
@@ -208,6 +209,7 @@ export function ViewsCheckRunner({
                 setting: api.launch.setting,
                 timing: inspectionProfileTimingOf(INSPECTION_PROFILE_TIMING, launchMode),
                 calls: run.calls,
+                react: reactCommitCounterOf(globalThis),
                 clusters: () => run.clusters.counts(served?.body ?? null),
               })
             : null;

@@ -201,6 +201,31 @@ const RECORD: InspectionTimingRecord = {
         { label: "bodies", call: "queue.writeBuffer", count: 2, bytes: 4_096 },
         { label: "atmosphere view", call: "device.createBindGroup", count: 4, bytes: 0 },
       ],
+      react: {
+        commits: 4,
+        renders: 12,
+        components: [
+          {
+            name: "ViewStage",
+            renders: 4,
+            mounts: 0,
+            unchanged: 1,
+            stateChanged: 3,
+            propsChanged: [],
+          },
+          {
+            name: "ViewLabelBlock",
+            renders: 4,
+            mounts: 1,
+            unchanged: 1,
+            stateChanged: 0,
+            propsChanged: [
+              { prop: "lines", renders: 2 },
+              { prop: "faults", renders: 1 },
+            ],
+          },
+        ],
+      },
       clusters: {
         passes: [
           { label: "lit", clusters: 900, triangles: 100_000 },
@@ -268,7 +293,11 @@ function results(
               gcMs: 40,
               sampledMs: 1_400,
               self: [{ name: "surveyEdges styles-x.js:31", ms: 900 }],
-              inclusive: [{ name: "tick index-x.js:5", ms: 1_300 }],
+              inclusive: [
+                { name: "tick index-x.js:5", ms: 1_300 },
+                { name: "ViewLabelBlock index-x.js:900", ms: 12 },
+              ],
+              reactMs: { renderAndCommit: 30, passiveEffects: 4 },
             },
           ],
         }),
@@ -383,6 +412,82 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect(markdown).toContain("| bodies | 10.0 | setBindGroup 6.0, draws 3.0, writeBuffer 1.0 |");
   });
 
+  it("states React's commits, renders and work a draw, and each component's renders by what changed (lane perf-render-thread-2)", () => {
+    const markdown = inspectionTimingMarkdown(results());
+    expect(markdown).toContain(
+      "- **Commits:** 4 (2.0 a draw of the primary); **renders:** 12 (6.0 a draw)",
+    );
+    expect(markdown).toContain(
+      "render and commit 30 ms (15.0 a draw), passive effects 4 ms (2.0 a draw)",
+    );
+    expect(markdown).toContain("| ViewLabelBlock | 4 | 2.0 | 12 | 1 | 1 | 0 | lines 2, faults 1 |");
+    expect(markdown).toContain("| ViewStage | 4 | 2.0 | — | 0 | 1 | 3 | — |");
+  });
+
+  it("takes a window's React commits, or none, and refuses them inconsistent (lane perf-render-thread-2)", () => {
+    const [window] = RECORD.windows;
+    if (window === undefined || window.react === null) {
+      throw new Error("the record has a window with React's commits");
+    }
+    const { react } = window;
+    const withReact = (value: unknown): unknown => ({
+      ...RECORD,
+      windows: [{ ...window, react: value }],
+    });
+    const [stage] = react.components;
+    if (stage === undefined) {
+      throw new Error("the record lists a component");
+    }
+    expect([
+      readInspectionTimingRecord(withReact(null))?.windows[0]?.react,
+      readInspectionTimingRecord(withReact({ ...react, renders: 7 })),
+      readInspectionTimingRecord(
+        withReact({ ...react, components: [stage, { ...stage, renders: 1 }] }),
+      ),
+      readInspectionTimingRecord(withReact({ ...react, components: [{ ...stage, unchanged: 2 }] })),
+      readInspectionTimingRecord(withReact(undefined)),
+    ]).toEqual([null, null, null, null, null]);
+  });
+
+  it("sums React's work in a thread's inclusive time by its functions, whatever their line (lane perf-render-thread-2)", () => {
+    const scan = named(new ProfileScan());
+    scan.add({
+      name: "Profile",
+      ph: "P",
+      pid: 1,
+      tid: 1,
+      ts: 1_000,
+      id: "0x2",
+      args: { data: { startTime: 1_000 } },
+    });
+    scan.add({
+      name: "ProfileChunk",
+      ph: "P",
+      pid: 1,
+      tid: 77,
+      ts: 1_000,
+      id: "0x2",
+      args: {
+        data: {
+          cpuProfile: {
+            nodes: [
+              { id: 1, callFrame: frame("(root)", 0) },
+              { id: 2, parent: 1, callFrame: frame("performWorkOnRoot", 12_068) },
+              { id: 3, parent: 2, callFrame: frame("ViewStage", 40) },
+              { id: 4, parent: 1, callFrame: frame("flushPassiveEffects", 13_228) },
+            ],
+            samples: [3, 2, 4, 1],
+          },
+          timeDeltas: [100, 300, 200, 100],
+        },
+      },
+    });
+    const main = scan
+      .figures(0, 10_000)
+      .threads.find((thread) => thread.thread === "CrRendererMain");
+    expect(main?.reactMs).toEqual({ renderAndCommit: 0.5, passiveEffects: 0.1 });
+  });
+
   it("leaves the WebGPU calls out of a window that did not count them", () => {
     const [window] = RECORD.windows;
     const uncounted = window === undefined ? [] : [{ ...window, gpuCalls: null }];
@@ -491,7 +596,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 4,
+      version: 5,
       run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
     });
   });
