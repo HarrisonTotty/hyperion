@@ -7,7 +7,6 @@ use crate::planetary::fate::{
     BodyFate, BodyState, DestructionCause, Evaporation, FateBody, FateHost,
 };
 use crate::planetary::hosts::young::{Formation, FormationDraws};
-use crate::planetary::testing::{with_every_27_hold, with_every_28_hold};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::system::StarModel;
@@ -48,11 +47,6 @@ fn rock(a_au: f64, mass: f64) -> FateBody {
         .evaporating()
 }
 
-/// `run` under the evaporation's rules at 28.
-fn evaporating<R>(run: impl FnOnce() -> R) -> R {
-    with_evaporation(EvaporationRules::Evaporated, run)
-}
-
 /// The age of `star` at `t`, Gyr.
 fn age_gyr(star: &StarModel, t: UniverseTime) -> f64 {
     star.age_at(t).value() / 1e9
@@ -65,37 +59,6 @@ fn main_sequence_end_gyr(star: &StarModel) -> f64 {
         .expect("a solar track ends its main sequence")
         .value()
         / 1e9
-}
-
-/// The evaporation is held until the 27 → 28 bump: the rules in force are 27's, the tests' switch
-/// and 28's helper reach 28's, and 27's helper does not.
-#[test]
-fn the_evaporation_is_held_only_until_the_28_bump() {
-    assert!(
-        GENERATOR_VERSION < EVAPORATION_VERSION,
-        "the 27 → 28 bump has a small hot rocky body evaporate: delete `EVAPORATION_VERSION`, \
-         `EvaporationRules` with its `Kept` arm and its matches in `BodyFate::live_to` and \
-         `BodyFate::moon_evaporation`, the tests' `with_evaporation`, its switch in \
-         `with_every_28_hold` (and the helper, if no other 28 hold is left), its line in \
-         `HeldRules`, and this test; restate the tests held below 28"
-    );
-    assert_eq!(EvaporationRules::in_force(), EvaporationRules::Kept);
-    assert_eq!(
-        evaporating(EvaporationRules::in_force),
-        EvaporationRules::Evaporated
-    );
-    assert_eq!(
-        with_every_28_hold(EvaporationRules::in_force),
-        EvaporationRules::Evaporated
-    );
-    assert_eq!(
-        with_every_27_hold(EvaporationRules::in_force),
-        EvaporationRules::Kept
-    );
-    assert_eq!(
-        with_every_28_hold(|| with_evaporation(EvaporationRules::Kept, EvaporationRules::in_force)),
-        EvaporationRules::Kept
-    );
 }
 
 /// The vapour's flux ρ `c_s` at KIC 12557548b's 2,145 K is PBC13's eqs. 7, 9 and 14 worked in their
@@ -237,14 +200,14 @@ fn first_loss_finds_the_time_the_radius_is_lost() {
 }
 
 /// A 10⁻⁶ M⊕ rock at 0.05 au about the Sun, at a substellar 1,600–1,700 K on the main sequence,
-/// is `Destroyed { Evaporated }` on it, within 1 Gyr of its formation, under the rules at 28, and
-/// present under 27's; a body from 10⁻³ M⊕ is kept, and so is one built by hand.
+/// is `Destroyed { Evaporated }` on it, within 1 Gyr of its formation; a body from 10⁻³ M⊕ is
+/// kept, and so is one built by hand.
 #[test]
 fn a_small_rock_close_to_a_sun_like_star_evaporates_on_its_main_sequence() {
     let star = sun(4.6e9);
     let host = FateHost::star(&star);
     let close = rock(0.05, 1e-6);
-    let fate = evaporating(|| BodyFate::resolve(&close, &host));
+    let fate = BodyFate::resolve(&close, &host);
     let Some(BodyState::Destroyed { cause, at }) = fate.ending() else {
         panic!("a hot small rock evaporates: {:?}", fate.ending());
     };
@@ -262,15 +225,13 @@ fn a_small_rock_close_to_a_sun_like_star_evaporates_on_its_main_sequence() {
         BodyState::Destroyed { cause, at }
     );
 
-    let kept = BodyFate::resolve(&close, &host);
-    assert_eq!(kept.at(UniverseTime::EPOCH).state(), BodyState::Present);
     let heavier = rock(0.05, 2e-3);
-    let heavy = evaporating(|| BodyFate::resolve(&heavier, &host));
+    let heavy = BodyFate::resolve(&heavier, &host);
     assert_eq!(heavy.at(UniverseTime::EPOCH).state(), BodyState::Present);
     let by_hand =
         FateBody::new(*close.formation(), *close.orbit(), close.mass(), ROCK).expect("valid");
     assert_eq!(by_hand.evaporation(), Evaporation::Ignored);
-    let unfollowed = evaporating(|| BodyFate::resolve(&by_hand, &host));
+    let unfollowed = BodyFate::resolve(&by_hand, &host);
     assert_eq!(
         unfollowed.at(UniverseTime::EPOCH).state(),
         BodyState::Present
@@ -281,13 +242,13 @@ fn a_small_rock_close_to_a_sun_like_star_evaporates_on_its_main_sequence() {
 /// (PBC13's eq. 28 at a radius that falls): at 90% of the way from its formation to its
 /// evaporation, the 10⁻⁶ M⊕ rock at 0.05 au has the mass (1 − ∫ rate dt ÷ R₀)³ of its own, the
 /// integral taken here by a trapezoid of 200,000 steps over its orbit and its star's light, to
-/// 10⁻³; under 27's rules it keeps its mass.
+/// 10⁻³.
 #[test]
 fn a_rock_near_the_end_of_its_life_has_the_mass_its_radius_has_left() {
     let star = sun(4.6e9);
     let host = FateHost::star(&star);
     let close = rock(0.05, 1e-6);
-    let fate = evaporating(|| BodyFate::resolve(&close, &host));
+    let fate = BodyFate::resolve(&close, &host);
     let formed = fate.formed_at().expect("formed");
     let Some(BodyState::Destroyed { at: gone, .. }) = fate.ending() else {
         panic!("the rock evaporates");
@@ -320,7 +281,7 @@ fn a_rock_near_the_end_of_its_life_has_the_mass_its_radius_has_left() {
         .sum();
     let left = 1.0 - lost / radius_of(close.mass(), ROCK);
     let expected = 1e-6 * left * left * left;
-    let mass = evaporating(|| fate.at(t).mass().value());
+    let mass = fate.at(t).mass().value();
     assert!(
         (mass / expected - 1.0).abs() < 1e-3,
         "{mass} M⊕ against {expected}"
@@ -329,9 +290,8 @@ fn a_rock_near_the_end_of_its_life_has_the_mass_its_radius_has_left() {
         (1e-10..1e-8).contains(&mass),
         "{mass} M⊕ at 90% of its life"
     );
-    let later = evaporating(|| fate.at(at(0.99)).mass().value());
+    let later = fate.at(at(0.99)).mass().value();
     assert!(later < mass, "{later} M⊕ after {mass}");
-    assert_eq!(BodyFate::resolve(&close, &host).at(t).mass(), close.mass());
 }
 
 /// A 10⁻⁶ M⊕ rock at 1 au about the Sun of 13.5 Gyr, at a substellar 400–460 K on the main
@@ -343,7 +303,7 @@ fn a_rock_evaporates_only_once_its_host_leaves_its_main_sequence() {
     let star = sun(13.5e9);
     let host = FateHost::star(&star);
     let near = rock(1.0, 1e-6);
-    let fate = evaporating(|| BodyFate::resolve(&near, &host));
+    let fate = BodyFate::resolve(&near, &host);
     let Some(BodyState::Destroyed { cause, at }) = fate.ending() else {
         panic!(
             "a small rock at 1 au evaporates on the giant branches: {:?}",
@@ -361,25 +321,24 @@ fn a_rock_evaporates_only_once_its_host_leaves_its_main_sequence() {
         age < 12.6,
         "evaporated at {age} Gyr, after the white dwarf's birth"
     );
-    let kept = BodyFate::resolve(&near, &host);
-    assert_eq!(kept.at(UniverseTime::EPOCH).state(), BodyState::Present);
     let far = rock(2.0, 1e-6);
-    let cooler = evaporating(|| BodyFate::resolve(&far, &host));
+    let cooler = BodyFate::resolve(&far, &host);
     assert_eq!(cooler.at(UniverseTime::EPOCH).state(), BodyState::Present);
 }
 
 /// A moon has its own ending along its planet's history (`BodyFate::moon_evaporation`): a
 /// 10⁻⁶ M⊕ moon of an Earth at 1 au about the Sun of 13.5 Gyr evaporates once its host leaves its
 /// main sequence, at the time a member of its mass on its planet's orbit would, to the second's
-/// bisection; a moon from 10⁻³ M⊕ does not, and nothing does under 27's rules.
+/// bisection; a moon from 10⁻³ M⊕ does not.
 #[test]
 fn a_moon_evaporates_along_its_planet_s_history() {
     let star = sun(13.5e9);
     let host = FateHost::star(&star);
     let planet = rock(1.0, 1.0);
-    let fate = evaporating(|| BodyFate::resolve(&planet, &host));
+    let fate = BodyFate::resolve(&planet, &host);
     assert_eq!(fate.at(UniverseTime::EPOCH).state(), BodyState::Present);
-    let at = evaporating(|| fate.moon_evaporation(EarthMasses::new(1e-6)))
+    let at = fate
+        .moon_evaporation(EarthMasses::new(1e-6))
         .expect("a small moon evaporates on the giant branches");
     assert!(age_gyr(&star, at) > main_sequence_end_gyr(&star));
     // A rock of the moon's mass and density on the planet's orbit.
@@ -391,7 +350,7 @@ fn a_moon_evaporates_along_its_planet_s_history() {
     )
     .expect("valid")
     .evaporating();
-    let alone = evaporating(|| BodyFate::resolve(&twin, &host));
+    let alone = BodyFate::resolve(&twin, &host);
     assert_eq!(
         alone.ending(),
         Some(BodyState::Destroyed {
@@ -403,16 +362,12 @@ fn a_moon_evaporates_along_its_planet_s_history() {
     let near = at
         .checked_sub(Span::from_seconds(31_557_600_000))
         .expect("on the clock");
-    let left = evaporating(|| fate.moon_mass_at(EarthMasses::new(1e-6), near));
-    assert_eq!(left, evaporating(|| alone.at(near).mass()));
+    let left = fate.moon_mass_at(EarthMasses::new(1e-6), near);
+    assert_eq!(left, alone.at(near).mass());
     assert!(
         left.value() <= 1e-6,
         "{} M⊕ a millennium before its end",
         left.value()
     );
-    assert_eq!(
-        evaporating(|| fate.moon_evaporation(EarthMasses::new(1e-3))),
-        None
-    );
-    assert_eq!(fate.moon_evaporation(EarthMasses::new(1e-6)), None);
+    assert_eq!(fate.moon_evaporation(EarthMasses::new(1e-3)), None);
 }

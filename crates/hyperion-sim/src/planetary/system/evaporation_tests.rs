@@ -1,4 +1,4 @@
-//! P14.T55.b.a's evaporation in a generated system, under every 28 hold: a belt whose named
+//! P14.T55.b.a's evaporation in a generated system, from generator version 28: a belt whose named
 //! members evaporate loses their share of its mass and shine, and ends with the last of them; a
 //! body's record publishes the mass its rock has left.
 
@@ -10,10 +10,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::rules::GalaxyRules;
-use crate::planetary::fate::evaporation::{EvaporationRules, with_evaporation};
-use crate::planetary::testing::{
-    SampleFilter, sample_records, with_every_27_hold, with_every_28_hold,
-};
+use crate::planetary::testing::{SampleFilter, sample_records, with_every_28_hold};
 
 /// The ordinary census's galaxy (`census_tests`' `tallies_under_every_28_hold`'s) and its first
 /// 836 systems, by rank: the census's ranks up to #835.
@@ -69,7 +66,7 @@ fn member_states(snapshot: &SystemSnapshot, belt: &Belt) -> Vec<BodyState> {
 
 /// Census #14's inner belt (`41ffecb200000005.e1xx`): under every 28 hold all its eight named
 /// members evaporate at 2.31 Gyr, and so the belt ends then, `Destroyed { Evaporated }` at the last
-/// of their times; under every 27 hold it is present at the epoch, as every member is.
+/// of their times.
 #[test]
 fn a_belt_whose_named_members_all_evaporate_ends_with_the_last_of_them() {
     let (states, belt_state) = with_every_28_hold(|| {
@@ -102,18 +99,6 @@ fn a_belt_whose_named_members_all_evaporate_ends_with_the_last_of_them() {
             at: last
         }
     );
-    let kept = with_every_27_hold(|| {
-        on_census_system(14, |ctx, system| {
-            let belt = belt_holding(system, "41ffecb200000005.e101");
-            system
-                .snapshot_at(ctx, UniverseTime::EPOCH)
-                .body(belt.index())
-                .expect("a snapshot holds its belts")
-                .identity()
-                .state()
-        })
-    });
-    assert_eq!(kept, BodyState::Present);
 }
 
 /// The share of `belt`'s named members' mass that `snapshot` publishes gone: all of each one
@@ -156,8 +141,9 @@ fn mass_and_shine(snapshot: &SystemSnapshot, belt: &Belt) -> (f64, f64) {
 }
 
 /// Census #14's outer belt (`41ffecb200000005.e2xx`) is partly evaporated at the epoch under
-/// every 28 hold, two of its members gone: its mass and its dust's shine are the same belt's with
-/// evaporation set back, less the share of its members' mass gone.
+/// every 28 hold, two of its members gone: its mass and its dust's shine are the belt's own at the
+/// epoch (its collisional mass and its dust's shine by its host's light then), less the share of
+/// its members' mass gone.
 #[test]
 fn a_belt_partly_evaporated_loses_its_members_share_of_its_mass_and_shine() {
     let ((mass, shine, share), (kept_mass, kept_shine)) = with_every_28_hold(|| {
@@ -166,9 +152,17 @@ fn a_belt_partly_evaporated_loses_its_members_share_of_its_mass_and_shine() {
             let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
             let (mass, shine) = mass_and_shine(&snapshot, belt);
             let share = share_gone(&snapshot, belt);
-            let kept = with_evaporation(EvaporationRules::Kept, || {
-                mass_and_shine(&system.snapshot_at(ctx, UniverseTime::EPOCH), belt)
-            });
+            let age = ctx.age_at(UniverseTime::EPOCH);
+            let zone = system
+                .zone(belt.host())
+                .expect("a belt's host is one of its system's zones");
+            let light = Epoch::new(system, ctx, UniverseTime::EPOCH)
+                .luminosity(zone)
+                .expect("the belt's host shines at the epoch");
+            let kept = (
+                belt.mass_at(age).value(),
+                belt.fractional_luminosity(age, light),
+            );
             ((mass, shine, share), kept)
         })
     });

@@ -155,7 +155,6 @@ use crate::planetary::derive::{
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
 use crate::planetary::error::ResolveBodyError;
-use crate::planetary::fate::evaporation::EvaporationRules;
 use crate::planetary::fate::{
     BodyFate, BodyState, DestructionCause, FateAt, FateBody, FateHost, ScatterDraws,
 };
@@ -4858,7 +4857,8 @@ impl PlanetarySystem {
         .expect("a belt's mass and its members' density are positive");
         let host = fate_host(ctx, zone);
         let at = BodyFate::resolve(&proxy, &host).at(epoch.t);
-        // From P14.T55.b.a's hold at 28, what its named members' evaporation has taken of it.
+        // From generator version 28 (P14.T55.b.a), what its named members' evaporation has taken of
+        // it.
         let evaporated = match at.state() {
             BodyState::Present => self.belt_evaporation(belt, &host, epoch.t),
             BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
@@ -4922,7 +4922,7 @@ impl PlanetarySystem {
     /// (P14.T55.b.a): the share of its members' mass their rock has lost, those gone and what the
     /// rest have lost, which stands for the belt's own, since its cascade's smaller bodies go
     /// before them about the same light (lean, 2026-11-03); and, where none is left and the last
-    /// to go evaporated, when. `None` below the hold at 28 and for a belt with no named member.
+    /// to go evaporated, when. `None` for a belt with no named member.
     #[must_use]
     fn belt_evaporation(
         &self,
@@ -4930,10 +4930,6 @@ impl PlanetarySystem {
         host: &FateHost<'_>,
         t: UniverseTime,
     ) -> Option<BeltEvaporation> {
-        match EvaporationRules::in_force() {
-            EvaporationRules::Kept => return None,
-            EvaporationRules::Evaporated => {}
-        }
         let (mut formed, mut lost, mut left) = (0.0, 0.0, 0_usize);
         let mut latest: Option<BodyState> = None;
         for body in &self.bodies {

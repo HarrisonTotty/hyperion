@@ -21,7 +21,6 @@ use crate::planetary::derive::photometry::area_mix::{
     with_haze_layer, with_icy_regolith, with_minor_clouds, with_organic_sediment,
     with_rayleigh_adding,
 };
-use crate::planetary::fate::evaporation::{EvaporationRules, with_evaporation};
 use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
@@ -82,7 +81,6 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
-    evaporation: EvaporationRules = EvaporationRules::in_force => with_evaporation,
     zone_placement_margin: ZonePlacementMarginRules =
         ZonePlacementMarginRules::in_force => with_zone_placement_margin,
 }

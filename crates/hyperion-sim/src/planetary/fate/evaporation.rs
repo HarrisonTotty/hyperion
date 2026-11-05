@@ -57,6 +57,7 @@
 //! the same light go before them (lean, 2026-11-03); with none left it ends, `Destroyed
 //! { Evaporated }`, when the last of them went (`PlanetarySystem::belt_evaporation`).
 
+use crate::math;
 use crate::planetary::hosts::evolved::bisect;
 use crate::tables::gauss_legendre::{GL16_NODES, GL16_WEIGHTS};
 use crate::time::{Span, UniverseTime};
@@ -64,67 +65,6 @@ use crate::units::consts::{
     BOLTZMANN_CONSTANT, HYDROGEN_MASS_KG, SOLAR_LUMINOSITY_W, STEFAN_BOLTZMANN,
 };
 use crate::units::{EarthMasses, KilogramsPerCubicMetre, Metres, SolarLuminosities};
-use crate::{GENERATOR_VERSION, GeneratorVersion, math};
-
-/// The generator version from which the fate transform has a small hot rocky body evaporate
-/// (P14.T55.b.a; the [module documentation](self)): 28, held with the 28 train.
-///
-/// Below it [`EvaporationRules::in_force`] is [`EvaporationRules::Kept`]: every body keeps its
-/// mass however hot, and every figure is version 27's bit for bit. 28's bump deletes this hold,
-/// [`EvaporationRules`] with its `Kept` arm, the tests' switch, its line in the tests'
-/// `HeldRules` and its tripwire (`the_evaporation_is_held_only_until_the_28_bump`).
-pub(crate) const EVAPORATION_VERSION: GeneratorVersion = GeneratorVersion::new(28);
-
-/// Whether the fate transform has a small hot rocky body evaporate (its hold,
-/// [`EVAPORATION_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum EvaporationRules {
-    /// Version 27's and before: no body evaporates.
-    Kept,
-    /// Version 28's: a planet, a moon or a belt member below [`FREE_STREAMING_MASS`] is
-    /// `Destroyed { Evaporated }` once its rock's free-streaming vapour has taken its radius.
-    Evaporated,
-}
-
-impl EvaporationRules {
-    /// The rules this generator version gives: evaporation from [`EVAPORATION_VERSION`], none
-    /// below it; in the tests, the rules a test's switch sets on its thread ([`with_evaporation`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = EVAPORATION_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= EVAPORATION_VERSION {
-            Self::Evaporated
-        } else {
-            Self::Kept
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The evaporation rules a test sets on its thread, `None` for the version's.
-    static EVAPORATION_RULES: core::cell::Cell<Option<EvaporationRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the evaporation rules `rules` on this thread, for the tests to reach 28's
-/// evaporation ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 28's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_evaporation<R>(rules: EvaporationRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<EvaporationRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            EVAPORATION_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(EVAPORATION_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The mass below which a rocky body's vapour streams freely off it, M⊕: 10⁻³, PBC13's smallest
 /// (Perez-Becker and Chiang 2013, Figure 2, whose mass axis begins there), toward which all their

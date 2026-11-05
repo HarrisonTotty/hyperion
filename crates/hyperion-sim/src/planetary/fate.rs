@@ -112,7 +112,7 @@ use crate::id::BodyId;
 use crate::orbit::KeplerElements;
 use crate::planetary::context::SystemContext;
 use crate::planetary::drift::{DriftingOrbit, EvolvingLaw, composite_excess, drift_cell};
-use crate::planetary::fate::evaporation::{EvaporationRules, FREE_STREAMING_MASS};
+use crate::planetary::fate::evaporation::FREE_STREAMING_MASS;
 use crate::planetary::hosts::evolved::{
     Aftermath, Circularisation, circularised, circularised_axis, engulfment_reach, expanded,
     expanded_axis, first_crossing, first_engulfment, supernova,
@@ -1558,7 +1558,8 @@ impl<'a> BodyFate<'a> {
             (None, Some(at)) => Some(BodyState::Unbound { at }),
             (None, None) => None,
         };
-        // From P14.T55.b.a's hold at 28, the time its rock has evaporated, if that comes first.
+        // From generator version 28 (P14.T55.b.a), the time its rock has evaporated, if that comes
+        // first.
         let ending = match (ending, self.evaporation_in(&segment, end)) {
             (Some(ending), Some(at)) if ending.ended_at().is_some_and(|ended| ended <= at) => {
                 Some(ending)
@@ -1639,13 +1640,10 @@ impl<'a> BodyFate<'a> {
 
     /// The first time in `segment` up to `end` by which the body has lost its whole radius to its
     /// rock's free-streaming vapour, followed on from where its last segment left it
-    /// ([`evaporate`](Self::evaporate)): `None` below the hold at 28, for a body the transform does
-    /// not follow ([`Evaporation::Ignored`]), and for one from 10⁻³ M⊕.
+    /// ([`evaporate`](Self::evaporate)): `None` for a body the transform does not follow ([`Evaporation::Ignored`]), and for one from 10⁻³ M⊕.
     fn evaporation_in(&mut self, segment: &Segment, end: UniverseTime) -> Option<UniverseTime> {
-        match (EvaporationRules::in_force(), self.body.evaporation) {
-            (EvaporationRules::Evaporated, Evaporation::Rock)
-                if segment.mass < FREE_STREAMING_MASS =>
-            {
+        match self.body.evaporation {
+            Evaporation::Rock if segment.mass < FREE_STREAMING_MASS => {
                 let body = Evaporating {
                     mass: segment.mass,
                     density: self.body.density,
@@ -1655,8 +1653,7 @@ impl<'a> BodyFate<'a> {
                 self.evaporated = so_far;
                 at
             }
-            (EvaporationRules::Evaporated, Evaporation::Rock | Evaporation::Ignored)
-            | (EvaporationRules::Kept, _) => None,
+            Evaporation::Rock | Evaporation::Ignored => None,
         }
     }
 
@@ -1793,8 +1790,7 @@ impl<'a> BodyFate<'a> {
     /// ([`evaporate`](Self::evaporate)) on the moon's own mass, its rock at
     /// [`evaporation::MOON_EVAPORATING_ROCK_DENSITY`], along each of its planet's segments from
     /// its formation to its ending, since a moon is as far from its hosts as its planet. `None`
-    /// below the hold at 28, for a moon from 10⁻³ M⊕, and for one that outlasts its planet's
-    /// history.
+    /// for a moon from 10⁻³ M⊕, and for one that outlasts its planet's history.
     #[must_use]
     pub(crate) fn moon_evaporation(&self, mass: EarthMasses) -> Option<UniverseTime> {
         self.moon_history(mass).and_then(|(gone, _)| gone)
@@ -1825,10 +1821,6 @@ impl<'a> BodyFate<'a> {
     /// not follow it.
     #[must_use]
     fn moon_history(&self, mass: EarthMasses) -> Option<(Option<UniverseTime>, Evaporated)> {
-        match EvaporationRules::in_force() {
-            EvaporationRules::Kept => return None,
-            EvaporationRules::Evaporated => {}
-        }
         if mass >= FREE_STREAMING_MASS || self.formed_at? > self.known_until() {
             return None;
         }

@@ -489,11 +489,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 ///
 /// The holds at 28:
 ///
-/// - a small hot rocky body's evaporation, `EVAPORATION_VERSION` (P14.T55.b.a), at
-///   `EvaporationRules::Evaporated` through `with_evaporation`: a planet, a moon or a belt member
-///   below 10⁻³ M⊕ has the mass its rock's free-streaming vapour has left it, and is
-///   `Destroyed { Evaporated }` once that has taken its radius; a belt loses its members' share,
-///   and ends with the last of them.
 /// - a planet placed inside its pair's P-type limit, `ZONE_PLACEMENT_MARGIN_VERSION` (P14.T9.d),
 ///   at `ZonePlacementMarginRules::Margin` through `with_zone_placement_margin`: a planet whose
 ///   law lies inside a zone's P-type inner limit is placed 3% outside it, where the fit's drift
@@ -504,10 +499,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 /// with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
-    let run = move || {
-        use crate::planetary::fate::evaporation::{EvaporationRules, with_evaporation};
-        with_evaporation(EvaporationRules::Evaporated, run)
-    };
     let run = move || {
         use crate::planetary::placement::zones::{
             ZonePlacementMarginRules, with_zone_placement_margin,
