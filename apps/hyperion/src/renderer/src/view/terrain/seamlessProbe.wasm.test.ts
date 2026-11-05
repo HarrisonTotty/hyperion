@@ -28,7 +28,11 @@ import {
   pyramidLevels,
   pyramidProjectionOf,
 } from "../clusters/hzb";
-import { CLUSTER_RECORD_BYTES, type ClusterRecord } from "../clusters/record";
+import {
+  CLUSTER_FLAG_MAY_DISCARD,
+  CLUSTER_RECORD_BYTES,
+  type ClusterRecord,
+} from "../clusters/record";
 import {
   TERRAIN_CLUSTERS_PER_PAGE,
   TERRAIN_SUB_PATCH_MASK,
@@ -922,7 +926,28 @@ class SlotRecords {
       radiusM: view.getFloat32(at + 12, true),
     };
   }
+
+  /**
+   * Cluster `cluster`'s class in `slot`'s records, as the cull reads it (`clusterCull.wgsl`'s `real`
+   * and `template_of`): `none` for a negative radius, no cluster; `edge` for one that may discard
+   * (`CLUSTER_FLAG_MAY_DISCARD`), drawn at stride 1 by its may-discard template; `opaque` else.
+   * `null` for a slot with no records written.
+   */
+  classOf(slot: number, cluster: number): RecordClass | null {
+    const view = this.#bySlot.get(slot);
+    if (view === undefined) {
+      return null;
+    }
+    const at = cluster * CLUSTER_RECORD_BYTES;
+    if (!(view.getFloat32(at + 12, true) >= 0)) {
+      return "none";
+    }
+    return (view.getUint32(at + 28, true) & CLUSTER_FLAG_MAY_DISCARD) !== 0 ? "edge" : "opaque";
+  }
 }
+
+/** A cluster record's class by the survey (plan R14, R14.T1.g): see {@link SlotRecords.classOf}. */
+type RecordClass = "opaque" | "edge" | "none";
 
 /** One frame's measure of the camera's strides (plan R14, R14.T3.c): see {@link StrideFrames}. */
 interface StrideFrame {
@@ -1129,35 +1154,54 @@ class StrideFrames {
         mayDiscard: false,
         material: 0,
       });
+      // The blocks the cull draws, by their records' classes (`clusterCull.wgsl`'s `real` and
+      // `template_of`): none where no cluster, and at stride 1 where one may discard.
+      const drawnBlocks = new Uint8Array(64);
       for (let block = 0; block < 64; block += 1) {
         const sphere = records.sphere(slot, block);
-        if (sphere === null || terrainMaskCluster(inst.subWord, block) === "none") {
+        const cls = records.classOf(slot, block) ?? "opaque";
+        if (
+          sphere === null ||
+          cls === "none" ||
+          terrainMaskCluster(inst.subWord, block) === "none"
+        ) {
           strides[block] = 1;
           continue;
         }
+        drawnBlocks[block] = 1;
         const centre = vec3(
           origin.x + sphere.centreM.x - cam.positionM.x,
           origin.y + sphere.centreM.y - cam.positionM.y,
           origin.z + sphere.centreM.z - cam.positionM.z,
         );
-        const level = cameraPassStrideLevel(
-          { kind: "camera", planes: [], horizon: null, order: "ordered", toleranceRad: 0, ...pass },
-          { ...recordOf(slot, block), centreM: sphere.centreM, radiusM: sphere.radiusM },
-          block,
-          {
-            originM: vec3(0, 0, 0),
-            page: slot,
-            passMask: 0,
-            unitM: 0,
-            strideScale: inst.strideScale,
-            edgeBandsM: inst.edgeBandsM,
-            quadrantWord: inst.quadrantWord,
-            holdFadesWord: inst.holdFadesWord,
-            subWord: inst.subWord,
-          },
-          { records: recordOf, clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE },
-          centre,
-        );
+        const level =
+          cls === "edge"
+            ? 0
+            : cameraPassStrideLevel(
+                {
+                  kind: "camera",
+                  planes: [],
+                  horizon: null,
+                  order: "ordered",
+                  toleranceRad: 0,
+                  ...pass,
+                },
+                { ...recordOf(slot, block), centreM: sphere.centreM, radiusM: sphere.radiusM },
+                block,
+                {
+                  originM: vec3(0, 0, 0),
+                  page: slot,
+                  passMask: 0,
+                  unitM: 0,
+                  strideScale: inst.strideScale,
+                  edgeBandsM: inst.edgeBandsM,
+                  quadrantWord: inst.quadrantWord,
+                  holdFadesWord: inst.holdFadesWord,
+                  subWord: inst.subWord,
+                },
+                { records: recordOf, clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE },
+                centre,
+              );
         strides[block] = 1 << level;
         strided += level > 0 ? 1 : 0;
         if (!measure) {
@@ -1273,7 +1317,7 @@ class StrideFrames {
           (block >= 56 ? 8 : 0);
         if (
           (sNow === sThen && !bandsMoved && (blockEdges & heldMoved) === 0) ||
-          terrainMaskCluster(inst.subWord, block) === "none"
+          drawnBlocks[block] !== 1
         ) {
           continue;
         }
@@ -1579,6 +1623,11 @@ interface BudgetFrame {
    */
   readonly atStride1By: StrideOneCauses;
   /**
+   * `atStride1By.litMeshStandIns` split by the stand-in's levels below its slot's patch and by its
+   * area's blocks' classes in its slot's records ({@link StandInSplit}; R14.T3.c's edge stand-ins).
+   */
+  readonly litMeshStandInsBy: Readonly<Record<StandInSplit, number>>;
+  /**
    * The primary view's lit triangles as the triangle budget reckoned its last selection
    * (`Selection.litTriangles`), `NaN` without a budget.
    */
@@ -1617,6 +1666,30 @@ const STRIDE_ONE_CAUSES = [
   "fading",
   "unscaled",
 ] as const;
+
+/**
+ * A lit-mesh stand-in's split ({@link BudgetFrame.litMeshStandInsBy}): its levels below its slot's
+ * patch (1, 2 to 3, 4 or more), then its area's blocks in its slot's records, every one opaque,
+ * every one no cluster, or any other mix (`SlotRecords.classOf`).
+ */
+type StandInSplit = `${"1" | "2-3" | "4+"}/${"opaque" | "none" | "mixed"}`;
+
+/** {@link StandInSplit}'s splits, in their order. */
+const STAND_IN_SPLITS: ReadonlyArray<StandInSplit> = (["1", "2-3", "4+"] as const).flatMap(
+  (levels) =>
+    (["opaque", "none", "mixed"] as const).map((area): StandInSplit => `${levels}/${area}`),
+);
+
+/** The split of a stand-in `levels` below its slot's patch whose area's blocks are `classes`. */
+function standInSplitOf(levels: number, classes: ReadonlyArray<RecordClass>): StandInSplit {
+  const band = levels <= 1 ? "1" : levels <= 3 ? "2-3" : "4+";
+  const area = classes.every((c) => c === "opaque")
+    ? "opaque"
+    : classes.every((c) => c === "none")
+      ? "none"
+      : "mixed";
+  return `${band}/${area}`;
+}
 
 /** A lit-mesh template's triangles a skirt strip at stride 1 (`clusters/templates.ts`): 16 ÷ s at s. */
 const STRIP_TRIANGLES = 16;
@@ -1661,7 +1734,12 @@ class BudgetFrames {
     drawn: ReadonlyMap<string, DrawnInstance>,
     figures: Omit<
       BudgetFrame,
-      "altitudeM" | "litTriangles" | "litTrianglesAtStride1" | "litAtStride1Only" | "atStride1By"
+      | "altitudeM"
+      | "litTriangles"
+      | "litTrianglesAtStride1"
+      | "litAtStride1Only"
+      | "atStride1By"
+      | "litMeshStandInsBy"
     >,
   ): void {
     const { figure } = planet;
@@ -1677,6 +1755,17 @@ class BudgetFrames {
       forced: 0,
       fading: 0,
       unscaled: 0,
+    };
+    const standIns: Record<StandInSplit, number> = {
+      "1/opaque": 0,
+      "1/none": 0,
+      "1/mixed": 0,
+      "2-3/opaque": 0,
+      "2-3/none": 0,
+      "2-3/mixed": 0,
+      "4+/opaque": 0,
+      "4+/none": 0,
+      "4+/mixed": 0,
     };
     for (const inst of drawn.values()) {
       const { slot } = inst;
@@ -1753,7 +1842,19 @@ class BudgetFrames {
       let seenBlocks = 0;
       let instanceTriangles = 0;
       let instanceAtStride1 = 0;
+      // Its area's blocks' classes in its slot's records, which a lit-mesh stand-in is split by.
+      const areaClasses: RecordClass[] = [];
       for (const c of clusters) {
+        if (c < 64) {
+          areaClasses.push(records.classOf(slot, c) ?? "opaque");
+        }
+        // The cull's class of a cluster on the path, but an own grid's, kept whole: no cluster is
+        // refused, and one that may discard draws at stride 1 by its may-discard template; a mask's
+        // strip by its own record, its slot's edge strip's (`clusterCull.wgsl`'s `real`).
+        const cls = inst.onPath && !ownGrid ? (records.classOf(slot, c) ?? "opaque") : "opaque";
+        if (cls === "none") {
+          continue;
+        }
         // A mask's strip hangs from its block at its set's side, and takes its stride at that
         // block's sphere, as the cull does (`cull.ts`' `strideRecordOf`).
         const block = maskStripBlock(inst.subWord, c);
@@ -1774,33 +1875,34 @@ class BudgetFrames {
           continue;
         }
         seenBlocks += c < 64 ? 1 : 0;
-        const level = strided
-          ? cameraPassStrideLevel(
-              {
-                kind: "camera",
-                planes: [],
-                horizon: null,
-                order: "ordered",
-                toleranceRad: 0,
-                ...pass,
-              },
-              { ...recordOf(slot, c), centreM: sphere.centreM, radiusM: sphere.radiusM },
-              c,
-              {
-                originM: vec3(0, 0, 0),
-                page: slot,
-                passMask: 0,
-                unitM: 0,
-                strideScale: inst.strideScale,
-                edgeBandsM: inst.edgeBandsM,
-                quadrantWord: inst.quadrantWord,
-                holdFadesWord: inst.holdFadesWord,
-                subWord: inst.subWord,
-              },
-              { records: recordOf, clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE },
-              centre,
-            )
-          : 0;
+        const level =
+          strided && cls === "opaque"
+            ? cameraPassStrideLevel(
+                {
+                  kind: "camera",
+                  planes: [],
+                  horizon: null,
+                  order: "ordered",
+                  toleranceRad: 0,
+                  ...pass,
+                },
+                { ...recordOf(slot, c), centreM: sphere.centreM, radiusM: sphere.radiusM },
+                c,
+                {
+                  originM: vec3(0, 0, 0),
+                  page: slot,
+                  passMask: 0,
+                  unitM: 0,
+                  strideScale: inst.strideScale,
+                  edgeBandsM: inst.edgeBandsM,
+                  quadrantWord: inst.quadrantWord,
+                  holdFadesWord: inst.holdFadesWord,
+                  subWord: inst.subWord,
+                },
+                { records: recordOf, clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE },
+                centre,
+              )
+            : 0;
         instanceTriangles +=
           c < 64 ? BLOCK_TRIANGLES / (1 << level) ** 2 : STRIP_TRIANGLES / (1 << level);
         instanceAtStride1 += c < 64 ? BLOCK_TRIANGLES : STRIP_TRIANGLES;
@@ -1834,6 +1936,9 @@ class BudgetFrames {
                     ? "ownGrid"
                     : "unscaled";
         causes[cause] += instanceTriangles;
+        if (cause === "litMeshStandIns") {
+          standIns[standInSplitOf(inst.levels, areaClasses)] += instanceTriangles;
+        }
       }
     }
     const r = norm(cam.positionM);
@@ -1848,6 +1953,7 @@ class BudgetFrames {
       litTrianglesAtStride1,
       litAtStride1Only,
       atStride1By: causes,
+      litMeshStandInsBy: standIns,
     });
   }
 }
@@ -1923,6 +2029,9 @@ function budgetSummaryOf(frames: ReadonlyArray<BudgetFrame>): Record<string, unk
             litAtStride1Only: pick((f) => f.litAtStride1Only),
             atStride1By: Object.fromEntries(
               STRIDE_ONE_CAUSES.map((cause) => [cause, pick((f) => f.atStride1By[cause])]),
+            ),
+            litMeshStandInsBy: Object.fromEntries(
+              STAND_IN_SPLITS.map((split) => [split, pick((f) => f.litMeshStandInsBy[split])]),
             ),
             litShare: at1 > 0 ? lit / at1 : null,
             reckonedTriangles: reckoned.length === 0 ? null : pick((f) => f.reckonedTriangles),
