@@ -47,6 +47,11 @@ export interface DrawnGroundBakes {
   bakeAt(key: PatchKey): ResidentBake | null;
   /** Their rim's revision (`ResidentHeights.rimRevision`), which {@link DrawnGround}'s takes in. */
   readonly rimRevision: number;
+  /**
+   * Their revision (`ResidentHeights.revision`), which moves as any bake comes or goes: the
+   * vertices' heights read under one stand while it does.
+   */
+  readonly revision: number;
 }
 
 /** What a view's survey edge reads of the ground the view drew (R10.T16.c after R10.T16.i). */
@@ -165,6 +170,17 @@ export class DrawnGround implements DrawnGroundView {
   #levels: number[] = [];
   #cameraM: Vec3 = vec3(0, 0, 0);
   #rows: readonly [Vec3, Vec3, Vec3] = [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)];
+  /**
+   * Each vertex's own and morph heights as read since the frame's end, by record and vertex
+   * ({@link vertexIndex}), as their place in {@link DrawnGround.#vertexHeights}, two words each
+   * (lane perf-render-thread-ground): a vertex's heights depend on its record and the resident
+   * bakes alone, and the rim's and the ground's reads take the same vertices again and again, a
+   * fading instance's each through its parent's. Forgotten at each frame's begin and end, and as
+   * the bakes' revision moves.
+   */
+  readonly #vertices = new Map<number, number>();
+  #vertexHeights = new Float64Array(2 * 256);
+  #verticesBakesRevision = Number.NaN;
 
   constructor(bakes: DrawnGroundBakes, figure: BodyFigure) {
     this.#bakes = bakes;
@@ -177,6 +193,7 @@ export class DrawnGround implements DrawnGroundView {
 
   /** Starts a frame with no instances. */
   begin(): void {
+    this.#vertices.clear();
     this.#count = 0;
     this.#lastRim = -1;
     this.#lastGround = -1;
@@ -226,6 +243,7 @@ export class DrawnGround implements DrawnGroundView {
    * revision where the instances drawing edge bakes differ from the frame before's.
    */
   end(cameraM: Vec3, rows: readonly [Vec3, Vec3, Vec3]): void {
+    this.#vertices.clear();
     this.#cameraM = cameraM;
     this.#rows = rows;
     this.#levels = [...this.#byLevel.entries()]
@@ -495,13 +513,7 @@ export class DrawnGround implements DrawnGroundView {
     // A vertex's heights mix towards another surface's only where its fade word's mix is not 0.
     const mixes = ((fades >>> 8) & MIX_STEPS) !== 0;
     for (let c = 0; c < 3; c += 1) {
-      const vx = d[3 + 2 * c] ?? 0;
-      const vy = d[4 + 2 * c] ?? 0;
-      if (mixes) {
-        this.#mixedHeights(record, bake, vx, vy, 9 + 2 * c);
-      } else {
-        d[9 + 2 * c] = this.#slotHeight(record, bake, 0, vx, vy);
-      }
+      this.#vertexHeightsInto(record, bake, d[3 + 2 * c] ?? 0, d[4 + 2 * c] ?? 0, mixes, 9 + 2 * c);
     }
     const ownM = d[0] * (d[9] ?? 0) + d[1] * (d[11] ?? 0) + d[2] * (d[13] ?? 0);
     const a = this.#figure.equatorialRadiusM;
@@ -533,13 +545,14 @@ export class DrawnGround implements DrawnGroundView {
     const edgeFades = r[at + 11] ?? 0;
     const cornerFades = r[at + 12] ?? 0;
     if (!mixes) {
-      // Its morph targets where its factor may need them: a rim read's for its reading again.
+      // Its morph targets where its factor may need them, as read with its own heights: a rim
+      // read's for its reading again; else its own heights in their place.
       const plain = holds === 0 && edgeFades === 0 && cornerFades === 0 && (fades & 0xff) === 0;
       const morphs = perVertex || !plain || d[15] !== 0 || d[16] !== 0 || d[17] !== 0;
-      for (let c = 0; c < 3; c += 1) {
-        d[10 + 2 * c] = morphs
-          ? this.#slotHeight(record, bake, 1, d[3 + 2 * c] ?? 0, d[4 + 2 * c] ?? 0)
-          : (d[9 + 2 * c] ?? 0);
+      if (!morphs) {
+        for (let c = 0; c < 3; c += 1) {
+          d[10 + 2 * c] = d[9 + 2 * c] ?? 0;
+        }
       }
     }
     if (perVertex) {
@@ -616,6 +629,50 @@ export class DrawnGround implements DrawnGroundView {
 
   /**
    * Leaves vertex (`vx`, `vy`) of `record`'s grid's own and morph heights in `#read` at `k` and
+   * `k` + 1: mixed towards the surface its fade word names where it `mixes`
+   * ({@link DrawnGround.#mixedHeights}), its slot's own otherwise, as read once since the frame's
+   * end under the bakes' revision ({@link DrawnGround.#vertices}).
+   */
+  #vertexHeightsInto(
+    record: number,
+    bake: ResidentBake,
+    vx: number,
+    vy: number,
+    mixes: boolean,
+    k: number,
+  ): void {
+    const revision = this.#bakes.revision;
+    if (revision !== this.#verticesBakesRevision) {
+      this.#vertices.clear();
+      this.#verticesBakesRevision = revision;
+    }
+    const index = vertexIndex(record, vx, vy);
+    const known = this.#vertices.get(index);
+    const read = this.#read;
+    if (known !== undefined) {
+      read[k] = this.#vertexHeights[known] ?? 0;
+      read[k + 1] = this.#vertexHeights[known + 1] ?? 0;
+      return;
+    }
+    if (mixes) {
+      this.#mixedHeights(record, bake, vx, vy, k);
+    } else {
+      read[k] = this.#slotHeight(record, bake, 0, vx, vy);
+      read[k + 1] = this.#slotHeight(record, bake, 1, vx, vy);
+    }
+    const slot = 2 * this.#vertices.size;
+    if (slot + 2 > this.#vertexHeights.length) {
+      const grown = new Float64Array(2 * this.#vertexHeights.length);
+      grown.set(this.#vertexHeights);
+      this.#vertexHeights = grown;
+    }
+    this.#vertexHeights[slot] = read[k] ?? 0;
+    this.#vertexHeights[slot + 1] = read[k + 1] ?? 0;
+    this.#vertices.set(index, slot);
+  }
+
+  /**
+   * Leaves vertex (`vx`, `vy`) of `record`'s grid's own and morph heights in `#read` at `k` and
    * `k` + 1, mixed by its fade word's mix towards the surface it names (`patchVertexOf`'s).
    */
   #mixedHeights(record: number, bake: ResidentBake, vx: number, vy: number, k: number): void {
@@ -685,6 +742,11 @@ export class DrawnGround implements DrawnGroundView {
     const py = ((j & 1) * QUADS + y) / 2;
     return parent.surveyedAt(px, py) ? onTriangles(parent, 0, px, py) : 0;
   }
+}
+
+/** Vertex (`vx`, `vy`), 0 to {@link QUADS}, of record `record`'s grid as one number. */
+function vertexIndex(record: number, vx: number, vy: number): number {
+  return (record * (QUADS + 1) + vy) * (QUADS + 1) + vx;
 }
 
 /**

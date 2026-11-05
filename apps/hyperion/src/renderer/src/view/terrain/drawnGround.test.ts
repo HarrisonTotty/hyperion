@@ -37,7 +37,7 @@ function bakeOf(
 
 /** The bakes, by key, and their rim revision. */
 function bakesOf(bakes: ReadonlyMap<string, ResidentBake>, rimRevision = 0): DrawnGroundBakes {
-  return { bakeAt: (key) => bakes.get(patchKeyString(key)) ?? null, rimRevision };
+  return { bakeAt: (key) => bakes.get(patchKeyString(key)) ?? null, rimRevision, revision: 0 };
 }
 
 /** The instance drawing `KEY` whole, its band from 1 km to 2 km, with no holds or fades. */
@@ -251,6 +251,84 @@ describe("the ground a view drew (R10.T16.c after R10.T16.i)", () => {
       expect.closeTo(0.5 * 100 + 0.5 * 60, 6),
       expect.closeTo(60, 6),
     ]);
+  });
+
+  describe("its vertices read once a frame (lane perf-render-thread-ground)", () => {
+    /** A sloped edge bake and its parent, counting their height reads. */
+    function counted(): { bakes: Map<string, ResidentBake>; reads: () => number } {
+      let reads = 0;
+      const sloped = (baseM: number): ResidentBake => ({
+        standing: "edge",
+        ownAtM: (x, y) => {
+          reads += 1;
+          return baseM + 3 * x + y * y;
+        },
+        morphAtM: (x, y) => {
+          reads += 1;
+          return baseM - 60 + x - y;
+        },
+        surveyedAt: (x) => x < 50,
+      });
+      return {
+        bakes: new Map([
+          [patchKeyString(KEY), sloped(100)],
+          [patchKeyString(PARENT), sloped(80)],
+        ]),
+        reads: () => reads,
+      };
+    }
+    const within: PatchKey = { face: 0, level: 7, i: 41, j: 45 };
+    /** The instances a frame draws: plain, refining from its parent, rising, and a sub-patch's. */
+    const INSTANCES: ReadonlyArray<DrawnInstance> = [
+      { ...PLAIN, morphStartM: 300, morphEndM: 30_000 },
+      { ...PLAIN, fades: fadeWord(40, Math.round(MIX_STEPS / 3), PARENT_MIX_SLOT) },
+      { ...PLAIN, fades: fadeWord(0, Math.round(MIX_STEPS / 5), DATUM_SLOT), edgeFades: 0x0f },
+      { ...PLAIN, area: within, morphStartM: 300, morphEndM: 30_000, fades: fadeWord(90, 0, 0) },
+    ];
+    /** Places along a line through the patch, a fifth of a quad apart. */
+    const places = Array.from({ length: 160 }, (_, i) => at(KEY, 3 + i / 5, 11 + i / 7));
+
+    it("reads the rim and the ground as read afresh, each vertex's heights once a frame", () => {
+      for (const instance of INSTANCES) {
+        const once = counted();
+        const ground = new DrawnGround(bakesOf(once.bakes), FIGURE);
+        ground.begin();
+        ground.push(instance);
+        ground.end(cameraOver(1_500), IDENTITY);
+        const read = places.flatMap((place) => [
+          ground.rimHeightAtM(place),
+          ground.groundHeightAtM(place),
+        ]);
+        const fresh = counted();
+        const afresh = places.flatMap((place) =>
+          (["rim", "ground"] as const).map((which) => {
+            const each = new DrawnGround(bakesOf(fresh.bakes), FIGURE);
+            each.begin();
+            each.push(instance);
+            each.end(cameraOver(1_500), IDENTITY);
+            return which === "rim" ? each.rimHeightAtM(place) : each.groundHeightAtM(place);
+          }),
+        );
+        expect([read, once.reads() < fresh.reads() / 2]).toEqual([afresh, true]);
+      }
+    });
+
+    it("reads its vertices again once the bakes' revision moves", () => {
+      const once = counted();
+      const bakes = { ...bakesOf(once.bakes), revision: 0 };
+      const ground = new DrawnGround(bakes, FIGURE);
+      ground.begin();
+      ground.push(INSTANCES[1] ?? PLAIN);
+      ground.end(cameraOver(1_500), IDENTITY);
+      const place = at(KEY, 20.4, 20.1);
+      const first = ground.rimHeightAtM(place);
+      const kept = once.reads();
+      ground.rimHeightAtM(place);
+      const again = once.reads();
+      bakes.revision = 1;
+      const moved = ground.rimHeightAtM(place);
+      expect([again === kept, once.reads() > again, moved]).toEqual([true, true, first]);
+    });
   });
 
   describe("its revision", () => {

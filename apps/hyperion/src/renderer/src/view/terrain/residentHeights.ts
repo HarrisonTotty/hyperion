@@ -403,11 +403,20 @@ export class ResidentHeights implements ResidentHeightsView {
   readonly #edges = new LevelIndex();
   #ceilingM: number | null = 0;
   #rimRevision = 0;
+  #revision = 0;
   /** Each held bake as the drawn ground's twin reads it, made at its first reading. */
   readonly #bakes = new WeakMap<HeldBake, ResidentBake>();
 
   get rimRevision(): number {
     return this.#rimRevision;
+  }
+
+  /**
+   * Moves whenever any bake comes or goes (lane perf-render-thread-ground), so that what the drawn
+   * ground's twin read of the bakes under one revision stands while it does.
+   */
+  get revision(): number {
+    return this.#revision;
   }
 
   /** The bytes the copies hold, for R10.T14's memory line. */
@@ -475,6 +484,7 @@ export class ResidentHeights implements ResidentHeightsView {
         break;
     }
     this.#all.set(held);
+    this.#revision += 1;
     if (standing === "edge") {
       this.#edges.set(held);
       this.#rimRevision += 1;
@@ -490,6 +500,7 @@ export class ResidentHeights implements ResidentHeightsView {
     if (key === null || !this.#all.delete(key)) {
       return;
     }
+    this.#revision += 1;
     if (this.#edges.delete(key)) {
       this.#rimRevision += 1;
     }
@@ -502,6 +513,7 @@ export class ResidentHeights implements ResidentHeightsView {
     this.#edges.clear();
     this.#ceilingM = 0;
     this.#rimRevision += 1;
+    this.#revision += 1;
   }
 
   /** The resident bake of `key` as the drawn ground's twin reads it, or `null` with none. */
