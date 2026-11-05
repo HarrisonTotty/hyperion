@@ -11,13 +11,14 @@ import {
 describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
   it("reads each field's values and writes them back in the fields' order", () => {
     const override = parseGeometryOverride(
-      "overlayDepth=scene-depth,occlusion=hzb,strides=measured,finClusters=true,wireClusters=false,hullClusters=true,figureClusters=false,casterStrideCap=4,clusterPath=true,casterDepthCull=false",
+      "overlayDepth=scene-depth,shading=visibility,occlusion=hzb,strides=measured,finClusters=true,wireClusters=false,hullClusters=true,figureClusters=false,casterStrideCap=4,clusterPath=true,casterDepthCull=false",
     );
     expect([override, geometryText(override), geometryText({})]).toEqual([
       {
         overlayDepth: "scene-depth",
         strides: "measured",
         occlusion: "hzb",
+        shading: "visibility",
         finClusters: true,
         wireClusters: false,
         hullClusters: true,
@@ -26,7 +27,7 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
         clusterPath: true,
         casterDepthCull: false,
       },
-      "clusterPath=true,casterDepthCull=false,casterStrideCap=4,overlayDepth=scene-depth,figureClusters=false,hullClusters=true,wireClusters=false,finClusters=true,strides=measured,occlusion=hzb",
+      "clusterPath=true,casterDepthCull=false,casterStrideCap=4,overlayDepth=scene-depth,figureClusters=false,hullClusters=true,wireClusters=false,finClusters=true,strides=measured,occlusion=hzb,shading=visibility",
       "",
     ]);
   });
@@ -48,6 +49,13 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     for (const text of ["farCascadeRate=3", "farCascadeRate=8", "farCascadeRate=0"]) {
       expect(() => parseGeometryOverride(text)).toThrow("farCascadeRate is 1, 2 or 4");
     }
+  });
+
+  it("refuses a shading other than forward or visibility (R14.T2.c)", () => {
+    for (const text of ["shading=deferred", "shading=ids", "shading="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("shading is forward or visibility");
+    }
+    expect(parseGeometryOverride("shading=forward")).toEqual({ shading: "forward" });
   });
 
   it("refuses an occlusion other than off or hzb (R14.T3.d)", () => {

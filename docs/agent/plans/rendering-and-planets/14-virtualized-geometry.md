@@ -2519,16 +2519,23 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     back; `--geometry shading=`; results files without it read `forward`.
   - `primitive-index` in `WANTED_FEATURES`, `GpuCapabilities.primitiveIndex`, and
     `CapabilityOverrides.withholdPrimitiveIndex`, which test-render's `no-subgroups` takes.
-    SwiftShader (Electron 45.1.0) offers no `primitive-index`, so both variants draw de-indexed and
-    the `primitive_index` form is compiled and drawn on no pod (pending: the owner's runs).
+    SwiftShader (Electron 45.1.0) offers no `primitive-index`, and test-render takes SwiftShader on
+    every machine, so both variants draw de-indexed and no run compares the two paths' IDs on a
+    device, as the task's test asks: its CPU twin alone stands (`visibility.test.ts`). The
+    `primitive_index` form is first compiled and drawn by a hardware run with
+    `--geometry shading=visibility` (pending: the owner's; Windows NOT RUN).
   - `clusters/visibility.ts`: `packVisibilityId`, `unpackVisibilityId`, `VISIBILITY_TRIANGLE_BITS`
-    (7), `deindexedClusterMesh`, `visibleConsumerRanges`, and `VisibilityBuffer(engine, name, scene,
-size)`, which takes the scene target whose depth it draws with (not Provides' two arguments),
-    `target` and `ids`; the pass labels `terrain id raster` and `terrain resolve`.
-  - (lean, 2026-11-04) The view's index space is shared by consumer ranges, terrain's lit lists from
-    0, a consumer its range: an entry stays the lists' one `u32`, (instance << 8) | cluster, not
-    Design note 9's two words. T5.e takes the range after terrain's, and its resolve pass refuses
-    the IDs outside its own.
+    (7), `deindexedClusterMesh`, `visibleConsumerRanges`, and
+    `VisibilityBuffer(engine, name, scene, size)`, which takes the scene target whose depth it draws
+    with (not Provides' two arguments), `target` and `ids`; the pass labels `terrain id raster` and
+    `terrain resolve`.
+  - (lean, 2026-11-04) The view's index space is shared by consumer ranges, a consumer its range:
+    the visible-cluster index is `clusterBase + instance_index`, an entry's index in its consumer's
+    lists, so terrain's range is its whole lists buffer, all seven passes', from 0 (the lit pass's
+    from `CLUSTER_LIT_PASS × passEntries`), and T5.e's starts after it, its resolve pass refusing the
+    IDs outside its own. An entry stays the lists' one `u32`, (instance << 8) | cluster, not Design
+    note 9's two words, and the resolve finds its template (stride and shape) by the bucket its
+    index lies in, from the pass's entries and its templates' offsets, not by 3 bits of the entry.
   - (lean, 2026-11-04) The de-indexed path draws `TerrainResources.clusterIdMesh`
     (`TERRAIN_CLUSTER_ID_MESH`), each index its own vertex, the template's triangle in its z above
     the lit-mesh code (z = code + 8 t, `DEINDEXED_TRIANGLE_STEP`), so that the buckets' indexed
@@ -2541,4 +2548,9 @@ size)`, which takes the scene target whose depth it draws with (not Provides' tw
     `null` until the ID form is made. `ClusterBuckets.drawItems` takes a `null` base, drawing the
     may-discard buckets alone, and keeps four sets of draws a pass.
   - (lean, 2026-11-04) A frame with the two-pass occlusion draws forward: the visibility path does
-    not take the late raster yet.
+    not take the late raster yet. A refused ID form draws the lit pass forward, its refusal stated.
+  - The device check (part 15) composes the frame itself, the bodies pass's figures, the raster,
+    then the forward draws loading colour and depth (`drawnByIds`), at `LOW_AT_STRIDE_1`: the
+    renderer's passes are T2.d's, and a strided template's IDs are not drawn on the pod. Counts are
+    unchanged, `forward` on both settings; `TERRAIN_CLUSTER_ID_MESH` is made with every clustered
+    lit layout.

@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import type { GraphicsLaunchMode } from "../../../preload/api";
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO, SWIFTSHADER_INFO } from "../test/fakeGpu";
-import { type AdapterOutcome, requestAdapterOutcome } from "../view/engine/platform";
+import {
+  type AdapterOutcome,
+  requestAdapterOutcome,
+  WANTED_FEATURES,
+} from "../view/engine/platform";
 import {
   type GraphicsEvent,
   GraphicsStatusContext,
@@ -71,6 +75,15 @@ describe("GraphicsPanel", () => {
     expect(reading("GPU Timer")).toHaveTextContent("QUANTIZED");
     const panel = screen.getByRole("region", { name: "Graphics" });
     expect(within(panel).queryByText(/^GRAPHICS /)).not.toBeInTheDocument();
+  });
+
+  it("lists every wanted feature the adapter offers in the wanted features' order, primitive-index last", async () => {
+    renderPanel("vulkan", {
+      kind: "adapter-outcome",
+      outcome: await adapter(INTEL_UHD_620_INFO, [...WANTED_FEATURES].toReversed()),
+    });
+    expect(reading("Features")).toHaveTextContent(WANTED_FEATURES.join(", "));
+    expect(WANTED_FEATURES.at(-1)).toBe("primitive-index");
   });
 
   it("states a software adapter in plain text", async () => {

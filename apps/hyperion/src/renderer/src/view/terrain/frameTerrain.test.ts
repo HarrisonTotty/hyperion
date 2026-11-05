@@ -818,6 +818,75 @@ describe("a view's frame terrain and the overlay's depth on the cluster path (pl
   });
 });
 
+describe("a view's frame terrain by the visibility buffer (plan R14, R14.T2.c)", () => {
+  /** A draw of a part of the visibility buffer's frame, by its name. */
+  const part = (name: string): DrawItem => ({ ...DRAW, material: { kind: "material", name } });
+
+  /**
+   * Two bodies handed over, the second {@link OTHER_BODY}, each drawn by `visibility` of its own
+   * (`null` for none); their order in the frame, as the source drew them.
+   */
+  function twoBodies(
+    near: TerrainViewFrame["visibility"],
+    other: TerrainViewFrame["visibility"],
+  ): { readonly terrain: LiveFrameTerrain; readonly order: () => string[] } {
+    const nearBody = bodyAt(3 * A);
+    const otherBody = bodyAt(5 * A, { id: OTHER_BODY, centreM: vec3(2.5 * A, 0, -5 * A) });
+    const plan = planLitBodies(
+      [nearBody, otherBody],
+      [{ disc: sunLikeHostDisc(), centreM: add(nearBody.centreM, scale(SUN, AU_M)) }],
+      OPTIONS,
+      new Map(),
+    );
+    const { source } = fakeSource({ visibility: near });
+    const drawn: string[] = [];
+    const both: ViewTerrainSource = {
+      ...source,
+      pass: () => source.pass(BODY),
+      drawTerrain: (view, body, input) => {
+        drawn.push(body);
+        const frame = source.drawTerrain(view, BODY, input);
+        return body === OTHER_BODY && frame !== null ? { ...frame, visibility: other } : frame;
+      },
+    };
+    const terrain = frameTerrain(both);
+    terrain.draws(plan, [nearBody, otherBody]);
+    return { terrain, order: () => drawn };
+  }
+
+  it("gives each body's ID raster's draws, then each body's forward draws, in the frame's order", () => {
+    const near = { raster: [part("near raster")], forward: [part("near forward")] };
+    const other = { raster: [part("other raster")], forward: [part("other forward")] };
+    const { terrain, order } = twoBodies(near, other);
+    const of = (body: string): typeof near => (body === OTHER_BODY ? other : near);
+    expect([order().toSorted(), terrain.visibility()]).toEqual([
+      [BODY, OTHER_BODY].toSorted(),
+      {
+        raster: order().flatMap((body) => of(body).raster),
+        forward: order().flatMap((body) => of(body).forward),
+      },
+    ]);
+  });
+
+  it("gives none where any body it drew draws forward", () => {
+    const near = { raster: [part("near raster")], forward: [part("near forward")] };
+    expect([
+      twoBodies(near, null).terrain.visibility(),
+      twoBodies(null, near).terrain.visibility(),
+    ]).toEqual([null, null]);
+  });
+
+  it("gives none where it drew nothing, and none before its draws", () => {
+    const { plan, body } = handed();
+    const empty = frameTerrain(
+      fakeSource({ draws: [], visibility: { raster: [], forward: [] } }).source,
+    );
+    const before = empty.visibility();
+    empty.draws(plan, [body]);
+    expect([before, empty.visibility()]).toEqual([null, null]);
+  });
+});
+
 describe("a view's frame terrain and the datum over the image (R10.T16.f)", () => {
   /** The plan of the body handed over with the mask `terrain` gives, in its rotation, if any. */
   function handedWith(terrain: LiveFrameTerrain): ReturnType<typeof handed> {

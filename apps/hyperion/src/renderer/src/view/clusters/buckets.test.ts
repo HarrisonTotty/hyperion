@@ -118,6 +118,55 @@ describe("the cluster path's buckets (plan R14, R14.T1.b)", () => {
     expect(buckets.drawItems(0, mesh, BASE, 1)).toHaveLength(2);
   });
 
+  it("draws a pass's may-discard buckets alone where its base is none (R14.T2.c)", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const all = terrainClusterMesh().templates;
+    const buckets = new ClusterBuckets(
+      engine,
+      "test clusters",
+      2,
+      all,
+      all.map(() => 10),
+    );
+    const mesh = engine.createMesh(terrainClusterMesh().mesh);
+    const discarding = { ...BASE, material: { kind: "material", name: "fin form" } } as const;
+    expect(
+      buckets
+        .drawItems(0, mesh, null, 8, discarding)
+        .map((item) => [item.material.name, (item.indirect?.offsetBytes ?? 0) / BUCKET_ARGS_BYTES]),
+    ).toEqual([8, 9, 10, 11].map((t) => ["fin form", t]));
+    expect(buckets.drawItems(0, mesh, null, 8, null)).toEqual([]);
+  });
+
+  it("keeps each of a pass's last four sets of draws, by mesh, bases and cap, the oldest let go first (R14.T2.c)", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const buckets = new ClusterBuckets(engine, "test clusters", 2, templates, CAPACITIES);
+    const mesh = engine.createMesh(terrainClusterMesh().mesh);
+    const ids = engine.createMesh({ ...terrainClusterMesh().mesh, name: "ids" });
+    const base = (name: string): typeof BASE => ({
+      ...BASE,
+      material: { kind: "material", name },
+    });
+    const [lit, depth, raster, fourth, fifth] = ["lit", "depth", "raster", "4", "5"].map(base);
+    const litItems = buckets.drawItems(1, mesh, lit ?? BASE, 1);
+    const depthItems = buckets.drawItems(1, mesh, depth ?? BASE, 1);
+    const rasterItems = buckets.drawItems(1, ids, raster ?? BASE, 1);
+    // Each form a frame draws the pass by keeps its draws whatever the others drew meanwhile.
+    expect([
+      buckets.drawItems(1, mesh, lit ?? BASE, 1),
+      buckets.drawItems(1, mesh, depth ?? BASE, 1),
+      buckets.drawItems(1, ids, raster ?? BASE, 1),
+    ]).toEqual([litItems, depthItems, rasterItems]);
+    expect(buckets.drawItems(1, mesh, lit ?? BASE, 1)).toBe(litItems);
+    expect(buckets.drawItems(1, ids, raster ?? BASE, 1)).toBe(rasterItems);
+    expect(buckets.drawItems(1, mesh, raster ?? BASE, 1)).not.toBe(rasterItems);
+    // A fourth and a fifth set let the oldest go: the lit form's is made again.
+    buckets.drawItems(1, mesh, fourth ?? BASE, 1);
+    buckets.drawItems(1, mesh, fifth ?? BASE, 1);
+    const again = buckets.drawItems(1, mesh, lit ?? BASE, 1);
+    expect([again === litItems, again]).toEqual([false, litItems]);
+  });
+
   it("refuses capacities not one a template, and lists past an exact f32 base", async () => {
     const engine = new CountingRenderEngine(await fakeDevice());
     expect(() => new ClusterBuckets(engine, "test", 1, templates, [1])).toThrow(RangeError);

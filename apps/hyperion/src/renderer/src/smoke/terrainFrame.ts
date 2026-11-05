@@ -578,8 +578,9 @@ async function drawnByIds(
   visibility: FrameVisibility,
 ): Promise<DrawnScene> {
   const target = createSceneTarget(engine, "smoke frame by IDs", VIEWPORT);
-  const buffer = new VisibilityBuffer(engine, "smoke frame by IDs", target, VIEWPORT);
+  let buffer: VisibilityBuffer | null = null;
   try {
+    buffer = new VisibilityBuffer(engine, "smoke frame by IDs", target, VIEWPORT);
     const depth = target.depth;
     if (depth === null) {
       throw new Error("the scene target has no depth");
@@ -604,7 +605,7 @@ async function drawnByIds(
       ids: new Uint32Array(ids),
     };
   } finally {
-    buffer.dispose();
+    buffer?.dispose();
     target.dispose();
   }
 }

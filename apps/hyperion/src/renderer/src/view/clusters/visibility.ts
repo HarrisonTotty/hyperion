@@ -19,11 +19,14 @@
  *   `drawIndexedIndirect` arguments draw it unchanged and its vertex stage writes the ID, at three
  *   vertex invocations a triangle. Each passes one flat `u32` beside the clip position: 20 B a
  *   vertex either way.
- * - **One index space a view, shared** (Design note 9; lean, 2026-11-04): each consumer's buckets'
- *   entries occupy a range of it, terrain's lit pass's lists first, from 0, and an entry is the one
- *   `u32` its own lists hold, (instance << 8) | cluster, so that a consumer is its range rather than
- *   a word of its entry. A resolve pass a consumer class refuses the IDs outside its range, and a
- *   later consumer (T5.e) takes the range after the last, a pass and not a format.
+ * - **One index space a view, shared** (Design note 9; lean, 2026-11-04): the visible-cluster index
+ *   is a bucket entry's index in its consumer's lists, its draw's `clusterBase` plus its instance,
+ *   each consumer's lists a range of the space: terrain's whole lists buffer first, from 0, all its
+ *   passes' (the lit pass's from `CLUSTER_LIT_PASS × passEntries`). An entry is the one `u32` its
+ *   lists hold, (instance << 8) | cluster, so that a consumer is its range rather than a word of its
+ *   entry, and an entry's template is its bucket's, found from its index (`resolve.ts`). A resolve
+ *   pass a consumer class refuses the IDs outside its range, and a later consumer (T5.e) takes the
+ *   range after the last, a pass and not a format.
  */
 
 import { ID_NONE } from "../engine/idTarget";
@@ -107,8 +110,8 @@ export interface VisibleConsumerRange {
 }
 
 /**
- * A view's index space for terrain's lit pass's lists of `terrainEntries` entries: terrain's range,
- * from 0.
+ * A view's index space for terrain's lists of `terrainEntries` entries, all its passes': terrain's
+ * range, from 0.
  *
  * @throws RangeError for a space past {@link MAX_LIST_ENTRIES}.
  */
@@ -139,12 +142,16 @@ export interface IndexedClusterMesh {
  * triangles from the same arguments.
  *
  * @throws Error for an indexed mesh with none, an index past its vertices or outside every
- *   template, or a template of more triangles than an ID names.
+ *   template, a template of more triangles than an ID names, or a mesh with attributes beside its
+ *   positions, which this does not de-index.
  */
 export function deindexedClusterMesh(cluster: IndexedClusterMesh, name: string): MeshSpec {
   const { positions, indices } = cluster.mesh;
   if (indices === null) {
     throw new Error(`${cluster.mesh.name} has no indices to draw de-indexed`);
+  }
+  if (Object.keys(cluster.mesh.attributes).length > 0) {
+    throw new Error(`${cluster.mesh.name} has attributes beside its positions to de-index`);
   }
   const triangleOf = new Int32Array(indices.length).fill(-1);
   for (const template of cluster.templates) {

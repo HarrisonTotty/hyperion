@@ -124,15 +124,22 @@ describe("the ID raster's de-indexed mesh (plan R14, R14.T2.c)", () => {
     );
   });
 
-  it("refuses a mesh with no indices", () => {
+  it("refuses a mesh with no indices, or with attributes beside its positions", () => {
     expect(() =>
       deindexedClusterMesh({ ...cluster, mesh: { ...cluster.mesh, indices: null } }, "ids"),
     ).toThrow(/no indices/);
+    const normal = { data: new Float32Array(3), size: 3 } as const;
+    expect(() =>
+      deindexedClusterMesh(
+        { ...cluster, mesh: { ...cluster.mesh, attributes: { normal } } },
+        "ids",
+      ),
+    ).toThrow(/attributes beside its positions/);
   });
 });
 
 describe("the views' visible-cluster index space (plan R14, R14.T2.c; Design note 9)", () => {
-  it("gives terrain's lit lists the space's first range, from 0, for a later consumer's after it", () => {
+  it("gives terrain's lists, all its passes', the space's first range, from 0, for a later consumer's after it", () => {
     expect(visibleConsumerRanges(70_000)).toEqual([
       { consumer: "terrain", first: 0, entries: 70_000 },
     ]);

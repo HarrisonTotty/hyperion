@@ -2465,6 +2465,28 @@ describe("the lit pass by the visibility buffer's ID raster (plan R14, R14.T2.c)
     expect([frame.visibility, frame.draws.length > 0]).toEqual([null, true]);
   });
 
+  it("asks its ID form again after a restore, its first frame by IDs a fresh pass's (Design note 16)", async () => {
+    const shapeOf = (frame: TerrainViewFrame): unknown => ({
+      raster: frame.visibility?.raster.map(drawShape) ?? null,
+      forward: frame.visibility?.forward.map(drawShape) ?? null,
+    });
+    const made = await byIds(await clusteredPass());
+    made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    made.engine.loseDevice();
+    made.engine.restore();
+    await made.pass.ready();
+    made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+    stream(made, [passView(PRIMARY, NEAR)], 24);
+    // The restored device's first frame asks the form again, and draws forward until it is made.
+    const asking = made.pass.drawFor(PRIMARY, frameOf(NEAR, true)).visibility;
+    await settle();
+    const restored = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const fresh = await byIds(await clusteredPass());
+    const freshFrame = fresh.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    expect([asking, restored.visibility !== null]).toEqual([null, true]);
+    expect(shapeOf(restored)).toEqual(shapeOf(freshFrame));
+  });
+
   it("draws forward where its ID form is refused, and states the refusal", async () => {
     const made = await clusteredPass();
     made.engine.failMaterials((name) => name.startsWith("terrain-id-cluster"));
