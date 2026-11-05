@@ -1822,7 +1822,7 @@ mod tests {
         departing: u64,
         /// `Detached` pairs the engine contradicts through their wind alone ([`wind_fed_by`]):
         /// from generator version 27 a wide pair's main-sequence star takes its partner's wind
-        /// (P11.T12), which the closed form's `Detached` reaches only at 28 (its wind reach,
+        /// (P11.T12), which the closed form's `Detached` reaches only at 29 (its wind reach,
         /// retargeted; train 27's findings), so they are counted apart, not held to the rule; and
         /// the brightest V of a departing star among them, mag.
         wind_fed: u64,
@@ -2099,7 +2099,7 @@ mod tests {
     /// and pairs of theirs with a star below 0.1 M☉, each in an old and a young window, on a seed
     /// of its own:
     /// - no `Detached` pair interacts before the window's end, or holds a departing star, but those
-    ///   whose wind alone does ([`wind_fed_by`]; P11.T12, which `Detached` reaches only at 28):
+    ///   whose wind alone does ([`wind_fed_by`]; P11.T12, which `Detached` reaches only at 29):
     ///   counted apart, a finding pinned as measured at 27, 15,652 windows (C 7,537, D 7,985,
     ///   E 130, every one old but D's 35), a departing star among them as bright as
     ///   M<sub>V</sub> −6.38;
