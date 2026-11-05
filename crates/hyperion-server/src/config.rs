@@ -28,6 +28,7 @@
 //! | `--serve-sky`            | `HYPERION_SERVE_SKY`               | on                                                     |
 //! | `--keep-skies`           | `HYPERION_KEEP_SKIES`              | on                                                     |
 //! | `--kept-skies-disk`      | `HYPERION_KEPT_SKIES_DISK_MB`      | 256 (MiB)                                              |
+//! | `--hold-kept-skies`      | `HYPERION_HOLD_KEPT_SKIES`         | on                                                     |
 //! | `--sky-qos`              | `HYPERION_SKY_QOS`                 | `background` on macOS, `utility` elsewhere             |
 //! | `--stop-on-stdin-close`  | `HYPERION_STOP_ON_STDIN_CLOSE`     | off                                                    |
 //!
@@ -36,12 +37,13 @@
 //! stay within about twice the performance cores (four on an M5's 4 performance and 6 efficiency
 //! cores).
 //!
-//! `--serve-sky`, `--keep-skies` and `--stop-on-stdin-close` are switches. Their variables take
-//! clap's boolish values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`,
-//! `f`, `false`, `off` or `0` for off. They refuse anything else, the empty string included.
-//! `--stop-on-stdin-close`, off by default, takes no value: given, it is on. `--serve-sky` and
-//! `--keep-skies`, on by default, also take one of those values after an equals sign, so that the
-//! command line can turn them off: `--serve-sky=false`. Given alone, each is on.
+//! `--serve-sky`, `--keep-skies`, `--hold-kept-skies` and `--stop-on-stdin-close` are switches.
+//! Their variables take clap's boolish values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for
+//! on, and `n`, `no`, `f`, `false`, `off` or `0` for off. They refuse anything else, the empty
+//! string included. `--stop-on-stdin-close`, off by default, takes no value: given, it is on.
+//! `--serve-sky`, `--keep-skies` and `--hold-kept-skies`, on by default, also take one of those
+//! values after an equals sign, so that the command line can turn them off: `--serve-sky=false`.
+//! Given alone, each is on.
 //!
 //! `--serve-sky` is the sky's switch (rendering plan R06, R06.T11.c), added off by the
 //! orchestrator's ruling of 2026-10-07. It is on by default since RM3's interim sky, rendering plan
@@ -69,6 +71,11 @@
 //! directory, so that a sky asked again after a restart is answered from its file (rendering plan
 //! R06, R06.T11.n; the owner's priority, 2026-11-05). 0 keeps none there, and `--keep-skies=false`
 //! none anywhere.
+//!
+//! `--hold-kept-skies` answers a sky asked at a later time, or from a little way off, with a kept
+//! reply of the same request otherwise that still holds there ([`HeldSkies`], R06.T11.p): before
+//! its `valid_until`, and from within a tenth of a pixel of its nearest star's parallax.
+//! `--hold-kept-skies=false` answers only a sky asked exactly again.
 //!
 //! `--sky-qos` is the class a sky's census runs at after its first reply ([`SkyQos`], R06.T11.o):
 //! `utility` or `background`. Only macOS's pool follows it; elsewhere either value leaves every
@@ -136,6 +143,8 @@ pub const ENV_SERVE_SKY: &str = "HYPERION_SERVE_SKY";
 pub const ENV_KEEP_SKIES: &str = "HYPERION_KEEP_SKIES";
 /// The variable giving the kept skies' files' budget in MiB, for `--kept-skies-disk`.
 pub const ENV_KEPT_SKIES_DISK_MB: &str = "HYPERION_KEPT_SKIES_DISK_MB";
+/// The variable that turns the held kept skies off, or on, for `--hold-kept-skies`.
+pub const ENV_HOLD_KEPT_SKIES: &str = "HYPERION_HOLD_KEPT_SKIES";
 /// The variable naming the class a sky's census runs at after its first reply, for `--sky-qos`.
 pub const ENV_SKY_QOS: &str = "HYPERION_SKY_QOS";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
@@ -406,6 +415,20 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_KEPT_SKIES_DISK_MB, default_value_t = DEFAULT_KEPT_SKIES_DISK)]
     kept_skies_disk: CacheBudget,
 
+    /// Answer a sky asked at a later time, or from a little way off, from a kept sky that still
+    /// holds there; `--hold-kept-skies=false` answers only a sky asked exactly again
+    #[arg(
+        long,
+        value_name = "BOOL",
+        env = ENV_HOLD_KEPT_SKIES,
+        num_args = 0..=1,
+        require_equals = true,
+        default_value = "true",
+        default_missing_value = "true",
+        value_parser = BoolishValueParser::new().map(held_skies),
+    )]
+    hold_kept_skies: HeldSkies,
+
     /// The class a sky's census runs at after its first reply, on macOS: `background`, the default
     /// there, keeps it on the efficiency cores, and `utility` leaves it at the pool's own class.
     /// Elsewhere either leaves it at the pool's lowered level
@@ -455,6 +478,24 @@ pub enum KeptSkies {
     /// exactly as one of them is answered from it: the default.
     #[default]
     Kept,
+}
+
+/// Whether a sky asked at a later time, or from a little way off, is answered from a kept sky that
+/// still holds there: its switch, `--hold-kept-skies` (rendering plan R06, R06.T11.p).
+///
+/// VIEW asks at the scene's time and from the camera, so with the clock running a relaunched client
+/// asks a sky that differs from every kept one in its time: near the Sun the same camera's sky an
+/// hour of universe time later cost a cold census again, some 4,000 s on four workers. A kept sky
+/// holds from its own time until its `valid_until`, and for an observer within a tenth of a pixel
+/// of its nearest star's parallax (Design note 13), as the client holds the sky it has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum HeldSkies {
+    /// Only a sky asked exactly as one kept is answered from it, as before R06.T11.p.
+    Exact,
+    /// A sky is also answered from a kept sky of the same request but for its time and observer
+    /// that holds for it: the default.
+    #[default]
+    Held,
 }
 
 /// The class a sky's census runs at after its first reply: its switch, `--sky-qos` (rendering plan
@@ -588,6 +629,16 @@ fn kept_skies(keep: bool) -> KeptSkies {
     }
 }
 
+/// The held kept skies that a switch asks for.
+#[must_use]
+fn held_skies(hold: bool) -> HeldSkies {
+    if hold {
+        HeldSkies::Held
+    } else {
+        HeldSkies::Exact
+    }
+}
+
 /// The stop on standard input that a switch asks for.
 #[must_use]
 fn stdin_stop(watch: bool) -> StdinStop {
@@ -623,6 +674,7 @@ impl From<ServerArgs> for ServerConfig {
             serve_sky,
             keep_skies,
             kept_skies_disk,
+            hold_kept_skies,
             sky_qos,
             stop_on_stdin_close,
         } = args;
@@ -647,6 +699,7 @@ impl From<ServerArgs> for ServerConfig {
             .sky_service(serve_sky)
             .kept_skies(keep_skies)
             .kept_skies_disk_bytes(kept_skies_disk.bytes)
+            .held_skies(hold_kept_skies)
             .sky_qos(sky_qos)
             .stdin_stop(stop_on_stdin_close);
         // Not given, the bound follows the workers (`ServerConfig::surface_passes`).
@@ -730,6 +783,7 @@ pub struct ServerConfig {
     sky_service: SkyService,
     kept_skies: KeptSkies,
     kept_skies_disk_bytes: usize,
+    held_skies: HeldSkies,
     sky_qos: SkyQos,
     global_list_warm_up: GlobalListWarmUp,
     feature_members: FeatureMembers,
@@ -884,6 +938,16 @@ impl ServerConfig {
         }
     }
 
+    /// Whether a sky is answered from a kept sky that holds for it (rendering plan R06,
+    /// R06.T11.p): [`HeldSkies::Exact`] where the kept skies are off, there being none.
+    #[must_use]
+    pub fn held_skies(&self) -> HeldSkies {
+        match self.kept_skies {
+            KeptSkies::Kept => self.held_skies,
+            KeptSkies::Off => HeldSkies::Exact,
+        }
+    }
+
     /// The class a sky's census runs at after its first reply (rendering plan R06, R06.T11.o).
     #[must_use]
     pub fn sky_qos(&self) -> SkyQos {
@@ -987,6 +1051,7 @@ impl Default for ServerConfigBuilder {
                 sky_service: SkyService::default(),
                 kept_skies: KeptSkies::default(),
                 kept_skies_disk_bytes: DEFAULT_KEPT_SKIES_DISK.bytes,
+                held_skies: HeldSkies::default(),
                 sky_qos: SkyQos::default(),
                 global_list_warm_up: GlobalListWarmUp::default(),
                 feature_members: FeatureMembers::default(),
@@ -1169,6 +1234,13 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn kept_skies_disk_bytes(mut self, bytes: usize) -> Self {
         self.config.kept_skies_disk_bytes = bytes;
+        self
+    }
+
+    /// Whether a sky is answered from a kept sky that holds for it; [`HeldSkies::Held`] by default.
+    #[must_use]
+    pub fn held_skies(mut self, held: HeldSkies) -> Self {
+        self.config.held_skies = held;
         self
     }
 
@@ -1414,7 +1486,7 @@ mod tests {
     /// cells, feature interiors, class cells, alert scans, the sky's cells, the sky tables, the
     /// surface and the kept skies' files),
     /// the sky's switch, the kept skies' switch, the feature members' gate, the stop on standard
-    /// input and the class of a sky's later steps.
+    /// input, the class of a sky's later steps and the held kept skies' switch.
     type Fields<'a> = (
         SocketAddr,
         &'a Path,
@@ -1426,6 +1498,7 @@ mod tests {
         FeatureMembers,
         StdinStop,
         SkyQos,
+        HeldSkies,
     );
 
     fn fields(config: &ServerConfig) -> Fields<'_> {
@@ -1456,6 +1529,7 @@ mod tests {
             config.feature_members(),
             config.stdin_stop(),
             config.sky_qos(),
+            config.held_skies(),
         )
     }
 
@@ -1542,6 +1616,7 @@ mod tests {
                 } else {
                     SkyQos::Utility
                 },
+                HeldSkies::Held,
             )
         );
     }
@@ -1591,6 +1666,7 @@ mod tests {
             "--keep-skies",
             "--kept-skies-disk",
             "47",
+            "--hold-kept-skies=off",
             "--sky-qos",
             "background",
             "--stop-on-stdin-close",
@@ -1624,6 +1700,7 @@ mod tests {
                 FeatureMembers::Served,
                 StdinStop::Watch,
                 SkyQos::Background,
+                HeldSkies::Exact,
             )
         );
     }
@@ -1699,6 +1776,34 @@ mod tests {
         );
     }
 
+    /// The held kept skies' switch is on unless it is turned off, as the kept skies' own is, and
+    /// off where they are (R06.T11.p).
+    #[test]
+    fn kept_skies_hold_unless_their_switch_is_off() {
+        assert_eq!(config(&[]).held_skies(), HeldSkies::Held);
+        assert_eq!(
+            ServerConfig::builder().build().held_skies(),
+            HeldSkies::Held
+        );
+        assert_eq!(config(&["--hold-kept-skies"]).held_skies(), HeldSkies::Held);
+        for off in ["false", "no", "off", "0"] {
+            let flag = format!("--hold-kept-skies={off}");
+            assert_eq!(config(&[&flag]).held_skies(), HeldSkies::Exact, "{flag}");
+        }
+        assert_eq!(
+            config(&["--keep-skies=false", "--hold-kept-skies"]).held_skies(),
+            HeldSkies::Exact
+        );
+        assert_eq!(
+            refusal(&["--hold-kept-skies=maybe"]),
+            ErrorKind::ValueValidation
+        );
+        assert_eq!(
+            refusal(&["--hold-kept-skies", "false"]),
+            ErrorKind::UnknownArgument
+        );
+    }
+
     #[test]
     fn an_ipv6_address_is_accepted() {
         assert_eq!(
@@ -1748,6 +1853,7 @@ mod tests {
                 (Some("serve-sky"), Some("HYPERION_SERVE_SKY")),
                 (Some("keep-skies"), Some("HYPERION_KEEP_SKIES")),
                 (Some("kept-skies-disk"), Some("HYPERION_KEPT_SKIES_DISK_MB")),
+                (Some("hold-kept-skies"), Some("HYPERION_HOLD_KEPT_SKIES")),
                 (Some("sky-qos"), Some("HYPERION_SKY_QOS")),
                 (
                     Some("stop-on-stdin-close"),
@@ -2025,6 +2131,7 @@ mod tests {
             .sky_service(SkyService::Unsupported)
             .kept_skies(KeptSkies::Off)
             .kept_skies_disk_bytes(150)
+            .held_skies(HeldSkies::Held)
             .sky_qos(SkyQos::Utility)
             .feature_members(FeatureMembers::Held)
             .stdin_stop(StdinStop::Watch)
@@ -2045,6 +2152,8 @@ mod tests {
                 FeatureMembers::Held,
                 StdinStop::Watch,
                 SkyQos::Utility,
+                // Held asked, but none, the kept skies being off.
+                HeldSkies::Exact,
             )
         );
     }

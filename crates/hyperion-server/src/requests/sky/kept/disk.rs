@@ -10,6 +10,12 @@
 //! that no file is read by a build or a configuration that could have answered otherwise. No build
 //! ID joins them, since a generator version's output is pinned by its goldens (lean, 2026-11-05).
 //!
+//! The name leads with a hash of the key's arrival ([`SkyArrival`]) after the same versions and
+//! settings, so that the directory's listing is the index of each arrival's files (R06.T11.p): a
+//! sky that no file holds exactly is answered from a file of its arrival that holds for it
+//! ([`SkyHold`]), read and checked against its own key, the latest seen and then the nearest of
+//! several. A file's hold is kept in memory once read, so each is read for it once at most.
+//!
 //! A file holds a magic, its key, the response's JSON, the payload, and an FNV-1a checksum of all
 //! of them. It is written whole under a temporary name and renamed into place, and never synced:
 //! it is a cache, and a file torn by a crash fails its checksum. A file whose key differs is a
@@ -37,7 +43,9 @@ use hyperion_protocol::{PROTOCOL_VERSION, ResponseBody};
 use hyperion_sim::GENERATOR_VERSION;
 use tokio::sync::{mpsc, oneshot};
 
-use super::SkyReplyKey;
+use hyperion_sim::coords::GalacticPosition as SimPosition;
+
+use super::{HeldSky, SkyArrival, SkyHold, SkyReplyKey};
 use crate::bulk::{Answer, BulkPayload};
 use crate::compute::SkyCaps;
 use crate::config::{FeatureMembers, SkyFeatureGas};
@@ -96,6 +104,7 @@ pub struct SkyFileCounters {
     bytes: u64,
     budget: u64,
     hits: u64,
+    held: u64,
     misses: u64,
     written: u64,
     evictions: u64,
@@ -127,6 +136,13 @@ impl SkyFileCounters {
     #[must_use]
     pub fn hits(&self) -> u64 {
         self.hits
+    }
+
+    /// Of the hits, those answered from a file of the sky's arrival seen earlier or from a little
+    /// way off, which holds for it (R06.T11.p).
+    #[must_use]
+    pub fn held(&self) -> u64 {
+        self.held
     }
 
     /// Lookups that were not, for want of a file, or of a good one with the key.
@@ -182,6 +198,28 @@ enum Op {
     },
     /// Writes the reply for the key.
     Keep { key: FileKey, answer: Box<Answer> },
+    /// The reply a good file of the ask's arrival holds that holds for it, if one does.
+    Held {
+        ask: Box<HeldAsk>,
+        reply: oneshot::Sender<Option<HeldSky>>,
+    },
+}
+
+/// A sky asked, as a lookup of its arrival's files reads it: its key and the observer it asks,
+/// checked, with the prefix its files' keys lead with, and the name its arrival's files lead with.
+#[derive(Debug)]
+struct HeldAsk {
+    key: SkyReplyKey,
+    at: SimPosition,
+    prefix: Vec<u8>,
+    arrival: String,
+}
+
+impl HeldAsk {
+    /// The file key of the sky of the ask's arrival that `hold` holds.
+    fn file_key(&self, hold: &SkyHold) -> FileKey {
+        file_key(&self.prefix, &hold.key(self.key.arrival()))
+    }
 }
 
 /// The kept skies' files, or none where they are off.
@@ -205,6 +243,10 @@ impl std::fmt::Debug for Op {
         match self {
             Self::Get { key, .. } => f.debug_struct("Get").field("key", &key.name).finish(),
             Self::Keep { key, .. } => f.debug_struct("Keep").field("key", &key.name).finish(),
+            Self::Held { ask, .. } => f
+                .debug_struct("Held")
+                .field("arrival", &ask.arrival)
+                .finish(),
         }
     }
 }
@@ -268,6 +310,24 @@ impl SkyReplyFiles {
         found.await.ok().flatten()
     }
 
+    /// The final reply a good file of `asked`'s arrival holds that holds for it seen from `at`, the
+    /// observer it asks checked ([`SkyHold::holds`]; R06.T11.p): of several, the latest seen, then
+    /// the nearest.
+    pub(crate) async fn held(&self, asked: &SkyReplyKey, at: &SimPosition) -> Option<HeldSky> {
+        let store = self.store.as_ref()?;
+        let queue = store.sender()?;
+        let (reply, found) = oneshot::channel();
+        let ask = Box::new(HeldAsk {
+            key: asked.clone(),
+            at: *at,
+            prefix: store.prefix.clone(),
+            arrival: arrival_name(&store.prefix, asked.arrival()),
+        });
+        // As for `get`: a closed queue, or a thread that panicked, finds nothing.
+        queue.send(Op::Held { ask, reply }).await.ok()?;
+        found.await.ok().flatten()
+    }
+
     /// Writes `answer`, the final reply of the sky `key`, unless the queue is full, when it is
     /// counted and dropped.
     pub(crate) fn keep(&self, key: &SkyReplyKey, answer: &Answer) {
@@ -328,15 +388,33 @@ impl Store {
         lock(&self.queue).clone()
     }
 
-    /// The file key of `key`: the prefix and its bytes, named by their hash.
+    /// The file key of `key` under the store's prefix.
     fn file_key(&self, key: &SkyReplyKey) -> FileKey {
-        let mut bytes = self.prefix.clone();
-        key.write_bytes(&mut bytes);
-        FileKey {
-            name: format!("{:016x}.{EXTENSION}", fnv1a(&bytes)),
-            bytes,
-        }
+        file_key(&self.prefix, key)
     }
+}
+
+/// The file key of `key` under `prefix`: the prefix and the key's bytes, named by the hash of its
+/// arrival's ([`arrival_name`]) and then theirs.
+fn file_key(prefix: &[u8], key: &SkyReplyKey) -> FileKey {
+    let mut bytes = prefix.to_vec();
+    key.write_bytes(&mut bytes);
+    FileKey {
+        name: format!(
+            "{}{:016x}.{EXTENSION}",
+            arrival_name(prefix, key.arrival()),
+            fnv1a(&bytes)
+        ),
+        bytes,
+    }
+}
+
+/// What the names of `arrival`'s files under `prefix` lead with: the hash of the prefix and the
+/// arrival's bytes, and a dash.
+fn arrival_name(prefix: &[u8], arrival: &SkyArrival) -> String {
+    let mut bytes = prefix.to_vec();
+    arrival.write_bytes(&mut bytes);
+    format!("{:016x}-", fnv1a(&bytes))
 }
 
 /// Locks `mutex`, whose data no panic can leave half-written: each holder only reads or assigns.
@@ -355,6 +433,10 @@ fn serve(dir: &Path, budget: u64, mut ops: mpsc::Receiver<Op>, counters: &Mutex<
                 let _ = reply.send(files.read(&key));
             }
             Op::Keep { key, answer } => files.write(&key, &answer),
+            Op::Held { ask, reply } => {
+                // As for `Get`, nobody may want it.
+                let _ = reply.send(files.read_held(&ask));
+            }
         }
         // `keep` counts the replies it drops itself, while the thread is busy.
         let mut shared = lock(counters);
@@ -365,11 +447,13 @@ fn serve(dir: &Path, budget: u64, mut ops: mpsc::Receiver<Op>, counters: &Mutex<
     }
 }
 
-/// A file held: its bytes, and when it was last used, in the order of uses.
+/// A file held: its bytes, when it was last used, in the order of uses, and its sky's hold once it
+/// has been read or written since the scan.
 #[derive(Debug, Clone, Copy)]
 struct Held {
     bytes: u64,
     used: u64,
+    hold: Option<SkyHold>,
 }
 
 /// The files in the directory, as the store's thread keeps them.
@@ -443,22 +527,26 @@ impl Files {
         }
         found.sort();
         for (_, name, bytes) in found {
-            files.hold(name, bytes);
+            files.hold(name, bytes, None);
         }
         files.evict_to(budget);
         files
     }
 
-    /// Holds `name`, of `bytes`, as the most recently used.
-    fn hold(&mut self, name: String, bytes: u64) {
+    /// Holds `name`, of `bytes`, as the most recently used, with its sky's hold `hold`, or the one
+    /// known already.
+    fn hold(&mut self, name: String, bytes: u64, hold: Option<SkyHold>) {
         let used = self.next_use;
         self.next_use += 1;
-        if let Some(was) = self.held.insert(name.clone(), Held { bytes, used }) {
+        let mut entry = Held { bytes, used, hold };
+        if let Some(was) = self.held.get(&name).copied() {
             self.by_use.remove(&was.used);
             self.counters.bytes -= was.bytes;
+            entry.hold = hold.or(was.hold);
         } else {
             self.counters.entries += 1;
         }
+        self.held.insert(name.clone(), entry);
         self.by_use.insert(used, name);
         self.counters.bytes += bytes;
     }
@@ -505,10 +593,7 @@ impl Files {
         };
         match read {
             Ok(answer) => {
-                self.counters.hits += 1;
-                let bytes = self.held[&key.name].bytes;
-                self.hold(key.name.clone(), bytes);
-                touch(&path);
+                self.used(&key.name, SkyHold::of(&answer));
                 Some(answer)
             }
             Err(Unread::OtherKey) => {
@@ -516,18 +601,120 @@ impl Files {
                 None
             }
             Err(Unread::Bad(why)) => {
-                tracing::warn!(
-                    file = %path.display(),
-                    why,
-                    "a kept sky's file is bad, and is removed"
-                );
-                remove(&path);
-                self.forget(&key.name);
-                self.counters.removed_bad += 1;
+                self.remove_bad(&path, &key.name, why);
                 self.counters.misses += 1;
                 None
             }
         }
+    }
+
+    /// Counts a hit of the file `name`, held, and marks it used, now and in its file's time, with its
+    /// sky's hold `hold`.
+    fn used(&mut self, name: &str, hold: Option<SkyHold>) {
+        self.counters.hits += 1;
+        let bytes = self.held[name].bytes;
+        self.hold(name.to_owned(), bytes, hold);
+        touch(&self.dir.join(name));
+    }
+
+    /// The reply a good file of `ask`'s arrival holds that holds for it, the latest seen and then
+    /// the nearest of several, marked as used; or `None`, which counts no miss, the ask's own key's
+    /// lookup having counted it.
+    ///
+    /// A file whose hold is not yet known is read whole for it, and checked against its own key,
+    /// the ask's arrival seen where and when its reply says; one that is bad is removed, as `read`
+    /// removes it.
+    fn read_held(&mut self, ask: &HeldAsk) -> Option<HeldSky> {
+        let mut names: Vec<String> = self
+            .held
+            .keys()
+            .filter(|name| name.starts_with(&ask.arrival))
+            .cloned()
+            .collect();
+        // The map's order is not the same from run to run; the choice must be.
+        names.sort_unstable();
+        let mut best: Option<(String, SkyHold, f64, Option<Answer>)> = None;
+        for name in names {
+            let Some(known) = self.held.get(&name).map(|held| held.hold) else {
+                continue;
+            };
+            let (hold, answer) = match known {
+                Some(hold) => (hold, None),
+                None => match self.read_hold(&name, ask) {
+                    Some((hold, answer)) => (hold, Some(answer)),
+                    None => continue,
+                },
+            };
+            let Some(offset_m) = hold.holds(ask.key.time(), &ask.at) else {
+                continue;
+            };
+            if best.as_ref().is_none_or(|(_, was, was_offset_m, _)| {
+                hold.rank(offset_m) > was.rank(*was_offset_m)
+            }) {
+                best = Some((name, hold, offset_m, answer));
+            }
+        }
+        let (name, hold, offset_m, answer) = best?;
+        let key = ask.file_key(&hold);
+        let answer = match answer {
+            Some(answer) => {
+                self.used(&name, Some(hold));
+                answer
+            }
+            // Read whole and checked against its key, as any file is; one gone bad since its hold
+            // was known is a miss, which `read` counts.
+            None => self.read(&key)?,
+        };
+        self.counters.held += 1;
+        Some(HeldSky {
+            key: hold.key(ask.key.arrival()),
+            answer,
+            offset_m,
+        })
+    }
+
+    /// The hold and the reply of the file `name`, read whole and checked against its own key, the
+    /// ask's arrival seen where and when its reply says; `None` for a file that is gone, holds
+    /// another key or is bad, which is removed.
+    fn read_hold(&mut self, name: &str, ask: &HeldAsk) -> Option<(SkyHold, Answer)> {
+        let path = self.dir.join(name);
+        let contents = match fs::read(&path) {
+            Ok(contents) => contents,
+            Err(error) => {
+                tracing::debug!(%error, file = %path.display(), "a kept sky's file is gone");
+                self.forget(name);
+                return None;
+            }
+        };
+        let expected = |hold: &SkyHold| {
+            let key = ask.file_key(hold);
+            (key.name == name).then_some(key.bytes)
+        };
+        match decode_held(contents, expected) {
+            Ok((hold, answer)) => {
+                if let Some(held) = self.held.get_mut(name) {
+                    held.hold = Some(hold);
+                }
+                Some((hold, answer))
+            }
+            Err(Unread::OtherKey) => None,
+            Err(Unread::Bad(why)) => {
+                self.remove_bad(&path, name, why);
+                None
+            }
+        }
+    }
+
+    /// Removes the bad file `name`, at `path`, for `why`, and forgets it.
+    fn remove_bad(&mut self, path: &Path, name: &str, why: &'static str) {
+        tracing::warn!(
+            file = %path.display(),
+            why,
+            "a kept sky's file is bad, and is removed"
+        );
+        remove(path);
+        self.forget(name);
+        self.counters.removed_bad += 1;
     }
 
     /// Writes `answer` for `key`, then removes the least recently used files until all fit.
@@ -567,7 +754,7 @@ impl Files {
             remove(&temp);
             return;
         }
-        self.hold(key.name.clone(), bytes);
+        self.hold(key.name.clone(), bytes, SkyHold::of(answer));
         self.counters.written += 1;
         self.evict_to(self.counters.budget);
     }
@@ -628,6 +815,31 @@ fn encode(key: &[u8], answer: &Answer) -> Option<Vec<u8>> {
 
 /// The reply in a file's `contents`, if they hold `key` and read back whole.
 fn decode(contents: Vec<u8>, key: &[u8]) -> Result<Answer, Unread> {
+    let (held, json, payload) = frame(contents)?;
+    if held.as_ref() != key {
+        return Err(Unread::OtherKey);
+    }
+    reply(&json, payload)
+}
+
+/// The hold and the reply in a file's `contents`, if they read back whole and hold the key that
+/// `expected` gives of the reply's hold: the key it must have been written under.
+fn decode_held(
+    contents: Vec<u8>,
+    expected: impl FnOnce(&SkyHold) -> Option<Vec<u8>>,
+) -> Result<(SkyHold, Answer), Unread> {
+    let (written, json, payload) = frame(contents)?;
+    let answer = reply(&json, payload)?;
+    let hold = SkyHold::of(&answer).ok_or(Unread::Bad("hold"))?;
+    if expected(&hold).is_none_or(|key| written.as_ref() != key.as_slice()) {
+        return Err(Unread::OtherKey);
+    }
+    Ok((hold, answer))
+}
+
+/// The key, the JSON and the payload a file's `contents` hold, if their magic, checksum and
+/// lengths are good.
+fn frame(contents: Vec<u8>) -> Result<(Bytes, Bytes, Bytes), Unread> {
     let file = Bytes::from(contents);
     let body_end = file
         .len()
@@ -651,10 +863,12 @@ fn decode(contents: Vec<u8>, key: &[u8]) -> Result<Answer, Unread> {
     if at != body_end {
         return Err(Unread::Bad("lengths"));
     }
-    if held.as_ref() != key {
-        return Err(Unread::OtherKey);
-    }
-    let body: ResponseBody = serde_json::from_slice(&json).map_err(|_| Unread::Bad("json"))?;
+    Ok((held, json, payload))
+}
+
+/// The final sky reply of a file's `json` and `payload`, if they read back as one.
+fn reply(json: &[u8], payload: Bytes) -> Result<Answer, Unread> {
+    let body: ResponseBody = serde_json::from_slice(json).map_err(|_| Unread::Bad("json"))?;
     let ResponseBody::Sky(sky) = &body else {
         return Err(Unread::Bad("not a sky"));
     };
@@ -698,7 +912,12 @@ mod tests {
     use hyperion_sim::units::LightYears;
     use tempfile::TempDir;
 
-    use super::super::tests::{answer, each_field_changed, galaxy, request};
+    use hyperion_protocol::SkyRequest;
+
+    use super::super::tests::{
+        YEAR_S, answer, asked, bound_m, each_field_changed, galaxy, moved, position, reply_of,
+        request, sun,
+    };
     use super::*;
     use crate::compute::GalaxyKey;
     use crate::testing::WAIT;
@@ -736,6 +955,14 @@ mod tests {
             &SkyReplyKey::of(GalaxyKey::new(0, GeneratorVersion::new(1)), &request()),
         )
         .await;
+    }
+
+    /// The reply a file holds that holds for `request`, asked from its observer.
+    async fn held(files: &SkyReplyFiles, request: &SkyRequest) -> Option<HeldSky> {
+        let key = SkyReplyKey::of(galaxy(), request);
+        tokio::time::timeout(WAIT, files.held(&key, &position(request.observer)))
+            .await
+            .unwrap()
     }
 
     /// The files in the store's directory.
@@ -1019,5 +1246,143 @@ mod tests {
         assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
         assert_eq!(fnv1a(b"foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    /// A file of the arrival that holds for a sky asked later, or from a little way off, answers
+    /// it, after a restart too, under its own key with its own JSON and payload byte for byte;
+    /// none answers past its `valid_until` or its bound, or for another arrival. The files of one
+    /// arrival share their names' lead, and of two that hold the latest seen answers.
+    #[tokio::test]
+    async fn a_file_of_the_arrival_that_holds_answers_a_later_sky_after_a_restart() {
+        let dir = TempDir::new().unwrap();
+        let first = asked(sun(), 0);
+        let first_key = SkyReplyKey::of(galaxy(), &first);
+        let sent = reply_of(&first, YEAR_S, &[8.6, 4.37]);
+        let files = store(&dir, 1 << 30);
+        kept(&files, &first_key, &sent).await;
+        let found = held(&files, &asked(sun(), 3_600)).await;
+        assert_eq!(found.expect("its hold known from its write").key, first_key);
+        files.close().await;
+
+        let restarted = store(&dir, 1 << 30);
+        let later = asked(moved(sun(), 0.5 * bound_m()), 3_600);
+        let exactly = get(&restarted, &SkyReplyKey::of(galaxy(), &later)).await;
+        assert_eq!(exactly, None, "no file holds it exactly");
+        let found = held(&restarted, &later).await.expect("held from its file");
+        assert_eq!(found.key, first_key);
+        assert_eq!(json(&found.answer), json(&sent));
+        assert_eq!(
+            found.answer.bulk.as_ref().unwrap().bytes(),
+            sent.bulk.as_ref().unwrap().bytes()
+        );
+        assert!((found.offset_m / bound_m() - 0.5).abs() < 1e-9, "{found:?}");
+        let refused = [
+            ("at its valid_until", asked(sun(), YEAR_S)),
+            ("before it was seen", asked(sun(), -1)),
+            (
+                "past its bound",
+                asked(moved(sun(), 1.01 * bound_m()), 3_600),
+            ),
+            (
+                "another arrival",
+                SkyRequest {
+                    camera_limit_v: Some(9.0),
+                    ..asked(sun(), 3_600)
+                },
+            ),
+        ];
+        for (what, request) in refused {
+            assert!(held(&restarted, &request).await.is_none(), "{what}");
+        }
+        // The file was read once for its hold, and the misses are the exact lookup's alone.
+        let counters = restarted.counters();
+        assert_eq!(
+            (
+                counters.hits(),
+                counters.held(),
+                counters.misses(),
+                counters.entries()
+            ),
+            (1, 1, 1, 1),
+            "{counters:?}"
+        );
+        restarted.close().await;
+
+        let files = store(&dir, 1 << 30);
+        let second = asked(sun(), 600);
+        let other = SkyRequest {
+            n_max: Some(9),
+            ..first.clone()
+        };
+        for kept_request in [&second, &other] {
+            let reply = reply_of(kept_request, YEAR_S, &[4.37]);
+            kept(&files, &SkyReplyKey::of(galaxy(), kept_request), &reply).await;
+        }
+        assert_eq!(listed(&dir).len(), 3, "{:?}", listed(&dir));
+        let lead = |request: &SkyRequest| {
+            let name = files
+                .store
+                .as_ref()
+                .unwrap()
+                .file_key(&SkyReplyKey::of(galaxy(), request))
+                .name;
+            name[..17].to_owned()
+        };
+        assert_eq!(lead(&first), lead(&second));
+        assert_ne!(lead(&first), lead(&other));
+        let latest = held(&files, &asked(sun(), 3_600)).await.unwrap();
+        assert_eq!(latest.key, SkyReplyKey::of(galaxy(), &second));
+        files.close().await;
+    }
+
+    /// A file of the arrival read for its hold that is bad is removed, as any bad file is; one
+    /// under the arrival's lead that holds another key is only not read.
+    #[tokio::test]
+    async fn a_bad_file_of_the_arrival_is_removed_and_another_keys_is_not_read() {
+        let dir = TempDir::new().unwrap();
+        let first = asked(sun(), 0);
+        let key = SkyReplyKey::of(galaxy(), &first);
+        let files = store(&dir, 1 << 30);
+        kept(&files, &key, &reply_of(&first, YEAR_S, &[4.37])).await;
+        let other = SkyRequest {
+            n_max: Some(9),
+            ..first.clone()
+        };
+        let (name, other_name) = {
+            let store = files.store.as_ref().unwrap();
+            let other_key = SkyReplyKey::of(galaxy(), &other);
+            (store.file_key(&key).name, store.file_key(&other_key).name)
+        };
+        files.close().await;
+        let skies = dir.path().join(SKY_FILES_DIR);
+        // The first's file under the other arrival's lead: its key is not the one it would hold.
+        let impostor = skies.join(format!("{}0000000000000000.{EXTENSION}", &other_name[..17]));
+        fs::copy(skies.join(&name), &impostor).unwrap();
+        let restarted = store(&dir, 1 << 30);
+        assert!(held(&restarted, &asked_as(&other, 3_600)).await.is_none());
+        assert!(impostor.exists(), "not bad, only another key's");
+        restarted.close().await;
+
+        let path = skies.join(&name);
+        let mut file = fs::read(&path).unwrap();
+        let at = file.len() - 20;
+        file[at] ^= 0x40;
+        fs::write(&path, &file).unwrap();
+        let restarted = store(&dir, 1 << 30);
+        assert!(held(&restarted, &asked(sun(), 3_600)).await.is_none());
+        assert!(!path.exists(), "removed");
+        assert_eq!(restarted.counters().removed_bad(), 1);
+        restarted.close().await;
+    }
+
+    /// `request` asked again `seconds` later.
+    fn asked_as(request: &SkyRequest, seconds: i64) -> SkyRequest {
+        SkyRequest {
+            time: hyperion_protocol::UniverseTime {
+                seconds: request.time.seconds + seconds,
+                ..request.time
+            },
+            ..request.clone()
+        }
     }
 }

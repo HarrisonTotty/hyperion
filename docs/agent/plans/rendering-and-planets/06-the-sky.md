@@ -2865,6 +2865,20 @@ the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a 
     `requests/sky.rs`, `config.rs`, `lib.rs`, `tests/sky.rs`, the root README.
   - **Acceptance:** `cargo test -p hyperion-server`, `just cross-clippy`, `just smart-ci`.
 
+- **R06.T11.p A re-asked sky answered from the kept sky its client would still hold (new;
+  perf-sky-beside-client's brief, 2026-11-05; no output moves).** A sky that no kept reply
+  answers exactly is answered with a kept final reply of the same request but for `time` and
+  `observer`, asked in [its `time`, its `valid_until`) and from within Design note 13's tenth of a
+  pixel at 1080p across 60° of its nearest listed star's parallax, sent as kept, behind
+  `--hold-kept-skies` (on): memory first, then the files.
+  - **Tests:** the arrival is the key but its observer and time; the hold's times and bound, none
+    listed; the latest, then the nearest, of several, in memory and in files after a restart; a bad
+    file read for its hold removed; an hour later answered with no census job, one past the bound
+    computed; the switch.
+  - **Files:** `crates/hyperion-server/src/requests/sky/kept{,/disk}.rs`, `requests/sky.rs`,
+    `bulk/sky.rs`, `cache/byte_lru.rs`, `config.rs`, `lib.rs`, `tests/sky.rs`, the root README.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -10088,3 +10102,19 @@ CensusCost)`.
     lowered.
   - Pending: the owner's Mac run (fps and the P/E split beside a cold sky, utility against
     background). Apple's own page on the background class was not read (no web from the pod).
+- **Deviations in T11.p, as built (2026-11-05).**
+  - `SkyReplyKey` is `{arrival: SkyArrival, observer, time}`, its bytes unchanged; `SkyHold`,
+    `HeldSky`, `SkyReplyCache::held`, `SkyReplyFiles::held` (`pub(crate)`);
+    `ByteLru::get_best`, `SharedByteLru::get_best`; `HeldSkies::{Exact, Held}` (exported),
+    `ServerConfig{,Builder}::held_skies`; `SkyFileCounters::held()`.
+  - The index of arrivals is the files' names: `<arrival hash>-<key hash>.sky` (lean, 2026-11-05).
+    Files named before T11.p are never read again and go first under the budget.
+  - The bound reads the nearest listed star on the wire, sprites included: tighter than the
+    client's, which skips its parallax sprites, within some 4.9 ly at 1080p across 60° (lean,
+    2026-11-05). With none listed a sky holds at its own observer alone.
+  - Of several that hold, the latest seen, then the nearest (lean, 2026-11-05).
+  - The bound is the brief's, 1080p across 60°: a camera of finer pixels (a narrower field, or
+    more than 1,080 across it) can hold a held sky more than a tenth of its own pixel off (lean,
+    2026-11-05). An hour's orbital motion is some 10⁻³ au against a bound of tens of au.
+  - The end at `valid_until` is tested on the hold, the memory and the files; `tests/sky.rs` skips
+    it, a sky a year on being in another time bucket, some 40 s more in a test build.

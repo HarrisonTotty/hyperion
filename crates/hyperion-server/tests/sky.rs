@@ -47,7 +47,7 @@ use hyperion_protocol::{
 use hyperion_server::compute::{BulkGate, SkyCaps, SkyCellCounters};
 use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
 use hyperion_server::{
-    KeptSkies, ServerConfigBuilder, ServerStats, SkyFeatureGas, SkyQos, SkyService,
+    HeldSkies, KeptSkies, ServerConfigBuilder, ServerStats, SkyFeatureGas, SkyQos, SkyService,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition as SimPosition, UnitVector};
@@ -84,6 +84,7 @@ use hyperion_sim::sky::limits::{Glare, eye_cut, eye_offsets, limit_map};
 use hyperion_sim::sky::luminosity::LuminosityTables;
 use hyperion_sim::stellar::system::SystemStars;
 use hyperion_sim::tables::star_colour::LUMINANCE_RGB;
+use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{CandelasPerSquareMetre, LightYears, Magnitudes, Years};
 use tempfile::TempDir;
 
@@ -1350,6 +1351,151 @@ async fn a_sky_asked_again_after_a_restart_is_answered_from_its_file_byte_for_by
 
     client.close().await;
     restarted.stop().await;
+}
+
+/// How far a camera may move from where a sky was seen before its nearest listed star in `sent`
+/// shifts a tenth of a pixel at 1080p across 60°, m: the bound by which the client holds a sky,
+/// `parallaxShiftPx` (Design note 13), from the star's distance on the wire.
+fn tenth_of_a_pixel_m(sent: &Sent) -> f64 {
+    let stars = usize::try_from(sent.response.stars_bytes).expect("a payload's length");
+    let nearest_ly = sent.payload()[..stars]
+        .as_chunks::<SKY_STAR_BYTES>()
+        .0
+        .iter()
+        .map(|star| wire_v_and_distance(star).1)
+        .min_by(f32::total_cmp)
+        .expect("a sky near the Sun lists stars");
+    0.1 * (60.0_f64.to_radians() / 1_080.0) * f64::from(nearest_ly) * METRES_PER_LIGHT_YEAR
+}
+
+/// [`sky`] asked `seconds` after the epoch from `metres` along x of its observer.
+fn sky_at(universe: &UniverseIdHex, seconds: i64, metres: f64) -> SkyRequest {
+    SkyRequest {
+        observer: GalacticPosition {
+            cell_ly: SUN_LY,
+            offset_m: [metres, 0.0, 0.0],
+        },
+        time: UniverseTime { seconds, nanos: 0 },
+        ..sky(universe)
+    }
+}
+
+/// A sky asked an hour after one kept, from a little way off but within a tenth of a pixel of its
+/// nearest star's parallax, is answered with the kept final reply alone, its own `time`, `observer`
+/// and `valid_until` unchanged, and the pool runs only the job that serialises its frame
+/// (R06.T11.p). One moved past the bound is computed. The unit tests hold the times to [its time,
+/// its `valid_until`): a sky a year on is in another time bucket, whose first sky costs some 40 s
+/// in a test build.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sky_asked_an_hour_later_is_its_kept_reply_and_one_past_its_bound_is_computed() {
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
+    let (mut client, universe) = opened(&server).await;
+    let first = served(&mut client, sky(&universe)).await;
+    let bound_m = tenth_of_a_pixel_m(&first);
+
+    let before = server.stats();
+    let hour_later = sky_at(&universe, 3_600, 0.5 * bound_m);
+    let id = client.send_request(RequestBody::Sky(hour_later)).await;
+    let again = replies_to(&mut client, id).await;
+    let after = server.stats();
+    assert_eq!(again.len(), 1, "the kept final reply alone");
+    assert_eq!(
+        again[0].response, first.response,
+        "its own time and observer"
+    );
+    assert_eq!(again[0].payload(), first.payload());
+    let pool = after.pool();
+    assert_eq!(
+        (pool.completed(), pool.queued_bulk(), pool.running()),
+        (before.pool().completed() + 1, 0, 0),
+        "the reply's frame alone, serialised on the pool: {:?}, then {pool:?}",
+        before.pool()
+    );
+    assert_eq!(
+        after.sky_replies().hits(),
+        before.sky_replies().hits() + 1,
+        "{:?}",
+        after.sky_replies()
+    );
+
+    let past = sky_at(&universe, 3_600, 2.0 * bound_m);
+    let sent = served(&mut client, past.clone()).await;
+    assert_eq!(
+        (sent.response.time, sent.response.observer),
+        (past.time, past.observer),
+        "computed for its own time and observer"
+    );
+    assert!(
+        server.stats().pool().completed() > after.pool().completed() + 1,
+        "computed afresh"
+    );
+    client.close().await;
+    server.stop().await;
+}
+
+/// After a restart, a sky asked later than those kept, from a little way off, is answered from the
+/// latest of their files that holds for it, its JSON's fields and payload the kept reply's, then
+/// from memory, with no sky job but its frame's (R06.T11.p). With `--hold-kept-skies=false` a sky
+/// asked half an hour later was computed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn after_a_restart_a_later_sky_is_answered_from_the_latest_file_that_holds_for_it() {
+    let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a small forced cap")
+        .with_band_spec(COARSE_BAND);
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = sky_config(data_dir.path(), caps, 2).held_skies(HeldSkies::Exact);
+    let exact = TestServer::start_with(config.build()).await;
+    let (mut client, universe) = opened(&exact).await;
+    let first = served(&mut client, sky(&universe)).await;
+    let before = exact.stats().pool().completed();
+    let half_hour = served(&mut client, sky_at(&universe, 1_800, 0.0)).await;
+    assert_eq!(
+        half_hour.response.time.seconds, 1_800,
+        "computed for its own time"
+    );
+    assert!(
+        exact.stats().pool().completed() > before + 1,
+        "computed afresh"
+    );
+    exact
+        .stats_until("both skies' final replies are written", |stats| {
+            stats.sky_files().written() == 2
+        })
+        .await;
+    client.close().await;
+    exact.stop().await;
+
+    let server = TestServer::start_with(sky_config(data_dir.path(), caps, 2).build()).await;
+    let mut client = reopened(&server, &universe).await;
+    let bound_m = tenth_of_a_pixel_m(&first);
+    let answered = [
+        ("from its file", sky_at(&universe, 3_600, 0.5 * bound_m)),
+        ("from memory", sky_at(&universe, 5_400, 0.25 * bound_m)),
+    ];
+    for (what, request) in answered {
+        let before = server.stats();
+        let id = client.send_request(RequestBody::Sky(request)).await;
+        let again = replies_to(&mut client, id).await;
+        let after = server.stats();
+        assert_eq!(again.len(), 1, "{what}: the kept final reply alone");
+        assert_eq!(
+            again[0].response, half_hour.response,
+            "{what}: the latest seen, its own time and observer"
+        );
+        assert_eq!(again[0].payload(), half_hour.payload(), "{what}");
+        let pool = after.pool();
+        assert_eq!(
+            (pool.completed(), pool.queued_bulk(), pool.running()),
+            (before.pool().completed() + 1, 0, 0),
+            "{what}: the reply's frame alone, serialised on the pool: {:?}, then {pool:?}",
+            before.pool()
+        );
+    }
+    let (files, kept) = (server.stats().sky_files(), server.stats().sky_replies());
+    assert_eq!((files.hits(), files.held()), (1, 1), "{files:?}");
+    assert_eq!(kept.hits(), 1, "{kept:?}");
+    client.close().await;
+    server.stop().await;
 }
 
 /// A sky's jobs after its first reply are lowered to the background class where the server's

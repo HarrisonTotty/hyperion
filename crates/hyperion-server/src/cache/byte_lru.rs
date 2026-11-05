@@ -169,6 +169,30 @@ where
         self.entries.get(key).map(|entry| Arc::clone(&entry.value))
     }
 
+    /// The entry `score` ranks highest of those it scores at all, with its key, marking it as the
+    /// most recently used and counting a hit: a lookup by what an entry holds rather than by its
+    /// key, which scans every entry. Of entries scored equal, the most recently used wins. Finding
+    /// none counts nothing, since a caller looks by its key first and counts that miss.
+    pub fn get_best<S: Ord>(
+        &mut self,
+        mut score: impl FnMut(&K, &V) -> Option<S>,
+    ) -> Option<(K, Arc<V>)> {
+        let mut best: Option<(S, &K)> = None;
+        for key in self.by_use.values().rev() {
+            let Some(entry) = self.entries.get(key) else {
+                continue;
+            };
+            if let Some(scored) = score(key, &entry.value)
+                && best.as_ref().is_none_or(|(was, _)| scored > *was)
+            {
+                best = Some((scored, key));
+            }
+        }
+        let key = best.map(|(_, key)| key.clone())?;
+        let value = self.get(&key)?;
+        Some((key, value))
+    }
+
     /// Whether `key` holds `expected`: the same `Arc`, or nothing for `None`.
     #[must_use]
     fn holds(&self, key: &K, expected: Option<&Arc<V>>) -> bool {
@@ -323,6 +347,11 @@ where
     #[must_use]
     pub fn peek(&self, key: &K) -> Option<Arc<V>> {
         self.lock().peek(key)
+    }
+
+    /// See [`ByteLru::get_best`]: `score` runs under the lock, so it must be quick.
+    pub fn get_best<S: Ord>(&self, score: impl FnMut(&K, &V) -> Option<S>) -> Option<(K, Arc<V>)> {
+        self.lock().get_best(score)
     }
 
     /// [`SharedByteLru::insert`], only if `key` still holds `expected` (the same `Arc`, or
@@ -661,6 +690,36 @@ mod tests {
         assert_eq!(counters.entries(), 2);
         assert_eq!(counters.bytes(), 2 * EMPTY);
         assert_eq!(counters.budget(), 2 * EMPTY);
+    }
+
+    /// The best entry is found by what it holds, the most recently used of equals, and counted and
+    /// marked as used; none found counts nothing.
+    #[test]
+    fn the_best_entry_is_found_by_its_value_and_marked_used() {
+        let mut cache = ByteLru::new(3 * (EMPTY + 64));
+        for (key, heap) in [(1, 30), (2, 10), (3, 30)] {
+            let _ = cache.insert(key, blob(heap));
+        }
+        let by_size = |_: &u32, blob: &Blob| (blob.0 >= 10).then_some(blob.0);
+        let (key, value) = cache.get_best(by_size).unwrap();
+        assert_eq!(
+            (key, value.0),
+            (3, 30),
+            "the most recently used of the two largest"
+        );
+        let _ = cache.get(&1);
+        assert_eq!(cache.get_best(by_size).unwrap().0, 1);
+        assert!(
+            cache
+                .get_best(|_, blob: &Blob| (blob.0 > 30).then_some(0))
+                .is_none()
+        );
+        let counters = cache.counters();
+        assert_eq!((counters.hits(), counters.misses()), (3, 0), "{counters:?}");
+        // The first found, 3, is now used after 2: an insert of a fourth evicts 2.
+        let _ = cache.insert(4, blob(30));
+        assert!(!cache.contains_key(&2) && cache.contains_key(&3));
+        check_invariants(&cache);
     }
 
     #[test]

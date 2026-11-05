@@ -123,6 +123,24 @@ impl EncodedSky {
     }
 }
 
+/// The distance of the nearest star a payload's stars' bytes `stars` list, ly, or `None` where they
+/// list none: the parallax rule's star (Design note 13), as a client decodes it (R06.T11.p).
+#[must_use]
+pub(crate) fn nearest_sky_star_ly(stars: &[u8]) -> Option<f32> {
+    stars
+        .as_chunks::<SKY_STAR_BYTES>()
+        .0
+        .iter()
+        .map(|star| {
+            f32::from_le_bytes(
+                star[12..16]
+                    .try_into()
+                    .expect("bytes 12–15 of a star are its distance"),
+            )
+        })
+        .min_by(f32::total_cmp)
+}
+
 /// `value` × `scale`, rounded to nearest and clamped to [`lo`, `hi`], NaN as 0.
 #[must_use]
 fn quantise(value: f64, scale: f64, lo: f64, hi: f64) -> f64 {
@@ -282,6 +300,21 @@ mod tests {
         let parts = [&stars[..3], &stars[3..3], &stars[3..]].map(encode_sky_stars);
         let joined = EncodedSky::of_parts(parts, &encode_sky_texels(&texels));
         assert_eq!(joined, whole);
+    }
+
+    /// The nearest star is read back from the stars' bytes as they were encoded, and none is
+    /// listed in none (R06.T11.p).
+    #[test]
+    fn the_nearest_star_is_read_from_the_stars_bytes() {
+        let stars: Vec<SkyStarWire> = [8.6, 4.37, 0.0124, 11.0]
+            .map(|distance_ly| SkyStarWire {
+                distance_ly,
+                ..pinned_star()
+            })
+            .into();
+        assert_eq!(nearest_sky_star_ly(&encode_sky_stars(&stars)), Some(0.0124));
+        assert_eq!(nearest_sky_star_ly(&PINNED_STAR), Some(8.6));
+        assert_eq!(nearest_sky_star_ly(&[]), None);
     }
 
     #[test]

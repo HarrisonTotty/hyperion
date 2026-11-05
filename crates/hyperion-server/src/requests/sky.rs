@@ -37,7 +37,11 @@
 //! The last skies' final replies are kept ([`kept`], R06.T11.l), in memory and in files under the
 //! data directory (R06.T11.n), and a sky asked again exactly as one of them, before or after a
 //! restart, is answered with its kept reply alone, with no sky job on the pool, unless the server
-//! is started with `--keep-skies=false` (or, for the files alone, `--kept-skies-disk 0`).
+//! is started with `--keep-skies=false` (or, for the files alone, `--kept-skies-disk 0`). A sky
+//! asked at a later time, or from a little way off, is answered with a kept reply of the same
+//! request otherwise that still holds for it, before its `valid_until` and within a tenth of a
+//! pixel of its nearest star's parallax, unchanged (R06.T11.p), unless the server is started with
+//! `--hold-kept-skies=false`.
 //!
 //! After a sky's first reply, its jobs are lowered to the background class where `--sky-qos` asks
 //! it, the default on macOS, whose pool runs them at the quality-of-service class background, on
@@ -112,8 +116,8 @@ use crate::compute::{
     Listing, Priority, SkyCaps,
 };
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
-use crate::{AppState, SkyQos};
-use kept::SkyReplyKey;
+use crate::{AppState, HeldSkies, SkyQos};
+use kept::{HeldSky, SkyReplyKey};
 
 /// The longest a sky holds before it is asked again, s: one Julian year (Design note 13).
 const VALID_FOR_S: f64 = SECONDS_PER_JULIAN_YEAR;
@@ -142,7 +146,10 @@ const AXIS_LENGTH_TOLERANCE: f64 = 1e-6;
 ///
 /// A sky asked exactly as one whose final reply is kept is answered with that reply alone, once its
 /// request is checked, and runs no sky job (R06.T11.l): from memory, or else from its file, kept
-/// before a restart (R06.T11.n). A final reply made here is kept in both.
+/// before a restart (R06.T11.n). A final reply made here is kept in both. Failing those, where
+/// the server holds kept skies ([`HeldSkies`]), a sky is answered as one of them would be had the
+/// client held it: with the kept reply of its arrival that holds for it, seen at an earlier time
+/// or from a little way off (R06.T11.p), from memory, or else from its file, unchanged.
 ///
 /// # Errors
 ///
@@ -179,6 +186,18 @@ pub(crate) async fn answer(
         );
         state.sky_replies.keep(kept, answer.clone());
         return Ok(answer);
+    }
+    if state.held_skies == HeldSkies::Held {
+        let at = asked.observer.position();
+        if let Some(held) = state.sky_replies.held(&kept, at) {
+            log_held(&held, &request, started, "memory");
+            return Ok(held.answer);
+        }
+        if let Some(held) = state.sky_files.held(&kept, at).await {
+            log_held(&held, &request, started, "disk");
+            state.sky_replies.keep(held.key, held.answer.clone());
+            return Ok(held.answer);
+        }
     }
     let mut end = SkyEnd {
         token: &token,
@@ -232,6 +251,24 @@ impl Drop for SkyEnd<'_> {
             }
         }
     }
+}
+
+/// Logs at `info` that a sky asked as `request` was answered with `held`, a kept reply that holds
+/// for it, from `store`: how much later it is asked and how far off, and its wall time.
+fn log_held(held: &HeldSky, request: &SkyRequest, started: Instant, store: &'static str) {
+    let checked =
+        |time: hyperion_protocol::UniverseTime| UniverseTime::new(time.seconds, time.nanos).ok();
+    let later_s = checked(request.time)
+        .zip(checked(held.key.time()))
+        .and_then(|(asked, kept)| asked.checked_since(kept))
+        .map(Span::as_seconds_f64);
+    tracing::info!(
+        store,
+        later_s,
+        offset_m = held.offset_m,
+        wall_s = seconds(started),
+        "a sky is answered with a kept final reply that holds for it"
+    );
 }
 
 /// Logs at `info` that a sky has started: where it is seen from and what it asks.

@@ -172,6 +172,7 @@ An option given on the command line wins over its variable.
 | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                                     | Serve `sky` requests                         |
 | `--keep-skies`          | `HYPERION_KEEP_SKIES`          | on                                                     | Answer a sky asked again from memory         |
 | `--kept-skies-disk`     | `HYPERION_KEPT_SKIES_DISK_MB`  | `256`                                                  | The kept skies on disk, in MiB               |
+| `--hold-kept-skies`     | `HYPERION_HOLD_KEPT_SKIES`     | on                                                     | Answer a later sky from a kept one           |
 | `--sky-qos`             | `HYPERION_SKY_QOS`             | `background` on macOS, `utility` elsewhere             | A sky's class after its first reply          |
 | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                                    | Stop gracefully when standard input closes   |
 
@@ -213,6 +214,15 @@ most stars a sky lists, in `skies/` under the data directory, so that a sky aske
 restart is answered from its file (R06.T11.n). The least recently used go first. A file that is
 torn, or was written by another generator or protocol version or under other sky settings, is
 never read; `0` keeps none on disk, and `--keep-skies=false` none anywhere.
+
+`--hold-kept-skies` answers a sky asked at a later time, or from a little way off, with a kept
+reply of the same request otherwise that still holds there: asked before its `valid_until`, and
+from within a tenth of a pixel of its nearest star's parallax at 1080p across 60°, as the client
+holds a sky it has (R06.T11.p). The reply goes as it was kept, its own time and observer
+unchanged, so a relaunched client with the clock running costs no census. Skies written before
+it are named otherwise, and are never read again; they go first as new skies are written.
+`--hold-kept-skies=false` answers only a sky asked exactly again. It takes the same values as
+`--serve-sky`.
 
 `--sky-qos` is the class a sky's census runs at after its first reply: `background`, the default on
 macOS, runs it at the quality-of-service class background, which Apple silicon keeps to its
