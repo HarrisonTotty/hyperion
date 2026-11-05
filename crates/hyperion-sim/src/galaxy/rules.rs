@@ -14,6 +14,8 @@
 //!
 //! The holds, each a field:
 //!
+//! - [`merger_tables`](GalaxyRules::merger_tables), the merger classes' step from 31 (P15.T10.b,
+//!   [`MergerTableRules`]): their census of the generator's own pairs;
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -23,6 +25,7 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::FieldShareRules;
+use crate::galaxy::catalogue_classes::binary::MergerTableRules;
 use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::members::recent::FeatureClassesRules;
@@ -49,6 +52,9 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
+    /// The merger classes' step (P15.T10.b's mergers, held at 31, [`MergerTableRules`]): whether
+    /// their census draws the generator's own pairs. Read only where a census runs.
+    pub(crate) merger_tables: MergerTableRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -63,8 +69,18 @@ impl GalaxyRules {
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
+            merger_tables: MergerTableRules::of_version(version),
             stellar: StellarRules::of_version(version),
         }
+    }
+
+    /// Every galaxy and stellar hold at 31 in force, for a test that asserts a 31 figure: the
+    /// merger classes' step (P15.T10.b, [`MergerTableRules::Fitted`]). The 31 bump deletes it with
+    /// them.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_31_hold() -> Self {
+        Self::of_version(GeneratorVersion::new(31))
     }
 }
 
@@ -148,5 +164,18 @@ mod tests {
                 StellarRules::of_version(GeneratorVersion::new(v))
             );
         }
+        for (v, merger_tables) in [
+            (30, MergerTableRules::Scratch),
+            (31, MergerTableRules::Fitted),
+        ] {
+            assert_eq!(
+                GalaxyRules::of_version(GeneratorVersion::new(v)).merger_tables,
+                merger_tables
+            );
+        }
+        assert_eq!(
+            GalaxyRules::every_31_hold().merger_tables,
+            MergerTableRules::Fitted
+        );
     }
 }

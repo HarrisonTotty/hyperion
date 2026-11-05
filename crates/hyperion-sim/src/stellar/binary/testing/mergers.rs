@@ -2,6 +2,11 @@
 //! mergers of first-attempt grid pairs, against which a merger class's sampler is checked and plan
 //! 15's P15.T10.b fits it.
 //!
+//! From generator version 31 a record's first attempt is the generator's, under its own
+//! multiplicity and on its primary's kept kick, so a displaced record has none (`mergers_of`), as
+//! the class census's (the merger step's hold, `galaxy::catalogue_classes::binary`'s
+//! `mergers_hold`).
+//!
 //! A merger falls in the source horizon, L + 2H ≈ 2.6 × 10⁵ years, of about one grid system in
 //! 10⁶ for the stellar mergers and one in 10¹⁰ for the neutron-star mergers, so the members of
 //! [`brute_force_class_members`](super::brute_force_class_members), whose pairs are in a class
@@ -22,9 +27,12 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{CellKey, SystemOrigin, SystemRecord, generate_cell};
 use crate::id::Layer;
+use crate::stellar::binary::carve::redraws;
 use crate::stellar::binary::{BinaryState, BinaryTimeline, CarvedClass, SegmentKind, carved_class};
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
-use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
+use crate::stellar::system::{
+    StarModel, SystemStars, draw_metallicity, grid_multiplicity, primary_draws,
+};
 use crate::tables::binary::CLASS_SHARES;
 use crate::units::Years;
 
@@ -149,6 +157,15 @@ pub fn brute_force_merger_members_in(
 }
 
 /// The mergers of `class` among the first attempt's pairs of grid record `record`.
+///
+/// From 31 ([`MergerTableRules::Fitted`](crate::galaxy::catalogue_classes::binary::MergerTableRules))
+/// they are the pairs of the system the generator draws there, before any redraw
+/// (`SystemStars::generate_at`), under the record's own multiplicity ([`grid_multiplicity`]) and on
+/// its primary's model as every reader takes it, the kept attempt of plan 08's kick loop for a
+/// record that constrains its kick, as the class census's members are; a record whose system the
+/// carve-out never redraws ([`redraws`]), a displaced one, which the generator shows single, has
+/// none (P15.T10.b; train 27's finding). Below 31 they are the first attempt's pairs under `Free`
+/// multiplicity on the primary's own draws, the held arm.
 fn mergers_of(
     galaxy: &Galaxy,
     record: &SystemRecord,
@@ -158,22 +175,36 @@ fn mergers_of(
     let SystemOrigin::Grid(component) = record.origin() else {
         return;
     };
-    let composition = draw_metallicity(galaxy, record);
-    let primary = StarModel::new_under(
-        record.primary_initial_mass(),
-        composition,
-        primary_draws(galaxy, record),
-        record.age_at_epoch(),
-        galaxy.rules().stellar,
-    )
-    .expect("a stellar layer's primary is a star with a finite age");
-    let stars = SystemStars::at_attempt(
-        galaxy,
-        record,
-        &primary,
-        MultiplicityContext::Free,
-        RedrawAttempt::FIRST,
-    );
+    let stars = if galaxy.rules().merger_tables.census_draws_the_generator() {
+        let ctx = grid_multiplicity(record);
+        if !redraws(galaxy, record, ctx) {
+            return;
+        }
+        SystemStars::generate_at(
+            galaxy,
+            record,
+            &draw_metallicity(galaxy, record),
+            ctx,
+            RedrawAttempt::FIRST,
+        )
+    } else {
+        let composition = draw_metallicity(galaxy, record);
+        let primary = StarModel::new_under(
+            record.primary_initial_mass(),
+            composition,
+            primary_draws(galaxy, record),
+            record.age_at_epoch(),
+            galaxy.rules().stellar,
+        )
+        .expect("a stellar layer's primary is a star with a finite age");
+        SystemStars::at_attempt(
+            galaxy,
+            record,
+            &primary,
+            MultiplicityContext::Free,
+            RedrawAttempt::FIRST,
+        )
+    };
     let ages = galaxy.fields().component(component).ages();
     for pair in stars.pairs() {
         let timeline = pair.timeline();
@@ -199,7 +230,7 @@ fn mergers_of(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stellar::system::{PairTimeline, grid_multiplicity};
+    use crate::stellar::system::PairTimeline;
 
     /// The fits' census galaxy (`hyperion-fit`'s binary manifests) at generator version 31's
     /// rules, at which the merger step is held (P15.T10.b).
