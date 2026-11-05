@@ -68,7 +68,7 @@ use self::imf::{BandShares, Chabrier, Kept, Kroupa, MassFunction, MassFunctionKi
 use self::kinematics::KinematicTables;
 use self::motion::CentreMotion;
 use self::params::GalaxyParams;
-use self::potential::{MassModel, PotentialTables};
+use self::potential::{MassModel, PotentialGrid, PotentialGridPlan, PotentialTables};
 use self::rules::GalaxyRules;
 use self::shares::ShareMatrix;
 use self::snr::WindowCaps;
@@ -616,27 +616,112 @@ impl Galaxy {
     /// it (plan 08, P08.T5): what velocities, and so every position away from the epoch, need.
     ///
     /// Plans 08–10 read the potential off the plane. The grid takes about 2 s to build (plan 02,
-    /// Risks, R15) and the kinematic tables some tens of milliseconds more; a galaxy that has them
-    /// already is returned as it is. Nothing else changes.
+    /// Risks, R15; 3.45 s on one thread from version 28, release, pod, 16 vCPU, 2026-11-05) and the
+    /// kinematic tables some 0.13 s more; a galaxy that has them already is returned as it is.
+    /// Nothing else changes. A caller with threads makes the grid on them
+    /// ([`potential_grid_plan`](Self::potential_grid_plan)).
     #[must_use]
     pub fn with_full_potential(self) -> Self {
         if self.potential.has_grid() && self.kinematics.is_some() {
             return self;
         }
-        let potential = if self.potential.has_grid() {
-            self.potential
+        if self.potential.has_grid() {
+            self.with_kinematics()
         } else {
-            self.potential.with_grid(&self.model)
-        };
+            Self {
+                potential: self.potential.with_grid(&self.model),
+                ..self
+            }
+            .with_kinematics()
+        }
+    }
+
+    /// The plan of the (R, |z|) grid that [`with_full_potential`](Self::with_full_potential)
+    /// adds to [`Galaxy::new`]'s galaxy of `seed`.
+    ///
+    /// It is the grid of the same mass model, built here from the seed's parameters in some 0.11 s,
+    /// without the rest of the galaxy (release, pod, 16 vCPU, 2026-11-05), so that a caller with
+    /// threads can make the grid's points on them beside [`Galaxy::new`], as the server does on its
+    /// pool (perf-galaxy-build-start), and hand the grid to
+    /// [`with_full_potential_grid`](Self::with_full_potential_grid). It is of [`Galaxy::new`]'s
+    /// galaxy alone, not of one built from other parameters or with another mass function.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::thread;
+    ///
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::potential::GRID_POINTS;
+    ///
+    /// let seed = Seed::new(42);
+    /// let plan = Galaxy::potential_grid_plan(seed);
+    /// // The galaxy on one thread, and its grid's points in two shares on two more.
+    /// let (galaxy, points) = thread::scope(|scope| {
+    ///     let galaxy = scope.spawn(|| Galaxy::new(seed));
+    ///     let shares = [0, 1].map(|first| {
+    ///         let plan = &plan;
+    ///         scope.spawn(move || {
+    ///             (first..GRID_POINTS).step_by(2).map(|k| plan.point(k)).collect::<Vec<_>>()
+    ///         })
+    ///     });
+    ///     let points: Vec<_> = shares.into_iter().flat_map(|share| share.join().unwrap()).collect();
+    ///     (galaxy.join().unwrap(), points)
+    /// });
+    /// // The serial `Galaxy::new(seed).with_full_potential()`, bit for bit.
+    /// let galaxy = galaxy.with_full_potential_grid(plan.finish(points));
+    /// assert!(galaxy.kinematics().is_some());
+    /// ```
+    #[must_use]
+    pub fn potential_grid_plan(seed: Seed) -> PotentialGridPlan {
+        PotentialGridPlan::new(MassModel::new(&GalaxyParams::from_seed(
+            seed,
+            MassFunctionKind::default(),
+        )))
+    }
+
+    /// [`with_full_potential`](Self::with_full_potential), with `grid` in place of the grid it
+    /// would make.
+    ///
+    /// It is the same galaxy, bit for bit, since a grid's points are pure functions of its model
+    /// ([`PotentialGridPlan`]). A galaxy that has the grid already keeps its own.
+    ///
+    /// # Panics
+    ///
+    /// If `grid` is not of this galaxy's mass model.
+    #[must_use]
+    pub fn with_full_potential_grid(self, grid: PotentialGrid) -> Self {
+        assert_eq!(
+            grid.model(),
+            &self.model,
+            "a galaxy's grid is of its own mass model"
+        );
+        if self.potential.has_grid() && self.kinematics.is_some() {
+            return self;
+        }
+        if self.potential.has_grid() {
+            self.with_kinematics()
+        } else {
+            Self {
+                potential: self.potential.with_made_grid(grid),
+                ..self
+            }
+            .with_kinematics()
+        }
+    }
+
+    /// This galaxy, whose potential has the (R, |z|) grid, with the kinematic tables built in it.
+    #[must_use]
+    fn with_kinematics(self) -> Self {
         let kinematics = KinematicTables::new(
             self.seed,
             &self.params,
             &self.fields,
             &self.model,
-            &potential,
+            &self.potential,
         );
         Self {
-            potential,
             kinematics: Some(Box::new(kinematics)),
             ..self
         }
@@ -1290,6 +1375,50 @@ mod tests {
         let version = Galaxy::from_params(seed, GalaxyParams::milky_way_like()).unwrap();
         version.make_query_tables();
         assert_eq!(made(&version), [false, true, true], "no kinematic tables");
+    }
+
+    /// perf-galaxy-build-start: the plan of a seed's grid is of [`Galaxy::new`]'s mass model, and
+    /// the galaxy given the grid gathered from its points, made in shares dealt out in turn, the
+    /// last share first, is its full potential's, bit for bit: the tables' and the kinematic
+    /// tables' `Debug` text, which prints every double's shortest round trip, and the galaxy's.
+    #[test]
+    #[ignore = "slow: two full potentials of one drawn galaxy"]
+    fn a_galaxy_given_its_grid_made_in_shares_is_its_full_potential_bit_for_bit() {
+        use self::potential::GRID_POINTS;
+        let seed = Seed::new(0x4d2);
+        let built = Galaxy::new(seed);
+        let plan = Galaxy::potential_grid_plan(seed);
+        assert_eq!(plan.model(), &built.model);
+        let shares = 7;
+        let points: Vec<_> = (0..shares)
+            .rev()
+            .flat_map(|share| (share..GRID_POINTS).step_by(shares))
+            .map(|k| plan.point(k))
+            .collect();
+        let made = built.clone().with_full_potential_grid(plan.finish(points));
+        let whole = built.with_full_potential();
+        assert_eq!(
+            format!("{:?}", made.potential()),
+            format!("{:?}", whole.potential())
+        );
+        assert_eq!(
+            format!("{:?}", made.kinematics()),
+            format!("{:?}", whole.kinematics())
+        );
+        assert_eq!(made, whole);
+        // A galaxy with its grid keeps it, given even a grid that no model has.
+        let filled = self::potential::PotentialGrid::filled(whole.model.clone(), 1.0);
+        assert_eq!(whole.clone().with_full_potential_grid(filled), whole);
+    }
+
+    /// A grid is refused by a galaxy of another mass model, before anything is built from it.
+    #[test]
+    #[should_panic(expected = "a galaxy's grid is of its own mass model")]
+    fn a_galaxy_refuses_another_model_s_grid() {
+        let plan = Galaxy::potential_grid_plan(Seed::new(0x4d2));
+        // Any values will do: the model is checked first.
+        let grid = self::potential::PotentialGrid::filled(plan.model().clone(), 0.0);
+        let _ = Galaxy::new(Seed::new(0x4d3)).with_full_potential_grid(grid);
     }
 
     #[test]

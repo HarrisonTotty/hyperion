@@ -2622,3 +2622,116 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
     client.close().await;
     server.stop().await;
 }
+
+/// perf-galaxy-build-start's table: on a server of eight workers that serves the sky to its
+/// derived caps and warms the global list at an open, as a played server does, the seconds from a
+/// universe's open to its open's answer, which waits for the galaxy, and to the first answer
+/// after it: on one server the range query of `systems_in_range`'s table, at the Sun-like point to
+/// 50 ly, and on another the first reply of a sky near the Sun, after which the sky is cancelled.
+/// Each is asked at a first launch over a fresh data directory and again after a relaunch over
+/// it. Its figures depend on the machine and the build, so it asserts only that the relaunched
+/// range answer is the first's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "measurement, run by hand: cargo test --release -p hyperion-server --test sky \
+            first_answers_after_a_launch_and_a_relaunch -- --ignored --nocapture"]
+async fn first_answers_after_a_launch_and_a_relaunch() {
+    let workers = NonZeroUsize::new(8).expect("eight");
+    eprintln!("| First answer | Launch | Open (s) | Answer after the open (s) |");
+    eprintln!("| --- | --- | --- | --- |");
+    for asked in ["range 50 ly", "sky's first reply"] {
+        let data_dir = tempfile::tempdir().expect("a temporary directory");
+        let config = || {
+            TestServer::config(data_dir.path())
+                .workers(workers)
+                .sky_service(SkyService::Served)
+                .global_list_warm_up(hyperion_server::GlobalListWarmUp::AtOpen)
+                .build()
+        };
+        let mut universe = None;
+        let mut answers = Vec::new();
+        for launch in ["first", "relaunched"] {
+            let server = TestServer::start_with(config()).await;
+            let mut client = server.connected().await;
+            let id = match &universe {
+                Some(id) => UniverseIdHex::clone(id),
+                None => client.create_universe("Sky: measured", SEED).await.id,
+            };
+            universe = Some(id.clone());
+            let started = std::time::Instant::now();
+            let body = RequestBody::OpenUniverse(OpenUniverseRequest {
+                universe: id.clone(),
+            });
+            match client.request(body).await {
+                Ok(ResponseBody::OpenUniverse(_)) => {}
+                other => panic!("expected the opened universe, got {other:?}"),
+            }
+            let open = started.elapsed();
+            // When the first answer arrived, before a sky is cancelled.
+            let answered = if asked.starts_with("range") {
+                let body = RequestBody::SystemsInRange(SystemsInRangeRequest {
+                    universe: id.clone(),
+                    centre: GalacticPosition {
+                        cell_ly: [0, 26_000, 0],
+                        offset_m: [0.0; 3],
+                    },
+                    radius_ly: 50.0,
+                    time: UniverseTime::default(),
+                    min_layer: MassLayer::A,
+                    limit: hyperion_server::limits::MAX_CENSUS_LIMIT,
+                    include_stellar: false,
+                    mode: hyperion_protocol::QueryModeDto::Now,
+                });
+                match client.request(body).await {
+                    Ok(ResponseBody::SystemsInRange(answer)) => {
+                        answers.push(serde_json::to_string(&answer).unwrap());
+                    }
+                    other => panic!("expected the systems in range, got {other:?}"),
+                }
+                started.elapsed()
+            } else {
+                let sky_id = client.send_request(RequestBody::Sky(sky(&id))).await;
+                let (finished, replied) = loop {
+                    match client.next_frame().await {
+                        Frame::Binary(..) => {}
+                        Frame::Message(ServerMessage::PartialResponse { id: answered, .. })
+                            if answered == sky_id =>
+                        {
+                            break (false, started.elapsed());
+                        }
+                        Frame::Message(ServerMessage::Response { id: answered, .. })
+                            if answered == sky_id =>
+                        {
+                            break (true, started.elapsed());
+                        }
+                        Frame::Message(other) => panic!("expected the sky's reply, got {other:?}"),
+                    }
+                };
+                if !finished {
+                    client.cancel(sky_id).await;
+                    loop {
+                        match client.next_frame().await {
+                            Frame::Message(ServerMessage::RequestError { id: ended, .. })
+                                if ended == sky_id =>
+                            {
+                                break;
+                            }
+                            Frame::Binary(..) | Frame::Message(_) => {}
+                        }
+                    }
+                }
+                replied
+            }
+            .saturating_sub(open);
+            eprintln!(
+                "| {asked} | {launch} | {:.2} | {:.2} |",
+                open.as_secs_f64(),
+                answered.as_secs_f64()
+            );
+            client.close().await;
+            server.stop().await;
+        }
+        if let [first, relaunched] = &answers[..] {
+            assert_eq!(relaunched, first, "the relaunched range answer");
+        }
+    }
+}

@@ -206,7 +206,7 @@ fn check_key(galaxy: &Galaxy, key: GalaxyKey) {
 /// # Errors
 ///
 /// [`ComputeError::Submit`] if the pool is shutting down or faulted.
-async fn queue<R: Send + 'static>(
+pub(super) async fn queue<R: Send + 'static>(
     pool: &CpuPool,
     priority: Priority,
     token: &CancelToken,
@@ -218,7 +218,7 @@ async fn queue<R: Send + 'static>(
 }
 
 /// What a job sent back, or why it sent nothing.
-async fn reply<R>(receiver: JobReceiver<R>) -> Result<R, ComputeError> {
+pub(super) async fn reply<R>(receiver: JobReceiver<R>) -> Result<R, ComputeError> {
     receiver
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))
@@ -284,7 +284,7 @@ impl Force {
 /// `count` indices dealt out in turn among `shares` shares, but never more shares than indices:
 /// share `j` holds `j`, `j + n`, `j + 2n` and so on, each in order.
 #[must_use]
-fn dealt(count: u64, shares: NonZeroUsize) -> Vec<Vec<u64>> {
+pub(super) fn dealt(count: u64, shares: NonZeroUsize) -> Vec<Vec<u64>> {
     let n = u64::try_from(shares.get()).unwrap_or(u64::MAX).min(count);
     let stride = usize::try_from(n).expect("at most the shares, a usize");
     (0..n)

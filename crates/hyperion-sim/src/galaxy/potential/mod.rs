@@ -34,8 +34,8 @@ pub use force::CylindricalForce;
 pub use model::MassModel;
 pub(crate) use model::axisymmetric_bulge_scales;
 pub use monopole::SphericalAverage;
-pub use tables::PotentialTables;
 pub(crate) use tables::{GRID_EDGE_LY, TIDAL_FLOOR};
+pub use tables::{GRID_POINTS, GridValues, PotentialGrid, PotentialGridPlan, PotentialTables};
 
 // The tables' node spacing and Hermite basis, for plan 10's spray table (P10.T5.b), which shares
 // the (R, |z|) grid's nodes.

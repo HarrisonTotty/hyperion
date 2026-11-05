@@ -2475,3 +2475,18 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     `a_drawn_galaxy_s_census_is_the_old_path_s_bit_for_bit` keeps every envelope from its parts.
   - _Left._ A galaxy's first launch still builds every table whose shell its first query meets (121
     at 50 ly); an open's warm-up still builds every table after a relaunch, to fill the cache.
+- **P10, a galaxy's build at the server's start (lane `perf-galaxy-build-start`, 2026-11-05, at 28;
+  no output moved).**
+  - _Sim._ `potential::{GRID_POINTS, GridValues, PotentialGridPlan, PotentialGrid}`;
+    `Galaxy::potential_grid_plan(seed)` (of `Galaxy::new`'s model alone) and
+    `Galaxy::with_full_potential_grid(grid)`, which panics on another model's grid.
+  - _Server._ `GalaxyCache` builds with `full_galaxy_on`: `Galaxy::new` in one job, the grid's
+    points in `workers − 1` shares beside it, then the grid and kinematic tables in one; the two
+    headroom checks and `make_query_tables` then run side by side. A test double builds in one job.
+  - _Tests._ `tables::tests::a_grid_plan_*`, `galaxy::tests::a_galaxy_refuses_another_model_s_grid`,
+    the slow `a_galaxy_given_its_grid_made_in_shares_is_its_full_potential_bit_for_bit`;
+    `compute::galaxies::tests::a_galaxy_built_on_the_pool_is_the_serial_build` (and its list); the
+    ignored measurement `--test sky first_answers_after_a_launch_and_a_relaunch`.
+  - _Left._ `Galaxy::new` (0.73 s, 0.39 s of it the displaced class table, one accumulator over the
+    components) is now the build's critical path; a first sky's first reply waits on its luminosity
+    tables, which no disk keeps.

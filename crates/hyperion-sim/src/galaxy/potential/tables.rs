@@ -184,14 +184,14 @@ struct Grid {
 }
 
 impl Grid {
+    /// The grid of `model`, its points made in index order by [`grid_values`]: the bits of every
+    /// grid a [`PotentialGridPlan`] gathers.
     fn new(model: &MassModel) -> Self {
-        let mut points = Vec::with_capacity(POINTS * POINTS);
-        for i in 0..POINTS {
-            for j in 0..POINTS {
-                points.push(model.extended_grid_point(grid_point(i), grid_point(j)));
-            }
+        Self {
+            points: (0..GRID_POINTS)
+                .map(|k| grid_values(model, k).values)
+                .collect(),
         }
-        Self { points }
     }
 
     /// The Gaussians' potential at a point inside the grid's range, bicubic in the logarithms.
@@ -242,6 +242,146 @@ impl Grid {
         }
         // The basis's rates are per cell; one cell is STEP in the logarithm.
         [by_ln_r / STEP, by_ln_z / STEP]
+    }
+}
+
+/// The points of the (R, |z|) grid, 64 radii by 64 heights: point `k` is at radius `R_i`, `i = k ÷
+/// 64`, and height `|z|_j`, `j = k mod 64`.
+pub const GRID_POINTS: usize = POINTS * POINTS;
+
+/// Point `k` of the (R, |z|) grid ([`GRID_POINTS`]): the Gaussians' potential and its
+/// logarithmic derivatives there, `[Φ, R ∂Φ ÷ ∂R, z ∂Φ ÷ ∂z, R z ∂²Φ ÷ ∂R ∂z]`, (km/s)².
+///
+/// [`PotentialGridPlan::point`] makes it, and it carries its index, so that
+/// [`PotentialGridPlan::finish`] puts it in its place whatever order the points come in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GridValues {
+    k: usize,
+    values: [f64; 4],
+}
+
+/// Point `k` of `model`'s grid ([`GRID_POINTS`]).
+///
+/// # Panics
+///
+/// If `k` is not below [`GRID_POINTS`].
+#[must_use]
+fn grid_values(model: &MassModel, k: usize) -> GridValues {
+    assert!(
+        k < GRID_POINTS,
+        "the grid has {GRID_POINTS} points, and {k} is not one"
+    );
+    GridValues {
+        k,
+        values: model.extended_grid_point(grid_point(k / POINTS), grid_point(k % POINTS)),
+    }
+}
+
+/// The (R, |z|) grid of a mass model, made a point at a time, so that a caller with threads can
+/// make its points on all of them (the server's pool, perf-galaxy-build-start).
+///
+/// The grid takes some 3.45 s on one thread, nearly all of a full potential's cost (release, pod,
+/// 16 vCPU, 2026-11-05). Each point is a pure function of the model and its index, which it
+/// carries, and [`PotentialTables::with_grid`] makes its grid from the same points in index order,
+/// so a grid finished from them made in any shares, on any threads and gathered in any order is
+/// that grid, bit for bit.
+///
+/// # Examples
+///
+/// ```no_run
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::galaxy::potential::{GRID_POINTS, MassModel, PotentialGridPlan};
+///
+/// let plan = PotentialGridPlan::new(MassModel::new(&GalaxyParams::milky_way_like()));
+/// // Points dealt out in turn to two shares, each made where it may be, then gathered.
+/// let (even, odd): (Vec<usize>, Vec<usize>) = (0..GRID_POINTS).partition(|k| k % 2 == 0);
+/// let made = [odd, even].map(|share| share.into_iter().map(|k| plan.point(k)).collect::<Vec<_>>());
+/// let grid = plan.finish(made.into_iter().flatten());
+/// assert_eq!(grid.model(), &MassModel::new(&GalaxyParams::milky_way_like()));
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct PotentialGridPlan {
+    model: MassModel,
+}
+
+impl PotentialGridPlan {
+    /// The plan of `model`'s grid.
+    #[must_use]
+    pub fn new(model: MassModel) -> Self {
+        Self { model }
+    }
+
+    /// The mass model whose grid this is.
+    #[must_use]
+    pub fn model(&self) -> &MassModel {
+        &self.model
+    }
+
+    /// Point `k` of the grid ([`GRID_POINTS`]).
+    ///
+    /// # Panics
+    ///
+    /// If `k` is not below [`GRID_POINTS`].
+    #[must_use]
+    pub fn point(&self, k: usize) -> GridValues {
+        grid_values(&self.model, k)
+    }
+
+    /// The grid of `points`, every point of the grid once, in any order, each as
+    /// [`point`](Self::point) made it.
+    ///
+    /// # Panics
+    ///
+    /// If a point comes twice, or one is missing.
+    #[must_use]
+    pub fn finish(self, points: impl IntoIterator<Item = GridValues>) -> PotentialGrid {
+        let mut placed = vec![None; GRID_POINTS];
+        for GridValues { k, values } in points {
+            assert!(
+                placed[k].replace(values).is_none(),
+                "a grid's point {k} is given once"
+            );
+        }
+        PotentialGrid {
+            model: self.model,
+            grid: Grid {
+                points: placed
+                    .into_iter()
+                    .enumerate()
+                    .map(|(k, values)| {
+                        values.unwrap_or_else(|| panic!("a grid's point {k} is missing"))
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+/// A mass model's (R, |z|) grid, gathered by a [`PotentialGridPlan`], with the model it is of:
+/// what [`Galaxy::with_full_potential_grid`](crate::galaxy::Galaxy::with_full_potential_grid)
+/// takes in place of the grid it would make.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PotentialGrid {
+    model: MassModel,
+    grid: Grid,
+}
+
+impl PotentialGrid {
+    /// The mass model whose grid this is.
+    #[must_use]
+    pub fn model(&self) -> &MassModel {
+        &self.model
+    }
+
+    /// A grid of `model` whose every value is `value`, which no model has: for the test that a
+    /// galaxy with its grid keeps it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn filled(model: MassModel, value: f64) -> Self {
+        PotentialGridPlan::new(model).finish((0..GRID_POINTS).map(|k| GridValues {
+            k,
+            values: [value; 4],
+        }))
     }
 }
 
@@ -325,6 +465,16 @@ impl PotentialTables {
     pub fn with_grid(self, model: &MassModel) -> Self {
         Self {
             grid: Some(Grid::new(model)),
+            ..self
+        }
+    }
+
+    /// These tables with `grid` added, which must be of the model the tables were built from, as
+    /// the galaxy that calls this checks: [`with_grid`](Self::with_grid)'s tables, bit for bit.
+    #[must_use]
+    pub(crate) fn with_made_grid(self, grid: PotentialGrid) -> Self {
+        Self {
+            grid: Some(grid.grid),
             ..self
         }
     }
@@ -657,6 +807,57 @@ impl PotentialTables {
 mod tests {
     use super::*;
     use crate::galaxy::params::GalaxyParams;
+
+    /// A grid plan's point `k` is the model's at row `k ÷ 64` and column `k mod 64`, at both ends
+    /// of each axis and through the grid, and its finish keeps every point at its index, so a grid
+    /// gathered by index is the grid [`Grid::new`] makes in index order (perf-galaxy-build-start);
+    /// the slow galaxy test holds a whole grid made in shares to it.
+    #[test]
+    fn a_grid_plan_s_points_are_the_model_s_and_its_finish_keeps_their_order() {
+        let model = MassModel::new(&GalaxyParams::milky_way_like());
+        let plan = PotentialGridPlan::new(model.clone());
+        for k in (0..GRID_POINTS)
+            .step_by(37)
+            .chain([63, 64, GRID_POINTS - 1])
+        {
+            let expected =
+                model.extended_grid_point(grid_point(k / POINTS), grid_point(k % POINTS));
+            let made = plan.point(k);
+            assert_eq!(made.k, k);
+            for (made, expected) in made.values.into_iter().zip(expected) {
+                hyperion_testkit::float::assert_same_bits(made, expected);
+            }
+        }
+        // Values that name their own index, given in reverse.
+        let grid = plan.finish((0..GRID_POINTS).rev().map(tagged));
+        assert_eq!(grid.model(), &model);
+        for (k, point) in grid.grid.points.iter().enumerate() {
+            assert_eq!(*point, tagged(k).values, "point {k}");
+        }
+    }
+
+    /// Point `k` with values that name it.
+    fn tagged(k: usize) -> GridValues {
+        let x = f64::from(u32::try_from(k).unwrap());
+        GridValues {
+            k,
+            values: [x, -x, x + 0.5, -x - 0.5],
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "a grid's point 4095 is missing")]
+    fn a_grid_plan_refuses_to_finish_short_of_a_point() {
+        let plan = PotentialGridPlan::new(MassModel::new(&GalaxyParams::milky_way_like()));
+        let _ = plan.finish((0..GRID_POINTS - 1).map(tagged));
+    }
+
+    #[test]
+    #[should_panic(expected = "a grid's point 7 is given once")]
+    fn a_grid_plan_refuses_a_point_given_twice() {
+        let plan = PotentialGridPlan::new(MassModel::new(&GalaxyParams::milky_way_like()));
+        let _ = plan.finish((0..GRID_POINTS).chain([7]).map(tagged));
+    }
 
     /// `potential_in_plane` sums Φ alone, so that it must be `totals(r).potential` bit for bit:
     /// below the grid, on and between its points, and beyond it out to the escape boundary and
