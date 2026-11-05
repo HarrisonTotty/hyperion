@@ -1307,6 +1307,16 @@ domain_tags! {
     /// its ejection speed inside its class's speed bin, and word 2 its azimuth, which its class's
     /// velocity reads in the ballistic bins.
     CLASS_CORE_COLLAPSE_EJECTION: System = "class.core_collapse.ejection";
+
+    // Rendering plan R15: the planet viewer's `RANDOMIZE`, a tool's draw of a real planet's inputs
+    // that no generator opens. Appended here, after P09.T33.b's ejection, because the macro's order
+    // fixes `ALL`.
+
+    /// The planet viewer's `RANDOMIZE` (rendering plan R15, `planetary::viewer::draw_inputs`),
+    /// opened with its draw seed as the stream's seed and `ObjectKey::galaxy_item(try)`: words
+    /// 0–3 four uniforms that place a point by the galaxy's density, word 4 the planet picked of
+    /// the system nearest it, word 5 the new `SEED`; every later word is reserved.
+    VIEWER_DRAW: Galaxy = "viewer.draw";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface

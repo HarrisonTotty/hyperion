@@ -125,7 +125,7 @@ use crate::planetary::placement::zones::P_TYPE_PLACEMENT_MARGIN;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::draws::UnitUniform;
 use crate::units::consts::{EARTH_MASS_KG, GM_EARTH, GM_SUN, SECONDS_PER_DAY, SOLAR_MASS_KG};
-use crate::units::{Days, EarthMasses, GravitationalParameter, Metres, SolarMasses};
+use crate::units::{Days, EarthMasses, GravitationalParameter, Metres, Radians, SolarMasses};
 
 /// Words of the [`tags::PLANET_COUNT`] stream that one orbit host owns: host h reads words 64h to
 /// 64h + 63. 256 hosts fill words 0 to 16,383.
@@ -752,6 +752,101 @@ pub fn place(
         planets,
         next_slot,
     }
+}
+
+/// One planet's primordial mass and orbit, given in place of a class's placement (the planet
+/// viewer, plan R15; [`place_given`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GivenOrbit {
+    /// The planet's primordial mass.
+    pub mass: EarthMasses,
+    /// Its primordial semi-major axis about its host, m, positive and finite.
+    pub semi_major_axis: Metres,
+    /// Its primordial eccentricity.
+    pub eccentricity: Eccentricity,
+    /// How far from its host it formed, m, positive and finite, or `None` for where
+    /// placement's rule puts it: its semi-major axis, or a giant's the site where
+    /// giants' cores grow if that lies further out.
+    pub formation_distance: Option<Metres>,
+}
+
+/// The planet `given` of `host`, whose disc is `disc`, in slot `slot` of `system` in the universe
+/// of `seed`, placed as [`place`]'s planets are but on its given orbit (the planet viewer, plan R15):
+/// its node, argument of periapsis and mean anomaly its own [`OrbitDraws`], in the host's plane,
+/// which it lies in (a lone planet has no mutual inclination to draw); μ = G (M★ + m) with M★ the
+/// host's zero-age mass; its formation distance given, or placement's rule's; and the
+/// side of the snow line it formed on from that distance. `None` where the host has no disc: no
+/// planet forms without one.
+///
+/// # Panics
+///
+/// If `slot` lies in no planets' block, or `given`'s semi-major axis is not positive and finite.
+#[must_use]
+pub fn place_given(
+    seed: Seed,
+    system: SystemId,
+    host: &PlacementHost,
+    disc: &Disc,
+    given: &GivenOrbit,
+    slot: u8,
+) -> Option<PlacedPlanet> {
+    let profile = disc.profile()?;
+    let index = planet_index(slot);
+    let draws = OrbitDraws::for_planet(seed, system, index);
+    let plane = orbits::host_plane(seed, system, host.number(), host.plane());
+    let orientation =
+        orbits::orientation_in_plane(&plane, Radians::ZERO, draws.node, draws.periapsis)
+            .expect("the angles are finite and the inclination zero");
+    let mu = GravitationalParameter::new(
+        GM_SUN * host.zams().mass().value() + GM_EARTH * given.mass.value(),
+    );
+    let a = given.semi_major_axis;
+    let orbit = KeplerElements::from_semi_major_axis(
+        a,
+        mu,
+        given.eccentricity,
+        orientation,
+        draws.mean_anomaly,
+    )
+    .expect("a positive, finite axis about a positive mass");
+    let giant = given.mass >= EarthMasses::from(SPACING_GIANT_MASS);
+    let snow = profile.snow_line();
+    let core_site = snow.max_of(profile.inner_edge());
+    let formation_distance =
+        given
+            .formation_distance
+            .unwrap_or(if giant { a.max_of(core_site) } else { a });
+    let formed = if formation_distance < snow {
+        SnowLineSide::Inside
+    } else {
+        SnowLineSide::Beyond
+    };
+    let e = given.eccentricity.value();
+    Some(PlacedPlanet {
+        index,
+        group: 0,
+        role: match (giant, formed) {
+            (true, _) => GroupRole::Giant,
+            (false, SnowLineSide::Inside) => GroupRole::Rocky,
+            (false, SnowLineSide::Beyond) => GroupRole::IceRich,
+        },
+        mass: given.mass,
+        orbit,
+        formation_distance,
+        formed,
+        origin: if formation_distance > a {
+            Origin::Migrated
+        } else {
+            Origin::InSitu
+        },
+        hot: false,
+        resonance: None,
+        drawn_eccentricity: e,
+        // No law drew it: the given value as a Rayleigh law's scale, which nothing reads after
+        // placement.
+        eccentricity_law: EccentricityLaw::Rayleigh { sigma: e },
+        rescaled: false,
+    })
 }
 
 /// The last slot of the block `first` lies in, or `None` past the planets' blocks.

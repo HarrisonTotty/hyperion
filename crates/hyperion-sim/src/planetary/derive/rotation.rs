@@ -67,13 +67,19 @@ use crate::units::{EarthMasses, EarthRadii, Kilograms, Metres, Radians, Seconds,
 /// reserved.
 pub const SPIN_WORDS: u64 = 8;
 
-/// A body's draws on its own [`tags::PLANET_SPIN`] stream (P14.T14.a).
+/// A body's draws on its own [`tags::PLANET_SPIN`] stream (P14.T14.a), and the primordial period
+/// and obliquity a tool may give in place of its ranks' (the planet viewer, plan R15).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpinDraws {
     period_rank: UnitUniform,
     obliquity_rank: UnitUniform,
     pole_azimuth: Radians,
     phase: Radians,
+    /// The primordial period given in place of the period rank's, still floored at the break-up
+    /// period; `None` for the drawn one, as every generated body has.
+    period: Option<Seconds>,
+    /// The obliquity given in place of the obliquity rank's; `None` for the drawn one.
+    obliquity: Option<Radians>,
 }
 
 impl SpinDraws {
@@ -83,6 +89,8 @@ impl SpinDraws {
         obliquity_rank: UnitUniform::HALF,
         pole_azimuth: Radians::ZERO,
         phase: Radians::ZERO,
+        period: None,
+        obliquity: None,
     };
 
     /// Draws of the ranks and angles given, for a test or a tool; each angle is reduced into
@@ -99,6 +107,8 @@ impl SpinDraws {
             obliquity_rank,
             pole_azimuth: Radians::new(reduce(pole_azimuth.value())),
             phase: Radians::new(reduce(phase.value())),
+            period: None,
+            obliquity: None,
         }
     }
 
@@ -136,6 +146,30 @@ impl SpinDraws {
             obliquity_rank,
             pole_azimuth,
             phase,
+            period: None,
+            obliquity: None,
+        }
+    }
+
+    /// These draws with the primordial period `period` in place of the period rank's (the planet
+    /// viewer's `DAY`, plan R15): the assembly still floors it at the body's [`breakup_period`].
+    /// `period` is the caller's to check positive and finite.
+    #[must_use]
+    pub const fn with_primordial_period(self, period: Seconds) -> Self {
+        Self {
+            period: Some(period),
+            ..self
+        }
+    }
+
+    /// These draws with the obliquity `obliquity` in place of the obliquity rank's (the planet
+    /// viewer's `TILT`, plan R15), whatever the body's [`ObliquityLaw`]. `obliquity` is the
+    /// caller's to check within `[0, π]`.
+    #[must_use]
+    pub const fn with_obliquity(self, obliquity: Radians) -> Self {
+        Self {
+            obliquity: Some(obliquity),
+            ..self
         }
     }
 
@@ -1119,10 +1153,15 @@ impl BodyRotation {
             &inputs.fractions,
             inputs.tides,
         )?;
-        let drawn = primordial_period(SpinFamily::of(inputs.class), inputs.draws.period_rank);
+        let drawn = inputs.draws.period.unwrap_or_else(|| {
+            primordial_period(SpinFamily::of(inputs.class), inputs.draws.period_rank)
+        });
         let floor = breakup_period(inputs.mass, inputs.radius);
         let period = Seconds::new(drawn.value().max(floor.value()));
-        let tilt = obliquity(inputs.obliquity_law, inputs.draws.obliquity_rank);
+        let tilt = inputs
+            .draws
+            .obliquity
+            .unwrap_or_else(|| obliquity(inputs.obliquity_law, inputs.draws.obliquity_rank));
         let locking_time = locking_time(&body, period);
         let frame = BodyFixedFrame::new(
             &inputs.orbit,

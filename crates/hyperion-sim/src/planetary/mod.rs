@@ -53,6 +53,9 @@
 //!   eruptions and a system's long-period comets, and the monotone phases of P14.T31.b, a giant's
 //!   great storms and a dry, thin-aired planet's global dust storms, each from plain arguments
 //!   until P14.T31.c calls them.
+//! - [`viewer`]: the planet viewer's planets (rendering plan R15): one planet from the generator's
+//!   own inputs as a synthetic system, a generated planet's inputs read back, and `RANDOMIZE`'s
+//!   draw of a real planet's.
 //! - [`surface`]: rendering plan R09's coarse pass, a body's coarse field from its surface seed
 //!   and plan 14's global figures; so far its frame (R09.T10): the inputs, the cell graph, the
 //!   quantiser and the steps as no-ops.
@@ -141,6 +144,7 @@ pub mod surface;
 pub mod system;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod viewer;
 
 pub use context::{HostKind, SystemContext};
 pub use error::{DecodeBodyIndexError, EncodeBodyIndexError, ResolveBodyError};

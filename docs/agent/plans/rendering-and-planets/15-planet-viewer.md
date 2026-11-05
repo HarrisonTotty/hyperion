@@ -65,11 +65,12 @@
   surface and detail seeds. Locking, despinning and every later state are derived.
 - **The string:** `PV1;` then `key=value` pairs in the table's order, `;`-separated, an `AUTO`
   input left out; numbers in shortest round-trip form, so a string parses to the same bits.
-- **`RANDOMIZE`:** from its `DRAW SEED`, a uniform pick of the real systems within 10 ly of a point
-  drawn uniformly within 100 ly of the Sun-like point. It keeps a single star with a present planet
-  at the epoch (at most 64 tries), takes one of its present planets uniformly, and reads that
-  planet's inputs: host initial mass, [Fe/H], age, primordial mass, a, e and formation distance,
-  with `DAY`, `TILT` and the volatiles left `AUTO`, and a `SEED` from the draw.
+- **`RANDOMIZE`:** from its `DRAW SEED`, a point drawn from the galaxy's own number density of
+  systems over the whole galaxy (a grid of 73,440 bins, constant within each), then the system
+  nearest it. It keeps a single star with a present planet at the epoch (at most 64 tries), takes
+  one of its present planets uniformly, and reads that planet's inputs: host initial mass, [Fe/H],
+  age, primordial mass, a, e and formation distance, with `DAY`, `TILT` and the volatiles left
+  `AUTO`, and a `SEED` from the draw.
 
 ## The tab
 
@@ -140,3 +141,22 @@ the lane's outbox.
 
 No generated output moves: the viewer's path adds functions and pass-through overrides, and
 every galaxy system takes the code it took before. No `GENERATOR_VERSION` change and no hold.
+
+## Risks and open points
+
+- R15.T1 (built): `planetary::viewer` holds `RawPlanetInputs` and `PlanetInputs` (`TryFrom`,
+  `InputField::range`), `canonical()` and `system_id()`, `ViewerSystem` (`generate`, `summary_at`,
+  `host_discs_at`, `drawn`, `into_parts`), `summary_of`, `host_discs_of_context`,
+  `is_viewer_system`, `inputs_of`, `DensityGrid` and `draw_inputs(galaxy, grid, draw_seed)`.
+- R15.T1: the ID hashes the inputs' canonical text (`PV1;name=value;…`, Rust's shortest decimal),
+  not their bits, since the sim bans hashing float bits. The client's string should be that text.
+- R15.T1: `generate`'s steps 6–10 are now `system::complete`. Also added: `system::generate_given`,
+  `placement::place_given` with `GivenOrbit`, `SpinDraws::with_primordial_period` and
+  `with_obliquity`, `sky::disc::host_discs_of`, `stellar::system::synthetic_summary_at`,
+  `PlanetarySystem::seed()`, and the tag `viewer.draw` (`tags.golden` extended only).
+- R15.T1 (lean, 2026-11-05, main's suggestion): `RANDOMIZE` draws its point by the whole galaxy's
+  density, then takes the nearest system. A nearest pick keeps a sparse region from being
+  under-drawn, as a fixed sphere would. Building the grid costs about 1 s (pod), so the server
+  keeps one per galaxy.
+- R15.T1 (lean, 2026-11-05): a lone given planet lies in its host's plane, with no mutual
+  inclination; its host's class is kept as drawn.

@@ -263,3 +263,4 @@ body.resources (Body) = 0x1dba07f272057896
 binary.ia_mark (Body) = 0x5b4141255b0f37b4
 member.recycled (System) = 0x4603a1e86fe807cc
 class.core_collapse.ejection (System) = 0xc7d37e0734559209
+viewer.draw (Galaxy) = 0x247f396baa2291e1

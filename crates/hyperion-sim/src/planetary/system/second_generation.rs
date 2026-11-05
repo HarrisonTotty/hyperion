@@ -36,6 +36,7 @@ use crate::planetary::placement::{OrbitHost, OrbitZone, PlacedPlanet};
 use crate::stellar::remnant::RemnantKind;
 use crate::units::{Megayears, Years};
 
+use super::given::GivenSpin;
 use super::{
     Body, Epoch, Part, PlanetPart, PlanetarySystem, parent_time, primordial_radius, radius_rank,
     sphere_density,
@@ -82,6 +83,7 @@ impl Body {
                 radius_rank: radius_rank(seed, id),
                 volatiles: VolatileDraws::for_body(seed, id),
                 fate,
+                spin: GivenSpin::DRAWN,
             }),
             rotation: None,
             laplace: None,

@@ -20,7 +20,8 @@ pub mod spacing;
 pub mod zones;
 
 pub use classes::{
-    Commensurability, HostPlacement, PlacedPlanet, PlacementHost, Resonance, core_fallback, place,
+    Commensurability, GivenOrbit, HostPlacement, PlacedPlanet, PlacementHost, Resonance,
+    core_fallback, place, place_given,
 };
 pub use masses::{GiantCore, GroupCap, GroupMasses, MassDraws, giant_core, group_masses};
 pub use spacing::{

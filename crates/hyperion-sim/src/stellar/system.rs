@@ -1775,6 +1775,50 @@ impl Shown {
     }
 }
 
+/// The summary at `t` of the single stars `stars`, each a slot of `hierarchy` by body index, of a
+/// synthetic host in the universe of `seed` whose existence then is `existence`: what
+/// [`SystemStars::summary_at`] gives a system of stars no pair the binary engine ran, for the
+/// planet viewer's star (plan R15), which a [`SystemContext`](crate::planetary::SystemContext)'s
+/// builder makes and no [`SystemStars`] holds.
+///
+/// # Panics
+///
+/// If `stars` is empty, and in debug builds as [`StarModel::state_at`].
+#[must_use]
+pub(crate) fn synthetic_summary_at(
+    seed: Seed,
+    stars: &[StarModel],
+    hierarchy: &SystemHierarchy,
+    existence: Existence,
+    t: UniverseTime,
+) -> SystemSummary {
+    let existence = SystemExistence::from(existence);
+    let composition = *stars
+        .first()
+        .expect("a synthetic host has a star")
+        .composition();
+    let (stars, hierarchy) = match existence {
+        SystemExistence::NotYetBorn => (Vec::new(), None),
+        SystemExistence::Exists => (
+            stars
+                .iter()
+                .zip(hierarchy.stars())
+                .filter_map(|(star, slot)| {
+                    star_summary_with(star, StarStreams::new(seed, slot.body()), t, None)
+                })
+                .collect(),
+            Some(hierarchy.clone()),
+        ),
+    };
+    SystemSummary {
+        time: t,
+        existence,
+        composition,
+        stars,
+        hierarchy,
+    }
+}
+
 /// The first supernova of `timeline` that unbinds the pair, if the pair had one by the age it was
 /// run to: a record of an unbound pair whose next segment is [`SegmentKind::Disrupted`] by its
 /// star (BSE appendix A1). A merged product's collapse, unbound for want of a companion, is not

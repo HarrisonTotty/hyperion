@@ -255,6 +255,7 @@ use small_bodies::SmallBodyTypes;
 use discs::SystemDiscs;
 pub use discs::{PROTOPLANETARY_DISC_SLOT, ProtoplanetaryDisc, WhiteDwarfSystem};
 pub use events::{ListedEvents, SystemEvents};
+pub(crate) use given::{GivenPlanet, GivenSpin, GivenVolatiles, PlanetParts, generate_given};
 pub use rogue::RoguePlanet;
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
@@ -389,6 +390,9 @@ struct PlanetPart {
     radius_rank: UnitUniform,
     volatiles: VolatileDraws,
     fate: FateBody,
+    /// The primordial spin given in place of its draws' (the planet viewer's, plan R15):
+    /// [`GivenSpin::DRAWN`] for every planet the galaxy's generator places.
+    spin: GivenSpin,
 }
 
 impl PlanetPart {
@@ -504,6 +508,7 @@ impl Body {
                 radius_rank: radius_rank(seed, id),
                 volatiles: VolatileDraws::for_body(seed, id),
                 fate,
+                spin: GivenSpin::DRAWN,
             }),
             rotation: None,
             laplace: None,
@@ -1190,7 +1195,15 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
     if ctx.host_kind() == HostKind::RoguePlanet {
         return rogue::generate(seed, ctx);
     }
-    let mut system = generate_planets(seed, ctx);
+    complete(seed, ctx, generate_planets(seed, ctx))
+}
+
+/// [`generate`]'s steps 6 to 10 on `system`, its planets placed: its belts and their members, the
+/// satellites, the halo, the rotation laws, the Laplace surfaces, the disc bodies and the
+/// second-generation planets, for the planets of [`generate_planets`] or a given planet's
+/// ([`given`]).
+#[must_use]
+fn complete(seed: Seed, ctx: &SystemContext, mut system: PlanetarySystem) -> PlanetarySystem {
     let id = ctx.id();
 
     // Step 6: belts, host by host.
@@ -1915,6 +1928,12 @@ impl PlanetarySystem {
     #[must_use]
     pub const fn system(&self) -> SystemId {
         self.system
+    }
+
+    /// The seed of the universe it was generated in: every stream's.
+    #[must_use]
+    pub const fn seed(&self) -> Seed {
+        self.seed
     }
 
     /// The stable zones, one per orbit host, in hierarchy order (P14.T9): the zones at birth,
@@ -3244,8 +3263,13 @@ impl PlanetarySystem {
         let mass = Kilograms::from(mass);
         let primary =
             elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value();
+        let own = SpinDraws::for_body(self.seed, index.body_id(self.system));
+        let draws = match &body.part {
+            Part::Planet(planet) => planet.spin.over(own),
+            Part::Moon(_) | Part::Ring(_) | Part::Member(_) => own,
+        };
         Some(SpinInputs {
-            draws: SpinDraws::for_body(self.seed, index.body_id(self.system)),
+            draws,
             obliquity_law,
             class: bulk.class,
             fractions: bulk.fractions,
@@ -7431,6 +7455,7 @@ mod evaporation_tests;
 pub(crate) mod events;
 #[cfg(test)]
 mod exposed_ice_tests;
+mod given;
 mod habitability;
 #[cfg(test)]
 mod line_switch_tests;

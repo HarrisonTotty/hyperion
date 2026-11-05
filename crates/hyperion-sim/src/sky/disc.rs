@@ -13,10 +13,11 @@
 use crate::galaxy::Galaxy;
 use crate::math;
 use crate::sky::colour::{AtmosphereGrid, StarColour, star_colour};
-use crate::stellar::Phase;
 use crate::stellar::multiplicity::StarIndex;
 use crate::stellar::photometry::absolute_magnitude_v_under;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::system::SystemStars;
+use crate::stellar::{Phase, StarState};
 use crate::tables::limb_darkening::{
     NORMAL, NORMAL_LOG_G, NORMAL_LOG_TEFF, WHITE_DWARF, WHITE_DWARF_LOG_G, WHITE_DWARF_LOG_TEFF,
 };
@@ -267,13 +268,22 @@ pub(crate) fn grid_of(phase: Phase) -> AtmosphereGrid {
 /// ```
 #[must_use]
 pub fn host_discs(galaxy: &Galaxy, stars: &SystemStars, t: UniverseTime) -> Vec<HostDisc> {
-    let rules = galaxy.rules().stellar;
-    let Some(state) = stars.state_at(t) else {
-        return Vec::new();
-    };
+    stars.state_at(t).map_or_else(Vec::new, |state| {
+        host_discs_of(galaxy.rules().stellar, state.stars())
+    })
+}
+
+/// The discs of the stars whose states are `stars`, by body index, under the stellar rules `rules`:
+/// [`host_discs`]' of a system's state, for a caller that holds the states, such as the planet
+/// viewer's single star (plan R15), which no [`SystemStars`] holds.
+///
+/// # Panics
+///
+/// For more stars than a hierarchy holds ([`STAR_BODY_INDEX_END`](crate::stellar::multiplicity::STAR_BODY_INDEX_END)).
+#[must_use]
+pub(crate) fn host_discs_of(rules: StellarRules, stars: &[StarState]) -> Vec<HostDisc> {
     let ten_parsecs = 10.0 * METRES_PER_PARSEC;
-    state
-        .stars()
+    stars
         .iter()
         .enumerate()
         .filter_map(|(i, star)| {
