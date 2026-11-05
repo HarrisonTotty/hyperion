@@ -51,15 +51,16 @@
 //! While it evaporates a body is present with the mass its radius has left,
 //! R(t) = R₀ − ∫ rate dt ([`mass_left`]), read from the parts [`first_loss`] integrated
 //! ([`lost_by`]): a planet or a member through the fate's mass, which its derivation and record
-//! read, and a moon in its record's mass, its bulk read at the mass it formed with (lean,
-//! 2026-11-03) until generator version 29 ([`EVAPORATED_BULK_VERSION`]), and from it at the mass
-//! left, its radius shrunk at its own density, so that its density is its mass over its volume.
+//! read, and a moon in its record's mass, its bulk read at the mass left, its radius shrunk at its
+//! own density, so that its density is its mass over its volume (P14.T55.b.a's follow-up, from
+//! generator version 29).
 //! A belt loses the share of its named members' mass they have lost, those gone and the rest's
 //! losses, from its mass and its dust's shine, since its cascade's smaller bodies about the same
 //! light go before them (lean, 2026-11-03); with none left it ends, `Destroyed { Evaporated }`,
-//! when the last of them went (`PlanetarySystem::belt_evaporation`); and from 29 its largest body
-//! is its largest member left.
+//! when the last of them went (`PlanetarySystem::belt_evaporation`); and its largest body is its
+//! largest member left.
 
+use crate::math;
 use crate::planetary::hosts::evolved::bisect;
 use crate::tables::gauss_legendre::{GL16_NODES, GL16_WEIGHTS};
 use crate::time::{Span, UniverseTime};
@@ -67,7 +68,6 @@ use crate::units::consts::{
     BOLTZMANN_CONSTANT, HYDROGEN_MASS_KG, SOLAR_LUMINOSITY_W, STEFAN_BOLTZMANN,
 };
 use crate::units::{EarthMasses, KilogramsPerCubicMetre, Metres, SolarLuminosities};
-use crate::{GENERATOR_VERSION, GeneratorVersion, math};
 
 /// The mass below which a rocky body's vapour streams freely off it, M⊕: 10⁻³, PBC13's smallest
 /// (Perez-Becker and Chiang 2013, Figure 2, whose mass axis begins there), toward which all their
@@ -81,70 +81,6 @@ pub(crate) const FREE_STREAMING_MASS: EarthMasses = EarthMasses::new(1e-3);
 /// (lean, 2026-11-03).
 pub(crate) const MOON_EVAPORATING_ROCK_DENSITY: KilogramsPerCubicMetre =
     crate::planetary::moons::regular::MOON_ROCK_DENSITY;
-
-/// The generator version from which a present moon's record reads its bulk, figure and class at
-/// the mass its rock has left, as its mass section does, and a belt's record its largest body at
-/// its largest member left (P14.T55.b.a's follow-up; the [module documentation](self)'s "What is
-/// left"): 29, held with the 29 train.
-///
-/// Below it [`EvaporatedBulkRules::in_force`] is [`EvaporatedBulkRules::Formed`]: a moon's bulk and
-/// a belt's largest body are read as formed, and every figure is version 28's bit for bit. 29's
-/// bump deletes this hold, [`EvaporatedBulkRules`] with its `Formed` arm, the tests' switch, its
-/// line in the tests' `HeldRules` and its tripwire
-/// (`the_evaporated_bulk_is_held_only_until_the_29_bump`).
-pub(crate) const EVAPORATED_BULK_VERSION: GeneratorVersion = GeneratorVersion::new(29);
-
-/// At which mass a present moon's record reads its bulk, and a belt's its largest body (its hold,
-/// [`EVAPORATED_BULK_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum EvaporatedBulkRules {
-    /// Version 28's and before: as formed, a moon's record's mass alone moving.
-    Formed,
-    /// Version 29's: at the mass its rock has left (`BodyFate::moon_mass_at`), and a belt's
-    /// largest member left.
-    Left,
-}
-
-impl EvaporatedBulkRules {
-    /// The rules this generator version gives: the mass left from [`EVAPORATED_BULK_VERSION`], the
-    /// formed mass below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_evaporated_bulk`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = EVAPORATED_BULK_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= EVAPORATED_BULK_VERSION {
-            Self::Left
-        } else {
-            Self::Formed
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The evaporated bulk's rules a test sets on its thread, `None` for the version's.
-    static EVAPORATED_BULK_RULES: core::cell::Cell<Option<EvaporatedBulkRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the evaporated bulk's rules `rules` on this thread, for the tests to reach
-/// 29's bulk ahead of the bump; the version's rules are set back after, a panic in `run` included.
-/// 29's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_evaporated_bulk<R>(rules: EvaporatedBulkRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<EvaporatedBulkRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            EVAPORATED_BULK_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(EVAPORATED_BULK_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// m `L_sub` ÷ k of olivine's sublimation, K: the molecule's mass, 169 `m_H` (Mg₁.₁Fe₀.₉SiO₄),
 /// times its latent heat, 3.21 × 10¹⁰ erg g⁻¹ = 3.21 × 10⁶ J kg⁻¹, over Boltzmann's constant,

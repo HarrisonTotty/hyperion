@@ -3968,7 +3968,9 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             let seasonal = *fate.at(t).orbit().unwrap();
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = system.record_moon(&epoch, moon, (&now, &fate)).unwrap();
-            let bulk = PlanetarySystem::moon_bulk_of(part, &derived, &now);
+            // Its bulk at its mass left (`MoonPart::at_mass_left`), as its record reads it.
+            let left = part.at_mass_left(&fate, part.state_at(now.state, &fate, ctx, t).0, t);
+            let bulk = PlanetarySystem::moon_bulk_of(&left, &derived, &now);
             // Its conditions read its published pass's context's heat flow and θ (rule (f)).
             let record = system.body_at(ctx, moon.index(), t).unwrap();
             let Section::Ok(surface) = record.surface() else {
@@ -5142,9 +5144,11 @@ fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
             let fate = system.fate_of(planet, &host);
             let label = label::label(system, planet.index).unwrap();
             let (_, now) = system.primary_record(&epoch, &HourCosines::new(), planet, label, &fate);
-            let satellite = &part.satellite;
+            // Its bulk at its mass left (`MoonPart::at_mass_left`), as its record reads it.
+            let left = part.at_mass_left(&fate, part.state_at(now.state, &fate, ctx, t).0, t);
+            let satellite = &left.satellite;
             let orbit = satellite.orbit_at(&part.parent, ctx.age_at(t));
-            let bulk = PlanetarySystem::moon_own_bulk(part, &orbit, &now);
+            let bulk = PlanetarySystem::moon_own_bulk(&left, &orbit, &now);
             let mut inputs = MoonInputs {
                 mass: satellite.mass(),
                 orbit,
@@ -5181,7 +5185,7 @@ fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
                 }
                 MoonBulk::Derived | MoonBulk::Kept { .. } => derived.radius(),
             };
-            let record = PlanetarySystem::moon_bulk_of(part, &derived, &now);
+            let record = PlanetarySystem::moon_bulk_of(&left, &derived, &now);
             assert_same_bits(EarthRadii::from(radius).value(), record.radius().value());
             let air = derived.atmosphere();
             // With what an ice crust holds as ice beside it (decision-p14-t54a-ganymede, C0
@@ -6191,7 +6195,7 @@ fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, Planet
             let state = |law: &BodyRotation| law.frame().state_at(t);
             let record = system.record_moon(&epoch, body, (&now, &fate)).unwrap();
             let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-            // Its record and law read it at its mass left then, from 29 (`MoonPart::at_mass_left`).
+            // Its record and law read it at its mass left then (`MoonPart::at_mass_left`).
             let left = moon.at_mass_left(&fate, moon.state_at(now.state, &fate, ctx, t).0, t);
             let bulk = SpinBulk::from(&PlanetarySystem::moon_bulk_of(&left, &record, &now));
             let record_law = system
