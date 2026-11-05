@@ -2167,7 +2167,8 @@ mod tests {
     /// P10.T10.b's orphan spray, held at 27: under every 27 hold the warm-up builds and keeps every
     /// stream's table of the Milky Way fixture, the orphans' from 500 tracers an arm at `τ_p ÷ 32`,
     /// and prints what it cost; the digest of the tables' bits pins the 27 arm. A 27 hold that
-    /// moves the fixture's list, or the bump, re-pins it by name.
+    /// moves the fixture's list, or the bump, re-pins it by name: re-measured on the bumped tree,
+    /// 360 streams, 355 of them orphans (359 and 354 as pinned under every 27 hold before it).
     #[tokio::test]
     #[ignore = "slow: warms every tube table of a Milky Way galaxy under 27's rules, some 3 \
                 CPU-minutes"]
@@ -2204,7 +2205,7 @@ mod tests {
         let tables = tables_digest(&tubes, streams);
         assert_eq!(
             (streams.len(), orphans, format!("{tables:016x}")),
-            (359, 354, "ad2c9cb7e4484cec".to_owned()),
+            (360, 355, "cecd55b31df10c09".to_owned()),
             "the tables' bits at 27"
         );
         pool.shutdown().await.unwrap();
