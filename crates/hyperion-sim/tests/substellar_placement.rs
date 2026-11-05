@@ -172,16 +172,18 @@ fn assert_layer_follows_the_stars(name: &str, galaxy: &Galaxy, layer: Layer, blo
         assert!((lo..=hi).contains(&m), "{what}: a mass of {m} M☉");
     }
 
-    // The odds the stellar layers pick with at this place: layer A's share × each component's
-    // integral. The substellar rows are one number in every column, so these are their odds too.
+    // The odds the layer's field picks with at this place: each component's field share of the
+    // layer's band × its integral. The substellar rows of the budget are one number in every
+    // column, layer A's odds; from generator version 27 the field keeps each component's budget
+    // times its field factor (P09.T2.c), the young disc's lowered by the features' φ, so the odds
+    // are the field's (`Galaxy::field_component_share`), as the count's mean is.
     let integrals =
         reference_box_component_integrals(galaxy, block.min_ly, block.edge_ly, block.steps());
-    let (fields, shares) = (galaxy.fields(), galaxy.shares());
+    let fields = galaxy.fields();
     let weights: Vec<f64> = fields
-        .components()
-        .iter()
+        .component_ids()
         .zip(integrals)
-        .map(|(c, integral)| shares.component_share(MassBand::A, c) * integral)
+        .map(|(id, integral)| galaxy.field_component_share(band, id) * integral)
         .collect();
     let total: f64 = weights.iter().sum();
     let mut observed = [0_u64; POPULATIONS.len()];
@@ -205,12 +207,14 @@ fn assert_layer_follows_the_stars(name: &str, galaxy: &Galaxy, layer: Layer, blo
         );
     }
 
+    // The field's ages (P09.T2.c): the young disc's are its budget's times `1 − φ(age)`.
     let cdf = |age: f64| {
         let mixed = fields
-            .components()
-            .iter()
+            .component_ids()
             .zip(&weights)
-            .fold(0.0, |sum, (c, w)| sum + w * c.ages().cdf(Years::new(age)));
+            .fold(0.0, |sum, (id, w)| {
+                sum + w * galaxy.field_ages(id).cdf(Years::new(age))
+            });
         (mixed / total).clamp(0.0, 1.0)
     };
     let mut ages: Vec<f64> = records.iter().map(|r| r.age_at_epoch().value()).collect();
