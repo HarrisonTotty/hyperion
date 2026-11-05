@@ -28,8 +28,8 @@ use crate::galaxy::catalogue_classes::supernova::{
 use crate::galaxy::catalogue_classes::{
     CatalogueClassCell, CatalogueEntry, check_class_headroom, resolve_entry, system_of,
 };
-use crate::galaxy::displaced::death_in_interval_under;
 use crate::galaxy::displaced::marks::LifetimeBracket;
+use crate::galaxy::displaced::{DisplacedKind, death_in_interval_under};
 use crate::galaxy::field_share::FieldShare;
 use crate::galaxy::imf::MassFunctionKind;
 use crate::galaxy::params::GalaxyParams;
@@ -897,7 +897,8 @@ struct Census {
     longest: f64,
     farthest: f64,
     /// The deaths weighted by the share of their component's systems of their age that another
-    /// galaxy's field keeps ([`census_weighed`]): the field's deaths that galaxy's class expects.
+    /// galaxy's field keeps, a runaway's whole ([`census_weighed`]): the field's deaths that
+    /// galaxy's class expects.
     kept: f64,
     /// The sum of those weights' squares: the weighed count's own sampling variance, less its
     /// share of the deaths' Poisson variance.
@@ -925,12 +926,18 @@ const NEGLIGIBLE_MEAN: f64 = 1e-9;
 /// The census of `galaxy`'s class: every cell of the root cube whose mean is not negligible, a
 /// column of cells at a time from the plane outwards (the bound never rises away from the plane),
 /// on four threads. Every entry's window is checked against its caps and its reach on the way.
+/// Its candidates are unscreened: from 27 the screen (P09.T33.b) refuses no entry, but it refuses
+/// the deaths before the longest window the field could cut at their site, which the deaths over
+/// the interval, and so the class's rate, count.
 fn census(galaxy: &Galaxy) -> Census {
     census_weighed(galaxy, None)
 }
 
 /// [`census`], with each death weighed by the share of its component's systems of layer E and
-/// its age that `field`'s field keeps, if a field is given (P09.T2.c).
+/// its age that `field`'s field keeps, if a field is given (P09.T2.c): the field term's and the
+/// walkaways', whose terms take the field's part of the budget at the field's ages; a runaway's
+/// whole, since from 27 its term takes the whole budget at the budget's ages (P09.T33.b), the
+/// features' runaways too.
 fn census_weighed(galaxy: &Galaxy, field: Option<&FieldShare>) -> Census {
     let process = CoreCollapseProcess::new(galaxy);
     let cap = galaxy.window_caps().cap(ShellEnvironment::Field);
@@ -945,7 +952,8 @@ fn census_weighed(galaxy: &Galaxy, field: Option<&FieldShare>) -> Census {
                 }
                 for index in 0..candidate_count(galaxy.seed(), &cell, bound) {
                     let id = cell.candidate_id(index, 0).unwrap();
-                    let Some(candidate) = process.candidate(galaxy, &cell, id, bound) else {
+                    let Some(candidate) = process.unscreened_candidate(galaxy, &cell, id, bound)
+                    else {
                         continue;
                     };
                     census.candidates += 1;
@@ -954,8 +962,14 @@ fn census_weighed(galaxy: &Galaxy, field: Option<&FieldShare>) -> Census {
                     };
                     census.deaths += 1;
                     if let Some(field) = field {
-                        let keeps =
-                            field.keeps(candidate.component, MassBand::E, candidate.age_at_epoch);
+                        let keeps = match candidate.ejection.map(|ejection| ejection.kind()) {
+                            Some(DisplacedKind::Runaway) => 1.0,
+                            _ => field.keeps(
+                                candidate.component,
+                                MassBand::E,
+                                candidate.age_at_epoch,
+                            ),
+                        };
                         census.kept += keeps;
                         census.kept_squares += keeps * keeps;
                     }
@@ -1034,8 +1048,11 @@ fn census_weighed(galaxy: &Galaxy, field: Option<&FieldShare>) -> Census {
 /// P09.T33.a, over seeds: within ±H a galaxy has 20–160 core collapses, about 40 at two a
 /// century (the brainstorm, "Events in time"), and some 3,000–21,000 more entries than shells,
 /// its progenitors and bare remnants; every entry's window is under its caps, and no system
-/// travels past the reach. The Milky Way fixture and three drawn galaxies natively; on
-/// wasm32-wasip1, which has no threads, the fixture alone, whose census takes minutes on one.
+/// travels past the reach. From 27 the class is the young field's (P09.T2.c), which keeps a tenth
+/// to a fifth of the deaths (12 in ±H on the fixture), so the brackets are read on the budget, the
+/// galaxy under the version's rules but the field share, whose class holds every death (34). The
+/// Milky Way fixture and three drawn galaxies natively; on wasm32-wasip1, which has no threads,
+/// the fixture alone, whose census takes minutes on one.
 #[test]
 #[ignore = "slow: the class's census of four galaxies"]
 fn core_collapses_over_seeds() {
@@ -1051,11 +1068,23 @@ fn core_collapses_over_seeds() {
     } else {
         &galaxies[..]
     };
+    let budget = GalaxyRules {
+        field_share: FieldShareRules::None,
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
+    };
     for &(name, drawn) in galaxies {
-        let galaxy = &drawn.map_or_else(
-            || milky_way(SEED),
-            |seed| Galaxy::new(Seed::new(seed)).with_full_potential(),
+        let (seed, params) = drawn.map_or_else(
+            || (SEED, GalaxyParams::milky_way_like()),
+            |seed| {
+                (
+                    seed,
+                    GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::default()),
+                )
+            },
         );
+        let galaxy = &Galaxy::from_params_with_rules(Seed::new(seed), params, budget)
+            .expect("the budget builds")
+            .with_full_potential();
         let census = census(galaxy);
         let years = CoreCollapseProcess::new(galaxy)
             .interval()
@@ -1092,10 +1121,12 @@ fn core_collapses_over_seeds() {
 /// checks stay: the deaths in ±H a Poisson share of its deaths at its rate, every window under its
 /// caps and no system past the reach. And its deaths match the budget's deaths, each weighed by
 /// the share of its component's systems of its age that the field keeps, the closed form
-/// `s_c F_c n_c(x) p(m) f_c(a) (1 − φ(a)) ÷ (1 − φ̄)` the class follows: the difference against
-/// the variance of two independent counts, the field's Poisson and the weighed sum's own, which
-/// errs lax, since the two arms share their candidates' streams. The budget is every 26 hold but
-/// the field share. The same four galaxies, natively; the fixture alone on wasm32-wasip1.
+/// `s_c F_c n_c(x) p(m) f_c(a) (1 − φ(a)) ÷ (1 − φ̄)` the class's field term and walkaways follow,
+/// and from 27 its runaways the budget's whole (P09.T33.b; on the fixture 1,198, 790 and 2,734
+/// deaths against 1,212, 834 and 2,749 weighed): the difference against the variance of two
+/// independent counts, the field's Poisson and the weighed sum's own, which errs lax, since the
+/// two arms share their candidates' streams. The budget is the version's rules but the field
+/// share. The same four galaxies, natively; the fixture alone on wasm32-wasip1.
 #[test]
 #[ignore = "slow: the class's census of four galaxies under either arm"]
 fn core_collapses_over_seeds_under_every_26_hold() {
