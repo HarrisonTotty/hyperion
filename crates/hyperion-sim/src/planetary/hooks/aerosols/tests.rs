@@ -1542,16 +1542,19 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
 ///   are listed and its structure published);
 /// - asserted, the record says `Tenuous`, not `Airless`, where a gas is held above the floor, and
 ///   every `Airless` record lists no gas;
-/// - asserted, the airs whose dominant condensable lies at or above 10 times its saturation
-///   pressure over its ice (decision-t24i-airless-state D4) are [`ITEM_33_WORLD`] and count
-///   (vii)'s two, 01ffeb2d20000000.e101 and 02002b2d1ffe0000.e103, by name. [`ITEM_33_WORLD`],
-///   main's 24 gate item (decision-p14-t53c-collapse §2.1), is `Tenuous` at about 1.68 Pa, its N₂
-///   about 49 times its saturation pressure at its 32.19 K coldest zone, its steady state's 0.034
-///   Pa: restated by P14.T54.b.k from a `Snowball` at 100.03 Pa (N₂ ×559 over its 33.57 K ice),
-///   which held before P14.T54.b.e. The weathered area mix moved it (decision-p14-t54b-e-findings
-///   §B, §C: `Airless` at 99.982 Pa under e alone, `Tenuous` at 1.68 Pa with T53.c), which closes
-///   the gate item as a state, the right one; its figure, about 49 times its steady state, is
-///   count (vii)'s by name, under the same owner;
+/// - asserted, no air's dominant condensable lies at or above 10 times its saturation pressure
+///   over its ice (decision-t24i-airless-state D4), and [`ITEM_33_WORLD`], main's 24 gate item
+///   (decision-p14-t53c-collapse §2.1), is `Tenuous` at its steady state, about 0.0348 Pa, its N₂
+///   at its saturation pressure over its 32.22 K coldest zone. P14.T54.b.k restated it from a
+///   `Snowball` at 100.03 Pa (N₂ ×559 over its 33.57 K ice), which held before P14.T54.b.e; the
+///   weathered area mix moved it (decision-p14-t54b-e-findings §B, §C: `Airless` at 99.982 Pa
+///   under e alone, `Tenuous` at 1.68 Pa with T53.c), which closed the gate item as a state, the
+///   right one, its figure about 49 times its steady state, count (vii)'s by name with
+///   01ffeb2d20000000.e101 and 02002b2d1ffe0000.e103. The figure is closed too, restated at
+///   generator version 27: from 26 P14.T53.i's one reading of the line (`line_switch_tests`'
+///   movers) holds item 33's N₂ at its saturation pressure, and at 27, under P14.T49.m's icy lag,
+///   count (vii)'s two, each printed, are `Snowball`s at the line, 100 Pa, their N₂ at its
+///   saturation over their 45.9 K ice (`Tenuous` at 0.10 and 0.15 Pa under the frost);
 /// - asserted, no ice-held gas saturates at or above 100 Pa at its ice, and 01ffeb2c20010000.0200,
 ///   which the line keeps from a 0.8 bar N₂ air, keeps T13.b's verdict;
 /// - asserted, no record's liquids list an ocean under its ice (count (i)), and every liquid entry
@@ -1634,22 +1637,34 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
     // Main's 24 gate item (decision-p14-t53c-collapse §2.1), closed as a state by
     // decision-p14-t54b-e-findings §C: P14.T54.b.e's weathered area mix, with T53.c in force, moved
     // it from a `Snowball` at 100.03 Pa (P14.T54.b.k's restatement) to `Tenuous` at 1.68 Pa, about
-    // 49 times its steady state over its ice, which count (vii) lists.
+    // 49 times its steady state over its ice, which count (vii) listed. It reads its steady state,
+    // its N₂ at its saturation pressure (P14.T53.i's one reading of the line, from 26), and at 27
+    // count (vii)'s two are `Snowball`s at the line at their N₂'s saturation: none is
+    // supersaturated.
     let item_33 = tenuous
         .iter()
         .find(|b| b.label.ends_with(ITEM_33_WORLD))
         .expect("item 33's world is in the census");
     assert_eq!(item_33.state, SurfaceState::Tenuous, "{}", item_33.line());
-    assert!((1.67..1.69).contains(&item_33.p), "{}", item_33.line());
+    assert!((0.034..0.036).contains(&item_33.p), "{}", item_33.line());
     assert!(
-        item_33.factor().is_some_and(|f| (45.0..55.0).contains(&f)),
+        item_33.factor().is_some_and(|f| (f - 1.0).abs() < 0.01),
         "{}",
         item_33.line()
     );
+    for id in COUNT_VII {
+        let body = tenuous
+            .iter()
+            .find(|b| b.label.ends_with(id))
+            .unwrap_or_else(|| panic!("count (vii)'s {id} is in the census"));
+        eprintln!("count (vii)'s {}: {}", body.label, body.line());
+    }
     let supersaturated: Vec<String> = supersaturated.iter().map(|b| id_of(b)).collect();
-    let mut expected = vec![ITEM_33_WORLD];
-    expected.extend(COUNT_VII);
-    assert_eq!(supersaturated, expected, "the gate item and count (vii)");
+    assert_eq!(
+        supersaturated,
+        Vec::<String>::new(),
+        "the airs at 10 times their saturation or more"
+    );
     let kept = tenuous
         .iter()
         .find(|b| b.label.ends_with(KEPT_AIRLESS))
