@@ -1120,6 +1120,10 @@ impl<'a> Spray<'a> {
     /// # Examples
     ///
     /// ```no_run
+    /// # // `pal5_like` is a test helper, built with the `testing` feature; without it (the
+    /// # // wasip1 doctests' crates alone) the example builds nothing.
+    /// # #[cfg(feature = "testing")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use hyperion_sim::Seed;
     /// use hyperion_sim::galaxy::Galaxy;
     /// use hyperion_sim::galaxy::global_list::spray::{Spray, SprayForce, SprayParams};
@@ -1144,7 +1148,10 @@ impl<'a> Spray<'a> {
     /// }
     /// let gathered: Vec<_> = gathered.into_iter().flatten().collect();
     /// assert_eq!(gathered, spray.tracers());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "testing"))]
+    /// # fn main() {}
     /// ```
     #[must_use]
     pub fn tracers_at(&self, indices: &[u32]) -> Vec<Tracer> {
