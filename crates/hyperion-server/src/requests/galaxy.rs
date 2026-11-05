@@ -481,10 +481,12 @@ fn row_origins<'a>(members: FeatureMembers, reads: &RowReads<'a>) -> RowOrigins<
 /// registration, P09.T37.b), and `None` below it or while `members` holds the feature members back,
 /// when the query takes none.
 ///
-/// The list is built at bulk priority on its first request, as the list's handlers build it, and
-/// the tables at interactive priority, as `stream_track` builds one, a few at once
+/// The list and the tables are built at interactive priority, the query's own, the tables as
+/// `stream_track` builds one, a few at once
 /// ([`GlobalListService::tubes`](crate::compute::GlobalListService::tubes)): some 0.2–0.5 s a
-/// stream on the pool, each once, and none for a query a warm-up has gone before. The query then
+/// stream on the pool, each once, and none for a query a warm-up has gone before. A build the
+/// open's warm-up or a sky started at bulk priority is joined and raised to it, so that a range
+/// query sent while a sky's jobs run is answered first, cold as warm (R06.T11.d). The query then
 /// reads every table warm, since a job never waits on another. The query's source keeps each
 /// table's envelope with the list's models as it reads it, and the warm-up as it builds it, so a
 /// stream whose shell a later query meets and whose envelope it misses (111 of the 121 about the
@@ -505,7 +507,7 @@ pub(crate) async fn list_for(
     if members == FeatureMembers::Held || !GlobalListSource::is_registered_in(galaxy) {
         return Ok(None);
     }
-    let held = lists.get(key).await?;
+    let held = lists.get(key, Priority::Interactive).await?;
     let read = GlobalListSource::streams_read_with(galaxy, held.list(), held.models(), query);
     let specs: Vec<&StreamSpec> = read
         .iter()

@@ -14,8 +14,8 @@ use common::origins::{SEED, at_years, galaxy};
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
     ClassKindWire, FeatureIdHex, GalacticPosition, GenerationWire, MassLayer, MemberClassWire,
-    MultiplicityWire, RequestBody, ResponseBody, SystemOriginWire, SystemRecord, SystemsInRange,
-    SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+    MultiplicityWire, OpenUniverseRequest, RequestBody, ResponseBody, SystemOriginWire,
+    SystemRecord, SystemsInRange, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_server::FeatureMembers;
 use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
@@ -394,17 +394,25 @@ fn about_the_sun(universe: &UniverseIdHex) -> RequestBody {
 }
 
 /// The reply's frames, byte for byte, do not depend on how many workers generate a cold query's
-/// cells ahead of its walk (P09.T40.a): a server of one worker and one of eight answer the
+/// cells ahead of its walk (P09.T40.a): a server of eight workers and then one of one answer the
 /// query inside the globular and the 50 ly query at the Sun-like point, cold and then warm, with
 /// the same text.
+///
+/// The one-worker server is launched over the eight's data directory, as a relaunched server is:
+/// from generator version 27 a galaxy's first query near the Sun builds the tube tables of the
+/// 121 streams whose shells meet its sphere, some 190 s of one worker in a test build (pod, 16
+/// vCPU, 2026-11-05), past the harness's patience in one wait, and the directory keeps their
+/// envelopes, so the one worker builds only the tables a sphere may touch (P10.T10.b,
+/// perf-range-envelopes-on-disk). Its cells are as cold as the eight's.
 #[tokio::test]
 async fn the_reply_is_the_same_at_one_and_eight_workers() {
     let mut reference = Some(std::thread::spawn(|| {
         a_globular();
     }));
     let mut replies = Vec::new();
-    for workers in [1, 8] {
-        let temp_dir = tempfile::tempdir().expect("a temporary directory");
+    let temp_dir = tempfile::tempdir().expect("a temporary directory");
+    let mut created: Option<UniverseIdHex> = None;
+    for workers in [8, 1] {
         let server = TestServer::start_with(
             TestServer::config(temp_dir.path())
                 .workers(std::num::NonZeroUsize::new(workers).expect("at least one"))
@@ -413,7 +421,21 @@ async fn the_reply_is_the_same_at_one_and_eight_workers() {
         )
         .await;
         let mut client = server.connected().await;
-        let universe = client.create_universe("Omega Reach", SEED).await.id;
+        let universe = match created.take() {
+            Some(universe) => {
+                // Opened, a request in the create's place, so that the queries go under the
+                // eight's request IDs.
+                let open = RequestBody::OpenUniverse(OpenUniverseRequest {
+                    universe: universe.clone(),
+                });
+                match client.request(open).await {
+                    Ok(ResponseBody::OpenUniverse(_)) => universe,
+                    other => panic!("expected the opened universe, got {other:?}"),
+                }
+            }
+            None => client.create_universe("Omega Reach", SEED).await.id,
+        };
+        created = Some(universe.clone());
         if let Some(reference) = reference.take() {
             reference.join().expect("the globular is found");
         }

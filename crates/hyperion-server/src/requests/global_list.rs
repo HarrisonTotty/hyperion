@@ -38,7 +38,7 @@ pub(crate) async fn features(
 ) -> Result<ResponseBody, RequestError> {
     let universe = openable_universe(&state, &request.universe)?;
     let key = universe.key();
-    let list = state.global_lists.get(key).await?;
+    let list = state.global_lists.get(key, Priority::Bulk).await?;
     let galaxy = state.galaxies.get(key).await?;
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
@@ -65,7 +65,7 @@ pub(crate) async fn track(
 ) -> Result<ResponseBody, RequestError> {
     let universe = openable_universe(&state, &request.universe)?;
     let key = universe.key();
-    let list = state.global_lists.get(key).await?;
+    let list = state.global_lists.get(key, Priority::Bulk).await?;
     let number = stream_track_number(list.list(), &request)?;
     let galaxy = state.galaxies.get(key).await?;
     let spec = list.list().stream(number).expect("the stream was checked");

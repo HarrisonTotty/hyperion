@@ -194,6 +194,12 @@ fn sky_config(data_dir: &Path, caps: SkyCaps, workers: usize) -> ServerConfigBui
 async fn opened(server: &TestServer) -> (TestClient, UniverseIdHex) {
     let mut client = server.connected().await;
     let universe = client.create_universe("Sky", SEED).await.id;
+    open(server, &mut client, &universe).await;
+    (client, universe)
+}
+
+/// `universe` opened by `client`, its galaxy's sky tables built as [`opened`]'s are.
+async fn open(server: &TestServer, client: &mut TestClient, universe: &UniverseIdHex) {
     let body = RequestBody::OpenUniverse(OpenUniverseRequest {
         universe: universe.clone(),
     });
@@ -210,7 +216,6 @@ async fn opened(server: &TestServer) -> (TestClient, UniverseIdHex) {
             })
             .await;
     }
-    (client, universe)
 }
 
 /// A sky near the Sun at the epoch, to [`CAMERA_LIMIT_V`], with no eye.
@@ -1720,19 +1725,35 @@ async fn expect_range_answer(client: &mut TestClient, id: RequestId) {
 /// to its answer it completes the query's own jobs, as many as on an idle pool, and at most one
 /// bulk job before each, however loaded the machine. A census to 120 ly is one step, so the sky
 /// sends nothing until its whole census is done.
+///
+/// From generator version 27 a galaxy's first query builds the tube tables of the 121 streams whose
+/// shells meet the sphere, 10 of which it may touch, some 190 s of the one worker in a test build
+/// (pod, 16 vCPU, 2026-11-05), and that one wait alone outlasted the harness's patience. So a
+/// server of four workers asks the query first over the data directory, which keeps each table's
+/// envelope ([`common::envelopes_kept`]), and the gated server, launched over it as a relaunched
+/// server is, builds only the 10.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_range_query_sent_while_a_skys_jobs_run_is_answered_first() {
     let gate = BulkGate::default();
     let caps = SkyCaps::forced(LightYears::new(LONG_CAP_LY)).expect("a small forced cap");
     let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let universe = common::envelopes_kept(data_dir.path(), ("Sky", SEED), range_query)
+        .await
+        .id;
     let config = sky_config(data_dir.path(), caps, 1).bulk_gate(gate.clone());
     let server = TestServer::start_with(config.build()).await;
-    let (mut client, universe) = opened(&server).await;
+    let mut client = server.connected().await;
+    open(&server, &mut client, &universe).await;
     // The query's own jobs, on an idle pool: a second query's, since from generator version 27 the
-    // first builds the galaxy's global list and its streams' tables for every later one, once
-    // (P10.T10.b's registration).
+    // first builds the galaxy's global list and the tables its sphere may touch for every later
+    // one, once (P10.T10.b's registration).
     let warm = client.send_request(range_query(&universe)).await;
     expect_range_answer(&mut client, warm).await;
+    assert!(
+        server.stats().envelope_files().hits() > 0,
+        "the first server's envelopes read back: {:?}",
+        server.stats().envelope_files()
+    );
     let idle = server.stats().pool().completed();
     let alone = client.send_request(range_query(&universe)).await;
     expect_range_answer(&mut client, alone).await;
@@ -1791,6 +1812,61 @@ async fn a_range_query_sent_while_a_skys_jobs_run_is_answered_first() {
     expect_cancelled(&mut client, sky_id).await;
     client.close().await;
     server.stop().await;
+}
+
+/// The cold [`range_query`] near the Sun, the first of a fresh data directory, on a server of one,
+/// four and eight workers serving the sky to [`LONG_CAP_LY`]: alone, the open's sky tables built
+/// and nothing else queued, and beside a sky, sent once the sky's first jobs are in the pool, with
+/// the tube tables each built (P10.T10.b, R06.T11.d). Both build the galaxy's global list and the
+/// tables of the 121 streams whose shells the sphere meets, which the sky's census reads too. Its
+/// figures depend on the machine and the build, so it asserts only that the answers agree.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "measurement, run by hand: HYPERION_TEST_PATIENCE_SECS=900 cargo test -p \
+            hyperion-server --test sky cold_range_queries_alone_and_beside_a_sky -- --ignored \
+            --nocapture"]
+async fn cold_range_queries_alone_and_beside_a_sky() {
+    eprintln!("| Workers | Sent | Query (s) | Tables built |");
+    eprintln!("| --- | --- | --- | --- |");
+    for workers in [1, 4, 8] {
+        let caps = SkyCaps::forced(LightYears::new(LONG_CAP_LY)).expect("a small forced cap");
+        let mut answers = Vec::with_capacity(2);
+        for beside in [false, true] {
+            let data_dir = tempfile::tempdir().expect("a temporary directory");
+            let server =
+                TestServer::start_with(sky_config(data_dir.path(), caps, workers).build()).await;
+            let (mut client, universe) = opened(&server).await;
+            if beside {
+                client.send_request(RequestBody::Sky(sky(&universe))).await;
+                server
+                    .stats_until("the sky's jobs are in the pool", |stats| {
+                        stats.pool().queued_bulk() > 0
+                    })
+                    .await;
+            }
+            let started = std::time::Instant::now();
+            let id = client.send_request(range_query(&universe)).await;
+            let answer = loop {
+                match client.next_frame().await {
+                    Frame::Message(ServerMessage::Response {
+                        id: answered,
+                        body: ResponseBody::SystemsInRange(answer),
+                    }) if answered == id => break answer,
+                    // The sky's replies and frames, if it ends first.
+                    Frame::Message(_) | Frame::Binary(..) => {}
+                }
+            };
+            eprintln!(
+                "| {workers} | {} | {:.2} | {} |",
+                if beside { "beside a sky" } else { "alone" },
+                started.elapsed().as_secs_f64(),
+                server.stats().tube_tables().entries()
+            );
+            answers.push(serde_json::to_string(&answer).expect("an answer serialises"));
+            client.close().await;
+            server.stop().await;
+        }
+        assert_eq!(answers[0], answers[1], "{workers} workers");
+    }
 }
 
 /// Reads the next message, which must be request `id`'s `cancelled`.

@@ -216,7 +216,7 @@ pub(super) async fn a_stream_member(
     served: &Served,
     galaxy: &Arc<Galaxy>,
 ) -> (StreamNumber, GalacticPosition) {
-    let list = within(served.lists.get(key()))
+    let list = within(served.lists.get(key(), Priority::Interactive))
         .await
         .expect("the list builds");
     let mut cell_members = Vec::new();

@@ -423,7 +423,7 @@ async fn sky_list(
     if !GlobalListSource::is_registered_in(galaxy) {
         return Ok(None);
     }
-    let held = state.global_lists.get(key).await?;
+    let held = state.global_lists.get(key, Priority::Bulk).await?;
     let by_step = streams_by_step(galaxy, (held.list(), held.models()), (plan, steps), query);
     let tubes = ListedTubes::new(
         (Arc::clone(galaxy), key),

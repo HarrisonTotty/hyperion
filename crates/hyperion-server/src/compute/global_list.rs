@@ -42,8 +42,11 @@
 //! **Kept** ([`GlobalListService`], P10.T10.a and P10.T10.b). A galaxy's list is built once, when
 //! its universe is opened or on its first request, and kept within a byte budget. Its streams'
 //! tables are kept in the [`TubeTableCache`]: each built when the open's warm-up reaches it, at
-//! bulk priority, or for the first `stream_track` that asks, at interactive priority, or inside
-//! the job that resolves one of its members ([`ListedTubes`]). A list and a table are pure
+//! bulk priority, or for the first `stream_track` or range query that asks, at interactive
+//! priority, or inside the job that resolves one of its members ([`ListedTubes`]). A build that a
+//! request of a higher priority joins queues the rest of its jobs at that priority
+//! ([`BuildClass`]), so that a range query is not held behind the bulk jobs a sky or the warm-up
+//! queued meanwhile (R06.T11.d). A list and a table are pure
 //! functions of their galaxy, so eviction never changes an answer, and neither does the order in
 //! which the warm-up's tables, several in flight at once, finish and are kept. Each table's
 //! envelope is written to disk as it is kept, and a list built again, after its eviction or a
@@ -53,8 +56,11 @@
 //! [`served_range_query`]: super::served_range_query
 //! [`DebrisPlan::orphan`]: hyperion_sim::galaxy::global_list::DebrisPlan::orphan
 
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Instant;
 
 use hyperion_protocol::SeedHex;
@@ -192,6 +198,97 @@ impl From<BuildLeapfrogError> for BuildTubeOnPoolError {
     }
 }
 
+/// The class a build's jobs are queued at: the highest any of its waiters asked, raised as a
+/// waiter of a higher class joins it, so that every job the build queues after the raise is queued
+/// at the raised class (P10.T10.b, R06.T11.d). A range query that joins a list or a table the
+/// warm-up or a sky started at bulk priority so has the rest of it built at its own class, ahead of
+/// the bulk jobs queued meanwhile. A job queued already keeps its place: a build queues its jobs a
+/// step at a time, each step once the last's replies are in, so it waits behind the bulk queue for
+/// the step in hand at most. The class is scheduling only: no job's value depends on it.
+#[derive(Debug)]
+pub(crate) struct BuildClass(AtomicU8);
+
+impl BuildClass {
+    /// `priority`'s rank, the lower the higher: [`Priority`]'s order.
+    const fn rank(priority: Priority) -> u8 {
+        match priority {
+            Priority::Interactive => 0,
+            Priority::Bulk => 1,
+            Priority::Background => 2,
+        }
+    }
+
+    /// A build's class, at `priority` until raised.
+    #[must_use]
+    pub(crate) const fn new(priority: Priority) -> Self {
+        Self(AtomicU8::new(Self::rank(priority)))
+    }
+
+    /// The class the build's next job is queued at.
+    #[must_use]
+    pub(crate) fn priority(&self) -> Priority {
+        match self.0.load(Ordering::Acquire) {
+            0 => Priority::Interactive,
+            1 => Priority::Bulk,
+            _ => Priority::Background,
+        }
+    }
+
+    /// Raises the class to `priority` if that is higher, and leaves it as it is otherwise.
+    pub(crate) fn raise(&self, priority: Priority) {
+        self.0.fetch_min(Self::rank(priority), Ordering::AcqRel);
+    }
+}
+
+/// The class of each build in flight, by its key ([`BuildClass`]), for the waiters that join it.
+///
+/// It keeps no build alive: each entry is a weak handle to the class its build holds, so that an
+/// ended build's entry is dead and is cleared at the next call.
+struct BuildClasses<K> {
+    classes: Mutex<HashMap<K, Weak<BuildClass>>>,
+}
+
+impl<K: Eq + Hash> BuildClasses<K> {
+    /// No build in flight.
+    fn new() -> Self {
+        Self {
+            classes: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The class of the build of `key` in flight, raised to `priority`, or a new class at
+    /// `priority` for the caller's own: the class the caller's flight runs at if it starts it.
+    ///
+    /// Called before the flight is joined or started, so that a waiter that arrives while it is
+    /// starting finds its class. A caller that finds a build just ended may raise the class its
+    /// successor starts with, which a build that finds its value kept then never queues a job at.
+    fn joined(&self, key: K, priority: Priority) -> Arc<BuildClass> {
+        // Each critical section retains, looks up or inserts, which leave the map whole even if
+        // a key's `Hash` panicked part-way, so a poisoned lock still guards a usable map.
+        let mut classes = self.classes.lock().unwrap_or_else(PoisonError::into_inner);
+        // So that the map holds only the builds in flight: a few lists or tables at once.
+        classes.retain(|_, class| class.strong_count() > 0);
+        if let Some(class) = classes.get(&key).and_then(Weak::upgrade) {
+            class.raise(priority);
+            return class;
+        }
+        let class = Arc::new(BuildClass::new(priority));
+        classes.insert(key, Arc::downgrade(&class));
+        class
+    }
+
+    /// The class of the build of `key` in flight, if there is one, left as it is.
+    #[cfg(test)]
+    fn priority_of(&self, key: &K) -> Option<Priority> {
+        // As in `joined`, a poisoned lock still guards a usable map.
+        let classes = self.classes.lock().unwrap_or_else(PoisonError::into_inner);
+        classes
+            .get(key)
+            .and_then(Weak::upgrade)
+            .map(|class| class.priority())
+    }
+}
+
 /// Panics unless `key` names `galaxy`: its spray table is kept under the key.
 fn check_key(galaxy: &Galaxy, key: GalaxyKey) {
     assert_eq!(
@@ -231,14 +328,14 @@ async fn force_of(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
     (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
-    priority: Priority,
+    class: &BuildClass,
     token: &CancelToken,
 ) -> Result<Force, ComputeError> {
     if let Some(force) = forces.get(key) {
         return Ok(Force::Held(force));
     }
     let galaxy = Arc::clone(galaxy);
-    let receiver = queue(pool, priority, token, move |_: &CancelToken| {
+    let receiver = queue(pool, class.priority(), token, move |_: &CancelToken| {
         SprayForce::new(galaxy.potential()).map(Arc::new)
     })
     .await?;
@@ -331,8 +428,27 @@ fn by_steps(legs: &[Leg], shares: NonZeroUsize) -> Vec<Vec<usize>> {
 pub async fn global_list_on(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
-    (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+    at: (&Arc<Galaxy>, GalaxyKey),
     (priority, shares): (Priority, Shares),
+    token: &CancelToken,
+) -> Result<GlobalList, ComputeError> {
+    list_on(
+        pool,
+        forces,
+        at,
+        (&BuildClass::new(priority), shares),
+        token,
+    )
+    .await
+}
+
+/// [`global_list_on`] with each job queued at `class` as it then stands, so that a waiter that
+/// joins the build at a higher class raises the jobs queued after it ([`BuildClass`]).
+async fn list_on(
+    pool: &CpuPool,
+    forces: &Arc<SharedSprayForces>,
+    (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+    (class, shares): (&BuildClass, Shares),
     token: &CancelToken,
 ) -> Result<GlobalList, ComputeError> {
     check_key(galaxy, key);
@@ -341,19 +457,19 @@ pub async fn global_list_on(
     let centre = {
         let galaxy = at(galaxy);
         // Its model is kept in the galaxy; the finish reads it, and fails as it does if it fails.
-        queue(pool, priority, token, move |_: &CancelToken| {
+        queue(pool, class.priority(), token, move |_: &CancelToken| {
             galaxy.centre().is_ok()
         })
         .await?
     };
     let planned = {
         let galaxy = at(galaxy);
-        queue(pool, priority, token, move |_: &CancelToken| {
+        queue(pool, class.priority(), token, move |_: &CancelToken| {
             Arc::new(Debris::plan(&galaxy))
         })
         .await?
     };
-    let force = force_of(pool, forces, (galaxy, key), priority, token).await?;
+    let force = force_of(pool, forces, (galaxy, key), class, token).await?;
     let plan = reply(planned).await?;
     let orphan_shares = dealt(plan.orphan_count(), shares.orphans.min(workers));
     let mut drawing = Vec::with_capacity(orphan_shares.len());
@@ -365,7 +481,7 @@ pub async fn global_list_on(
                 .map(|k| (k, plan.orphan(&galaxy, k)))
                 .collect::<Vec<_>>()
         };
-        drawing.push(queue(pool, priority, token, job).await?);
+        drawing.push(queue(pool, class.priority(), token, job).await?);
     }
     let mut orphans: Vec<Option<StreamSpec>> = vec![
         None;
@@ -380,7 +496,7 @@ pub async fn global_list_on(
     }
     let assembled = {
         let legs = shares.legs.min(workers);
-        queue(pool, priority, token, move |_: &CancelToken| {
+        queue(pool, class.priority(), token, move |_: &CancelToken| {
             let list = ListPlan::of_debris(Arc::unwrap_or_clone(plan).finish(orphans));
             let dealt = by_steps(list.legs(), legs);
             (Arc::new(list), dealt)
@@ -402,7 +518,7 @@ pub async fn global_list_on(
                 .zip(radii_over_ly(&force, &legs))
                 .collect::<Vec<_>>()
         };
-        stepping.push(queue(pool, priority, token, job).await?);
+        stepping.push(queue(pool, class.priority(), token, job).await?);
     }
     let mut radii = vec![[f64::NAN; 2]; list.legs().len()];
     for receiver in stepping {
@@ -414,7 +530,7 @@ pub async fn global_list_on(
     // job sent back is the finish's to find again.
     let _ = reply(centre).await?;
     let galaxy = at(galaxy);
-    let finished = queue(pool, priority, token, move |_: &CancelToken| {
+    let finished = queue(pool, class.priority(), token, move |_: &CancelToken| {
         Arc::unwrap_or_clone(list).finish(&galaxy, &radii)
     })
     .await?;
@@ -437,9 +553,23 @@ pub async fn global_list_on(
 pub async fn tube_table_on(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
-    (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+    at: (&Arc<Galaxy>, GalaxyKey),
     spec: &StreamSpec,
     (priority, shares): (Priority, Shares),
+    token: &CancelToken,
+) -> Result<TubeTable, BuildTubeOnPoolError> {
+    let class = BuildClass::new(priority);
+    table_on(pool, forces, at, spec, (&class, shares), token).await
+}
+
+/// [`tube_table_on`] with each job queued at `class` as it then stands, so that a waiter that
+/// joins the build at a higher class raises the jobs queued after it ([`BuildClass`]).
+async fn table_on(
+    pool: &CpuPool,
+    forces: &Arc<SharedSprayForces>,
+    (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
+    spec: &StreamSpec,
+    (class, shares): (&BuildClass, Shares),
     token: &CancelToken,
 ) -> Result<TubeTable, BuildTubeOnPoolError> {
     let tracers = tracers_on(
@@ -447,12 +577,12 @@ pub async fn tube_table_on(
         forces,
         (galaxy, key),
         (spec, SprayParams::of_stream(galaxy, spec)),
-        (priority, shares),
+        (class, shares),
         token,
     )
     .await?;
     let (galaxy, spec) = (Arc::clone(galaxy), spec.clone());
-    let reduced = queue(pool, priority, token, move |_: &CancelToken| {
+    let reduced = queue(pool, class.priority(), token, move |_: &CancelToken| {
         TubeTable::from_tracers(
             galaxy.seed(),
             galaxy.mean_system_mass(Population::Halo),
@@ -465,7 +595,7 @@ pub async fn tube_table_on(
 }
 
 /// The tracers of `spec`'s stream in `galaxy`, the galaxy `key` names, at `params`, in index order,
-/// sprayed on `pool`'s workers at `priority` in shares of at most `shares`' tracers a share, or as
+/// sprayed on `pool`'s workers at `class` in shares of at most `shares`' tracers a share, or as
 /// many as keep the shares to the workers' count, the indices dealt out in turn and gathered by
 /// index, every share from the one [`SprayPlan`] a job made first: [`Spray::tracers`]'s, bit for
 /// bit.
@@ -483,11 +613,11 @@ pub(crate) async fn tracers_on(
     forces: &Arc<SharedSprayForces>,
     (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
     (spec, params): (&StreamSpec, SprayParams),
-    (priority, shares): (Priority, Shares),
+    (class, shares): (&BuildClass, Shares),
     token: &CancelToken,
 ) -> Result<Vec<Tracer>, BuildTubeOnPoolError> {
     check_key(galaxy, key);
-    let force = force_of(pool, forces, (galaxy, key), priority, token)
+    let force = force_of(pool, forces, (galaxy, key), class, token)
         .await?
         .ready()
         .await??;
@@ -501,7 +631,7 @@ pub(crate) async fn tracers_on(
     let dealt = dealt(u64::from(count), share_count);
     let planned = {
         let (galaxy, force, spec) = (Arc::clone(galaxy), Arc::clone(&force), spec.clone());
-        queue(pool, priority, token, move |_: &CancelToken| {
+        queue(pool, class.priority(), token, move |_: &CancelToken| {
             SprayPlan::new(galaxy.seed(), &force, galaxy.potential(), &spec, &params).map(Arc::new)
         })
         .await?
@@ -522,7 +652,7 @@ pub(crate) async fn tracers_on(
                 .zip(spray.tracers_at(&indices))
                 .collect::<Vec<_>>()
         };
-        spraying.push(queue(pool, priority, token, job).await?);
+        spraying.push(queue(pool, class.priority(), token, job).await?);
     }
     let mut tracers = vec![None; usize::try_from(count).expect("a u32 fits a usize")];
     for receiver in spraying {
@@ -585,14 +715,14 @@ impl HeapBytes for HeldGlobalList {
 /// "Kept").
 ///
 /// [`GlobalListService::get`] hands back a galaxy's list, building it with [`global_list_on`] at
-/// [`Priority::Bulk`] if no one has yet, the galaxy taken from the [`GalaxyCache`], which builds
+/// the priority asked if no one has yet, the galaxy taken from the [`GalaxyCache`], which builds
 /// every galaxy with the kinematic tables the list needs. [`GlobalListService::tube`] hands back a
 /// stream's table, building it with [`tube_table_on`] at the priority asked if the cache lacks it,
 /// and its crate's `prefetch` starts a galaxy's list and then every one of its tables at bulk
 /// priority, for an open. Callers that ask for one list, one table or one warm-up at once
-/// share one build through a [`SingleFlight`], and if every one of them gives up, its jobs still
-/// queued are skipped. Every build keeps its galaxy's spray table in the service's
-/// [`SharedSprayForces`].
+/// share one build through a [`SingleFlight`], whose jobs are queued at the highest priority any
+/// of them asked (module documentation, "Kept"), and if every one of them gives up, its jobs still
+/// queued are skipped. Every build keeps its galaxy's spray table in the service's [`SharedSprayForces`].
 pub struct GlobalListService {
     lists: Arc<Lists>,
     /// The tasks that wait on the warm-ups [`prefetch`](Self::prefetch) started.
@@ -606,8 +736,12 @@ struct Lists {
     forces: Arc<SharedSprayForces>,
     held: Arc<SharedByteLru<GalaxyKey, HeldGlobalList>>,
     flights: SingleFlight<GalaxyKey, HeldGlobalList, ComputeError>,
+    /// The class of each list's build in flight, which a waiter of a higher class raises.
+    classes: BuildClasses<GalaxyKey>,
     tubes: Arc<TubeTableCache>,
     tube_flights: SingleFlight<TubeKey, TubeTable, BuildTubeOnPoolError>,
+    /// The class of each table's build in flight, which a waiter of a higher class raises.
+    tube_classes: BuildClasses<TubeKey>,
     warm_ups: SingleFlight<GalaxyKey, WarmedTubes, ComputeError>,
 }
 
@@ -660,27 +794,36 @@ impl GlobalListService {
                 forces,
                 held: Arc::new(SharedByteLru::new(budget_bytes)),
                 flights: SingleFlight::new(),
+                classes: BuildClasses::new(),
                 tubes,
                 tube_flights: SingleFlight::new(),
+                tube_classes: BuildClasses::new(),
                 warm_ups: SingleFlight::new(),
             }),
             warming: Mutex::new(JoinSet::new()),
         }
     }
 
-    /// The global list of the galaxy `key` names, built if it is not held already.
+    /// The global list of the galaxy `key` names, built at `priority` if it is not held already.
+    /// A build in flight is joined, and the jobs it queues from then on are raised to `priority`
+    /// if that is higher than its own.
     ///
     /// # Errors
     ///
     /// [`ComputeError`] as [`GalaxyCache::get`] gives it for the galaxy, and as
     /// [`global_list_on`] gives it for the build.
-    pub async fn get(&self, key: GalaxyKey) -> Result<Arc<HeldGlobalList>, ComputeError> {
-        self.lists.get(key).await
+    pub async fn get(
+        &self,
+        key: GalaxyKey,
+        priority: Priority,
+    ) -> Result<Arc<HeldGlobalList>, ComputeError> {
+        self.lists.get(key, priority).await
     }
 
     /// The tube table of `spec`'s stream in `galaxy`, the galaxy `key` names: the cache's, or its
     /// tracers sprayed on the pool's workers at `priority` and kept. A build in flight for the
-    /// stream is joined, at the priority it was started at.
+    /// stream is joined, and the jobs it queues from then on are raised to `priority` if that is
+    /// higher than its own.
     ///
     /// # Errors
     ///
@@ -700,7 +843,8 @@ impl GlobalListService {
 
     /// The tube tables of `specs`' streams in `galaxy`, the galaxy `key` names, that the cache
     /// lacks, built a few at once at `priority` as the warm-up builds them ([`tables_in_flight`]),
-    /// each joining a build in flight for its stream: what a sky's handler asks at bulk priority
+    /// each joining a build in flight for its stream, raised to `priority` if that is higher than
+    /// its own: what a sky's handler asks at bulk priority
     /// for a step's streams before that step's members' jobs read them (rendering plan R06,
     /// R06.T16.a's cost), and a range query's at interactive priority for the streams it reads
     /// (P10.T10.b). One at a time, the 121 tables of a cold Sun-like 50 ly query took 20.1 s on
@@ -779,7 +923,7 @@ impl GlobalListService {
             | SystemIdKind::Pinned(_)
             | SystemIdKind::Catalogue(_) => return Ok(Listing::Unlisted),
         };
-        let list = self.lists.get(key).await?;
+        let list = self.lists.get(key, Priority::Bulk).await?;
         let galaxy = self.lists.galaxies.get(key).await?;
         // A number the list has no stream for resolves to no system, reading no table.
         if let Some(spec) = stream.and_then(|number| list.list().stream(number)) {
@@ -879,10 +1023,15 @@ impl std::fmt::Debug for GlobalListService {
 
 impl Lists {
     /// [`GlobalListService::get`].
-    async fn get(&self, key: GalaxyKey) -> Result<Arc<HeldGlobalList>, ComputeError> {
+    async fn get(
+        &self,
+        key: GalaxyKey,
+        priority: Priority,
+    ) -> Result<Arc<HeldGlobalList>, ComputeError> {
         if let Some(list) = self.held.get(&key) {
             return Ok(list);
         }
+        let class = self.classes.joined(key, priority);
         let (pool, galaxies, forces, held, tubes) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.galaxies),
@@ -902,18 +1051,12 @@ impl Lists {
                 // Cancels the jobs still queued once every waiter on this flight has gone.
                 let _cancel_on_drop = CancelOnDrop::new(token.clone());
                 let shares = Shares::for_workers(pool.workers());
-                let list = global_list_on(
-                    &pool,
-                    &forces,
-                    (&galaxy, key),
-                    (Priority::Bulk, shares),
-                    &token,
-                )
-                .await?;
+                let list =
+                    list_on(&pool, &forces, (&galaxy, key), (&class, shares), &token).await?;
                 // The cores' models, some milliseconds, on the pool as the list was.
                 let modelled = {
                     let galaxy = Arc::clone(&galaxy);
-                    queue(&pool, Priority::Bulk, &token, move |_: &CancelToken| {
+                    queue(&pool, class.priority(), &token, move |_: &CancelToken| {
                         HeldGlobalList::new(&galaxy, list)
                     })
                     .await?
@@ -950,6 +1093,7 @@ impl Lists {
         if let Some(table) = self.tubes.get(&tube_key) {
             return Ok(table);
         }
+        let class = self.tube_classes.joined(tube_key, priority);
         let (pool, forces, tubes, galaxy, spec) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.forces),
@@ -968,12 +1112,12 @@ impl Lists {
                 let _cancel_on_drop = CancelOnDrop::new(token.clone());
                 let shares = Shares::for_workers(pool.workers());
                 let table = Arc::new(
-                    tube_table_on(
+                    table_on(
                         &pool,
                         &forces,
                         (&galaxy, key),
                         &spec,
-                        (priority, shares),
+                        (&class, shares),
                         &token,
                     )
                     .await?,
@@ -995,7 +1139,7 @@ impl Lists {
     /// list's models, held or built, so that a query whose sphere misses it never reads it again
     /// ([`GlobalListModels::keep_envelope`]).
     async fn warm(&self, key: GalaxyKey) -> Result<WarmedTubes, ComputeError> {
-        let list = self.get(key).await?;
+        let list = self.get(key, Priority::Bulk).await?;
         let galaxy = self.galaxies.get(key).await?;
         let streams = list.list().debris().streams();
         let budget = self.tubes.counters().budget();
@@ -1119,7 +1263,7 @@ mod tests {
     use hyperion_sim::units::LightYears;
 
     use super::*;
-    use crate::compute::{ENVELOPE_FILES_DIR, EnvelopeFiles, SharedSystemCache};
+    use crate::compute::{BulkGate, ENVELOPE_FILES_DIR, EnvelopeFiles, SharedSystemCache};
     use crate::convert::origins::SEED;
     use crate::limits::TUBE_TABLE_CACHE_BYTES;
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -1226,7 +1370,7 @@ mod tests {
                 &forces,
                 (&galaxy, key()),
                 (&spec, params),
-                (Priority::Bulk, shares),
+                (&BuildClass::new(Priority::Bulk), shares),
                 &CancelToken::new(),
             ))
             .await
@@ -1288,7 +1432,9 @@ mod tests {
 
     /// The galaxy of [`key`] as `service` holds it, and its list.
     async fn listed(service: &GlobalListService) -> (Arc<Galaxy>, Arc<HeldGlobalList>) {
-        let list = within(service.get(key())).await.expect("the list builds");
+        let list = within(service.get(key(), Priority::Bulk))
+            .await
+            .expect("the list builds");
         let galaxy = within(service.lists.galaxies.get(key()))
             .await
             .expect("the galaxy builds");
@@ -1426,7 +1572,7 @@ mod tests {
             .await
             .expect("the warm-up's jobs run");
         let streams = service
-            .get(key())
+            .get(key(), Priority::Bulk)
             .await
             .expect("held")
             .list()
@@ -1437,7 +1583,7 @@ mod tests {
             (warmed.built(), warmed.held(), warmed.streams()),
             (2, 2, streams)
         );
-        let list = service.get(key()).await.expect("held");
+        let list = service.get(key(), Priority::Bulk).await.expect("held");
         let held: Vec<bool> = list.list().debris().streams()[..4]
             .iter()
             .map(|spec| service.is_ready(key(), spec.number()))
@@ -1547,7 +1693,9 @@ mod tests {
     async fn the_tubes_given_are_built_and_kept() {
         let cache = Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES));
         let (service, pool) = service_on(4, &cache);
-        let list = within(service.get(key())).await.expect("the list");
+        let list = within(service.get(key(), Priority::Bulk))
+            .await
+            .expect("the list");
         let galaxy = within(service.lists.galaxies.get(key()))
             .await
             .expect("the galaxy");
@@ -1632,7 +1780,7 @@ mod tests {
             .await
             .expect("a task was started")
             .expect("the warm-up's task ends");
-        let list = service.get(key()).await.expect("held");
+        let list = service.get(key(), Priority::Bulk).await.expect("held");
         let streams = list.list().debris().streams();
         assert!(service.is_ready(key(), streams[0].number()));
         assert!(!service.is_ready(key(), streams[1].number()));
@@ -1965,5 +2113,133 @@ mod tests {
             assert_eq!(table, expected, "{n} workers");
             pool.shutdown().await.unwrap();
         }
+    }
+
+    /// A build's class is raised by a higher one and never lowered (R06.T11.d).
+    #[test]
+    fn a_build_s_class_is_raised_and_never_lowered() {
+        let class = BuildClass::new(Priority::Background);
+        class.raise(Priority::Bulk);
+        assert_eq!(class.priority(), Priority::Bulk);
+        class.raise(Priority::Background);
+        assert_eq!(class.priority(), Priority::Bulk, "never lowered");
+        class.raise(Priority::Interactive);
+        assert_eq!(class.priority(), Priority::Interactive);
+        class.raise(Priority::Bulk);
+        assert_eq!(class.priority(), Priority::Interactive, "never lowered");
+    }
+
+    /// A waiter joining a key's build in flight is given its class, raised to its own; once the
+    /// build has ended, the next caller is given a class of its own at its priority (R06.T11.d).
+    #[test]
+    fn a_waiter_raises_the_class_of_the_build_in_flight_and_no_later_one() {
+        let classes = BuildClasses::new();
+        let started = classes.joined(1_u32, Priority::Bulk);
+        let joined = classes.joined(1, Priority::Interactive);
+        assert!(
+            Arc::ptr_eq(&started, &joined),
+            "the build in flight's class"
+        );
+        assert_eq!(started.priority(), Priority::Interactive);
+        let other = classes.joined(2, Priority::Bulk);
+        assert_eq!(
+            other.priority(),
+            Priority::Bulk,
+            "another key's build is its own"
+        );
+        drop((started, joined));
+        let next = classes.joined(1, Priority::Bulk);
+        assert_eq!(
+            next.priority(),
+            Priority::Bulk,
+            "the ended build's class is gone"
+        );
+    }
+
+    /// The jobs of a list's build at bulk priority on one worker whose bulk jobs a closed gate
+    /// holds, letting each through as it is held, that a waiter at `waiter`, if any, joins once the
+    /// build's first job is held: the jobs let through, and the list.
+    async fn gated_list_build(waiter: Option<Priority>) -> (usize, Arc<HeldGlobalList>) {
+        let gate = BulkGate::default();
+        let pool = Arc::new(
+            CpuPool::with_bulk_gate(
+                workers(1),
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+                gate.clone(),
+            )
+            .expect("the pool starts"),
+        );
+        // The galaxy built once for both builds, as `cold`'s.
+        let galaxies = Arc::new(GalaxyCache::with_builder(Arc::clone(&pool), |_| {
+            Arc::unwrap_or_clone(cold())
+        }));
+        let tubes = Arc::new(TubeTableCache::new(64 << 20));
+        let (service, pool) = service_of(pool, galaxies, &tubes);
+        within(service.lists.galaxies.get(key()))
+            .await
+            .expect("the galaxy builds");
+        let service = Arc::new(service);
+        gate.close();
+        let bulk = {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { service.get(key(), Priority::Bulk).await })
+        };
+        let joined = match waiter {
+            Some(priority) => {
+                within(async {
+                    while gate.held() == 0 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await;
+                let joining = Arc::clone(&service);
+                let joined = tokio::spawn(async move { joining.get(key(), priority).await });
+                // Joined before the build's first job is let through, so that every job it
+                // queues after those it had queued already is queued at the waiter's class.
+                within(async {
+                    while service.lists.classes.priority_of(&key()) != Some(priority) {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await;
+                Some(joined)
+            }
+            None => None,
+        };
+        let mut admitted = 0;
+        within(async {
+            while !bulk.is_finished() {
+                if gate.held() == 1 {
+                    gate.admit();
+                    admitted += 1;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        let list = bulk.await.expect("the build's task").expect("the list");
+        if let Some(joined) = joined {
+            let theirs = joined.await.expect("the waiter's task").expect("the list");
+            assert!(Arc::ptr_eq(&theirs, &list), "one build between them");
+        }
+        gate.open();
+        pool.shutdown().await.unwrap();
+        (admitted, list)
+    }
+
+    /// A list's build that a range query joins at interactive priority, started at bulk priority
+    /// as a sky's or the warm-up's is, queues the rest of its jobs at the query's class: on one
+    /// worker whose bulk jobs a test's gate holds, fewer of its jobs wait at the gate than when it
+    /// is built alone, and the list is the same, bit for bit (R06.T11.d, P10.T10.b).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_bulk_build_a_query_joins_queues_its_later_jobs_at_the_query_s_class() {
+        let (alone, built) = gated_list_build(None).await;
+        let (joined, raised) = gated_list_build(Some(Priority::Interactive)).await;
+        assert!(
+            0 < joined && joined < alone,
+            "the jobs that waited at the gate: {joined} joined, {alone} alone"
+        );
+        assert_eq!(raised.list(), built.list(), "the same list");
     }
 }

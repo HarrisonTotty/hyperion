@@ -29,7 +29,7 @@ use super::super::observe::observe_row;
 use super::super::scene::frame_line;
 use super::registration::{Served, a_stream_member, key, request, within};
 use crate::compute::{
-    ListedTubes, Listing, RangeCaches, SharedCentreOrbitCache, SharedClusterModelCache,
+    ListedTubes, Listing, Priority, RangeCaches, SharedCentreOrbitCache, SharedClusterModelCache,
     SharedSystemCache,
 };
 use crate::convert::{ListMembers, MotionReads, SystemLine, system_motion};
@@ -175,7 +175,9 @@ async fn pick(
         .await
         .expect("the list builds");
     let mut picked = vec![at_epoch("a stream's member", streamed)];
-    let held = within(served.lists.get(key())).await.expect("the list");
+    let held = within(served.lists.get(key(), Priority::Interactive))
+        .await
+        .expect("the list");
     let mut cored = None;
     for spec in held.list().debris().cores().iter().take(4) {
         let centre = GalacticPosition::ORIGIN

@@ -25,7 +25,7 @@ use axum::serve::ListenerExt;
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
     ClientMessage, CreateUniverseRequest, NotificationBody, RequestBody, RequestError, RequestId,
-    ResponseBody, SeedHex, ServerMessage, UniverseInfo,
+    ResponseBody, SeedHex, ServerMessage, UniverseIdHex, UniverseInfo,
 };
 use hyperion_server::universe::SequenceEntropy;
 use hyperion_server::{
@@ -122,6 +122,51 @@ const STATS_POLL: Duration = Duration::from_millis(5);
 /// universe IDs, as they are drawn.
 pub fn test_entropy() -> impl Iterator<Item = u64> {
     (1..=256).map(|n| 0x5eed_0000_0000_0000 | n)
+}
+
+/// The workers of the server [`envelopes_kept`] answers its query on: four, about 50 s of them in
+/// a test build for the 121 tables a galaxy's first query near the Sun builds (pod, 16 vCPU,
+/// 2026-11-05), and the slots each of the server's sky tests takes (`.config/nextest.toml`).
+pub const ENVELOPE_WORKERS: NonZeroUsize = NonZeroUsize::new(4).expect("4 is not zero");
+
+/// A universe named `name` of `seed`, created over `data_dir` by a server of [`ENVELOPE_WORKERS`]
+/// workers, which answers `query`'s range query in it and then stops, so that the data directory
+/// keeps the envelope of every stream's tube table the query built (P10.T10.b,
+/// perf-range-envelopes-on-disk).
+///
+/// From generator version 27 a galaxy's first range query builds the table of every stream whose
+/// shell meets its sphere: 121 near the Sun, of which it may touch 10, some 190 s on one worker in
+/// a test build (pod, 16 vCPU, 2026-11-05), past [`DEFAULT_PATIENCE`] in one wait. A server
+/// launched over the data directory after this one, as a relaunched server is, reads the envelopes
+/// back and builds only the tables a sphere may touch, and answers as a fresh one does, byte for
+/// byte (`systems_in_range`'s relaunch test).
+///
+/// # Panics
+///
+/// If the query is not answered with the systems in range, or builds no table.
+pub async fn envelopes_kept(
+    data_dir: &Path,
+    (name, seed): (&str, u64),
+    query: impl FnOnce(&UniverseIdHex) -> RequestBody,
+) -> UniverseInfo {
+    let config = TestServer::config(data_dir)
+        .workers(ENVELOPE_WORKERS)
+        .build();
+    let server = TestServer::start_with(config).await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe(name, seed).await;
+    match client.request(query(&universe.id)).await {
+        Ok(ResponseBody::SystemsInRange(_)) => {}
+        other => panic!("expected the systems in range, got {other:?}"),
+    }
+    assert!(
+        server.stats().tube_tables().entries() > 0,
+        "the query built its streams' tables"
+    );
+    client.close().await;
+    // Its shutdown waits for the envelopes still queued to be written.
+    server.stop().await;
+    universe
 }
 
 /// A server listening on `127.0.0.1` at a port the OS chose.

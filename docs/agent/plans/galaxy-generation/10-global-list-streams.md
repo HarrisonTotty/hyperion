@@ -2490,3 +2490,20 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   - _Left._ `Galaxy::new` (0.73 s, 0.39 s of it the displaced class table, one accumulator over the
     components) is now the build's critical path; a first sky's first reply waits on its luminosity
     tables, which no disk keeps.
+- **P10.T10.b, a range query's builds at its class (lane `fix-range-query-first`, 2026-11-05, at
+  28; no output moved).**
+  - _Server._ `GlobalListService::get` takes a `Priority`: `list_for` asks at interactive, the
+    handlers, the sky, `listing` and the warm-up at bulk. New `compute::global_list::BuildClass`:
+    a list's or a table's flight queues each job at the highest priority any waiter asked, so a
+    query that joins a bulk build raises the jobs it queues after (one already queued keeps its
+    place). `global_list_on` and `tube_table_on` keep their signatures; `tracers_on` takes a
+    `&BuildClass`.
+  - _Cause of the timeout._ CPU, not waiting: a galaxy's first 10 ly query near the Sun builds
+    the 121 shelled streams' tables, 190 s of one worker in a test build, nothing behind a sky.
+    Its three one-worker tests (`sky`'s `a_range_query_sent_while_…_answered_first`, `abuse`'s
+    `closing_a_socket_…` and `shutdown_returns_…`) first have a four-worker server keep the
+    envelopes over their data directory (`tests/common`'s `envelopes_kept`), so they build 10;
+    `feature_members`' `the_reply_is_the_same_at_one_and_eight_workers` runs eight, then one.
+  - _Left._ No job is split: no single build is most of the cold query (the list 0.7 %, the
+    largest table 1.7 %). `listing`, `GlobalFeatures` and `StreamTrack` still build the list at
+    bulk. A joined build's jobs queued already keep their bulk place.

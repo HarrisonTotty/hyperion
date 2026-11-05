@@ -308,17 +308,21 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
     const QUERIES: usize = 4;
 
     let data_dir = tempfile::tempdir().expect("a temporary directory");
+    // From generator version 27 a range query reads the galaxy's global list and its streams'
+    // tables, which the first builds (P10.T10.b): warmed too, or the queries below would wait for
+    // them, with no job of their own queued. A first server keeps the tables' envelopes, so that
+    // this one's one worker builds only those the query may touch.
+    let universe = common::envelopes_kept(data_dir.path(), ("Kepler Reach", SEED), |id| {
+        Query::around([0, 26_000, 0]).body(id)
+    })
+    .await;
     let config = TestServer::config(data_dir.path())
         .workers(one_worker())
         .build();
     let server = TestServer::start_with(config).await;
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
     open(&mut client, &universe.id).await;
     assert_eq!(server.stats().galaxies().builds(), 1, "the galaxy is warm");
-    // From generator version 27 a range query reads the galaxy's global list, which the first
-    // builds at bulk priority (P10.T10.b): warmed too, or the queries below would wait behind the
-    // bands for it, with no job of their own queued.
     let warm = client
         .request(Query::around([0, 26_000, 0]).body(&universe.id))
         .await;
@@ -732,17 +736,19 @@ const _: () = assert!(SHUTDOWN_WITH_WORK_QUEUED.as_nanos() > CLOSE_TIMEOUT.as_na
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_returns_within_the_network_timeout_with_work_queued() {
     let data_dir = tempfile::tempdir().expect("a temporary directory");
+    // From generator version 27 a range query reads the galaxy's global list and its streams'
+    // tables, which the first builds (P10.T10.b): warmed here, or the queries below would wait for
+    // them, with no job of their own queued. A first server keeps the tables' envelopes, so that
+    // this one's one worker builds only those the query may touch.
+    let query = Query::around([0, 26_000, 0]).with_radius(50.0);
+    let universe =
+        common::envelopes_kept(data_dir.path(), ("Kepler Reach", SEED), |id| query.body(id)).await;
     let config = TestServer::config(data_dir.path())
         .workers(one_worker())
         .build();
     let server = TestServer::start_with(config).await;
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
     open(&mut client, &universe.id).await;
-    // From generator version 27 a range query reads the galaxy's global list, which the first
-    // builds at bulk priority (P10.T10.b): warmed here, or the queries below would wait behind the
-    // map's bands for it, with no job of their own queued.
-    let query = Query::around([0, 26_000, 0]).with_radius(50.0);
     let warm = client.request(query.body(&universe.id)).await;
     assert!(warm.is_ok(), "the warming query is answered: {warm:?}");
 
