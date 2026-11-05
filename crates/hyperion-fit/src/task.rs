@@ -52,6 +52,18 @@ impl TaskClass {
             Self::Slow => "slow",
         }
     }
+
+    /// A full run's time as the class bounds it, for `hyperion-fit list`: `< 1 min` for a fast
+    /// task, and none for a slow one, which bounds no time (`equipartition`'s run takes about half
+    /// a minute, `displaced_forms`' hours). Neither a header nor a lock entry records a measured
+    /// time (P15.T12).
+    #[must_use]
+    pub const fn runtime(self) -> Option<&'static str> {
+        match self {
+            Self::Fast => Some("< 1 min"),
+            Self::Slow => None,
+        }
+    }
 }
 
 /// The crate whose `src/tables/` holds a table, and whose `tables::MANIFEST` lists it.

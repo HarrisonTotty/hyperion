@@ -7,9 +7,9 @@
 //! from the lock file's by more than 10⁻⁹ relative; its `since-generator-version` exceeds
 //! `GENERATOR_VERSION`; or the lock file and the header, or the lock file and the
 //! `tables::MANIFEST` of the table's crate, disagree. A registered task with no lock entry fails
-//! too. With `--rerun-fast` it also reruns every fast task and compares the bytes it would write
-//! with the committed file. Provisional tables are listed as warnings until P15.T12 makes them
-//! errors.
+//! too, and so does a provisional table, whatever else holds of it: plan 15 closes with none
+//! (P15.T12). With `--rerun-fast` it also reruns every fast task and compares the bytes it would
+//! write with the committed file.
 
 use std::fmt;
 use std::fs;
@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use hyperion_sim::tables::TableInfo;
 
 use crate::data::{DatasetClass, Provenance};
-use crate::emit::{HeaderKind, Placement, TableText, Workspace};
+use crate::emit::{Header, HeaderKind, Placement, TableText, Workspace};
 use crate::manifest::{InputsHash, LockEntry, LockFile, SimFingerprint};
 use crate::pipeline::{ManifestKind, load_manifest, placement_among, rerender};
 use crate::task::{FitTask, TableCrate, TaskClass, table_crate_of};
@@ -61,6 +61,15 @@ pub enum Problem {
     NotRegistered(String),
     /// A fast task's rerun does not reproduce the committed file.
     RerunDiffers,
+    /// The table is provisional, a scratch stand-in, which no table may stay from P15.T12 on.
+    Provisional {
+        /// The task that must fit it, if a registered task makes it.
+        task: Option<String>,
+        /// The plan task its header says made it, if the header could be read.
+        by: Option<String>,
+        /// Its `since-generator-version`.
+        since: u32,
+    },
     /// The table could not be checked; the text says why.
     Unreadable(String),
 }
@@ -90,6 +99,18 @@ impl fmt::Display for Problem {
                 f,
                 "a rerun of this fast task does not reproduce the committed file"
             ),
+            Self::Provisional { task, by, since } => {
+                write!(f, "provisional, a scratch stand-in")?;
+                if let Some(by) = by {
+                    write!(f, " by {by}")?;
+                }
+                write!(f, " since generator version {since}: ")?;
+                match task {
+                    Some(task) => write!(f, "task `{task}` must fit it")?,
+                    None => write!(f, "no registered task fits it")?,
+                }
+                write!(f, ", as no table may stay provisional (P15.T12)")
+            }
             Self::Unreadable(why) => write!(f, "cannot be checked: {why}"),
         }
     }
@@ -109,7 +130,7 @@ pub struct Finding {
 pub struct CheckReport {
     /// The tables that passed, by name, with a one-line note.
     pub fresh: Vec<(String, String)>,
-    /// Warnings: provisional tables, and fast tasks not rerun because their data is not fetched.
+    /// Warnings: fast tasks not rerun because their data is not fetched.
     pub warnings: Vec<(String, String)>,
     /// Failures.
     pub findings: Vec<Finding>,
@@ -219,7 +240,21 @@ pub fn check(inputs: &CheckInputs<'_>, rerun: Rerun, threads: NonZeroUsize) -> C
             None => None,
         };
         let before = report.findings.len();
-        check_entry(inputs, entry, task, &mut report);
+        let header = check_entry(inputs, entry, task, &mut report);
+        if entry.provisional {
+            let by = header.and_then(|header| match header.kind {
+                Some(HeaderKind::Provisional { by }) => Some(by),
+                Some(HeaderKind::Generated | HeaderKind::Static) | None => None,
+            });
+            report.fail(
+                &entry.name,
+                Problem::Provisional {
+                    task: entry.task.clone(),
+                    by,
+                    since: entry.since_generator_version,
+                },
+            );
+        }
         if report.findings.len() > before {
             continue;
         }
@@ -230,26 +265,18 @@ pub fn check(inputs: &CheckInputs<'_>, rerun: Rerun, threads: NonZeroUsize) -> C
         {
             continue;
         }
-        match (&entry.provisional, &entry.acceptance) {
-            (true, _) => report.warnings.push((
-                entry.name.clone(),
-                format!(
-                    "provisional, since generator version {}",
-                    entry.since_generator_version
-                ),
-            )),
-            (false, acceptance) => report.fresh.push((
-                entry.name.clone(),
-                format!(
-                    "revision {}, since generator version {}{}",
-                    entry.revision,
-                    entry.since_generator_version,
-                    acceptance
-                        .as_ref()
-                        .map_or_else(String::new, |a| format!("; {a}"))
-                ),
-            )),
-        }
+        report.fresh.push((
+            entry.name.clone(),
+            format!(
+                "revision {}, since generator version {}{}",
+                entry.revision,
+                entry.since_generator_version,
+                entry
+                    .acceptance
+                    .as_ref()
+                    .map_or_else(String::new, |a| format!("; {a}"))
+            ),
+        ));
     }
     report
 }
@@ -314,13 +341,14 @@ fn check_manifest_agrees(
     }
 }
 
-/// Checks one lock entry against its file, its task and the generator version.
+/// Checks one lock entry against its file, its task and the generator version, and returns its
+/// header if it could be read.
 fn check_entry(
     inputs: &CheckInputs<'_>,
     entry: &LockEntry,
     task: Option<&'static dyn FitTask>,
     report: &mut CheckReport,
-) {
+) -> Option<Header> {
     let name = entry.name.as_str();
     if entry.since_generator_version > inputs.current {
         report.fail(
@@ -335,7 +363,7 @@ fn check_entry(
     let path = inputs.workspace.tables_dir(table_crate).join(&entry.path);
     let Ok(text) = fs::read_to_string(&path) else {
         report.fail(name, Problem::Missing);
-        return;
+        return None;
     };
     let block = task.map_or(Placement::File, |task| placement_among(inputs.tasks, task))
         == Placement::Block;
@@ -344,11 +372,11 @@ fn check_entry(
             Ok(Some(split)) => split,
             Ok(None) => {
                 report.fail(name, Problem::Missing);
-                return;
+                return None;
             }
             Err(e) => {
                 report.fail(name, Problem::Header(e.to_string()));
-                return;
+                return None;
             }
         }
     } else {
@@ -358,7 +386,7 @@ fn check_entry(
         Ok(header) => header,
         Err(e) => {
             report.fail(name, Problem::Header(e.to_string()));
-            return;
+            return None;
         }
     };
     if split.body_sha256() != entry.body_sha256 {
@@ -379,7 +407,7 @@ fn check_entry(
         report.fail(name, disagree("the task and revision"));
     }
     let Some(task) = task else {
-        return;
+        return Some(header);
     };
     match load_manifest(inputs.workspace, task, ManifestKind::Full)
         .map_err(|e| e.to_string())
@@ -406,6 +434,7 @@ fn check_entry(
     if header.sim_fingerprint != Some(SimFingerprint::hash_of(&entry.fingerprint)) {
         report.fail(name, disagree("sim-fingerprint"));
     }
+    Some(header)
 }
 
 /// Reruns fast `task` and compares what it would write with the committed file; false if it

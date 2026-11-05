@@ -25,6 +25,7 @@
 //! - [`manifest`]: manifests, the inputs hash, sim fingerprints and the lock file `tables.lock`;
 //! - [`emit`]: the Rust source emitter, the header grammar and the guards on writing a table;
 //! - [`check`]: the staleness check, `just fit-check`;
+//! - [`list`]: the tables' listing, `hyperion-fit list`;
 //! - [`data`]: external datasets and their provenance;
 //! - [`materials`]: rendering plan R08's committed material files, read as a fit's input;
 //! - [`parallel`]: the deterministic map-reduce;
@@ -36,6 +37,7 @@ pub mod check;
 pub mod cli;
 pub mod data;
 pub mod emit;
+pub mod list;
 pub mod manifest;
 pub mod materials;
 pub mod optimise;
@@ -64,6 +66,9 @@ pub enum RunFitError {
     /// The staleness check found stale tables; the report lists them.
     #[error("{} stale tables", .0.findings.len())]
     Check(check::CheckReport),
+    /// `list` could not read the lock file or a table.
+    #[error(transparent)]
+    List(#[from] list::ListTablesError),
     /// `--smoke` or `--manifest` was given without `--out`: a committed table is always made from
     /// the task's own manifest.
     #[error(
@@ -144,6 +149,7 @@ impl RunFitError {
             | Self::Task(_)
             | Self::Emit(_)
             | Self::Check(_)
+            | Self::List(_)
             | Self::AtmosphereCase(_)
             | Self::AtmosphereReference(
                 atmosphere::TraceReferenceError::ThreadPool(_)

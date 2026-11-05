@@ -12,7 +12,8 @@ use hyperion_fit::check::{CheckInputs, CheckReport, Problem, REPOSITORY_MANIFEST
 use hyperion_fit::emit::{
     Destination, EmitTableError, Placement, RustTable, TableItem, Workspace, write_table,
 };
-use hyperion_fit::manifest::{LockFile, Manifest, SimFingerprint};
+use hyperion_fit::list::{ListRow, ListState, listing};
+use hyperion_fit::manifest::{LockEntry, LockFile, Manifest, SimFingerprint};
 use hyperion_fit::pipeline::{ManifestKind, manifest_path, placement_among, prepare};
 use hyperion_fit::task::{FitTask, RunTaskError, TableCrate, TaskClass, TaskOutput, registry};
 use hyperion_fit::{RunFitError, emit};
@@ -28,6 +29,7 @@ struct Toy {
     table_crate: TableCrate,
     path: &'static str,
     shares_its_file: bool,
+    provisional: Option<&'static str>,
     probe: Mutex<f64>,
 }
 
@@ -81,7 +83,7 @@ impl FitTask for Toy {
             },
             source: "a test".to_owned(),
             acceptance: format!("value {value}"),
-            provisional: None,
+            provisional: self.provisional,
         })
     }
 }
@@ -98,6 +100,19 @@ fn toy_in(table_crate: TableCrate, name: &'static str, path: &'static str) -> &'
         table_crate,
         path,
         shares_its_file: false,
+        provisional: None,
+        probe: Mutex::new(1.5),
+    }))
+}
+
+/// A toy task of the sim's tables whose table is a scratch stand-in that plan task `by` replaces.
+fn toy_provisional(name: &'static str, path: &'static str, by: &'static str) -> &'static Toy {
+    Box::leak(Box::new(Toy {
+        name,
+        table_crate: TableCrate::Sim,
+        path,
+        shares_its_file: false,
+        provisional: Some(by),
         probe: Mutex::new(1.5),
     }))
 }
@@ -109,6 +124,7 @@ fn toy_beside_code(name: &'static str, path: &'static str) -> &'static Toy {
         table_crate: TableCrate::Sim,
         path,
         shares_its_file: true,
+        provisional: None,
         probe: Mutex::new(1.5),
     }))
 }
@@ -338,6 +354,225 @@ fn check_rejects_since_version_above_current() {
             current: 11
         }),
         "{report}"
+    );
+}
+
+/// A provisional table fails the check from P15.T12 on, as it only warned before, and the failure
+/// names the table, the task that must fit it and the plan task its header says made it.
+#[test]
+fn check_fails_on_a_provisional_table_naming_it_and_its_task() {
+    let t = toy_provisional("toy", "toy.rs", "P15.T99");
+    let (_root, ws) = workspace(&[t]);
+    let tasks: [&'static dyn FitTask; 1] = [t];
+    run(&ws, &tasks, t, Some(11), 11).unwrap();
+    assert!(
+        LockFile::read(&ws.lock_path)
+            .unwrap()
+            .get("toy")
+            .unwrap()
+            .provisional
+    );
+    for rerun in [Rerun::None, Rerun::Fast] {
+        let report = check_with(&ws, &tasks, &manifests_of(&ws), 11, rerun);
+        assert!(!report.passed(), "{report}");
+        assert!(report.warnings.is_empty(), "{report}");
+        let tables: Vec<&str> = report.findings.iter().map(|f| f.table.as_str()).collect();
+        assert_eq!(tables, ["toy"], "{report}");
+        assert_eq!(
+            problems(&report),
+            [Problem::Provisional {
+                task: Some("toy".to_owned()),
+                by: Some("P15.T99".to_owned()),
+                since: 11
+            }],
+            "{report}"
+        );
+        assert!(
+            report.to_string().contains(
+                "STALE    toy: provisional, a scratch stand-in by P15.T99 since generator version \
+                 11: task `toy` must fit it, as no table may stay provisional (P15.T12)\n0 fresh, \
+                 0 warnings, 1 failures"
+            ),
+            "{report}"
+        );
+    }
+}
+
+/// The listing gives each task's table its lock entry's revision and figures and its state, and
+/// then lists each table file whose own header no task writes: a hand-made header beside a task's
+/// block, or a file of its own, in the grammar or not; a file whose comment holds no header is no
+/// table.
+#[test]
+fn the_listing_shows_provisional_and_unregistered_tables() {
+    let alpha = toy("alpha", "alpha.rs");
+    let beta = toy_provisional("beta", "beta.rs", "P15.T99");
+    let gamma = toy_beside_code("gamma", "beside.rs");
+    let (_root, ws) = workspace(&[alpha, beta, gamma]);
+    let tasks: [&'static dyn FitTask; 3] = [alpha, beta, gamma];
+    let tables = ws.tables_dir(TableCrate::Sim);
+    fs::write(
+        tables.join("beside.rs"),
+        "//! Shapes of a table.\n//!\n//! @provisional: hand-made scratch values.\n\npub const \
+         SCRATCH: f64 = 1.0;\n\n// @begin-table gamma\n// @end-table gamma\n",
+    )
+    .unwrap();
+    for t in [alpha, beta, gamma] {
+        run(&ws, &tasks, t, Some(11), 11).unwrap();
+    }
+    fs::write(
+        tables.join("hand.rs"),
+        "//! A constant.\n//!\n//! @static.\n//! since-generator-version: 3\n//! source: a test\n\n\
+         pub const X: f64 = 1.0;\n",
+    )
+    .unwrap();
+    fs::write(
+        tables.join("plain.rs"),
+        "//! Not a table.\n\npub const Y: f64 = 2.0;\n",
+    )
+    .unwrap();
+    let manifests = manifests_of(&ws);
+    let manifests: Vec<(TableCrate, &[TableInfo])> = manifests
+        .iter()
+        .map(|(table_crate, rows)| (*table_crate, rows.as_slice()))
+        .collect();
+    let listed = listing(&CheckInputs {
+        workspace: &ws,
+        tasks: &tasks,
+        manifests: &manifests,
+        current: 11,
+    })
+    .unwrap();
+    let task_row = |name: &str, path: &str, state| ListRow {
+        name: name.to_owned(),
+        revision: Some(2),
+        class: Some(TaskClass::Fast),
+        state,
+        path: path.to_owned(),
+        acceptance: Some("value 0.25".to_owned()),
+    };
+    let unregistered = |name: &str, kind: &str| ListRow {
+        name: name.to_owned(),
+        revision: None,
+        class: None,
+        state: ListState::Unregistered(kind.to_owned()),
+        path: format!("{name}.rs"),
+        acceptance: None,
+    };
+    assert_eq!(
+        listed.rows,
+        [
+            task_row("alpha", "alpha.rs", ListState::Fresh),
+            task_row("beta", "beta.rs", ListState::Provisional),
+            task_row("gamma", "beside.rs", ListState::Fresh),
+            unregistered("beside", "provisional"),
+            unregistered("hand", "static"),
+        ]
+    );
+    let text = listed.to_string();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines[0],
+        "name    revision  class  runtime  state                     table      acceptance"
+    );
+    assert_eq!(
+        lines[2],
+        "beta    2         fast   < 1 min  provisional               beta.rs    value 0.25"
+    );
+    assert_eq!(
+        lines[5],
+        "hand    -         -      -        unregistered static       hand.rs    -"
+    );
+}
+
+/// A lock entry that no task makes is listed once, from its lock entry and not again as an
+/// unregistered file, and fails the check while provisional; a stale table is listed as stale.
+#[test]
+fn the_listing_shows_a_lock_entry_no_task_makes_once_and_a_stale_table() {
+    let alpha = toy("alpha", "alpha.rs");
+    let (_root, ws) = workspace(&[alpha]);
+    let tasks: [&'static dyn FitTask; 1] = [alpha];
+    let tables = ws.tables_dir(TableCrate::Sim);
+    let scratch = "//! A scratch table.\n//!\n//! @provisional by P11.T15. Do not edit.\n//! \
+                   since-generator-version: 9\n//! source: a test\n\npub const Z: f64 = 3.0;\n";
+    fs::write(tables.join("scratch.rs"), scratch).unwrap();
+    let mut lock = LockFile::default();
+    lock.upsert(LockEntry {
+        name: "scratch".to_owned(),
+        path: "scratch.rs".to_owned(),
+        task: None,
+        revision: 0,
+        inputs_sha256: None,
+        body_sha256: emit::TableText::of_file(scratch).body_sha256(),
+        fingerprint: Vec::new(),
+        since_generator_version: 9,
+        provisional: true,
+        acceptance: None,
+    });
+    lock.write(&ws.lock_path).unwrap();
+    run(&ws, &tasks, alpha, Some(11), 11).unwrap();
+    let path = tables.join("alpha.rs");
+    let text = fs::read_to_string(&path).unwrap().replace("0.5,", "0.6,");
+    fs::write(&path, text).unwrap();
+    let manifests = manifests_of(&ws);
+    let report = check_with(&ws, &tasks, &manifests, 11, Rerun::None);
+    let findings: Vec<(&str, &Problem)> = report
+        .findings
+        .iter()
+        .map(|f| (f.table.as_str(), &f.problem))
+        .collect();
+    assert_eq!(
+        findings,
+        [
+            ("alpha", &Problem::HandEdited),
+            (
+                "scratch",
+                &Problem::Provisional {
+                    task: None,
+                    by: Some("P11.T15".to_owned()),
+                    since: 9
+                }
+            ),
+        ],
+        "{report}"
+    );
+    assert!(
+        report.to_string().contains(
+            "STALE    scratch: provisional, a scratch stand-in by P11.T15 since generator version \
+             9: no registered task fits it"
+        ),
+        "{report}"
+    );
+    let manifests: Vec<(TableCrate, &[TableInfo])> = manifests
+        .iter()
+        .map(|(table_crate, rows)| (*table_crate, rows.as_slice()))
+        .collect();
+    let listed = listing(&CheckInputs {
+        workspace: &ws,
+        tasks: &tasks,
+        manifests: &manifests,
+        current: 11,
+    })
+    .unwrap();
+    assert_eq!(
+        listed.rows,
+        [
+            ListRow {
+                name: "alpha".to_owned(),
+                revision: Some(2),
+                class: Some(TaskClass::Fast),
+                state: ListState::Stale,
+                path: "alpha.rs".to_owned(),
+                acceptance: Some("value 0.25".to_owned()),
+            },
+            ListRow {
+                name: "scratch".to_owned(),
+                revision: Some(0),
+                class: None,
+                state: ListState::Provisional,
+                path: "scratch.rs".to_owned(),
+                acceptance: None,
+            },
+        ]
     );
 }
 
@@ -571,11 +806,7 @@ fn the_committed_tables_are_fresh() {
         NonZeroUsize::MIN,
     );
     assert!(report.passed(), "{report}");
-    assert_eq!(
-        report.fresh.len() + report.warnings.len(),
-        registry().len(),
-        "{report}"
-    );
+    assert_eq!(report.fresh.len(), registry().len(), "{report}");
 }
 
 /// Every committed table declares its task's items, in order: a file's, or its block's where

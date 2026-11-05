@@ -1921,7 +1921,8 @@ Risks, "T7.b's swap as built"), T8.a–c (production at their committed values b
 decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a, T10.a (fitted at P09.T43's
 scratch bits, no bump; Risks, "T10.a as built"), T10.b's accreting white dwarfs and X-ray
 binaries (held for 27, refitted at 27; Risks, "T10.b as built" and "T10.b's refit at 27"), T11.a (`streams` registered, provisional; Risks,
-"T11.a as built") and T11.b (fitted, held for 27; Risks, "T11.b as built").
+"T11.a as built"), T11.b (fitted, held for 27; Risks, "T11.b as built") and T12's tools
+(`list` and the provisional error; Risks, "T12's tools as built"); T12's tables wait.
 
 ## Verification
 
@@ -3499,3 +3500,16 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
   now `IDENTITY` and `CandidateHeliumTable::COMMITTED` the fit (the `Option` stays, for candidates).
 - **`mge` is revision 3** (the same lane), cleared by `BoxyFigures::passes_as_ruled` (masses and
   forces) once T3.c's two Milky Way checks passed at 26.
+- **T12's tools as built (lane p15-t12-fit-tools, 2026-11-05, at 28; no output moves).** `check`
+  fails on a provisional lock entry, `Problem::Provisional { task, by, since }` (`by` the header's
+  plan task); `CheckReport::warnings` holds only fast tasks not rerun.
+- **`list`'s rows** (the same lane, `list::listing`): each registered task's name, lock revision,
+  class, runtime, state, path and lock acceptance; then lock entries no task makes; then files no
+  registered header writes, today `binary` (`unregistered provisional`), which P11.T15 drops.
+- `list_prints_registered_tasks` (P15.T1) is now
+  `list_prints_every_tables_revision_class_runtime_and_acceptance`, in `cli.rs`.
+- From here a provisional lock entry fails `just fit-check`: T9.b's and T10.b's merger blocks
+  register non-provisional (held, as T10.b's first two were), and P11.T15's "clear the
+  `provisional` flags" leaves only `binary.rs`'s own header.
+- (lean, 2026-11-05) Runtime is the class's bound, `TaskClass::runtime`: `< 1 min` for fast, `-`
+  for slow, which bounds none; no header or lock entry records a time. Acceptance is the lock's.

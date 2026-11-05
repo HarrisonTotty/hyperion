@@ -1,7 +1,8 @@
 //! The command line (plan 15, P15.T1):
 //!
 //! ```text
-//! hyperion-fit list                      # tasks, class (fast or slow), table path, state
+//! hyperion-fit list                      # every table: name, revision, class (fast or slow),
+//!                                        # runtime, state, path and acceptance figures
 //! hyperion-fit run <task> [--since <generator version>] [--smoke] [--threads N] [--out PATH]
 //!                         [--data DIR] [--manifest PATH]
 //! hyperion-fit check [--rerun-fast]      # staleness
@@ -47,6 +48,7 @@ use crate::atmosphere::{
 };
 use crate::check::{CheckInputs, REPOSITORY_MANIFESTS, Rerun, check};
 use crate::emit::{Destination, Workspace, write_table};
+use crate::list::listing;
 use crate::manifest::Manifest;
 use crate::pipeline::{ManifestKind, load_manifest, prepare};
 use crate::task::{self, FitTask};
@@ -63,7 +65,8 @@ pub struct Cli {
 /// A subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Command {
-    /// List the tasks: name, class, table path and state.
+    /// List the tables: name, revision, class, runtime, state, path and acceptance figures, and
+    /// each table file no registered task writes.
     List,
     /// Run a task and write its table.
     Run {
@@ -227,6 +230,7 @@ fn find(name: &str) -> Result<&'static dyn FitTask, RunFitError> {
 ///
 /// [`RunFitError::UnknownTask`] for a task that is not registered; the task's, the emitter's and
 /// the manifest's errors from `run`; [`RunFitError::Check`] if `check` finds a stale table;
+/// [`RunFitError::List`] if `list` cannot read the lock file or a table;
 /// [`RunFitError::AtmosphereCase`] if `atmosphere-reference`'s case cannot be read,
 /// [`RunFitError::AtmosphereReference`] if it cannot be traced and
 /// [`RunFitError::WriteReference`] if its reference cannot be written;
@@ -562,36 +566,15 @@ fn atmosphere_sweep(args: &AtmosphereSweepArgs, out: &mut dyn Write) -> Result<(
     Ok(())
 }
 
-/// `list`: every task's name, class, table and state.
+/// `list`: every table's name, revision, class, runtime, state, path and acceptance figures.
 fn list(workspace: &Workspace, out: &mut dyn Write) -> Result<(), RunFitError> {
-    let tasks = task::registry();
-    let report = check(
-        &CheckInputs {
-            workspace,
-            tasks,
-            manifests: REPOSITORY_MANIFESTS,
-            current: GENERATOR_VERSION.get(),
-        },
-        Rerun::None,
-        NonZeroUsize::MIN,
-    );
-    writeln!(out, "{:<16}{:<7}{:<20}state", "task", "class", "table")?;
-    for task in tasks {
-        let name = task.name();
-        let state = if report.findings.iter().any(|f| f.table == name) {
-            "stale"
-        } else if report.warnings.iter().any(|(t, _)| t == name) {
-            "provisional"
-        } else {
-            "fresh"
-        };
-        writeln!(
-            out,
-            "{name:<16}{:<7}{:<20}{state}",
-            task.class().as_str(),
-            task.table_path()
-        )?;
-    }
+    let listing = listing(&CheckInputs {
+        workspace,
+        tasks: task::registry(),
+        manifests: REPOSITORY_MANIFESTS,
+        current: GENERATOR_VERSION.get(),
+    })?;
+    writeln!(out, "{listing}")?;
     Ok(())
 }
 
@@ -1095,19 +1078,82 @@ mod tests {
         ));
     }
 
+    /// `list` prints every registered table's name, revision, class, runtime, state, file and
+    /// acceptance figures, in columns, and then each table file whose header no registered task
+    /// writes: the hand-made `binary`, until P11.T15 registers it (P15.T12).
     #[test]
-    fn list_prints_registered_tasks() {
+    fn list_prints_every_tables_revision_class_runtime_and_acceptance() {
         let mut out = Vec::new();
         run(&parse(&["list"]).unwrap(), &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
-        let rows: Vec<&str> = text.lines().skip(1).collect();
-        assert_eq!(rows.len(), task::registry().len(), "{text}");
-        for (row, task) in rows.iter().zip(task::registry()) {
-            assert!(row.starts_with(task.name()), "{row}");
-            assert!(row.contains(task.table_path()), "{row}");
-            assert!(row.contains(task.class().as_str()), "{row}");
+        let mut lines = text.lines();
+        let head = lines.next().unwrap();
+        let labels = [
+            "name",
+            "revision",
+            "class",
+            "runtime",
+            "state",
+            "table",
+            "acceptance",
+        ];
+        let starts: Vec<usize> = labels
+            .iter()
+            .map(|label| {
+                head.find(label)
+                    .unwrap_or_else(|| panic!("no `{label}` in `{head}`"))
+            })
+            .collect();
+        assert!(starts.is_sorted(), "{head}");
+        assert_eq!(starts[0], 0, "{head}");
+        let cells = |row: &str| -> Vec<String> {
+            (0..starts.len())
+                .map(|i| {
+                    let end = starts.get(i + 1).copied().unwrap_or(row.len());
+                    row.get(starts[i]..end)
+                        .unwrap_or_else(|| panic!("`{row}` is short of column {i}"))
+                        .trim()
+                        .to_owned()
+                })
+                .collect()
+        };
+        let rows: Vec<&str> = lines.collect();
+        let tasks = task::registry();
+        assert_eq!(rows.len(), tasks.len() + 1, "{text}");
+        let lock = crate::manifest::LockFile::read(&Workspace::repository().lock_path).unwrap();
+        for (row, task) in rows.iter().zip(tasks) {
+            let entry = lock.get(task.name()).unwrap();
+            let runtime = match task.class() {
+                task::TaskClass::Fast => "< 1 min",
+                task::TaskClass::Slow => "-",
+            };
+            assert_eq!(
+                cells(row),
+                [
+                    task.name(),
+                    &entry.revision.to_string(),
+                    task.class().as_str(),
+                    runtime,
+                    "fresh",
+                    task.table_path(),
+                    entry.acceptance.as_deref().unwrap_or("-"),
+                ],
+                "{row}"
+            );
         }
-        assert!(text.contains("mge             fast   mge.rs"), "{text}");
+        assert_eq!(
+            cells(rows[tasks.len()]),
+            [
+                "binary",
+                "-",
+                "-",
+                "-",
+                "unregistered provisional",
+                "binary.rs",
+                "-"
+            ],
+            "{text}"
+        );
     }
 
     #[test]
