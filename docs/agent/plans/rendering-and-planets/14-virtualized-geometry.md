@@ -2454,10 +2454,16 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     in one submission, exactly as each `render` in turn (a disposed target left out, a target of
     several mips ending the submission); bloom's levels go through it (`BloomChain.run`). Each
     frame of a submission takes its own `Frame` block (`uniforms.ts`' `FrameBlocks`, one write a
-    submission). Every `RenderEngine` (the fakes and `ProbedEngine` too) implements it.
-  - The inspection's 4 km window: under MAXIMIZE VIEW `setFreeRate` shows the folded label block
-    to read the rate, then folds it again for the ground's readout. Reached at low on SwiftShader;
-    at high a hold can span two frames, the camera meets the ground and the step fails (handoff).
+    submission). Every `RenderEngine` (the fakes, `ProbedEngine` and `SourceTableEngine` too)
+    implements it.
+  - The inspection's 4 km window (`inspectionCheckRun.ts`): each hold is one camera step, let up in
+    the submission that ends it (`holdForStep`); the step flies by the POSITION range to 25 km over
+    the ground the close window's rested reading places (`lowApproachRangeM`), then by dead
+    reckoning from rested slant ranges (`ReckonedSlant`, `restedSlantM`), backing out of the ground
+    by doubles. Under MAXIMIZE VIEW the rate and the range are read from the camera panel
+    (`cameraRateStep`, perf-render-thread-ground's; `cameraRangeM`). A terrain still streaming past
+    the ground's wait is measured all the same (`awaitedOrNot`; main's lean). The profile's watchdog
+    and launch limit give the window 20 more minutes (100 in software).
   - Pending: the owner's Mac re-profile, `views-check --inspection --timing --hidden` (gate.txt).
 - **R14.T3.d** (`r14-t3c-strides`):
   - Landed from this lane behind `occlusion: "off"` on both settings; its acceptance captures (off
