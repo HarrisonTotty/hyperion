@@ -738,7 +738,8 @@ fn assert_no_faults(what: &str, inside: usize, faults: &[String]) {
 }
 
 /// Every 26 hold: the features' recent entries, through the features' members, the one source
-/// registered beside the grid at 26 (module documentation). Their IDs resolve through
+/// registered beside the grid at 26 (module documentation), asked alone: from 27 the list and
+/// the classes are registered beside it, which the 27 test asks too. Their IDs resolve through
 /// `resolve_member`.
 #[test]
 #[ignore = "slow: range queries about four features' lists at three times under every 26 hold"]
@@ -747,9 +748,14 @@ fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
         let galaxy = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
         let asked = features_asked(&galaxy, Kind::Recent);
         with_served(&galaxy, |sources, reads| {
-            assert_eq!(sources.len(), 1, "at 26 the features' members alone");
+            assert_eq!(
+                sources.len(),
+                3,
+                "at 27 the members, the list and the classes"
+            );
+            // The features' members, first, alone.
             let (inside, faults) =
-                features_in_range((&galaxy, reads), (sources, Kind::Recent), &asked);
+                features_in_range((&galaxy, reads), (&sources[..1], Kind::Recent), &asked);
             assert_no_faults("the features under every 26 hold", inside, &faults);
         });
         let interiors = KeepInteriors::new(&galaxy);
