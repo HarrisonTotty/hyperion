@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 world europa_like level 6 cells 24576 climate cells 6144 craters 0
 header body system 0 index 5
 header radius m = 0x4137d0e000000000  # 1560800.0

@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 
 # giant_bolometric_correction_v, mag, at T_eff (K) and log g (cm s^-2)
 giant 1705 K log g -0.31 = none

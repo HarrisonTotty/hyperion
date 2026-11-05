@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 m_dwarf_resonant_chain 0100 iron_group = 0x3f81183b83ddf4ec  # 0.008347001039278067
 m_dwarf_resonant_chain 0100 light_lithophiles = 0x3fd324e15eff92ec  # 0.29912599827939235
 m_dwarf_resonant_chain 0100 rare_earths = 0x3ee38ee8498a798e  # 9.326091729375244e-6

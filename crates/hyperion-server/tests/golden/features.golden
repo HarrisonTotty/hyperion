@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 # features in range, epoch
 {
   "type": "response",
@@ -87,7 +87,7 @@
         "mass_msun": 267.61955894113163,
         "expected_members": 424.67306095087673,
         "emission": null,
-        "bubble_radius_ly": 378.17154755790216
+        "bubble_radius_ly": 98.51478945481962
       },
       {
         "id": "e85a00a800000000",
@@ -133,7 +133,7 @@
         "mass_msun": 131.80975619877387,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 593.3391838168292
+        "bubble_radius_ly": 68.10220229301876
       },
       {
         "id": "e7d9e07480000000",
@@ -202,7 +202,7 @@
         "mass_msun": 148.33349762615774,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 339.8870119331395
+        "bubble_radius_ly": 66.07963712688982
       },
       {
         "id": "e85a00cc80000000",
@@ -225,7 +225,7 @@
         "mass_msun": 155.44519610828394,
         "expected_members": 0.0,
         "emission": "reflection_nebula",
-        "bubble_radius_ly": 219.18689969340647
+        "bubble_radius_ly": 73.42650236917346
       },
       {
         "id": "e859e03a00000000",
@@ -248,7 +248,7 @@
         "mass_msun": 155.38311621007756,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 869.7216169775637
+        "bubble_radius_ly": 76.79763300889658
       },
       {
         "id": "e7da008180000000",
@@ -271,7 +271,7 @@
         "mass_msun": 246.70221073264605,
         "expected_members": 0.0,
         "emission": "hii_region",
-        "bubble_radius_ly": 207.12082882782119
+        "bubble_radius_ly": 89.57570439900219
       },
       {
         "id": "e7da00d300000000",
@@ -294,7 +294,7 @@
         "mass_msun": 150.71445189213446,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 851.0436611424947
+        "bubble_radius_ly": 74.29768451377667
       },
       {
         "id": "e7d9e03c00000000",
@@ -340,7 +340,7 @@
         "mass_msun": 158.0922660776969,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 413.3233151749119
+        "bubble_radius_ly": 72.34969848391724
       },
       {
         "id": "e85a00c380000000",
@@ -386,7 +386,7 @@
         "mass_msun": 138.7236796310171,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 538.026369614147
+        "bubble_radius_ly": 69.63803763696038
       },
       {
         "id": "e7d9e0c900000000",
@@ -432,7 +432,7 @@
         "mass_msun": 12319.572113971775,
         "expected_members": 0.0,
         "emission": "hii_region",
-        "bubble_radius_ly": 731.2297460831114
+        "bubble_radius_ly": 525.7361812616494
       },
       {
         "id": "e7d9e09700000000",
@@ -455,7 +455,7 @@
         "mass_msun": 149.27393372751584,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 607.8049931543343
+        "bubble_radius_ly": 77.27405761318168
       },
       {
         "id": "e7d9e0e500000000",
@@ -501,7 +501,7 @@
         "mass_msun": 134.10744488379282,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 725.2515777106122
+        "bubble_radius_ly": 61.567247642511234
       },
       {
         "id": "e7d9e02e00000000",
@@ -547,7 +547,7 @@
         "mass_msun": 126.27944367207458,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 575.851824793229
+        "bubble_radius_ly": 65.56949726150746
       },
       {
         "id": "e7da001b80000000",
@@ -616,7 +616,7 @@
         "mass_msun": 369.7127935349965,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 839.2345771926458
+        "bubble_radius_ly": 116.29242326466029
       },
       {
         "id": "e85a00c980000000",
@@ -662,7 +662,7 @@
         "mass_msun": 137.70175548180833,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 626.1108519368798
+        "bubble_radius_ly": 53.472279573648436
       },
       {
         "id": "e85a00e500000000",
@@ -916,7 +916,7 @@
         "mass_msun": 267.61602556202314,
         "expected_members": 424.67306095087673,
         "emission": null,
-        "bubble_radius_ly": 378.1987004324199
+        "bubble_radius_ly": 98.51489924789794
       },
       {
         "id": "e85a00a800000000",
@@ -962,7 +962,7 @@
         "mass_msun": 131.80975619877387,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 593.3550056679355
+        "bubble_radius_ly": 68.10221272209155
       },
       {
         "id": "e7d9e07480000000",
@@ -1031,7 +1031,7 @@
         "mass_msun": 148.33349762615774,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 339.9086691292163
+        "bubble_radius_ly": 66.07969508707444
       },
       {
         "id": "e85a00cc80000000",
@@ -1054,7 +1054,7 @@
         "mass_msun": 155.44519610828394,
         "expected_members": 0.0,
         "emission": "reflection_nebula",
-        "bubble_radius_ly": 219.21949704877142
+        "bubble_radius_ly": 73.42685568393357
       },
       {
         "id": "e859e03a00000000",
@@ -1077,7 +1077,7 @@
         "mass_msun": 155.38311621007756,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 869.7348742021702
+        "bubble_radius_ly": 76.79763684817338
       },
       {
         "id": "e7da008180000000",
@@ -1100,7 +1100,7 @@
         "mass_msun": 246.70221073264605,
         "expected_members": 0.0,
         "emission": "hii_region",
-        "bubble_radius_ly": 207.15880550477684
+        "bubble_radius_ly": 89.57570439900222
       },
       {
         "id": "e7da00d300000000",
@@ -1123,7 +1123,7 @@
         "mass_msun": 150.71445189213446,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 851.0569113018447
+        "bubble_radius_ly": 74.29768838887455
       },
       {
         "id": "e7d9e03c00000000",
@@ -1169,7 +1169,7 @@
         "mass_msun": 158.0922660776969,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 413.3441575733923
+        "bubble_radius_ly": 72.34973818442634
       },
       {
         "id": "e85a00c380000000",
@@ -1215,7 +1215,7 @@
         "mass_msun": 138.7236796310171,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 538.0434983246555
+        "bubble_radius_ly": 69.63805284432829
       },
       {
         "id": "e7d9e0c900000000",
@@ -1261,7 +1261,7 @@
         "mass_msun": 12319.572113971775,
         "expected_members": 0.0,
         "emission": "hii_region",
-        "bubble_radius_ly": 731.2787174482032
+        "bubble_radius_ly": 525.7366908145749
       },
       {
         "id": "e7d9e09700000000",
@@ -1284,7 +1284,7 @@
         "mass_msun": 149.27393372751584,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 607.8220196110403
+        "bubble_radius_ly": 77.27407067426238
       },
       {
         "id": "e85a014600000000",
@@ -1307,7 +1307,7 @@
         "mass_msun": 134.10744488379282,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 725.2636903959088
+        "bubble_radius_ly": 61.56725133793043
       },
       {
         "id": "e7d9e0e500000000",
@@ -1376,7 +1376,7 @@
         "mass_msun": 126.27944367207458,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 575.8672673144519
+        "bubble_radius_ly": 65.56950741693757
       },
       {
         "id": "e7da001b80000000",
@@ -1445,7 +1445,7 @@
         "mass_msun": 369.7127935349965,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 839.252580677089
+        "bubble_radius_ly": 116.29243478546181
       },
       {
         "id": "e85a00c980000000",
@@ -1491,7 +1491,7 @@
         "mass_msun": 137.70175548180833,
         "expected_members": 0.0,
         "emission": null,
-        "bubble_radius_ly": 626.1224111981286
+        "bubble_radius_ly": 53.472283496135525
       },
       {
         "id": "e85a00e500000000",
@@ -1689,7 +1689,7 @@
       "mass_msun": 267.6192056021592,
       "expected_members": 424.67306095087673,
       "emission": null,
-      "bubble_radius_ly": 378.17426290385214
+      "bubble_radius_ly": 98.51480043530809
     },
     "structure": {
       "type": "cluster",

@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 world earth_like level 8 cells 393216 climate cells 98304 craters 1
 header body system 0 index 1
 header radius m = 0x41584dae00000000  # 6371000.0

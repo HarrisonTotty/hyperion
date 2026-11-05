@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 near the Sun (0, 26,000, 68) ly at the epoch, cut V 7, every cap forced to 130 ly
   cells = 27274
   shells = 9
@@ -22,16 +22,16 @@ the tallies, each layer's
   C without photometry = 0
   C centre members = 0
   D cells = 88
-  D generated = 1202
+  D generated = 1207
   D accepted = 134
   D listed = 134
-  D without photometry = 36
+  D without photometry = 34
   D centre members = 0
   E cells = 22
   E generated = 305
   E accepted = 3
   E listed = 3
-  E without photometry = 8
+  E without photometry = 7
   E centre members = 0
   BrownDwarf cells = 2948
   BrownDwarf generated = 0

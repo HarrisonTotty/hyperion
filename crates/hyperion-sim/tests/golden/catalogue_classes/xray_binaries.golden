@@ -1,5 +1,5 @@
-# generator_version = 28
-cell [-4, -4, -1] bound = 0x3e4ed4859a07c47a  # 1.4356413669823258e-8
+# generator_version = 29
+cell [-4, -4, -1] bound = 0x3e4dbb0048a44a9f  # 1.3844330366601477e-8
 cell [-4, -4, -1] candidates 1 entries 1
 cell [-4, -4, -1] fc57c7c7f0000000 component 8 kind NeutronStarTransient donor attempt 0
 cell [-4, -4, -1] fc57c7c7f0000000 cell [-1762, -1754, -329]
@@ -10,35 +10,35 @@ cell [-4, -4, -1] fc57c7c7f0000000 velocity 0 = 0x40e5c14df5889714  # 44554.4362
 cell [-4, -4, -1] fc57c7c7f0000000 velocity 1 = 0x4105a734848b50a1  # 177382.5647188472
 cell [-4, -4, -1] fc57c7c7f0000000 velocity 2 = 0xc0e41cf2a93b0f49  # -41191.583158044676
 cell [-4, -4, -1] fc57c7c7f0000000 recurrence = 0x40823f5ac6a9b7f3  # 583.919324232031
-cell [-4, -4, -1] fc57c7c7f0000000 accretor = 0x3ff83b61581f5e45  # 1.5144971315657056
-cell [-4, -4, -1] fc57c7c7f0000000 period = 0x40b18eb89ce8338e  # 4494.721144211375
-cell [-4, -4, -1] fc57c7c7f0000000 rate = 0x3db29007ef3e1930  # 1.688260551554044e-11
+cell [-4, -4, -1] fc57c7c7f0000000 accretor = 0x3ff7df4d6a5a467b  # 1.4920171884918136
+cell [-4, -4, -1] fc57c7c7f0000000 period = 0x40b14b3140e618e1  # 4427.192396527361
+cell [-4, -4, -1] fc57c7c7f0000000 rate = 0x3db3539f917a845f  # 1.757748902369727e-11
 cell [-4, -4, -1] fc57c7c7f0000000 accretor NeutronStar
-cell [-4, -4, -1] fc57c7c7f0000000 accretor mass = 0x3ff83b61581f5e45  # 1.5144971315657056
-cell [-4, -4, -1] fc57c7c7f0000000 accretor core = 0x3ff83b61581f5e45  # 1.5144971315657056
+cell [-4, -4, -1] fc57c7c7f0000000 accretor mass = 0x3ff7df4d6a5a467b  # 1.4920171884918136
+cell [-4, -4, -1] fc57c7c7f0000000 accretor core = 0x3ff7df4d6a5a467b  # 1.4920171884918136
 cell [-4, -4, -1] fc57c7c7f0000000 accretor radius = 0x3ef2635cf9422719  # 1.753629437976139e-5
-cell [-4, -4, -1] fc57c7c7f0000000 accretor luminosity = 0x3e058138a8d44028  # 6.258712035250579e-10
+cell [-4, -4, -1] fc57c7c7f0000000 accretor luminosity = 0x3e05485cf57607ac  # 6.194071739217241e-10
 cell [-4, -4, -1] fc57c7c7f0000000 donor MainSequence
-cell [-4, -4, -1] fc57c7c7f0000000 donor mass = 0x3f904450b434d65f  # 0.015885601996350803
+cell [-4, -4, -1] fc57c7c7f0000000 donor mass = 0x3f91099a0d56f4ae  # 0.016638190330685525
 cell [-4, -4, -1] fc57c7c7f0000000 donor core = 0x0000000000000000  # 0.0
-cell [-4, -4, -1] fc57c7c7f0000000 donor radius = 0x3fb1eb32b388aae1  # 0.06999508746290985
+cell [-4, -4, -1] fc57c7c7f0000000 donor radius = 0x3fb20060ec2e1187  # 0.07031827703582937
 cell [-4, -4, -1] fc57c7c7f0000000 donor luminosity = 0x3f50eae06019ebdf  # 0.0010325614133808098
 cell [-4, -4, -1] fc57c7c7f0000000 eccentricity = 0x0000000000000000  # 0.0
 cell [-4, -4, -1] fc57c7c7f0000000 inclination = 0x3ff6441578f7b6ce  # 1.3916220403001947
 cell [-4, -4, -1] fc57c7c7f0000000 node = 0x3ffa613bb700f183  # 1.648738589151521
 cell [-4, -4, -1] fc57c7c7f0000000 periapsis = 0x3fe4e0066b26d71a  # 0.6523468106085801
 cell [-4, -4, -1] fc57c7c7f0000000 mean anomaly = 0x3fcde70c115e3686  # 0.2336134991459639
-cell [-4, -4, -1] fc57c7c7f0000000 primary initial = 0x4021d9dcb78f455a  # 8.9255120623008
-cell [-4, -4, -1] fc57c7c7f0000000 donor initial = 0x3fe7ffb96711c1e2  # 0.7499663365434197
+cell [-4, -4, -1] fc57c7c7f0000000 primary initial = 0x40223b17488cf52d  # 9.115412013251069
+cell [-4, -4, -1] fc57c7c7f0000000 donor initial = 0x3fe75f95f9872caf  # 0.7304181932062387
 cell [-4, -4, -1] fc57c7c7f0000000 age = 0x41f84ed3fcfa3f8d  # 6525108175.640515
 cell [-4, -4, -1] fc57c7c7f0000000 feh = 0x3fd90105c4616589  # 0.390687410142697
 cell [-4, -4, -1] fc57c7c7f0000000 model 0 NeutronStar
 cell [-4, -4, -1] fc57c7c7f0000000 model 0 mass = 0x3ff37d9ea0731657  # 1.21816885638818
-cell [-4, -4, -1] fc57c7c7f0000000 model 0 luminosity = 0x3e029964ec76b236  # 5.413078535126556e-10
+cell [-4, -4, -1] fc57c7c7f0000000 model 0 luminosity = 0x3e02976eac443d65  # 5.410848093651031e-10
 cell [-4, -4, -1] fc57c7c7f0000000 model 1 MainSequence
-cell [-4, -4, -1] fc57c7c7f0000000 model 1 mass = 0x3fe7ffb96711c1e2  # 0.7499663365434197
-cell [-4, -4, -1] fc57c7c7f0000000 model 1 luminosity = 0x3fc6f70ac83b0b42  # 0.17941412712942834
-cell [-4, -2, 0] bound = 0x3e5b0c019286ab52  # 2.5189387604987548e-8
+cell [-4, -4, -1] fc57c7c7f0000000 model 1 mass = 0x3fe75f95f9872caf  # 0.7304181932062387
+cell [-4, -4, -1] fc57c7c7f0000000 model 1 luminosity = 0x3fc41dcef1d6424f  # 0.15715967949337759
+cell [-4, -2, 0] bound = 0x3e58f044c3f207e8  # 2.32258339197507e-8
 cell [-4, -2, 0] candidates 5 entries 1
 cell [-4, -2, 0] fc57c7e800000000 component 8 kind BlackHoleTransient donor attempt 0
 cell [-4, -2, 0] fc57c7e800000000 cell [-1777, -884, 135]
@@ -49,36 +49,36 @@ cell [-4, -2, 0] fc57c7e800000000 velocity 0 = 0x40e05c14abb422d0  # 33504.64595
 cell [-4, -2, 0] fc57c7e800000000 velocity 1 = 0x40f92c62a0587ccd  # 103110.16414688826
 cell [-4, -2, 0] fc57c7e800000000 velocity 2 = 0xc0db44e49f6fe488  # -27923.572231267142
 cell [-4, -2, 0] fc57c7e800000000 recurrence = 0x406b6dc275735146  # 219.42998764536804
-cell [-4, -2, 0] fc57c7e800000000 accretor = 0x400e462782d4fe7c  # 3.784255048871101
-cell [-4, -2, 0] fc57c7e800000000 period = 0x40cc866309ec8fa3  # 14604.773740358482
-cell [-4, -2, 0] fc57c7e800000000 rate = 0x3de9d5d01c755343  # 1.8797586944399493e-10
+cell [-4, -2, 0] fc57c7e800000000 accretor = 0x401013b0e1f72324  # 4.019229441365301
+cell [-4, -2, 0] fc57c7e800000000 period = 0x40cdff0d2e0da5c6  # 15358.102967935509
+cell [-4, -2, 0] fc57c7e800000000 rate = 0x3deda1634bb09deb  # 2.1558969006282397e-10
 cell [-4, -2, 0] fc57c7e800000000 accretor BlackHole
-cell [-4, -2, 0] fc57c7e800000000 accretor mass = 0x400e462782d4fe7c  # 3.784255048871101
-cell [-4, -2, 0] fc57c7e800000000 accretor core = 0x400e462782d4fe7c  # 3.784255048871101
-cell [-4, -2, 0] fc57c7e800000000 accretor radius = 0x3ef0d83230c386cb  # 1.606418213462891e-5
+cell [-4, -2, 0] fc57c7e800000000 accretor mass = 0x401013b0e1f72324  # 4.019229441365301
+cell [-4, -2, 0] fc57c7e800000000 accretor core = 0x401013b0e1f72324  # 4.019229441365301
+cell [-4, -2, 0] fc57c7e800000000 accretor radius = 0x3ef1e3f3a2aabd97  # 1.706164963860348e-5
 cell [-4, -2, 0] fc57c7e800000000 accretor luminosity = 0x0000000000000000  # 0.0
 cell [-4, -2, 0] fc57c7e800000000 donor FirstGiantBranch
-cell [-4, -2, 0] fc57c7e800000000 donor mass = 0x3fcd5e7d82518c66  # 0.22944611418924693
+cell [-4, -2, 0] fc57c7e800000000 donor mass = 0x3fcf07119ccfec7f  # 0.2424032226261694
 cell [-4, -2, 0] fc57c7e800000000 donor core = 0x3fc3333333333333  # 0.15
-cell [-4, -2, 0] fc57c7e800000000 donor radius = 0x3fd75766a86b9665  # 0.36470953414241186
+cell [-4, -2, 0] fc57c7e800000000 donor radius = 0x3fd895d8286040bf  # 0.384145774297405
 cell [-4, -2, 0] fc57c7e800000000 donor luminosity = 0x400227859bb4e636  # 2.269297806223018
 cell [-4, -2, 0] fc57c7e800000000 eccentricity = 0x0000000000000000  # 0.0
 cell [-4, -2, 0] fc57c7e800000000 inclination = 0x40024d810d18f71c  # 2.2878438018077656
 cell [-4, -2, 0] fc57c7e800000000 node = 0x40173060c64dacf4  # 5.797244165888731
 cell [-4, -2, 0] fc57c7e800000000 periapsis = 0x4017ed33958e87b0  # 5.981642090629904
 cell [-4, -2, 0] fc57c7e800000000 mean anomaly = 0x400e6f34c97d6b32  # 3.8042999020957717
-cell [-4, -2, 0] fc57c7e800000000 primary initial = 0x4025d8ee3b43fd12  # 10.923692562150368
+cell [-4, -2, 0] fc57c7e800000000 primary initial = 0x4025e9babafc9a2e  # 10.95650276502155
 cell [-4, -2, 0] fc57c7e800000000 donor initial = 0x3ff00bdbf5629a36  # 1.0028953156812697
 cell [-4, -2, 0] fc57c7e800000000 age = 0x42010804f5f13fff  # 9143623358.156248
 cell [-4, -2, 0] fc57c7e800000000 feh = 0x3f9b9c2dbb394fd1  # 0.026962961723555005
 cell [-4, -2, 0] fc57c7e800000000 model 0 NeutronStar
-cell [-4, -2, 0] fc57c7e800000000 model 0 mass = 0x3ff84585270eec51  # 1.5169726873125635
-cell [-4, -2, 0] fc57c7e800000000 model 0 luminosity = 0x3df5d0e5b617f259  # 3.174646570742506e-10
+cell [-4, -2, 0] fc57c7e800000000 model 0 mass = 0x3ff8585aa07851ac  # 1.5215708034857967
+cell [-4, -2, 0] fc57c7e800000000 model 0 luminosity = 0x3df5dc0698a835eb  # 3.180972366216151e-10
 cell [-4, -2, 0] fc57c7e800000000 model 1 MainSequence
 cell [-4, -2, 0] fc57c7e800000000 model 1 mass = 0x3ff00bdbf5629a36  # 1.0028953156812697
 cell [-4, -2, 0] fc57c7e800000000 model 1 luminosity = 0x3ff888bda2c156aa  # 1.533383975756275
-cell [-3, -1, 0] bound = 0x3e72cc56bda4c123  # 7.002874672225535e-8
-cell [-3, -1, 0] candidates 9 entries 3
+cell [-3, -1, 0] bound = 0x3e6f77883c861958  # 5.861171065422435e-8
+cell [-3, -1, 0] candidates 7 entries 3
 cell [-3, -1, 0] fc57d7f800000000 component 7 kind NeutronStarTransient donor attempt 0
 cell [-3, -1, 0] fc57d7f800000000 cell [-1131, -347, 493]
 cell [-3, -1, 0] fc57d7f800000000 offset 0 = 0x4325ea8770095e9f  # 3084420966035279.5
@@ -88,31 +88,31 @@ cell [-3, -1, 0] fc57d7f800000000 velocity 0 = 0xc0f73173c938698e  # -94999.2366
 cell [-3, -1, 0] fc57d7f800000000 velocity 1 = 0xc0befd44bbc9e12e  # -7933.268490426517
 cell [-3, -1, 0] fc57d7f800000000 velocity 2 = 0xc0fa737d7e1d92a7  # -108343.84328992163
 cell [-3, -1, 0] fc57d7f800000000 recurrence = 0x406ba8d426df1142  # 221.27589744155745
-cell [-3, -1, 0] fc57d7f800000000 accretor = 0x3ff51094219af609  # 1.3165475189883884
-cell [-3, -1, 0] fc57d7f800000000 period = 0x40c03bf88b6f2bdd  # 8311.941755196016
-cell [-3, -1, 0] fc57d7f800000000 rate = 0x3dafae2f88f015c2  # 1.4406583807256889e-11
+cell [-3, -1, 0] fc57d7f800000000 accretor = 0x3ff4fc336fbef86f  # 1.3115724911763456
+cell [-3, -1, 0] fc57d7f800000000 period = 0x40c081976a3364bc  # 8451.182928489863
+cell [-3, -1, 0] fc57d7f800000000 rate = 0x3db20825017662e5  # 1.6399839898771386e-11
 cell [-3, -1, 0] fc57d7f800000000 accretor NeutronStar
-cell [-3, -1, 0] fc57d7f800000000 accretor mass = 0x3ff51094219af609  # 1.3165475189883884
-cell [-3, -1, 0] fc57d7f800000000 accretor core = 0x3ff51094219af609  # 1.3165475189883884
+cell [-3, -1, 0] fc57d7f800000000 accretor mass = 0x3ff4fc336fbef86f  # 1.3115724911763456
+cell [-3, -1, 0] fc57d7f800000000 accretor core = 0x3ff4fc336fbef86f  # 1.3115724911763456
 cell [-3, -1, 0] fc57d7f800000000 accretor radius = 0x3ef2635cf9422719  # 1.753629437976139e-5
-cell [-3, -1, 0] fc57d7f800000000 accretor luminosity = 0x3df4f4c60a8cfe02  # 3.0495207275246694e-10
+cell [-3, -1, 0] fc57d7f800000000 accretor luminosity = 0x3df4e42f869ea76f  # 3.040091569280464e-10
 cell [-3, -1, 0] fc57d7f800000000 donor MainSequence
-cell [-3, -1, 0] fc57d7f800000000 donor mass = 0x3fc61a6bb845a19a  # 0.17268129823356732
+cell [-3, -1, 0] fc57d7f800000000 donor mass = 0x3fc6d8daed58d69a  # 0.17849289502344307
 cell [-3, -1, 0] fc57d7f800000000 donor core = 0x0000000000000000  # 0.0
-cell [-3, -1, 0] fc57d7f800000000 donor radius = 0x3fcce086cf45ef00  # 0.22560200806389474
-cell [-3, -1, 0] fc57d7f800000000 donor luminosity = 0x3f74a798deba72e3  # 0.0050426455960887765
+cell [-3, -1, 0] fc57d7f800000000 donor radius = 0x3fcd8356c8d7a8ca  # 0.23057064825781587
+cell [-3, -1, 0] fc57d7f800000000 donor luminosity = 0x3f764897236a1f71  # 0.0054403213349657345
 cell [-3, -1, 0] fc57d7f800000000 eccentricity = 0x0000000000000000  # 0.0
 cell [-3, -1, 0] fc57d7f800000000 inclination = 0x3fd222ec35104677  # 0.28338151151647345
 cell [-3, -1, 0] fc57d7f800000000 node = 0x4008e4367fa230b8  # 3.111432072770267
 cell [-3, -1, 0] fc57d7f800000000 periapsis = 0x400a5bdbaaa5d4bc  # 3.2948525745256045
 cell [-3, -1, 0] fc57d7f800000000 mean anomaly = 0x40143e692e3fe126  # 5.060948107384581
-cell [-3, -1, 0] fc57d7f800000000 primary initial = 0x401cfa55eed44710  # 7.244468433100124
+cell [-3, -1, 0] fc57d7f800000000 primary initial = 0x401db93658a48196  # 7.43087137703005
 cell [-3, -1, 0] fc57d7f800000000 donor initial = 0x3feda899f8cbb6cf  # 0.9268312320034172
 cell [-3, -1, 0] fc57d7f800000000 age = 0x4200a17497dc214d  # 8928531195.51626
 cell [-3, -1, 0] fc57d7f800000000 feh = 0xbfe06e9a8d52e538  # -0.5135014305334726
 cell [-3, -1, 0] fc57d7f800000000 model 0 OxygenNeonWhiteDwarf
 cell [-3, -1, 0] fc57d7f800000000 model 0 mass = 0x3ff5eb851eb851ec  # 1.37
-cell [-3, -1, 0] fc57d7f800000000 model 0 luminosity = 0x3e66ecf5746c6aaf  # 4.270229552444414e-8
+cell [-3, -1, 0] fc57d7f800000000 model 0 luminosity = 0x3e66ea9b278870cd  # 4.2685177118803175e-8
 cell [-3, -1, 0] fc57d7f800000000 model 1 MainSequence
 cell [-3, -1, 0] fc57d7f800000000 model 1 mass = 0x3feda899f8cbb6cf  # 0.9268312320034172
 cell [-3, -1, 0] fc57d7f800000000 model 1 luminosity = 0x3ffcaa921c920c9e  # 1.7916432491336205
@@ -125,71 +125,71 @@ cell [-3, -1, 0] fc57d7f800000030 velocity 0 = 0xc0e6e5cedf643f27  # -46894.4647
 cell [-3, -1, 0] fc57d7f800000030 velocity 1 = 0x40fc53746ce0bce5  # 116023.27658151423
 cell [-3, -1, 0] fc57d7f800000030 velocity 2 = 0xc104400579fdcb43  # -165888.68456610487
 cell [-3, -1, 0] fc57d7f800000030 recurrence = 0x40807c6594ac53d8  # 527.5495999777877
-cell [-3, -1, 0] fc57d7f800000030 accretor = 0x3ffafa3ca1e0f709  # 1.6860929797543938
-cell [-3, -1, 0] fc57d7f800000030 period = 0x40c126df585b3be2  # 8781.744883922805
-cell [-3, -1, 0] fc57d7f800000030 rate = 0x3d8c750fff27fc10  # 3.2352176436154423e-12
+cell [-3, -1, 0] fc57d7f800000030 accretor = 0x3ffa693ff546f263  # 1.6506957608354689
+cell [-3, -1, 0] fc57d7f800000030 period = 0x40c16bab17e239c1  # 8919.33666637249
+cell [-3, -1, 0] fc57d7f800000030 rate = 0x3d8fd9b714874716  # 3.620976921409706e-12
 cell [-3, -1, 0] fc57d7f800000030 accretor NeutronStar
-cell [-3, -1, 0] fc57d7f800000030 accretor mass = 0x3ffafa3ca1e0f709  # 1.6860929797543938
-cell [-3, -1, 0] fc57d7f800000030 accretor core = 0x3ffafa3ca1e0f709  # 1.6860929797543938
+cell [-3, -1, 0] fc57d7f800000030 accretor mass = 0x3ffa693ff546f263  # 1.6506957608354689
+cell [-3, -1, 0] fc57d7f800000030 accretor core = 0x3ffa693ff546f263  # 1.6506957608354689
 cell [-3, -1, 0] fc57d7f800000030 accretor radius = 0x3ef2635cf9422719  # 1.753629437976139e-5
-cell [-3, -1, 0] fc57d7f800000030 accretor luminosity = 0x3df47e2954e47777  # 2.982097528050619e-10
+cell [-3, -1, 0] fc57d7f800000030 accretor luminosity = 0x3df4355768fdce71  # 2.9407041471313866e-10
 cell [-3, -1, 0] fc57d7f800000030 donor MainSequence
-cell [-3, -1, 0] fc57d7f800000030 donor mass = 0x3fd1959ac6e2f3fb  # 0.2747561399699518
+cell [-3, -1, 0] fc57d7f800000030 donor mass = 0x3fd18d519bba4867  # 0.27425041396884925
 cell [-3, -1, 0] fc57d7f800000030 donor core = 0x0000000000000000  # 0.0
-cell [-3, -1, 0] fc57d7f800000030 donor radius = 0x3fd175155e608f6d  # 0.2727712079670173
-cell [-3, -1, 0] fc57d7f800000030 donor luminosity = 0x3f8766bc57c2ae19  # 0.011426421573864908
+cell [-3, -1, 0] fc57d7f800000030 donor radius = 0x3fd1a065dd1ee7df  # 0.2754149112112127
+cell [-3, -1, 0] fc57d7f800000030 donor luminosity = 0x3f8751b501ba5bf5  # 0.011386312594636275
 cell [-3, -1, 0] fc57d7f800000030 eccentricity = 0x0000000000000000  # 0.0
 cell [-3, -1, 0] fc57d7f800000030 inclination = 0x3ff09822e61a65d4  # 1.0371426571276645
 cell [-3, -1, 0] fc57d7f800000030 node = 0x4015aad1b97e2d0b  # 5.416815660787743
 cell [-3, -1, 0] fc57d7f800000030 periapsis = 0x40119f22cdf6496d  # 4.405406206280856
 cell [-3, -1, 0] fc57d7f800000030 mean anomaly = 0x3ff7b737fbb6894f  # 1.482231124166521
-cell [-3, -1, 0] fc57d7f800000030 primary initial = 0x4027e6dbdd533e3d  # 11.950896183406366
+cell [-3, -1, 0] fc57d7f800000030 primary initial = 0x40275b0e59151ce2  # 11.677843841387986
 cell [-3, -1, 0] fc57d7f800000030 donor initial = 0x3feec012bca0941c  # 0.9609464344144985
 cell [-3, -1, 0] fc57d7f800000030 age = 0x420231cca5a9484a  # 9768113333.160297
 cell [-3, -1, 0] fc57d7f800000030 feh = 0xbfbf1e75f3762c28  # -0.12155854410063738
 cell [-3, -1, 0] fc57d7f800000030 model 0 NeutronStar
-cell [-3, -1, 0] fc57d7f800000030 model 0 mass = 0x3ffa85929679a19a  # 1.6576105001387078
-cell [-3, -1, 0] fc57d7f800000030 model 0 luminosity = 0x3df442e9bb1c8dca  # 2.9484186889848715e-10
+cell [-3, -1, 0] fc57d7f800000030 model 0 mass = 0x3ff9de6439c99e86  # 1.6167948014571336
+cell [-3, -1, 0] fc57d7f800000030 model 0 luminosity = 0x3df3ee43f911b34c  # 2.9003021604941644e-10
 cell [-3, -1, 0] fc57d7f800000030 model 1 MainSequence
 cell [-3, -1, 0] fc57d7f800000030 model 1 mass = 0x3feec012bca0941c  # 0.9609464344144985
 cell [-3, -1, 0] fc57d7f800000030 model 1 luminosity = 0x3ff75d9b5d4de9f1  # 1.4603532452298362
-cell [-3, -1, 0] fc57d7f800000040 component 8 kind NeutronStarPersistent donor attempt 0
+cell [-3, -1, 0] fc57d7f800000040 component 7 kind NeutronStarPersistent donor attempt 0
 cell [-3, -1, 0] fc57d7f800000040 cell [-1108, -304, 435]
 cell [-3, -1, 0] fc57d7f800000040 offset 0 = 0x433bf18b221854dc  # 7865404245955804.0
 cell [-3, -1, 0] fc57d7f800000040 offset 1 = 0x4326dfb4ae0cd3ae  # 3219208297408983.0
 cell [-3, -1, 0] fc57d7f800000040 offset 2 = 0x430bf98c346d882f  # 984275617689861.9
-cell [-3, -1, 0] fc57d7f800000040 velocity 0 = 0x40e88f41911c3ffb  # 50298.048963665926
-cell [-3, -1, 0] fc57d7f800000040 velocity 1 = 0x40d7e373a6a2b6df  # 24461.80704563006
-cell [-3, -1, 0] fc57d7f800000040 velocity 2 = 0xc0bafe3ad96f7b17  # -6910.229880302001
-cell [-3, -1, 0] fc57d7f800000040 accretor = 0x3ff5626d527b9dcb  # 1.3365300390231478
-cell [-3, -1, 0] fc57d7f800000040 period = 0x40c25f091c0f8bac  # 9406.071168845367
-cell [-3, -1, 0] fc57d7f800000040 rate = 0x3e572af5a2eab608  # 2.157670502916043e-8
+cell [-3, -1, 0] fc57d7f800000040 velocity 0 = 0x40d007823c29c168  # 16414.03492206466
+cell [-3, -1, 0] fc57d7f800000040 velocity 1 = 0x40dcae9be56ff3ba  # 29370.43587874223
+cell [-3, -1, 0] fc57d7f800000040 velocity 2 = 0xc0bf90271094a14f  # -8080.15259674967
+cell [-3, -1, 0] fc57d7f800000040 accretor = 0x3ff54218dcd7fab3  # 1.3286369921403718
+cell [-3, -1, 0] fc57d7f800000040 period = 0x40c2ac40981647fd  # 9560.504641328002
+cell [-3, -1, 0] fc57d7f800000040 rate = 0x3e352c8e867795f4  # 4.929967635057984e-9
 cell [-3, -1, 0] fc57d7f800000040 accretor NeutronStar
-cell [-3, -1, 0] fc57d7f800000040 accretor mass = 0x3ff5626d527b9dcb  # 1.3365300390231478
-cell [-3, -1, 0] fc57d7f800000040 accretor core = 0x3ff5626d527b9dcb  # 1.3365300390231478
+cell [-3, -1, 0] fc57d7f800000040 accretor mass = 0x3ff54218dcd7fab3  # 1.3286369921403718
+cell [-3, -1, 0] fc57d7f800000040 accretor core = 0x3ff54218dcd7fab3  # 1.3286369921403718
 cell [-3, -1, 0] fc57d7f800000040 accretor radius = 0x3ef2635cf9422719  # 1.753629437976139e-5
-cell [-3, -1, 0] fc57d7f800000040 accretor luminosity = 0x3e0463f03ab5d9a8  # 5.934382893257047e-10
+cell [-3, -1, 0] fc57d7f800000040 accretor luminosity = 0x3df785f35d6138b0  # 3.423082627939625e-10
 cell [-3, -1, 0] fc57d7f800000040 donor FirstGiantBranch
-cell [-3, -1, 0] fc57d7f800000040 donor mass = 0x3faee095e3cf7872  # 0.06030720144166048
-cell [-3, -1, 0] fc57d7f800000040 donor core = 0x3fabca20803ab934  # 0.05427648129749443
-cell [-3, -1, 0] fc57d7f800000040 donor radius = 0x3fc666ebf9c9faf1  # 0.1750159234688549
-cell [-3, -1, 0] fc57d7f800000040 donor luminosity = 0x3f74e4d7fdac6641  # 0.00510105487298912
+cell [-3, -1, 0] fc57d7f800000040 donor mass = 0x3faf6f68f69383d0  # 0.061396865939748246
+cell [-3, -1, 0] fc57d7f800000040 donor core = 0x3fac4aab4451903b  # 0.05525717934577342
+cell [-3, -1, 0] fc57d7f800000040 donor radius = 0x3fc6c617305e494d  # 0.1779202448056573
+cell [-3, -1, 0] fc57d7f800000040 donor luminosity = 0x3f77438acfa08b56  # 0.005679647665632745
 cell [-3, -1, 0] fc57d7f800000040 eccentricity = 0x0000000000000000  # 0.0
 cell [-3, -1, 0] fc57d7f800000040 inclination = 0x3fe1cc2e692fa87b  # 0.5561744741837765
 cell [-3, -1, 0] fc57d7f800000040 node = 0x4014050bd43c6aa7  # 5.004927936732805
 cell [-3, -1, 0] fc57d7f800000040 periapsis = 0x40157a7198b1c136  # 5.369573961114204
 cell [-3, -1, 0] fc57d7f800000040 mean anomaly = 0x401493be03602be4  # 5.144279530281867
-cell [-3, -1, 0] fc57d7f800000040 primary initial = 0x40175508ef03e698  # 5.833041891682704
-cell [-3, -1, 0] fc57d7f800000040 donor initial = 0x3fbb2fb03d8d6017  # 0.10619641783466736
-cell [-3, -1, 0] fc57d7f800000040 age = 0x41f822c198f1fd40  # 6478895503.124329
-cell [-3, -1, 0] fc57d7f800000040 feh = 0xbfca1df02123c498  # -0.20403863542700118
-cell [-3, -1, 0] fc57d7f800000040 model 0 CarbonOxygenWhiteDwarf
-cell [-3, -1, 0] fc57d7f800000040 model 0 mass = 0x3ff2232df2acee2d  # 1.1335887412559587
-cell [-3, -1, 0] fc57d7f800000040 model 0 luminosity = 0x3f07663af3575ac2  # 4.463069346243499e-5
+cell [-3, -1, 0] fc57d7f800000040 primary initial = 0x401872dfb570c0bb  # 6.11218150616349
+cell [-3, -1, 0] fc57d7f800000040 donor initial = 0x3fbb3a6966afe8a0  # 0.10636004216204009
+cell [-3, -1, 0] fc57d7f800000040 age = 0x41ff961ad8f1fd40  # 8478895503.124329
+cell [-3, -1, 0] fc57d7f800000040 feh = 0xbfd1694ac0c28310  # -0.27205151390266824
+cell [-3, -1, 0] fc57d7f800000040 model 0 OxygenNeonWhiteDwarf
+cell [-3, -1, 0] fc57d7f800000040 model 0 mass = 0x3ff2f7d8c11d4c54  # 1.1855094474347156
+cell [-3, -1, 0] fc57d7f800000040 model 0 luminosity = 0x3e7ec97f2dfe404a  # 1.146908732414894e-7
 cell [-3, -1, 0] fc57d7f800000040 model 1 MainSequence
-cell [-3, -1, 0] fc57d7f800000040 model 1 mass = 0x3fbb2fb03d8d6017  # 0.10619641783466736
-cell [-3, -1, 0] fc57d7f800000040 model 1 luminosity = 0x3f531caae3dd62df  # 0.001166502842769805
-cell [-3, 3, -1] bound = 0x3e51e91b4a77fce7  # 1.6680520657436234e-8
+cell [-3, -1, 0] fc57d7f800000040 model 1 mass = 0x3fbb3a6966afe8a0  # 0.10636004216204009
+cell [-3, -1, 0] fc57d7f800000040 model 1 luminosity = 0x3f5380d80e1b0105  # 0.00119038676386657
+cell [-3, 3, -1] bound = 0x3e50d01ede9fcdb7  # 1.5658299469491638e-8
 cell [-3, 3, -1] candidates 1 entries 1
 cell [-3, 3, -1] fc57d837f0000000 component 7 kind Ultracompact donor attempt 0
 cell [-3, 3, -1] fc57d837f0000000 cell [-1198, 1734, -278]
@@ -200,31 +200,31 @@ cell [-3, 3, -1] fc57d837f0000000 velocity 0 = 0xc0e7ef3713b5a330  # -49017.7211
 cell [-3, 3, -1] fc57d837f0000000 velocity 1 = 0xc0a32e8395c87d47  # -2455.257002129834
 cell [-3, 3, -1] fc57d837f0000000 velocity 2 = 0xc102c17188efdd7f  # -153646.1918637566
 cell [-3, 3, -1] fc57d837f0000000 recurrence = 0x400bdde856f39f9b  # 3.4833533089731197
-cell [-3, 3, -1] fc57d837f0000000 accretor = 0x3ff533bfd6d6f4ef  # 1.3251341240095902
-cell [-3, 3, -1] fc57d837f0000000 period = 0x40a952f1b2cd4f86  # 3241.4720672759604
-cell [-3, 3, -1] fc57d837f0000000 rate = 0x3d8004f405d1130a  # 1.8211890723288655e-12
+cell [-3, 3, -1] fc57d837f0000000 accretor = 0x3ff51b51bb37c076  # 1.3191697419352102
+cell [-3, 3, -1] fc57d837f0000000 period = 0x40a9546b453deddc  # 3242.209512648855
+cell [-3, 3, -1] fc57d837f0000000 rate = 0x3d7fe8bbc2d042c9  # 1.8138231897265364e-12
 cell [-3, 3, -1] fc57d837f0000000 accretor NeutronStar
-cell [-3, 3, -1] fc57d837f0000000 accretor mass = 0x3ff533bfd6d6f4ef  # 1.3251341240095902
-cell [-3, 3, -1] fc57d837f0000000 accretor core = 0x3ff533bfd6d6f4ef  # 1.3251341240095902
+cell [-3, 3, -1] fc57d837f0000000 accretor mass = 0x3ff51b51bb37c076  # 1.3191697419352102
+cell [-3, 3, -1] fc57d837f0000000 accretor core = 0x3ff51b51bb37c076  # 1.3191697419352102
 cell [-3, 3, -1] fc57d837f0000000 accretor radius = 0x3ef2635cf9422719  # 1.753629437976139e-5
-cell [-3, 3, -1] fc57d837f0000000 accretor luminosity = 0x3dea1b865073899e  # 1.8995719600211773e-10
+cell [-3, 3, -1] fc57d837f0000000 accretor luminosity = 0x3dea05c618e48162  # 1.8933899972725274e-10
 cell [-3, 3, -1] fc57d837f0000000 donor HeliumWhiteDwarf
-cell [-3, 3, -1] fc57d837f0000000 donor mass = 0x3f80da77c144f77a  # 0.008229194245924044
-cell [-3, 3, -1] fc57d837f0000000 donor core = 0x3f80da77c144f77a  # 0.008229194245924044
-cell [-3, 3, -1] fc57d837f0000000 donor radius = 0x3fa747518ac28b54  # 0.04546599215361505
-cell [-3, 3, -1] fc57d837f0000000 donor luminosity = 0x3f93121d5c4e8867  # 0.018623789557416972
+cell [-3, 3, -1] fc57d837f0000000 donor mass = 0x3f80d97da7334834  # 0.008227330842064708
+cell [-3, 3, -1] fc57d837f0000000 donor core = 0x3f80d97da7334834  # 0.008227330842064708
+cell [-3, 3, -1] fc57d837f0000000 donor radius = 0x3fa74784b51a203d  # 0.045467517001327874
+cell [-3, 3, -1] fc57d837f0000000 donor luminosity = 0x3f931271320cb28d  # 0.01862503879526627
 cell [-3, 3, -1] fc57d837f0000000 eccentricity = 0x0000000000000000  # 0.0
 cell [-3, 3, -1] fc57d837f0000000 inclination = 0x3fee7455d3d3f910  # 0.9517010819688796
 cell [-3, 3, -1] fc57d837f0000000 node = 0x401072f49742f08d  # 4.112261165104553
 cell [-3, 3, -1] fc57d837f0000000 periapsis = 0x3f89d0a91c3a0332  # 0.012605019735248389
 cell [-3, 3, -1] fc57d837f0000000 mean anomaly = 0x4017a66df610c128  # 5.912528843662848
-cell [-3, 3, -1] fc57d837f0000000 primary initial = 0x4021677442a2c8f0  # 8.70205887066956
-cell [-3, 3, -1] fc57d837f0000000 donor initial = 0x3ff7a1044758cc05  # 1.4768107211100425
+cell [-3, 3, -1] fc57d837f0000000 primary initial = 0x4021ccfa2b19417b  # 8.900346133072835
+cell [-3, 3, -1] fc57d837f0000000 donor initial = 0x3ff7b0bf3dfd52dd  # 1.4806511327234866
 cell [-3, 3, -1] fc57d837f0000000 age = 0x42050fdc0c87be48  # 11307549072.96791
 cell [-3, 3, -1] fc57d837f0000000 feh = 0xbfecce16ad60a81c  # -0.9001572977333612
 cell [-3, 3, -1] fc57d837f0000000 model 0 NeutronStar
 cell [-3, 3, -1] fc57d837f0000000 model 0 mass = 0x3ff2ee1f09a553d5  # 1.1831350685872526
-cell [-3, 3, -1] fc57d837f0000000 model 0 luminosity = 0x3de83519c2971b31  # 1.7613219328784767e-10
+cell [-3, 3, -1] fc57d837f0000000 model 0 luminosity = 0x3de8338990d2ac24  # 1.760877627837283e-10
 cell [-3, 3, -1] fc57d837f0000000 model 1 CarbonOxygenWhiteDwarf
-cell [-3, 3, -1] fc57d837f0000000 model 1 mass = 0x3fe448a5278f01eb  # 0.6338678143147808
-cell [-3, 3, -1] fc57d837f0000000 model 1 luminosity = 0x3f0b09db07c3fafd  # 5.1571842933020494e-5
+cell [-3, 3, -1] fc57d837f0000000 model 1 mass = 0x3fe44d867d8e25da  # 0.6344635441066047
+cell [-3, 3, -1] fc57d837f0000000 model 1 luminosity = 0x3f0af26a2387704d  # 5.1397194002795155e-5

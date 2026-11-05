@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 source = 42002f2200c00000
 walked 5494 cells, 10799 systems, 0 spheres, layers LayerSet(31)
 3 lens events
@@ -242,7 +242,7 @@ bearing.down_rimward.frame = Local
 bearing.down_rimward.azimuth_deg = 0x40643214e634c3b8  # 161.56505117707798
 bearing.down_rimward.elevation_deg = 0xc0326f58ce59e23d  # -18.434948822922014
 bearing.centre.frame = Local
-bearing.centre.azimuth_deg = 0x8000000000000000  # -0.0
+bearing.centre.azimuth_deg = 0x0000000000000000  # 0.0
 bearing.centre.elevation_deg = 0xbfa690d2e41bb558  # -0.0440736678554951
 bearing.from_axis.frame = GalacticX
 bearing.from_axis.azimuth_deg = 0x4056800e7120137e  # 90.00088146336017

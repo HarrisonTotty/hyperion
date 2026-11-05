@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 red_giant 0x4200ecd200000003: OldThinDisc, 1 stars
 fe_h = 0x3fb0536aeeff0199  # 0.0637728532301537
 age_at_epoch_yr = 0x4200e53a3fea5d43  # 9070659581.295538
@@ -1050,7 +1050,7 @@ belt: InsideGiant about Star(0), Rocky
 main_inner_m = 0x4246f12ef3e195b3  # 197071333315.16953
 main_outer_m = 0x4252358c7b9651a6  # 312831241817.27576
 size_slope = 0x400696592bfe9d47  # 2.8234122693135393
-largest_diameter_m = 0x412219ca17381d04  # 593125.0453499858
+largest_diameter_m = 0x412219c7aadb7c09  # 593123.8337057839
 fractional_luminosity = 0x3e21b98e58b8bf54  # 2.0634415892733337e-9
 members: [e101, e102]
 surface: NotApplicable
@@ -2877,7 +2877,7 @@ belt: InsideGiant about Star(0), Rocky
 main_inner_m = 0x4246f132eecdec12  # 197071855003.8443
 main_outer_m = 0x4252358fa44e9b52  # 312832069946.4269
 size_slope = 0x400696592bfe9d47  # 2.8234122693135393
-largest_diameter_m = 0x412219ca17381d04  # 593125.0453499858
+largest_diameter_m = 0x412219c7aa3a6d7f  # 593123.8324770181
 fractional_luminosity = 0x3e21b954b14ae610  # 2.063339175160751e-9
 members: [e101, e102]
 surface: NotApplicable

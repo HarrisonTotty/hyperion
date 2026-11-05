@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 CoreCollapse: OneShot over ["CORE_COLLAPSE"], pending None, lasting Some(Unending), curve Some(SupernovaTemplate)
 CoreCollapse in Photometric(U) = 0x470cfec9645d155b  # 1.8819e34
 CoreCollapse in Photometric(B) = 0x4714b165f00725c3  # 2.6861e34

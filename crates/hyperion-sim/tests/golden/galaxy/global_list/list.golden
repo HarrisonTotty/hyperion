@@ -1,4 +1,4 @@
-# generator_version = 28
+# generator_version = 29
 streams 360 (living globulars 4, orphans 355, dwarfs 1), cores 1, beyond the limit 0
 entry.0.kind Centre
 entry.0.mass = 0x417bba31ed9d8c86  # 29074206.85096409
