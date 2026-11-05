@@ -26,6 +26,7 @@ use hyperion_sim::galaxy::gas::SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY;
 use hyperion_sim::galaxy::gas::extinction::{NoiseMode, Quality, SIGHTLINE_QUALITY, sightline};
 use hyperion_sim::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
+use hyperion_sim::galaxy::global_list::discrete_share;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::quad::gl_panels;
 use hyperion_sim::galaxy::{Galaxy, Population};
@@ -1136,9 +1137,13 @@ fn young_members(galaxy: &Galaxy, lo: f64, hi: f64) -> f64 {
 /// to its budget in every mass band, to 10⁻⁶ relative (P09.T6).
 ///
 /// The members come from closed forms, not from sampling: the clusters' and nurseries' rates ×
-/// their mean members, mass outermost, not in the order φ is computed in, and the globulars'
-/// expected mass over the population's mean system mass, by band weight. The carved classes'
-/// share is the one that
+/// their mean members, mass outermost, not in the order φ is computed in, the globulars'
+/// expected mass over the population's mean system mass, by band weight, and from generator
+/// version 27 the halo's discrete share of streams and dwarf cores, which the galaxy's build
+/// stores and the halo's field gives up in every band (P10.T3.d.b, P09.T2.c), recomputed here
+/// from the seed, the parameters and the potential (`global_list::discrete_share`). Left out, it
+/// fails the halo by its size, −1.03 × 10⁻² in every band at the first seed (2026-11-05). The
+/// carved classes' share is the one that
 /// [`field_factor`](hyperion_sim::galaxy::features::shares::FeatureShares::field_factor) gives up
 /// to plan 11's catalogue classes (P11.T7). By age, in ten bins of 10 Myr, the young disc's
 /// members and its 1 − φ, the field with the carved classes, add up to its budget likewise.
@@ -1179,6 +1184,14 @@ fn field_and_features_add_up_to_every_budget() {
                 _ => 0.0,
             };
             let globular_members = globular_mass / galaxy.mean_system_mass(population).value();
+            // The halo's streams and dwarf cores: its discrete share of the budget in every band,
+            // from 27 (P10.T3.d.b).
+            let discrete = match population {
+                Population::Halo => {
+                    discrete_share(Seed::new(SEED | n), galaxy.params(), galaxy.potential())
+                }
+                _ => 0.0,
+            };
             let weights = shares.globular_band_weights();
             let conserved: f64 = MassBand::ALL
                 .iter()
@@ -1195,7 +1208,8 @@ fn field_and_features_add_up_to_every_budget() {
                 let total = field
                     + carved
                     + members * share
-                    + globular_members * share * weights[band.index()];
+                    + globular_members * share * weights[band.index()]
+                    + budget * share * discrete;
                 let relative = total / (budget * share) - 1.0;
                 assert!(
                     relative.abs() < 1e-6,
