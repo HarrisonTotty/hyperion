@@ -2265,10 +2265,40 @@ mod tests {
     /// How many sampled features the brute-force test at ±H queries.
     const CENTRES: usize = 20;
 
+    /// The hits the members on `feature`'s feature-level list (P09.T37) make in `sphere`, by a
+    /// scan of every entry its classes' draws and tests keep: a core collapse's remnant on its
+    /// broken line (`RecentEntry::motion`), every other member through its epoch position at its
+    /// velocity, the feature's bulk motion.
+    fn list_scan(galaxy: &Galaxy, feature: &FeatureRecord, sphere: &QuerySphere) -> Vec<SystemHit> {
+        let Some(list) = FeatureLevelList::listed_of(galaxy, feature) else {
+            return Vec::new();
+        };
+        let elapsed = Seconds::new(sphere.time().since_epoch().as_seconds_f64());
+        list.entries()
+            .filter_map(|entry| {
+                if entry.class() == ClassId::CORE_COLLAPSE {
+                    let death = list.recent_entry(galaxy, entry.index())?;
+                    let at = death.motion().position_at(sphere.time());
+                    hit_there(death.member().record(), at, sphere)
+                } else {
+                    let member = list.member(galaxy, entry.index())?;
+                    hit_at(member.record(), member.velocity(), sphere, elapsed)
+                }
+            })
+            .collect()
+    }
+
     /// P09.T23's brute-force comparison at both ends of the clock window, in the 20 sampled
     /// features whose members' bound is the largest, the sample's fastest feature among
     /// them: a sphere of the half-mass radius off each centre, where the bulk motion alone carries
     /// the cluster some 2 ly by ±H.
+    ///
+    /// From 27 a feature's members are its grid's and its list's (P09.T37: its recent classes,
+    /// P09.T36, and plan 11's binary classes, P11.T8.f), which the query reads beside the grid, so
+    /// the scan takes both ([`every_member`], [`list_scan`]). Under 26's rules the scan was the
+    /// grid's alone. At 27 three of the 20 features' lists reach their spheres: `GFG F3`'s query
+    /// at −H returned 33 listed members besides the grid's 23,457, and the list's own scan finds
+    /// each of them.
     #[test]
     #[ignore = "slow: 40 queries and every member of 20 features, 10 minutes"]
     fn queries_at_plus_and_minus_h_find_what_a_scan_finds_in_the_20_fastest_sampled_features() {
@@ -2293,7 +2323,7 @@ mod tests {
             let [x, y, z] = interior.feature().position().to_light_years_f64();
             let centre =
                 GalacticPosition::from_light_years([x + 0.25 * r_h, y, z - 0.25 * r_h]).unwrap();
-            let mut counts = Vec::new();
+            let (mut counts, mut listed) = (Vec::new(), Vec::new());
             for years in [-1_000, 1_000] {
                 let sphere = sphere_at(centre, r_h, years);
                 let mut hits = Vec::new();
@@ -2301,14 +2331,18 @@ mod tests {
                 let mut found: Vec<SystemHit> =
                     hits.into_iter().filter(|h| of_feature(h, id)).collect();
                 found.sort_by_key(SystemHit::id);
-                let brute = brute_force(&members, &sphere);
+                let on_list = list_scan(galaxy, interior.feature(), &sphere);
+                let mut brute = brute_force(&members, &sphere);
+                brute.extend_from_slice(&on_list);
+                brute.sort_by_key(SystemHit::id);
                 assert_eq!(found, brute, "{} at {years} years", id.designation());
                 counts.push(brute.len());
+                listed.push(on_list.len());
             }
             found_any += usize::from(counts.iter().any(|&n| n > 0));
             println!(
                 "{} {:?}: bound {:.3} km/s, {} members, r_h {r_h:.2} ly, hits at −H and +H \
-                 {counts:?}",
+                 {counts:?}, of them listed {listed:?}",
                 id.designation(),
                 interior.feature().process(),
                 interior.member_speed_bound().value(),
