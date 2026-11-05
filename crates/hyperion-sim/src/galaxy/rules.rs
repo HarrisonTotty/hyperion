@@ -159,20 +159,10 @@ mod tests {
         }
     }
 
-    /// The galaxy's every 29 hold takes the stellar holds at 29, P11.T4's `core_endings` among
-    /// them, which the version's rules hold.
+    /// The galaxy's every 29 hold takes the stellar holds at 29.
     #[test]
     fn every_29_hold_adds_the_stellar_holds_at_29() {
-        use crate::stellar::binary::core_endings::CoreEndingRules;
-
         let every_29 = GalaxyRules::every_29_hold();
         assert_eq!(every_29.stellar, StellarRules::every_29_hold());
-        assert_eq!(every_29.stellar.core_endings, CoreEndingRules::Unified);
-        assert_eq!(
-            GalaxyRules::of_version(crate::GENERATOR_VERSION)
-                .stellar
-                .core_endings,
-            CoreEndingRules::Held
-        );
     }
 }

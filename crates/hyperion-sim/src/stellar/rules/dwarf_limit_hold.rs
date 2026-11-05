@@ -117,9 +117,9 @@ struct Figures {
     merged: [[usize; 2]; 3],
     /// The deaths of giants whose cores are carbon–oxygen or oxygen–neon dwarfs', by ending
     /// (`dwarf_limit::dwarf_core_deaths`): their tracks' own, a white dwarf of the dwarf's kind,
-    /// an electron capture and a disruption at their tracks' deaths, and an electron capture and
-    /// a disruption at their cores' limits.
-    endings: [[usize; 6]; 3],
+    /// an electron capture and a disruption at their tracks' deaths, and an electron capture at
+    /// their cores' limits.
+    endings: [[usize; 5]; 3],
     /// Of the pairs run, those that show an oxygen–neon white dwarf above the capture mass,
     /// 1.37 M☉ (`testing::oxygen_neon_dwarfs_above_the_capture_mass`): other than a pinned
     /// primary's, and a pinned primary's.
@@ -136,7 +136,7 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
         unplaced: [[0; 8]; 3],
         swollen: [[0; 2]; 3],
         merged: [[0; 2]; 3],
-        endings: [[0; 6]; 3],
+        endings: [[0; 5]; 3],
         oxygen_neon_above: [[0; 2]; 3],
     };
     for (k, layer) in [Layer::C, Layer::D, Layer::E].into_iter().enumerate() {
@@ -179,7 +179,7 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
             let unplaced: [usize; 8] =
                 core::array::from_fn(|j| unplaced_after[j] - unplaced_before[j]);
             let endings_after = dwarf_core_deaths();
-            let endings: [usize; 6] =
+            let endings: [usize; 5] =
                 core::array::from_fn(|j| endings_after[j] - endings_before[j]);
             (counts, unplaced, endings)
         });
@@ -225,7 +225,7 @@ const CENSUS_FIGURES: [Figures; 2] = [
         unplaced: [[0; 8], [0, 4, 0, 3, 0, 0, 0, 0], [0, 0, 0, 0, 0, 109, 0, 0]],
         swollen: [[0, 0], [1, 0], [0, 0]],
         merged: [[6, 0], [371, 26], [25, 0]],
-        endings: [[0; 6]; 3],
+        endings: [[0; 5]; 3],
         oxygen_neon_above: [[0, 0], [225, 0], [89, 0]],
     },
     Figures {
@@ -236,11 +236,7 @@ const CENSUS_FIGURES: [Figures; 2] = [
         unplaced: [[0; 8], [0, 1, 0, 6, 0, 0, 0, 0], [0, 0, 0, 0, 0, 109, 0, 0]],
         swollen: [[0; 2]; 3],
         merged: [[0; 2]; 3],
-        endings: [
-            [25, 0, 0, 0, 0, 0],
-            [848, 45, 0, 36, 11, 0],
-            [69, 4, 0, 2, 0, 0],
-        ],
+        endings: [[25, 0, 0, 0, 0], [848, 45, 0, 36, 11], [69, 4, 0, 2, 0]],
         oxygen_neon_above: [[0; 2]; 3],
     },
 ];

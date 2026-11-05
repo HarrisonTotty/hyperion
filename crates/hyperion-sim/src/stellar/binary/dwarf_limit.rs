@@ -97,7 +97,6 @@ use crate::stellar::rules::StellarRules;
 use crate::stellar::sse;
 use crate::units::SolarMasses;
 
-use super::core_endings::CoreEndingRules;
 use super::star::Kind;
 
 /// The generator version whose stellar rules take the white-dwarf union's fixes to the dwarf limit
@@ -166,7 +165,7 @@ pub(super) enum Unplaced {
         mass: SolarMasses,
     },
     /// A helium star of `mass` whose carbon–oxygen core of `co_core` is an oxygen–neon one, which
-    /// collapses at once by electron capture (from version 29, P11.T4's `core_endings`; plan 06's
+    /// collapses at once by electron capture (P11.T4's kept-core endings; plan 06's
     /// `helium_star_end`, HPT sections 6 and 6.1).
     ElectronCapture {
         /// Its carbon–oxygen core.
@@ -175,8 +174,8 @@ pub(super) enum Unplaced {
         mass: SolarMasses,
     },
     /// A helium star of `mass` whose carbon–oxygen core ignites carbon at the Chandrasekhar mass,
-    /// which disrupts it and leaves nothing, with no Type Ia candidate (from version 29, P11.T4's
-    /// `core_endings`; plan 06's `helium_star_end`).
+    /// which disrupts it and leaves nothing, with no Type Ia candidate (P11.T4's kept-core endings;
+    /// plan 06's `helium_star_end`).
     Disruption {
         /// Its mass.
         mass: SolarMasses,
@@ -242,16 +241,14 @@ pub(crate) enum Ending {
     Disruption,
     /// An electron capture at its core's limit (`Engine::reach_core_limit`).
     CaptureAtLimit,
-    /// A disruption at its core's limit (`Engine::reach_core_limit`).
-    DisruptionAtLimit,
 }
 
 #[cfg(test)]
 thread_local! {
     /// This thread's deaths of giants whose cores are dwarfs' since it started
     /// ([`dwarf_core_deaths`]).
-    static DWARF_CORE_DEATHS: core::cell::Cell<[usize; 6]> =
-        const { core::cell::Cell::new([0; 6]) };
+    static DWARF_CORE_DEATHS: core::cell::Cell<[usize; 5]> =
+        const { core::cell::Cell::new([0; 5]) };
 }
 
 /// Counts a death of `ending` ([`dwarf_core_deaths`]) on this thread.
@@ -267,12 +264,12 @@ pub(super) fn count_dwarf_core_death(ending: Ending) {
 /// The deaths of giants whose cores are carbon–oxygen or oxygen–neon dwarfs'
 /// (`Engine::dwarf_cores`) this thread's engines have acted on since it started, by ending: their
 /// tracks' own, a white dwarf of the dwarf's kind, an electron capture and a disruption at their
-/// tracks' deaths (`supernova::SwollenDeath`), and an electron capture and a disruption at their
-/// cores' limits (`Engine::reach_core_limit`), a test build's counter for the dwarf limit's census
-/// ([`Ending`]'s order).
+/// tracks' deaths (`supernova::SwollenDeath`), and an electron capture at their cores' limits
+/// (`Engine::reach_core_limit`), a test build's counter for the dwarf limit's census ([`Ending`]'s
+/// order).
 #[cfg(test)]
 #[must_use]
-pub(crate) fn dwarf_core_deaths() -> [usize; 6] {
+pub(crate) fn dwarf_core_deaths() -> [usize; 5] {
     DWARF_CORE_DEATHS.with(core::cell::Cell::get)
 }
 
@@ -384,8 +381,8 @@ impl DwarfLimitRules {
 
     /// What the product of `kind`, mass `m` and core `core` from `source` leaves where no star of
     /// its kind has such a core: see the module documentation; but under
-    /// [`CoreEndingRules::Unified`] (`endings`, from version 29) a helium giant of no dwarf's ends
-    /// by its mass `m`, which stands for its helium star's and so for `Mc,BAGB` (HPT section 6.1):
+    /// [`DwarfLimitRules::Whole`] a helium giant of no dwarf's ends by its mass `m`, which stands
+    /// for its helium star's and so for `Mc,BAGB` (HPT section 6.1; P11.T4's kept-core endings):
     /// an iron core from 2.25 M☉, an oxygen–neon core's electron capture from 1.6 M☉ (HPT section
     /// 6; research-leans-40), a disruption that leaves nothing from the Chandrasekhar mass, and a
     /// carbon–oxygen dwarf of min(core, m) below.
@@ -396,14 +393,12 @@ impl DwarfLimitRules {
         m: SolarMasses,
         core: SolarMasses,
         source: CoreSource,
-        endings: CoreEndingRules,
     ) -> Unplaced {
         let mass = SolarMasses::new(core.value().max(1e-3).min(m.value()));
-        // From 29 a helium giant of no dwarf ends by its mass, as plan 06's helium star does with
-        // its core at the Chandrasekhar mass (P11.T4's `core_endings`).
-        let by_mass = endings == CoreEndingRules::Unified
-            && matches!(kind, Kind::HeliumGap | Kind::HeliumGiant)
-            && source == CoreSource::Other;
+        // A helium giant of no dwarf ends by its mass, as plan 06's helium star does with its core
+        // at the Chandrasekhar mass (P11.T4's kept-core endings).
+        let by_mass =
+            matches!(kind, Kind::HeliumGap | Kind::HeliumGiant) && source == CoreSource::Other;
         match self {
             Self::Whole if by_mass && m >= IRON_CORE_MC_BAGB => Unplaced::IronCore {
                 co_core: mass,
@@ -495,9 +490,8 @@ pub(super) fn collapses(mass: f64) -> bool {
     collapses_at(mass, CHANDRASEKHAR_MASS)
 }
 
-/// [`collapses`] for a dwarf whose collapse mass is `at` (`core_endings::CoreEndingRules::
-/// collapse_mass`: the Chandrasekhar mass, and from version 29 an oxygen–neon dwarf's capture mass
-/// under the default recipe).
+/// [`collapses`] for a dwarf whose collapse mass is `at` (`structure::white_dwarf_collapse_mass`:
+/// the Chandrasekhar mass, and an oxygen–neon dwarf's capture mass under the default recipe).
 #[must_use]
 pub(super) fn collapses_at(mass: f64, at: SolarMasses) -> bool {
     mass >= at.value()

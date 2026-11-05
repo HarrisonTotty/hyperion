@@ -1227,7 +1227,6 @@ impl Engine {
                     self.ctx.composition(),
                     self.ctx.draws(a_idx),
                     Some(self.reach_span_years(self.age)),
-                    self.ctx.rules().core_endings,
                 );
                 self.set_member(
                     a_idx,
@@ -1255,7 +1254,7 @@ impl Engine {
                 ));
                 false
             }
-            // From 29 an oxygen–neon dwarf collapses at its capture mass (P11.T4's `core_endings`).
+            // An oxygen–neon dwarf collapses at its capture mass (P11.T4's kept-core endings).
             Kind::HeliumWhiteDwarf | Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf
                 if white_dwarf_phase(ka)
                     .is_some_and(|phase| ma >= self.collapse_mass(phase).value()) =>

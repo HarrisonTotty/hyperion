@@ -13,11 +13,42 @@ use crate::stellar::Phase;
 use crate::units::consts::{GM_SUN, SOLAR_RADIUS_M, SPEED_OF_LIGHT};
 use crate::units::{SolarMasses, SolarRadii};
 
+use super::collapse::OXYGEN_NEON_CAPTURE_MASS;
 use super::{CompactRemnant, RemnantKind, RemnantRecipe};
 
 /// The Chandrasekhar mass HPT use at all times, 1.44 M☉ (section 6.2.1): they write it as about
 /// 5.8 ÷ μₑ² M☉, 1.45 for a mean molecular weight per electron μₑ = 2, and take 1.44.
 pub(crate) const CHANDRASEKHAR_MASS: SolarMasses = SolarMasses::new(1.44);
+
+/// The relative rounding to which a track's core that reaches the Chandrasekhar mass is that mass
+/// ([`below_the_chandrasekhar_mass`]): the thermal pulses' and a helium star's cores reach it to
+/// within 10⁻¹⁵ of it (1.439 999 999 999 998 6 M☉ measured, 2026-11-03), not to the bit.
+pub(crate) const CORE_ROUNDING: f64 = 1e-9;
+
+/// Whether a core of `core` is below the Chandrasekhar mass, 1.44 M☉, where it has not reached it:
+/// by more than [`CORE_ROUNDING`] of it, so that no kind of death turns on the last bits of a
+/// helium star's core or the thermal pulses' at `Mc,SN` (plan 11, P11.T4's kept-core endings).
+#[must_use]
+pub(crate) fn below_the_chandrasekhar_mass(core: SolarMasses) -> bool {
+    core.value() < CHANDRASEKHAR_MASS.value() * (1.0 - CORE_ROUNDING)
+}
+
+/// The mass, M☉, at which a white dwarf of `phase` collapses under `recipe`: the capture mass,
+/// [`OXYGEN_NEON_CAPTURE_MASS`] = 1.37 M☉, for an oxygen–neon one under
+/// [`RemnantRecipe::MandelMuller2020`], where electron captures on ²⁴Mg and ²⁰Ne collapse it
+/// (Miyaji et al. 1980, PASJ 32, 303; Nomoto 1984, ApJ 277, 791; ruling 57), as the recipe caps a
+/// single star's oxygen–neon core there; and the Chandrasekhar mass otherwise, which
+/// [`RemnantRecipe::Hurley2000`] keeps for every dwarf, as carbon–oxygen and helium dwarfs do
+/// under both (plan 11, P11.T4's kept-core endings).
+#[must_use]
+pub(crate) fn white_dwarf_collapse_mass(phase: Phase, recipe: RemnantRecipe) -> SolarMasses {
+    match recipe {
+        RemnantRecipe::MandelMuller2020 if phase == Phase::OxygenNeonWhiteDwarf => {
+            OXYGEN_NEON_CAPTURE_MASS
+        }
+        RemnantRecipe::MandelMuller2020 | RemnantRecipe::Hurley2000 => CHANDRASEKHAR_MASS,
+    }
+}
 
 /// The core mass at the base of the AGB from which carbon ignites off-centre under
 /// semi-degenerate conditions, so that the white dwarf left is oxygen–neon rather than
@@ -197,6 +228,35 @@ mod tests {
 
     const RECIPES: [RemnantRecipe; 2] =
         [RemnantRecipe::Hurley2000, RemnantRecipe::MandelMuller2020];
+
+    /// P11.T4's kept-core endings: under the default recipe an oxygen–neon dwarf collapses at the
+    /// capture mass, 1.37 M☉; under `Hurley2000`, and for a carbon–oxygen or helium dwarf, at the
+    /// Chandrasekhar mass. A core within [`CORE_ROUNDING`] of the Chandrasekhar mass has reached
+    /// it.
+    #[test]
+    fn an_oxygen_neon_dwarf_collapses_at_the_capture_mass_from_29() {
+        let (one, co, he) = (
+            Phase::OxygenNeonWhiteDwarf,
+            Phase::CarbonOxygenWhiteDwarf,
+            Phase::HeliumWhiteDwarf,
+        );
+        let (mm20, h00) = (RemnantRecipe::MandelMuller2020, RemnantRecipe::Hurley2000);
+        for (phase, recipe, at) in [
+            (one, mm20, OXYGEN_NEON_CAPTURE_MASS),
+            (one, h00, CHANDRASEKHAR_MASS),
+            (co, mm20, CHANDRASEKHAR_MASS),
+            (he, mm20, CHANDRASEKHAR_MASS),
+        ] {
+            let collapse = white_dwarf_collapse_mass(phase, recipe);
+            assert!(
+                (collapse.value() - at.value()).abs() < 1e-12,
+                "{phase:?}, {recipe:?}: {collapse:?}"
+            );
+        }
+        let m_ch = CHANDRASEKHAR_MASS.value();
+        assert!(!below_the_chandrasekhar_mass(mass(m_ch * (1.0 - 1e-12))));
+        assert!(below_the_chandrasekhar_mass(mass(m_ch * (1.0 - 1e-8))));
+    }
 
     fn mass(m: f64) -> SolarMasses {
         SolarMasses::new(m)

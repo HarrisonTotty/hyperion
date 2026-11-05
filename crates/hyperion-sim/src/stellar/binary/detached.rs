@@ -723,8 +723,8 @@ impl Engine {
     }
 
     /// The time, years, in which member `i`, a white dwarf a wind feeds at `rates` from `s`,
-    /// reaches its collapse mass ([`Engine::collapse_mass`]: the Chandrasekhar mass, and from
-    /// version 29 an oxygen–neon dwarf's capture mass), at which it stops (P11.T4's `dwarf_limit`,
+    /// reaches its collapse mass ([`Engine::collapse_mass`]: the Chandrasekhar mass, and an
+    /// oxygen–neon dwarf's capture mass under the default recipe), at which it stops (P11.T4's `dwarf_limit`,
     /// [`Stop::Chandrasekhar`]); `None` for any other member. From 29 a carbon–oxygen or
     /// oxygen–neon dwarf only, and none for a pinned primary whose pin is pending
     /// (`Engine::pin_pending`).
@@ -737,7 +737,7 @@ impl Engine {
         let Member::Remnant { phase, .. } = &self.members[i] else {
             return None;
         };
-        // From 29 an oxygen–neon dwarf's is the capture mass (P11.T4's `core_endings`).
+        // An oxygen–neon dwarf's is the capture mass (P11.T4's kept-core endings).
         let limit = self.collapse_mass(*phase).value();
         // From 29 a helium dwarf is left out: it ignites at 0.7 M☉ (BSE section 2.6.6), far below
         // the limit.

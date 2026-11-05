@@ -63,7 +63,7 @@ use crate::stellar::Phase;
 use crate::stellar::remnant::collapse::{
     OXYGEN_NEON_CAPTURE_MASS, RemnantDraws, electron_capture_remnant,
 };
-use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+use crate::stellar::remnant::structure::{CHANDRASEKHAR_MASS, below_the_chandrasekhar_mass};
 use crate::stellar::remnant::{
     CollapseChannel, CompactRemnant, DeathKind, KickDraws, KickLaw, NatalKick, ProgenitorAtDeath,
     RemnantKind, RemnantRecipe, StandardKickLaw, Stripping, SupernovaType,
@@ -73,7 +73,6 @@ use crate::time::{Span, UniverseTime};
 use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M};
 use crate::units::{GravitationalParameter, Megayears, Radians, SolarMasses, Years};
 
-use super::core_endings::CoreEndingRules;
 use super::detached::last_living;
 use super::dwarf_limit::CoreSource;
 use super::evolve::{Engine, LiveOrbit, OwnMainSequenceEnd, Pin, PreTest, clock_resolution_years};
@@ -108,51 +107,43 @@ pub(super) enum SwollenDeath {
 
 impl SwollenDeath {
     /// How a giant whose core came from `source` ends where its own track's death is `death`, with
-    /// its carbon–oxygen core at `core`, leaving a remnant of `phase`, under `endings`.
+    /// its carbon–oxygen core at `core`, leaving a remnant of `phase`.
     ///
-    /// From version 29 ([`CoreEndingRules::Unified`]) a track that collapses an iron core collapses
-    /// the kept core too, a modelling choice after BSE, whose merger product takes the type of the
-    /// giant it makes (BSE table 2; research-leans-38): the kept kind sets only what is left where
-    /// the track leaves a white dwarf or collapses an oxygen–neon core by electron capture, there a
-    /// carbon–oxygen core below the Chandrasekhar mass
-    /// ([`CoreEndingRules::below_the_chandrasekhar_mass`]) being left as its dwarf.
+    /// The track's own `Mc,BAGB` decides how a kept core ends, whatever kind it keeps (P11.T4's
+    /// kept-core endings): a track that collapses an iron core collapses the kept core too, a
+    /// modelling choice after BSE, whose merger product takes the type of the giant it makes (BSE
+    /// table 2; research-leans-38). The kept kind sets only what is left where the track leaves a
+    /// white dwarf or collapses an oxygen–neon core by electron capture, there a carbon–oxygen core
+    /// below the Chandrasekhar mass ([`below_the_chandrasekhar_mass`]) being left as its dwarf and
+    /// one at it disrupting, with no Type Ia candidate. Before the fix a kept carbon–oxygen core
+    /// disrupted and left nothing where its track would collapse it: 378 such products in 17,814
+    /// pairs of the dwarf-limit census's layer D (2026-11-05), several times layer D's Type Ia.
     #[must_use]
     pub(super) fn of(
         source: CoreSource,
         death: DeathKind,
         core: SolarMasses,
         phase: Phase,
-        endings: CoreEndingRules,
     ) -> Self {
         let Some(kind) = source.dwarf() else {
             return Self::Own;
         };
         match death {
             DeathKind::ElectronCapture
-                if endings == CoreEndingRules::Unified
-                    && kind == Phase::CarbonOxygenWhiteDwarf
-                    && endings.below_the_chandrasekhar_mass(core) =>
+                if kind == Phase::CarbonOxygenWhiteDwarf && below_the_chandrasekhar_mass(core) =>
             {
                 Self::WhiteDwarf(kind)
             }
             DeathKind::CoreCollapse { .. }
             | DeathKind::DirectCollapse
-            | DeathKind::PairInstability
-                if endings == CoreEndingRules::Unified =>
-            {
-                Self::Own
-            }
+            | DeathKind::PairInstability => Self::Own,
             DeathKind::EnvelopeLoss if source.dwarf_phase(phase) == phase => Self::Own,
             DeathKind::EnvelopeLoss => Self::WhiteDwarf(kind),
             DeathKind::ElectronCapture if kind == Phase::OxygenNeonWhiteDwarf => Self::Own,
             DeathKind::ThermonuclearDisruption if kind == Phase::CarbonOxygenWhiteDwarf => {
                 Self::Own
             }
-            DeathKind::ElectronCapture
-            | DeathKind::ThermonuclearDisruption
-            | DeathKind::CoreCollapse { .. }
-            | DeathKind::DirectCollapse
-            | DeathKind::PairInstability => {
+            DeathKind::ElectronCapture | DeathKind::ThermonuclearDisruption => {
                 if kind == Phase::OxygenNeonWhiteDwarf {
                     Self::ElectronCapture
                 } else {
@@ -217,26 +208,19 @@ pub(super) fn first_age_at(
 }
 
 /// The mass, M☉, at which a core that is a dwarf's of `source` reaches its end under `recipe`
-/// ([`Engine::core_limit_age`]): a carbon–oxygen one at the Chandrasekhar mass, where carbon
-/// ignites (HPT section 6); an oxygen–neon one at the capture mass under
+/// ([`Engine::core_limit_age`]): an oxygen–neon one at the capture mass under
 /// [`RemnantRecipe::MandelMuller2020`], at which electron captures on ²⁴Mg and ²⁰Ne collapse it
 /// (Miyaji et al. 1980, PASJ 32, 303; Nomoto 1984, ApJ 277, 791; ruling 57), as the recipe caps
 /// the oxygen–neon cores of single stars outside the capture window there ([`capture_mass`]), and
 /// at the Chandrasekhar mass under [`RemnantRecipe::Hurley2000`], which caps none; `None` for a
-/// core that is no dwarf's.
+/// core that is no dwarf's, and for a carbon–oxygen one, which ends as its track does (P11.T4's
+/// kept-core endings, [`SwollenDeath::of`]).
 #[must_use]
-fn core_limit(
-    source: CoreSource,
-    recipe: RemnantRecipe,
-    endings: CoreEndingRules,
-) -> Option<SolarMasses> {
+fn core_limit(source: CoreSource, recipe: RemnantRecipe) -> Option<SolarMasses> {
     match (source, recipe) {
-        (CoreSource::Other, _) => None,
-        // From 29 a kept carbon–oxygen core ends as its track does (P11.T4's `core_endings`).
-        (CoreSource::CarbonOxygenDwarf, _) if endings == CoreEndingRules::Unified => None,
+        (CoreSource::Other | CoreSource::CarbonOxygenDwarf, _) => None,
         (CoreSource::OxygenNeonDwarf, RemnantRecipe::MandelMuller2020) => Some(capture_mass()),
-        (CoreSource::CarbonOxygenDwarf, _)
-        | (CoreSource::OxygenNeonDwarf, RemnantRecipe::Hurley2000) => Some(CHANDRASEKHAR_MASS),
+        (CoreSource::OxygenNeonDwarf, RemnantRecipe::Hurley2000) => Some(CHANDRASEKHAR_MASS),
     }
 }
 
@@ -331,9 +315,8 @@ impl Engine {
         let phase = track
             .remnant_clock()
             .map_or(Phase::NoRemnant, |(phase, ..)| phase);
-        let endings = self.ctx.rules().core_endings;
         let core = death.progenitor().co_core_mass();
-        let ending = SwollenDeath::of(self.dwarf_cores[i], death.kind(), core, phase, endings);
+        let ending = SwollenDeath::of(self.dwarf_cores[i], death.kind(), core, phase);
         #[cfg(test)]
         if self.dwarf_cores[i] != CoreSource::Other {
             ending.count();
@@ -460,9 +443,8 @@ impl Engine {
     /// research-leans-35 §7–§8); `None` for any other member, for a pinned primary whose pin is
     /// pending, or where the phase ends first, whose boundary the next step's limit starts from.
     ///
-    /// A carbon–oxygen core reaches the Chandrasekhar mass before a track that would collapse it
-    /// does: on an early AGB whose `Mc,BAGB` passes 2.316 M☉ its `Mc,SN` (HPT equation 75) lies
-    /// above it. An oxygen–neon core on a carbon–oxygen track would grow to that track's `Mc,SN`,
+    /// Only an oxygen–neon core has a limit ([`core_limit`]): a carbon–oxygen one ends as its track
+    /// does (P11.T4's kept-core endings). An oxygen–neon core on a carbon–oxygen track would grow to that track's `Mc,SN`,
     /// 1.44 M☉, or leave a dwarf above the capture mass. The core is the track's own carbon–oxygen
     /// core ([`Track::carbon_oxygen_core_at`]), which the binary's mass does not change, found on
     /// the phase's span by bisection ([`first_age_at`]). No built track's carbon–oxygen core passes
@@ -490,9 +472,8 @@ impl Engine {
         let phase = track
             .remnant_clock()
             .map_or(Phase::NoRemnant, |(phase, ..)| phase);
-        let endings = self.ctx.rules().core_endings;
         let core = death.progenitor().co_core_mass();
-        if SwollenDeath::of(source, death.kind(), core, phase, endings) == SwollenDeath::Own {
+        if SwollenDeath::of(source, death.kind(), core, phase) == SwollenDeath::Own {
             return None;
         }
         // The phase the engine's age is in or about to enter, as the step's own limits read it.
@@ -503,15 +484,13 @@ impl Engine {
                 .carbon_oxygen_core_at(age)
                 .map_or(0.0, SolarMasses::value)
         };
-        let limit = core_limit(source, self.ctx.track_options().remnant(), endings)?;
+        let limit = core_limit(source, self.ctx.track_options().remnant())?;
         let at = first_age_at(core, now, to, limit.value())?;
         Some(self.age.max(offset + at))
     }
 
     /// Member `i`'s core, a white dwarf's, reaches its limit now ([`Engine::core_limit_age`]): an
-    /// oxygen–neon one collapses by electron capture, and a carbon–oxygen one at the Chandrasekhar
-    /// mass ignites carbon and leaves nothing (HPT section 6), as at its track's death
-    /// ([`SwollenDeath::Disruption`]).
+    /// oxygen–neon one collapses by electron capture.
     pub(super) fn reach_core_limit(&mut self, i: usize) {
         self.close_segment();
         let (m, _) = self.current(i);
@@ -522,24 +501,11 @@ impl Engine {
                 super::dwarf_limit::count_dwarf_core_death(
                     super::dwarf_limit::Ending::CaptureAtLimit,
                 );
-                let limit = core_limit(
-                    source,
-                    self.ctx.track_options().remnant(),
-                    self.ctx.rules().core_endings,
-                );
+                let limit = core_limit(source, self.ctx.track_options().remnant());
                 self.electron_capture_collapse(i, limit.unwrap_or(CHANDRASEKHAR_MASS), m);
             }
-            // A core that is no dwarf's has no limit (`core_limit_age`).
-            CoreSource::Other => {}
-            CoreSource::CarbonOxygenDwarf => {
-                #[cfg(test)]
-                super::dwarf_limit::count_dwarf_core_death(
-                    super::dwarf_limit::Ending::DisruptionAtLimit,
-                );
-                self.set_member(i, Member::Gone);
-                let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);
-                self.explode(i, m, nothing, None);
-            }
+            // A core that is no dwarf's, or a carbon–oxygen one, has no limit (`core_limit_age`).
+            CoreSource::Other | CoreSource::CarbonOxygenDwarf => {}
         }
     }
 
@@ -661,8 +627,8 @@ impl Engine {
     /// Member `i`, a merger's helium-giant product of `mass` M☉ that no star can hold, whose
     /// carbon–oxygen core of `co_core` is an oxygen–neon one, collapses now by electron capture.
     ///
-    /// From version 29 (P11.T4's `core_endings`, [`Unplaced::ElectronCapture`]; research-leans-40)
-    /// the product's mass stands for its helium star's, and so for `Mc,BAGB` (HPT section 6.1),
+    /// The product's mass (P11.T4's kept-core endings, [`Unplaced::ElectronCapture`];
+    /// research-leans-40) stands for its helium star's, and so for `Mc,BAGB` (HPT section 6.1),
     /// and one of 1.6–2.25 M☉ has an oxygen–neon core (HPT section 6), as plan 06's helium star of
     /// that mass collapses (`helium_star_end`). It takes plan 06's electron-capture supernova
     /// under the pair's remnant recipe ([`sse::oxygen_neon_capture_fate`]: Mandel and Müller's
@@ -1150,12 +1116,11 @@ impl Engine {
             let options = self.ctx.track_options();
             let build = |reach: f64| {
                 if helium {
-                    sse::Track::helium_star_under(
+                    sse::Track::helium_star(
                         SolarMasses::new(m.min(sse::MAX_INITIAL_MASS.value())),
                         composition,
                         draws,
-                        Some(Years::new(reach)),
-                        options.rules().core_endings,
+                        Years::new(reach),
                     )
                 } else {
                     sse::Track::to_age_with(

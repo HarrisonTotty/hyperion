@@ -38,14 +38,13 @@ use std::sync::Arc;
 
 use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
-use crate::stellar::remnant::structure::white_dwarf_radius;
+use crate::stellar::remnant::structure::{white_dwarf_collapse_mass, white_dwarf_radius};
 use crate::stellar::remnant::white_dwarf::WhiteDwarfCore;
 use crate::stellar::remnant::{CompactRemnant, RemnantKind};
 use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts};
 use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
-use super::core_endings::CoreEndingRules;
 use super::dwarf_limit::{self, CoreSource, DwarfLimitRules, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
 use super::params::BinaryParams;
@@ -416,10 +415,9 @@ impl Engine {
         }
     }
 
-    /// Whether member `i`, an oxygen–neon white dwarf a strip has just left, collapses at once:
-    /// from version 29, at or above its capture mass under the default recipe (P11.T4's
-    /// `core_endings`; [`Engine::collapse_mass`]), as a fed one does, a pinned primary's being left
-    /// to its pin. A window's giant that keeps its thermal pulses grows its core past the capture
+    /// Whether member `i`, an oxygen–neon white dwarf a strip has just left, collapses at once: at
+    /// or above its capture mass under the default recipe (P11.T4's kept-core endings;
+    /// [`Engine::collapse_mass`]), as a fed one does, a pinned primary's being left to its pin. A window's giant that keeps its thermal pulses grows its core past the capture
     /// mass, and a strip there leaves it bare.
     #[must_use]
     fn bare_oxygen_neon_core_collapses(&self, i: usize) -> bool {
@@ -431,9 +429,7 @@ impl Engine {
         else {
             return false;
         };
-        self.ctx.rules().core_endings == CoreEndingRules::Unified
-            && SolarMasses::new(mass.at(self.age))
-                >= self.collapse_mass(Phase::OxygenNeonWhiteDwarf)
+        SolarMasses::new(mass.at(self.age)) >= self.collapse_mass(Phase::OxygenNeonWhiteDwarf)
             && !self.pin_pending(i)
     }
 
@@ -449,14 +445,12 @@ impl Engine {
         }
     }
 
-    /// The mass, M☉, at which a white dwarf of `phase` collapses (from version 29 an oxygen–neon one
-    /// at the capture mass under the default recipe, P11.T4's `core_endings`).
+    /// The mass, M☉, at which a white dwarf of `phase` collapses under the pair's recipe
+    /// ([`white_dwarf_collapse_mass`]: an oxygen–neon one at the capture mass under the default
+    /// recipe, P11.T4's kept-core endings).
     #[must_use]
     pub(super) fn collapse_mass(&self, phase: Phase) -> SolarMasses {
-        self.ctx
-            .rules()
-            .core_endings
-            .collapse_mass(phase, self.ctx.track_options().remnant())
+        white_dwarf_collapse_mass(phase, self.ctx.track_options().remnant())
     }
 
     /// Whether member `i`, of type `kind`, is a giant whose own track types its carbon–oxygen core
@@ -1327,7 +1321,6 @@ impl Engine {
             self.ctx.composition(),
             self.ctx.draws(0),
             Some(self.reach_span_years(self.age)),
-            self.ctx.rules().core_endings,
         );
         Member::Track {
             track: Arc::new(track),
@@ -1446,9 +1439,8 @@ impl Engine {
             // From 29 a placed product keeps its dwarf parent's kind (P11.T4's fix).
             return Product::Member(star, limit.placed(source));
         }
-        let endings = self.ctx.rules().core_endings;
         let (m, core) = (SolarMasses::new(m), SolarMasses::new(core));
-        let unplaced = limit.unplaced(kind, m, core, source, endings);
+        let unplaced = limit.unplaced(kind, m, core, source);
         #[cfg(test)]
         unplaced.count(self.pin_pending(0));
         match unplaced {
@@ -1654,13 +1646,9 @@ impl Engine {
         let (m0, phase, fraction) =
             sse::new_star_mass(target, SolarMasses::new(ask), self.ctx.coeffs())?;
         let track = match target {
-            NewStar::HeliumGiant => Track::helium_star_under(
-                m0,
-                self.ctx.composition(),
-                self.ctx.draws(i),
-                None,
-                self.ctx.rules().core_endings,
-            ),
+            NewStar::HeliumGiant => {
+                Track::helium_star_full(m0, self.ctx.composition(), self.ctx.draws(i))
+            }
             NewStar::GiantBranch
             | NewStar::CoreHeliumBurning { .. }
             | NewStar::EarlyAgb

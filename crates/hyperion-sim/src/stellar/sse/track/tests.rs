@@ -551,52 +551,43 @@ fn an_oxygen_neon_core_captures_electrons_under_either_recipe() {
     }
 }
 
-/// P11.T4's kept-core endings (research-leans-38): under every 29 hold a window star's thermal
-/// pulses end in its collapse at the capture mass, 1.37 M☉ (`Builder::pulses_cap`). A
-/// companion-stripped 7.7 M☉ star at Z = 0.02, whose pulses start below the cap, collapses by
-/// electron capture into the 1.26 M☉ neutron star with its core at the capture mass, earlier than
-/// under every 27 hold, where its core reaches 1.378 M☉. A window star whose core is above the cap
-/// from the second dredge-up, 8.25 M☉ or 8.1 M☉ companion-stripped, dies as under every 27 hold.
+/// P11.T4's kept-core endings (research-leans-38): a window star's thermal pulses end in its
+/// collapse at the capture mass, 1.37 M☉ (`Builder::pulses_cap`). A companion-stripped 7.7 M☉
+/// star at Z = 0.02, whose pulses start below the cap, collapses by electron capture into the
+/// 1.26 M☉ neutron star with its core at the capture mass, where before the fix its core reached
+/// 1.378 M☉. A window star whose core is above the cap from the second dredge-up, 8.25 M☉ or
+/// 8.1 M☉ companion-stripped, collapses with its core above it, as before the fix.
 #[test]
 fn a_window_star_s_pulses_end_at_the_capture_mass_from_29() {
     use crate::rng::Mark;
     use crate::stellar::remnant::collapse::{OXYGEN_NEON_CAPTURE_MASS, electron_capture_remnant};
-    use crate::stellar::rules::StellarRules;
 
     let marked = StarDraws::from_parts(StarDrawsParts {
         stripped: Mark::from_word(0),
         ..StarDrawsParts::MEDIAN
     });
-    let death = |m: f64, draws: &StarDraws, rules: StellarRules| {
-        let options = TrackOptions::default().with_rules(rules);
-        let track = Track::full_with(SolarMasses::new(m), &composition(0.02), draws, options);
+    let death = |m: f64, draws: &StarDraws| {
+        let track = Track::full_with(
+            SolarMasses::new(m),
+            &composition(0.02),
+            draws,
+            TrackOptions::default(),
+        );
         assert_eq!(track.remnant(), Some(electron_capture_remnant()), "{m} M☉");
         let death = track.death().expect("a full track dies");
         assert_eq!(death.kind(), DeathKind::ElectronCapture, "{m} M☉");
         death
     };
-    let (every_27, every_29) = (
-        StellarRules::of_version(crate::GENERATOR_VERSION),
-        StellarRules::every_29_hold(),
-    );
-    let (held, unified) = (death(7.7, &marked, every_27), death(7.7, &marked, every_29));
     let capture = OXYGEN_NEON_CAPTURE_MASS.value();
     let core = |death: &crate::stellar::remnant::Death| death.progenitor().co_core_mass().value();
+    let capped = death(7.7, &marked);
     assert!(
-        (core(&unified) - capture).abs() < 1e-9 * capture,
-        "{unified:?}"
-    );
-    assert!(core(&held) > capture + 5e-3, "{held:?}");
-    assert!(
-        unified.age().value() < held.age().value(),
-        "{unified:?} {held:?}"
+        (core(&capped) - capture).abs() < 1e-9 * capture,
+        "{capped:?}"
     );
     for (m, draws) in [(8.25, StarDraws::median()), (8.1, marked)] {
-        assert_eq!(
-            death(m, &draws, every_27),
-            death(m, &draws, every_29),
-            "{m} M☉"
-        );
+        let death = death(m, &draws);
+        assert!(core(&death) > capture, "{m} M☉: {death:?}");
     }
 }
 

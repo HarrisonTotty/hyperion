@@ -235,7 +235,7 @@ pub(crate) fn dwarfs_above_the_limit(
 
 /// Whether each member of `timeline`, primary first, shows an oxygen–neon white dwarf above the
 /// capture mass, 1.37 M☉, at a segment's edge or at a knot of a remnant's mass, at or before
-/// `until` years (P11.T4's kept-core endings, `core_endings`).
+/// `until` years (P11.T4's kept-core endings).
 #[cfg(test)]
 #[must_use]
 pub(crate) fn oxygen_neon_dwarfs_above_the_capture_mass(

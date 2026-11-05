@@ -36,12 +36,6 @@
 //!   dwarfs' merger, `Engine::finish_merger`, the accretor's events and the detached phase's step
 //!   limit through the engine's input's rules. The fitted tables keep the version's rules until
 //!   the bump refits them (`stellar/rules/dwarf_limit_hold.rs` lists the movers).
-//! - [`core_endings`](StellarRules::core_endings), at [`CORE_ENDINGS_VERSION`] (plan 11, P11.T4's
-//!   fix): how a white dwarf's core that a giant keeps ends, as its track does but for what is
-//!   left, and one collapse mass for every oxygen–neon core under the default recipe, read by the
-//!   binary engine through its input's rules and by the track's builder through its options. The
-//!   fitted tables keep the version's rules until the bump refits them
-//!   (`stellar/rules/core_endings_hold.rs` lists the movers).
 //! - [`wind_reach`](StellarRules::wind_reach), whether the census's pair bound reads the wind's
 //!   reach for its `Detached`, from 29 ([`WIND_REACH_VERSION`]; P11.T12's fix). Its one reader is
 //!   `light::detached`, which `pair_light_bound_under` reaches with the galaxy's rules from the
@@ -56,7 +50,6 @@
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
 
 use crate::GeneratorVersion;
-use crate::stellar::binary::core_endings::{CORE_ENDINGS_VERSION, CoreEndingRules};
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::wind_reach::WindReachRules;
 use crate::stellar::remnant::KickRankRules;
@@ -72,9 +65,6 @@ pub(crate) struct StellarRules {
     /// How the binary engine's dwarf limit treats a pinned primary and types the dwarf a merger's
     /// unplaced product leaves, the hold of [`DWARF_LIMIT_VERSION`].
     pub(crate) dwarf_limit: DwarfLimitRules,
-    /// How a white dwarf's core that a giant keeps ends, and where an oxygen–neon core collapses,
-    /// the hold of [`CORE_ENDINGS_VERSION`].
-    pub(crate) core_endings: CoreEndingRules,
     /// Whether the census's pair bound reads the wind's reach for its `Detached`
     /// ([`WindReachRules`]), from 29.
     pub(crate) wind_reach: WindReachRules,
@@ -93,17 +83,12 @@ impl StellarRules {
             } else {
                 DwarfLimitRules::Held
             },
-            core_endings: if version.get() >= CORE_ENDINGS_VERSION.get() {
-                CoreEndingRules::Unified
-            } else {
-                CoreEndingRules::Held
-            },
             wind_reach: WindReachRules::of_version(version),
         }
     }
 
     /// Every stellar hold at 29 in force, for a test that asserts a 29 figure without a galaxy:
-    /// P11.T4's `dwarf_limit` and `core_endings`, and P11.T12's `wind_reach`. The
+    /// P11.T4's `dwarf_limit` and P11.T12's `wind_reach`. The
     /// stellar part of `GalaxyRules::every_29_hold()`, so a later hold at 29 joins both with nothing
     /// to edit; the 29 bump deletes it with it.
     #[cfg(test)]
@@ -133,8 +118,6 @@ mod binary_kicks_hold;
 mod classes_hold;
 #[cfg(test)]
 mod collapses_hold;
-#[cfg(test)]
-mod core_endings_hold;
 #[cfg(test)]
 mod dwarf_limit_hold;
 #[cfg(test)]

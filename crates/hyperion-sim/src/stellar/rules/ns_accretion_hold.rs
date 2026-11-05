@@ -7,8 +7,8 @@
 //!   every 27 hold it keeps under a tenth and stays a neutron star.
 //! - The same pair twice gives the same timeline.
 //! - Slow: a census of 10⁷ slab records under every 27 hold, and one under every 29 hold, which
-//!   the white-dwarf union's holds at 29 move (P11.T4's `dwarf_limit` and `core_endings`; its
-//!   swollen dwarf is on the record).
+//!   the white-dwarf union's holds at 29 move (P11.T4's `dwarf_limit`; its swollen dwarf and
+//!   kept-core endings are on the record).
 
 use hyperion_testkit::pins::Tolerance;
 
@@ -294,7 +294,7 @@ fn assert_the_figures(f: CompactFigures, pinned: CompactFigures) {
 /// - the galaxy's holds at 29 (P09.T36's alert walks' lists and P09.T5's superbubbles), 0;
 /// - P11.T4's swollen helium dwarf, 0;
 /// - P11.T4's dwarf limit made whole (`dwarf_limit`), 0;
-/// - P11.T4's kept-core endings and the helium stars' electron capture (`core_endings`), +18
+/// - P11.T4's kept-core endings and the helium stars' electron capture, +18
 ///   (+18), not split further.
 ///
 /// The black holes, the grown, the median black hole and the most gained stay the version's.
