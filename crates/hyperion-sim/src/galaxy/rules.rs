@@ -206,5 +206,4 @@ mod tests {
             ListedAlertsRules::Lists
         );
     }
-
 }
