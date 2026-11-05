@@ -704,7 +704,9 @@ fn trapped_area(condensates: &Condensates, gas: Gas) -> f64 {
 /// Ar areas, both ways; and the counts. Only a body on an `H2O` regolith (its lid's row, or none
 /// known on an ice bulk) or on an ice bulk moves, its bare regolith or only its passes' path (a
 /// pass lagged on the way to a resurfaced end, or before its lid is known), and every escape stays
-/// albedo-free: no exobase moves (ruling §1.4).
+/// albedo-free (ruling §1.4): no exobase moves but by a moon's orbit, from generator version 27,
+/// whose tides read the surface its lid gives (P14.T55.j), [`EXOBASES_BY_THEIR_ORBIT`]'s, each by
+/// under 10⁻⁸ of itself.
 #[test]
 #[ignore = "slow: the 60 systems generated twice under every 26 hold"]
 fn under_every_26_hold_the_icy_lids_movers_are_stated() {
@@ -715,6 +717,7 @@ fn under_every_26_hold_the_icy_lids_movers_are_stated() {
     let held = with_icy_regolith(IcyRegolithRules::Frost, trap_bodies_afresh);
     assert_eq!(lagged.len(), held.len());
     let (mut movers, mut flips, mut icy, mut bare) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let mut exobases = Vec::new();
     let water = Gas::Water.substance();
     for (now, before) in lagged.iter().zip(&held) {
         assert_eq!(now.id(), before.id());
@@ -723,10 +726,39 @@ fn under_every_26_hold_the_icy_lids_movers_are_stated() {
         let ice_bulk = SurfaceMaterial::of(&b.fractions()) == SurfaceMaterial::Ice;
         let h2o = row == Some(water) || (row.is_none() && ice_bulk);
         icy += u32::from(h2o);
-        assert_same_bits(
+        let (exobase_now, exobase_before) = (
             a.atmosphere().exobase_temperature().value(),
             b.atmosphere().exobase_temperature().value(),
         );
+        if bits(exobase_now) != bits(exobase_before) {
+            // From 27 a moon's tides read the surface its lid gives (P14.T55.j), and its
+            // eccentricity at its age with them: its flux, and its exobase, move by its orbit.
+            let eccentricity = |body: &TrapBody| {
+                body.record
+                    .orbit()
+                    .ok()
+                    .map(|orbit| orbit.elements().eccentricity().value())
+            };
+            let (e_now, e_before) = (eccentricity(now), eccentricity(before));
+            eprintln!(
+                "the exobase of {} ({:?}) moves by its orbit: {exobase_before} → {exobase_now} K \
+                 ({:+.3e}), e {e_before:?} → {e_now:?}, flux {:?} → {:?}",
+                now.id(),
+                now.kind,
+                exobase_now / exobase_before - 1.0,
+                b.flux(),
+                a.flux(),
+            );
+            assert!(
+                now.planet.is_some()
+                    && e_now != e_before
+                    && bits(a.flux().value()) != bits(b.flux().value())
+                    && (exobase_now / exobase_before - 1.0).abs() < 1e-8,
+                "{}: its exobase moves, not by a moon's orbit",
+                now.id()
+            );
+            exobases.push(now.id());
+        }
         if format!("{a:?}") == format!("{b:?}") {
             continue;
         }
@@ -769,7 +801,15 @@ fn under_every_26_hold_the_icy_lids_movers_are_stated() {
         lagged.len()
     );
     assert!(movers > 0, "the sample holds icy lids that move");
+    assert_eq!(exobases, EXOBASES_BY_THEIR_ORBIT, "the exobases that move");
 }
+
+/// The bodies of the cold traps' sample whose exobase P14.T49.m's icy regolith moves, from
+/// generator version 27, by their orbits alone: 220016597ff80000.0304, a moon whose lid the lag
+/// darkens (its Bond albedo 0.710 → 0.322, `T_eq` 69.4 → 85.8 K), which P14.T55.j's tides, reading
+/// its surface, leave at an eccentricity of 0.0028 at its age, not 0, its flux 5.1 × 10⁻⁹ and its
+/// exobase 1.3 × 10⁻⁹ of themselves above the frost's. Its escape itself reads no albedo.
+const EXOBASES_BY_THEIR_ORBIT: [&str; 1] = ["220016597ff80000.0304"];
 
 /// P14.T24.h.b's movers over the cold traps' sample (decision-p14-t51-batch §9.4), stated: every
 /// body of the first 60 systems derived under every 26 hold and again with P14.T24.h.b's holds set
