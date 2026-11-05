@@ -11,6 +11,7 @@ use super::*;
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::Population;
 use crate::galaxy::features::centre::NoCentreOrbitCache;
+use crate::galaxy::global_list::members::expected_members;
 use crate::galaxy::global_list::spec::{DwarfCoreSpec, SphericalOrbit, StreamSpec};
 use crate::galaxy::global_list::spray::{Spray, SprayForce, SprayParams};
 use crate::galaxy::global_list::testing::{gd1_like, pal5_like, sagittarius_like};
@@ -20,7 +21,7 @@ use crate::galaxy::placement::{NoCache, SystemOrigin};
 use crate::galaxy::potential::{MassModel, PotentialTables};
 use crate::galaxy::query::{RangeQuery, range_query};
 use crate::id::Layer;
-use crate::rng::Seed;
+use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::units::SolarMasses;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{LightYears, Years};
@@ -275,6 +276,220 @@ fn a_query_reads_only_the_streams_it_is_said_to() {
             "{years}: read {read:?}, said {said:?}"
         );
     }
+}
+
+/// The streams whose tables a lookup handed out since it was last asked, and the list's models it
+/// lends, each stream's envelope kept.
+struct Enveloped<'a> {
+    lookup: &'a Lookup,
+    models: GlobalListModels,
+    read: std::sync::Mutex<std::collections::BTreeSet<u16>>,
+}
+
+impl Enveloped<'_> {
+    fn taken(&self) -> std::collections::BTreeSet<u16> {
+        std::mem::take(&mut *self.read.lock().expect("not poisoned"))
+    }
+}
+
+impl TubeLookup for Enveloped<'_> {
+    fn global_list(&self) -> &GlobalList {
+        &self.lookup.list
+    }
+
+    fn tube(&self, stream: StreamNumber) -> Arc<TubeTable> {
+        self.read.lock().expect("not poisoned").insert(stream.get());
+        self.lookup.tube(stream)
+    }
+
+    fn models(&self) -> Option<&GlobalListModels> {
+        Some(&self.models)
+    }
+}
+
+/// Spheres on the three test streams' tubes and off them, from 1 ly to 10,000 ly, and anywhere in
+/// the halo, each about a centre a query may have, in the root cube, which `sagittarius_like`'s
+/// tube passes.
+fn envelope_spheres(tubes: &[Arc<TubeTable>]) -> Vec<(GalacticPosition, f64)> {
+    let mut draws = Stream::open(
+        Seed::new(0x0a10_9a01),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy(),
+    );
+    let mut spheres = Vec::new();
+    for k in 0..64 {
+        let radius = crate::math::powf(10.0, 4.0 * draws.uniform());
+        let centre = if k % 4 == 3 {
+            let p = [0; 3].map(|_| 120_000.0 * draws.uniform() - 60_000.0);
+            GalacticPosition::from_light_years(p).expect("in the cube")
+        } else {
+            let (u, a, b) = (
+                draws.uniform(),
+                16.0 * draws.uniform() - 8.0,
+                16.0 * draws.uniform() - 8.0,
+            );
+            tubes[k % 4].locate(u, a, b)
+        };
+        if RangeQuery::builder(centre, LightYears::new(radius))
+            .build()
+            .is_ok()
+        {
+            spheres.push((centre, radius));
+        }
+    }
+    assert!(spheres.len() > 40, "{} spheres in the cube", spheres.len());
+    spheres
+}
+
+/// The census of `radius` ly about `centre` by hand, the old path: the streams of `lookup`'s list,
+/// a list of streams alone, whose shells the sphere meets at the epoch, each one's cells' means
+/// summed band by band from zero and added in list order; and how many streams' tubes it touches.
+fn census_by_hand(
+    galaxy: &Galaxy,
+    lookup: &Lookup,
+    (centre, radius): (GalacticPosition, f64),
+) -> (LayerCounts, usize) {
+    let (mut by_hand, mut touched) = (LayerCounts::ZERO, 0);
+    let at_epoch = sphere(centre, radius, 0);
+    for (n, tube) in lookup.tubes.iter().enumerate() {
+        if !lookup.list.entries()[n].shell().touches(&at_epoch) {
+            continue;
+        }
+        let shares = StreamBandShares::of(galaxy, &lookup.list.debris().streams()[n]);
+        let cells: Vec<_> = tube
+            .cells_touching(&centre, LightYears::new(radius))
+            .collect();
+        for band in BANDS_COARSEST_FIRST {
+            let sum = cells
+                .iter()
+                .fold(0.0, |s, &c| s + expected_members(tube, &shares, c, band));
+            by_hand.set(band.layer(), by_hand.get(band.layer()) + sum);
+        }
+        touched += usize::from(!cells.is_empty());
+    }
+    (by_hand, touched)
+}
+
+/// The sky's members of each band within `radius` ly of `centre` over the window from the epoch to
+/// `t`, in one part, each band's as a source `source` makes gives them.
+fn sky_members<'a>(
+    source: impl Fn() -> GlobalListSource<'a>,
+    galaxy: &Galaxy,
+    (centre, radius): (GalacticPosition, f64),
+    t: UniverseTime,
+) -> Vec<Vec<GlobalMemberRecord>> {
+    BANDS_COARSEST_FIRST
+        .into_iter()
+        .map(|band| {
+            let mut seen = Vec::new();
+            let reach = (band, LightYears::new(radius));
+            source().members_in_shell_over(
+                galaxy,
+                &centre,
+                (UniverseTime::EPOCH, t),
+                (reach, (0, NonZeroU32::MIN)),
+                &mut |m| seen.push(*m),
+            );
+            seen
+        })
+        .collect()
+}
+
+/// The raw numbers of `streams`.
+fn numbers(streams: &[StreamNumber]) -> std::collections::BTreeSet<u16> {
+    streams.iter().map(|number| number.get()).collect()
+}
+
+/// A source whose list's models keep every stream's envelope counts and finds what a source that
+/// keeps none does, bit for bit, and its census is the cells' sums by hand, list order kept
+/// (perf-range-census-streams); it reads only the tables of streams whose envelopes its spheres
+/// meet, which [`GlobalListSource::streams_read_with`] names, and passes some by. Over
+/// [`envelope_spheres`], at the epoch and a millennium on; below 300 ly, its hits and the sky's
+/// members over each window too.
+#[test]
+fn kept_envelopes_pass_tables_by_and_move_no_count_or_hit() {
+    let galaxy = galaxy();
+    let kept = lookup();
+    let streams = Lookup {
+        list: GlobalList::of_parts(galaxy, tables(), streams(), Vec::new()),
+        tubes: kept.tubes.clone(),
+        per_arm: kept.per_arm,
+        rebuild: false,
+        handed: AtomicUsize::new(0),
+    };
+    let models = GlobalListModels::new(galaxy, &streams.list);
+    for tube in &streams.tubes {
+        models.keep_envelope(tube);
+    }
+    let enveloped = Enveloped {
+        lookup: &streams,
+        models,
+        read: std::sync::Mutex::default(),
+    };
+    let with = GlobalListSource::new(galaxy, &enveloped, &NoCentreOrbitCache).expect("no centre");
+    let bits = |counts: LayerCounts| counts.to_array().map(hyperion_testkit::float::bits);
+    // Made afresh for each call, so that it keeps no envelope and reads every table in reach.
+    let without =
+        || GlobalListSource::new(galaxy, &streams, &NoCentreOrbitCache).expect("no centre");
+    let (mut passed, mut touched) = (0, 0);
+    let (mut hits_read, mut hits_read_without) = (0, 0);
+    for (centre, radius) in envelope_spheres(&streams.tubes) {
+        for years in [0, 1_000] {
+            let s = sphere(centre, radius, years);
+            let census = with.expected_in_sphere(galaxy, &s);
+            assert_eq!(bits(census), bits(without().expected_in_sphere(galaxy, &s)));
+            let (by_hand, touching) = census_by_hand(galaxy, &streams, (centre, radius));
+            assert_eq!(bits(census), bits(by_hand), "{radius} ly, {years}");
+            touched += touching;
+            // `sagittarius_like`'s tube holds some 10⁸ members, so the hits and the sky's members
+            // only in small spheres.
+            let mut read = enveloped.taken();
+            if radius <= 300.0 {
+                let found = hits(&with, galaxy, &s);
+                let mut hit_tables = enveloped.taken();
+                hits_read += hit_tables.len();
+                let handed = streams.handed();
+                assert_eq!(found, hits(&without(), galaxy, &s), "{radius} ly, {years}");
+                hits_read_without += streams.handed() - handed;
+                read.append(&mut hit_tables);
+                let sphere = (centre, radius);
+                let seen = sky_members(|| with.clone(), galaxy, sphere, s.time());
+                let unseen = sky_members(without, galaxy, sphere, s.time());
+                assert_eq!(seen, unseen, "{radius} ly, {years}");
+                // The sky's reads, padded by its own rule, are not the query's to name.
+                drop(enveloped.taken());
+            }
+            let query = RangeQuery::builder(centre, LightYears::new(radius))
+                .time(UniverseTime::from_julian_years(years).expect("in the clock window"))
+                .build()
+                .expect("a query in the cube");
+            let said = numbers(&GlobalListSource::streams_read_with(
+                galaxy,
+                &streams.list,
+                &enveloped.models,
+                &query,
+            ));
+            let shelled = numbers(&GlobalListSource::streams_read(
+                galaxy,
+                &streams.list,
+                &query,
+            ));
+            assert!(read.is_subset(&said), "read {read:?}, said {said:?}");
+            assert!(
+                said.is_subset(&shelled),
+                "said {said:?}, shelled {shelled:?}"
+            );
+            passed += shelled.len() - said.len();
+        }
+    }
+    assert!(
+        passed > 20 && touched > 20,
+        "{passed} tables passed by, {touched} touched"
+    );
+    assert!(
+        hits_read < hits_read_without,
+        "the hits read {hits_read} tables, {hits_read_without} without the envelopes"
+    );
 }
 
 /// P10.T9: the census is the exact sum of the touched cells' means band by band, the same through
@@ -939,5 +1154,102 @@ fn a_drawn_galaxy_s_source_holds_the_centre_s_and_resolves_its_members() {
     assert!(!returned.is_empty(), "no member about one of stream 0's");
     for hit in returned.iter().take(20) {
         assert_eq!(resolve_with(&galaxy, hit.id(), &lookup), Ok(*hit.record()));
+    }
+}
+
+/// perf-range-census-streams: over the server tests' galaxy's 321 streams, the census of each
+/// sphere train 27 measured, about the Sun-like point out to the widest radius a request may ask,
+/// 131,072 ly, and 58,000 ly above the centre, is the old path's bit for bit: each stream's cells'
+/// means summed by hand ([`expected_members`] over [`TubeTable::cells_touching`]) and added in list
+/// order. So it is through a source that keeps no envelope and through one whose models keep every
+/// envelope, which reads 10 of the 121 tables whose shells the Sun-like 50 ly sphere meets.
+#[test]
+#[ignore = "slow: builds a drawn galaxy's 321 tube tables and sums the widest query's 377 million \
+            cells by hand, some 10 CPU-minutes"]
+fn a_drawn_galaxy_s_census_is_the_old_path_s_bit_for_bit() {
+    use crate::planetary::testing::in_shares;
+    /// The slots it takes (`.config/nextest.toml`'s slow profile).
+    const THREADS: usize = 8;
+    let galaxy = Galaxy::new(Seed::new(0x4d2)).with_full_potential();
+    let streams = GlobalList::build(&galaxy).debris().streams().to_vec();
+    assert_eq!(streams.len(), 321);
+    let tubes = in_shares(streams.len(), THREADS, |k| {
+        Arc::new(TubeTable::build(&galaxy, &streams[k]).expect("the full potential"))
+    });
+    let lookup = Lookup {
+        list: GlobalList::of_parts(&galaxy, galaxy.potential(), streams, Vec::new()),
+        tubes,
+        per_arm: 0,
+        rebuild: false,
+        handed: AtomicUsize::new(0),
+    };
+    let models = GlobalListModels::new(&galaxy, &lookup.list);
+    for tube in &lookup.tubes {
+        models.keep_envelope(tube);
+    }
+    let enveloped = Enveloped {
+        lookup: &lookup,
+        models,
+        read: std::sync::Mutex::default(),
+    };
+    let kept = GlobalListSource::new(&galaxy, &enveloped, &NoCentreOrbitCache).expect("no centre");
+    let at = |p: [f64; 3]| GalacticPosition::from_light_years(p).expect("in the cube");
+    let sun = at([0.0, 26_000.0, 0.0]);
+    let spheres = [
+        (sun, 50.0, 10),
+        (sun, 1_000.0, 14),
+        (sun, 5_000.0, 26),
+        (sun, 20_000.0, 104),
+        (sun, 131_072.0, 238),
+        (at([0.0, 0.0, 58_000.0]), 200.0, 0),
+        (at([0.0, 0.0, 58_000.0]), 5_000.0, 4),
+        (at([0.0, 0.0, 30_000.0]), 5_000.0, 18),
+    ];
+    for (centre, radius, reads) in spheres {
+        let s = sphere(centre, radius, 0);
+        let entries = lookup.list.entries();
+        let by_stream = in_shares(entries.len(), THREADS, |n| {
+            let number =
+                StreamNumber::new(u16::try_from(n).expect("321 streams")).expect("a number");
+            assert_eq!(entries[n].kind(), GlobalEntryKind::Stream(number));
+            if !entries[n].shell().touches(&s) {
+                return None;
+            }
+            let (tube, spec) = (&lookup.tubes[n], &lookup.list.debris().streams()[n]);
+            let shares = StreamBandShares::of(&galaxy, spec);
+            let cells: Vec<_> = tube
+                .cells_touching(&centre, LightYears::new(radius))
+                .collect();
+            Some(BANDS_COARSEST_FIRST.map(|band| {
+                cells.iter().fold(0.0, |sum, &c| {
+                    sum + expected_members(tube, &shares, c, band)
+                })
+            }))
+        });
+        let mut old = LayerCounts::ZERO;
+        for sums in by_stream.into_iter().flatten() {
+            for (band, sum) in BANDS_COARSEST_FIRST.into_iter().zip(sums) {
+                old.set(band.layer(), old.get(band.layer()) + sum);
+            }
+        }
+        let bits = |counts: LayerCounts| counts.to_array().map(hyperion_testkit::float::bits);
+        let fresh =
+            GlobalListSource::new(&galaxy, &lookup, &NoCentreOrbitCache).expect("no centre");
+        assert_eq!(
+            bits(fresh.expected_in_sphere(&galaxy, &s)),
+            bits(old),
+            "{radius} ly"
+        );
+        assert_eq!(
+            bits(kept.expected_in_sphere(&galaxy, &s)),
+            bits(old),
+            "{radius} ly"
+        );
+        assert_eq!(
+            enveloped.taken().len(),
+            reads,
+            "{radius} ly: the tables read"
+        );
+        eprintln!("{radius} ly about {centre:?}: {old:?}");
     }
 }

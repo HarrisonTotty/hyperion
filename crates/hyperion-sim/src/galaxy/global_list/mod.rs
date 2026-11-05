@@ -114,7 +114,7 @@ pub use debris::{Debris, DebrisPlan};
 pub use share::discrete_share;
 pub use source::{GlobalListModels, GlobalListSource};
 pub use spec::{ClusterStars, DwarfCoreSpec, MassLoss, SphericalOrbit, StreamSpec};
-pub use tube::{TubeLookup, TubeTable};
+pub use tube::{TubeEnvelope, TubeLookup, TubeTable};
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, ROOT_HALF_WIDTH_LY};
 use crate::galaxy::features::{FeatureId, FeatureKind};

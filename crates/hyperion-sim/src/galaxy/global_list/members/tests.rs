@@ -3,6 +3,7 @@
 
 use std::sync::OnceLock;
 
+use hyperion_testkit::float::bits;
 use hyperion_testkit::order::assert_order_independent;
 use hyperion_testkit::stats::{
     ALPHA, assert_p_value, assert_poisson_count, chi_square_gof, ks_one_sample,
@@ -378,6 +379,71 @@ fn the_counts_along_follow_the_line_density_and_the_gap_noise() {
     let scaled: Vec<f64> = expected.iter().map(|e| e * n / total).collect();
     let chi = chi_square_gof(by_along, &scaled);
     assert_p_value("the counts along", chi.p_value, ALPHA);
+}
+
+/// The census's sums from each along and across cell's factors taken once
+/// ([`expected_touching`]) are the fold from zero of [`expected_members`] over
+/// [`TubeTable::cells_touching`], band by band, bit for bit (perf-range-census-streams): in every
+/// band, the substellar two the streams hold none of among them, with each test stream's shares,
+/// over spheres on the synthetic tube and off it from 1 ly to beyond its span, one holding the
+/// whole tube and one missing it.
+#[test]
+fn the_census_s_sums_are_the_fold_of_each_cell_s_mean_bit_for_bit() {
+    let (tube, _) = synthetic(RADIUS);
+    let bands = [
+        MassBand::E,
+        MassBand::D,
+        MassBand::C,
+        MassBand::B,
+        MassBand::A,
+        MassBand::BrownDwarf,
+        MassBand::RoguePlanet,
+    ];
+    let mut draws = Stream::open(
+        Seed::new(0x0a10_8b01),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy(),
+    );
+    let mut spheres: Vec<(GalacticPosition, f64)> = (0..24)
+        .map(|_| {
+            let (u, a, b) = (
+                draws.uniform(),
+                12.0 * draws.uniform() - 6.0,
+                12.0 * draws.uniform() - 6.0,
+            );
+            (
+                tube.locate(u, a, b),
+                math::powf(10.0, 4.0 * draws.uniform()),
+            )
+        })
+        .collect();
+    spheres.push((GalacticPosition::ORIGIN, 2.0 * RADIUS));
+    spheres.push((tube.locate(0.5, 0.0, 0.0), 0.5));
+    let far = GalacticPosition::from_light_years([0.0, 0.0, 30_000.0]).unwrap();
+    spheres.push((far, 1_000.0));
+    let (mut touched, mut whole) = (0, false);
+    for (name, _, shares) in test_streams() {
+        for &(centre, radius) in &spheres {
+            let radius = LightYears::new(radius);
+            let cells: Vec<TubeCell> = tube.cells_touching(&centre, radius).collect();
+            let fold = bands.map(|band| {
+                cells.iter().fold(0.0, |sum, &cell| {
+                    sum + expected_members(&tube, &shares, cell, band)
+                })
+            });
+            let sums = expected_touching(&tube, &shares, (&centre, radius), bands);
+            assert_eq!(
+                sums.map(bits),
+                fold.map(bits),
+                "{name}, {} ly: {sums:?} against {fold:?}",
+                radius.value()
+            );
+            touched += usize::from(!cells.is_empty());
+            whole |= cells.len() == 64 * 64 * usize::try_from(tube.along_cells()).unwrap();
+        }
+    }
+    assert!(touched > 3 * 12, "{touched} spheres touch the tube");
+    assert!(whole, "a sphere holds every cell");
 }
 
 /// P10.T8.b: the members' across coordinates are normal, truncated to the cut at ±4 widths, by

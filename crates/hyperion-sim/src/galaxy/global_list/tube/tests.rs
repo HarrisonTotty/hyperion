@@ -974,6 +974,55 @@ fn the_scan_finds_every_segment_a_sphere_reaches() {
     );
 }
 
+/// A tube's envelope misses a sphere only where the scan finds no segment, and so
+/// `cells_touching` no cell (perf-range-census-streams): for spheres about the synthetic tube and
+/// beyond it, from 1 ly to 3 × 10⁵ ly, and spheres anywhere in a cube of 300,000 ly, of which it
+/// misses many and holds every one that finds a cell. It keeps the table's speed bound, in about
+/// 1.5 kB.
+#[test]
+fn an_envelope_misses_a_sphere_only_where_the_table_finds_no_cell() {
+    let tube = table(&circle(600, 2));
+    let envelope = TubeEnvelope::of(&tube);
+    assert_eq!(envelope.member_speed_bound(), tube.member_speed_bound());
+    assert!(
+        size_of::<TubeEnvelope>() < 1_600,
+        "{}",
+        size_of::<TubeEnvelope>()
+    );
+    let mut draws = Stream::open(
+        Seed::new(0x0a10_6c04),
+        tags::SELFTEST_STREAM,
+        ObjectKey::galaxy(),
+    );
+    let anywhere = (0..600).map(|_| {
+        let p = [0; 3].map(|_| 300_000.0 * draws.uniform() - 150_000.0);
+        let centre = GalacticPosition::from_light_years(p).expect("in the cube");
+        (centre, math::powf(10.0, 4.5 * draws.uniform()))
+    });
+    let spheres: Vec<_> = spheres(&tube, 400).into_iter().chain(anywhere).collect();
+    let (mut missed, mut found) = (0, 0);
+    for (centre, radius) in spheres {
+        let cells = tube
+            .cells_touching(&centre, LightYears::new(radius))
+            .count();
+        if envelope.may_touch(&centre, LightYears::new(radius)) {
+            found += usize::from(cells > 0);
+        } else {
+            assert_eq!(
+                tube.segments_near(&centre, radius).count(),
+                0,
+                "{radius} ly"
+            );
+            assert_eq!(cells, 0, "{radius} ly");
+            missed += 1;
+        }
+    }
+    assert!(
+        missed > 300 && found > 300,
+        "{missed} missed, {found} found cells"
+    );
+}
+
 /// Every point within the cut lies within its segment's reach of the segment's centre line, the
 /// premise of the scan of the segments, at the cut's corners too.
 #[test]

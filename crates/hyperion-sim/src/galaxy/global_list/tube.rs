@@ -893,6 +893,34 @@ impl TubeTable {
         centre: &GalacticPosition,
         radius: LightYears,
     ) -> impl Iterator<Item = TubeCell> + use<> {
+        self.rows_touching(centre, radius)
+            .into_iter()
+            .flat_map(|(along, bits)| {
+                (0..ACROSS_CELLS).flat_map(move |a| {
+                    let row = bits[usize::from(a)];
+                    (0..ACROSS_CELLS)
+                        .filter(move |&b| (row >> b) & 1 == 1)
+                        .map(move |b| TubeCell {
+                            along,
+                            across: [a, b],
+                        })
+                })
+            })
+    }
+
+    /// The cells [`cells_touching`](Self::cells_touching) yields, as rows: each along cell that
+    /// holds any of them, in order, with one word for each normal cell `a`, whose bit `b` marks
+    /// the cell `[a, b]`.
+    ///
+    /// # Panics
+    ///
+    /// If `radius` is negative or not finite.
+    #[must_use]
+    pub(crate) fn rows_touching(
+        &self,
+        centre: &GalacticPosition,
+        radius: LightYears,
+    ) -> BTreeMap<u32, [u64; ACROSS]> {
         let radius_ly = radius.value();
         assert!(
             radius_ly.is_finite() && radius_ly >= 0.0,
@@ -924,17 +952,7 @@ impl TubeTable {
                 }
             }
         }
-        rows.into_iter().flat_map(|(along, bits)| {
-            (0..ACROSS_CELLS).flat_map(move |a| {
-                let row = bits[usize::from(a)];
-                (0..ACROSS_CELLS)
-                    .filter(move |&b| (row >> b) & 1 == 1)
-                    .map(move |b| TubeCell {
-                        along,
-                        across: [a, b],
-                    })
-            })
-        })
+        rows
     }
 
     /// The knot segments whose reach about their centre lines meets the ball of `radius_ly` about
@@ -973,8 +991,139 @@ impl TubeTable {
     }
 }
 
+/// What a stream's tube table bounds of where its cells lie and how fast its members move, kept by
+/// a caller when the table is not (perf-range-census-streams, P10.T10.b's census).
+///
+/// A shell bounds a stream's distance from the galactic centre alone, so a sphere meets the
+/// shells of many streams whose tubes lie far from it: the Sun-like 50 ly query meets 121 shells of
+/// the server tests' galaxy and touches none of their tubes, and its census and hits read each of
+/// those 121 tables, which a cold cache builds first, some 0.5 CPU-seconds each (measured
+/// 2026-11-05, pod, 16 vCPU, release). The envelope holds 32 boxes, each about 16 knot segments
+/// of one arm and padded by their reaches, about 1.5 kB, so that a caller can keep a galaxy's
+/// every envelope beside its list and pass by a table whose envelope a sphere misses, building
+/// none. With them the same query reads 10 of the 121.
+///
+/// [`may_touch`](Self::may_touch) answers no only where [`TubeTable::cells_touching`] yields no
+/// cell: a segment's cells are found only once the sphere's centre lies in the segment's box padded
+/// by the radius and its reach ("Finding the segments"), and each envelope box holds its segments'
+/// boxes so padded, widened beyond the rounding. So a source that passes such a stream by counts
+/// and finds what it would have, bit for bit.
+///
+/// # Examples
+///
+/// Not run: the table needs the full potential and a spray of some seconds.
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::global_list::testing::pal5_like;
+/// use hyperion_sim::galaxy::global_list::{TubeEnvelope, TubeTable};
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::units::LightYears;
+///
+/// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?
+///     .with_full_potential();
+/// let table = TubeTable::build(&galaxy, &pal5_like(galaxy.potential()))?;
+/// let envelope = TubeEnvelope::of(&table);
+/// let on_axis = table.locate(0.3, 0.0, 0.0);
+/// assert!(envelope.may_touch(&on_axis, LightYears::new(50.0)));
+/// // Where the envelope says no, the table finds no cell, so a caller need not keep it.
+/// let far = hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 0.0, 60_000.0])
+///     .ok_or("out of range")?;
+/// if !envelope.may_touch(&far, LightYears::new(50.0)) {
+///     assert_eq!(table.cells_touching(&far, LightYears::new(50.0)).count(), 0);
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct TubeEnvelope {
+    /// Each box's least corner and greatest, ly in the galactic frame: the trailing arm's
+    /// segments in order, [`ENVELOPE_SEGMENTS`] a box, then the leading arm's.
+    boxes_ly: [[[f64; 3]; 2]; ENVELOPE_BOXES],
+    /// The table's [`TubeTable::member_speed_bound`].
+    speed_bound: KilometresPerSecond,
+}
+
+impl TubeEnvelope {
+    /// The envelope of `table` (type documentation).
+    #[must_use]
+    pub fn of(table: &TubeTable) -> Self {
+        let empty = [[f64::INFINITY; 3], [f64::NEG_INFINITY; 3]];
+        let mut boxes_ly = [empty; ENVELOPE_BOXES];
+        let per_arm = ENVELOPE_BOXES / 2;
+        // `<` rather than `f64::min` or `max`, whose choice between zeros of either sign is not
+        // portable (the sim-determinism skill's "Hazards across targets"), though no answer reads
+        // the boxes but through a test the slack holds far from their edges.
+        let lesser = |a: f64, b: f64| if b < a { b } else { a };
+        let greater = |a: f64, b: f64| if b > a { b } else { a };
+        for (side, arm) in table.arms.iter().enumerate() {
+            let segments = arm.knots.windows(2).zip(&arm.reaches_ly);
+            for (k, (pair, &reach_ly)) in segments.enumerate() {
+                let [low, high] = &mut boxes_ly[side * per_arm + k / ENVELOPE_SEGMENTS];
+                let pad = reach_ly + MARGIN_LY + ENVELOPE_SLACK_LY;
+                for end in pair {
+                    let p = end.centre.to_light_years_f64();
+                    for axis in 0..3 {
+                        low[axis] = lesser(low[axis], p[axis] - pad);
+                        high[axis] = greater(high[axis], p[axis] + pad);
+                    }
+                }
+            }
+        }
+        Self {
+            boxes_ly,
+            speed_bound: table.member_speed_bound(),
+        }
+    }
+
+    /// Whether the table's [`cells_touching`](TubeTable::cells_touching) may yield a cell within
+    /// `radius` of `centre`: `false` only where it yields none (type documentation).
+    ///
+    /// # Panics
+    ///
+    /// If `radius` is negative or not finite, as [`TubeTable::cells_touching`].
+    #[must_use]
+    pub fn may_touch(&self, centre: &GalacticPosition, radius: LightYears) -> bool {
+        let r = radius.value();
+        assert!(
+            r.is_finite() && r >= 0.0,
+            "a sphere's radius is finite and not negative: {r}"
+        );
+        let c = centre.to_light_years_f64();
+        self.boxes_ly.iter().any(|[low, high]| {
+            (0..3).all(|axis| c[axis] >= low[axis] - r && c[axis] <= high[axis] + r)
+        })
+    }
+
+    /// The table's bound on its members' speeds ([`TubeTable::member_speed_bound`]), which the
+    /// range query pads a stream's cells by.
+    #[must_use]
+    pub const fn member_speed_bound(&self) -> KilometresPerSecond {
+        self.speed_bound
+    }
+}
+
+/// The knot segments of one arm a [`TubeEnvelope`]'s box holds: 16, so that an arm's 255 take 16
+/// boxes. Over the server tests' galaxy's 321 tubes, boxes of 16 keep the Sun-like 50 ly query's
+/// tables to 10 of 121; boxes of 4 would keep 9, at four times the bytes (an estimate of
+/// 2026-11-05 with every reach widened to `4 (w_n + w_b)`; this task's lean).
+const ENVELOPE_SEGMENTS: usize = 16;
+
+/// A [`TubeEnvelope`]'s boxes: [`ENVELOPE_SEGMENTS`] segments a box along each arm.
+const ENVELOPE_BOXES: usize = 32;
+
+const _: () = assert!(
+    2 * (KNOTS_PER_ARM - 1).div_ceil(16) == 32 && ENVELOPE_SEGMENTS == 16 && ENVELOPE_BOXES == 32,
+    "an envelope holds every segment of both arms"
+);
+
+/// What a [`TubeEnvelope`]'s boxes add to every side beyond their segments' own padding, ly: one,
+/// far above the rounding of the boxes' tests and of the tests they stand for, some 10⁻¹⁰ ly at a
+/// million light-years.
+const ENVELOPE_SLACK_LY: f64 = 1.0;
+
 /// [`ACROSS_CELLS`] as an index.
-const ACROSS: usize = ACROSS_CELLS as usize;
+pub(crate) const ACROSS: usize = ACROSS_CELLS as usize;
 
 /// What [`TubeTable::cells_touching`] widens a fraction by at a cell's or a segment's edge, so
 /// that a member whose `u Λ_total` rounds across the edge is still counted.
@@ -1030,7 +1179,7 @@ impl From<StreamMemberId> for TubeCell {
 /// The across coordinates across cell `j` spans, in widths: `[−4 + j ÷ 8, −4 + (j + 1) ÷ 8]` at the
 /// generator's cut and cells, each exact in binary.
 #[must_use]
-fn across_range(j: u8) -> [f64; 2] {
+pub(crate) fn across_range(j: u8) -> [f64; 2] {
     let step = 2.0 * CUT_WIDTHS / f64::from(ACROSS_CELLS);
     [
         -CUT_WIDTHS + f64::from(j) * step,

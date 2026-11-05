@@ -249,6 +249,12 @@ threads-required = 4
 filter = "package(hyperion-sim) & test(/^galaxy::global_list::statistics::(the_discrete_share_s_budgets_hold_over_the_sweep|a_drawn_galaxy_s_tubes_and_contrast_keep_their_measured_figures|option_a_drops_a_bounded_share_over_the_sweep)$/)"
 threads-required = 8
 
+# The global list's census over a drawn galaxy builds its tube tables and sums its cells by hand
+# on eight threads of its own (`global_list::source`'s test, perf-range-census-streams).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::global_list::source::tests::a_drawn_galaxy_s_census_is_the_old_path_s_bit_for_bit)"
+threads-required = 8
+
 # P10.T10.b's warm-up at Milky Way values builds every tube table on a pool of eight workers of its
 # own (`compute::global_list`'s test of it).
 [[profile.slow.overrides]]

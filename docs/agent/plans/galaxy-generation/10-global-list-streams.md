@@ -2422,3 +2422,22 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     `Straight` does, and its range test places each returned entry by its ID (plan 09's records).
   - _Test._ `from_27_every_system_a_query_returns_is_placed_by_its_id` checks every row's velocity
     against `system_motion`'s, the centre's at a year and at ±10³ yr about the black hole.
+- **P10.T10.b, the census's cost (lane `perf-range-census-streams`, 2026-11-05, at 27; no output
+  moved).**
+  - _Census._ `expected_in_sphere` sums a stream's cells through `members::expected_touching`
+    (crate-visible), bit for bit `expected_members`' fold; `TubeTable::rows_touching` is
+    `cells_touching`'s rows (crate-visible).
+  - _Envelopes._ New `TubeEnvelope` (`of`, `may_touch`, `member_speed_bound`; 32 boxes, 1.5 kB);
+    `GlobalListModels::{envelope, keep_envelope}` keep one a stream, from its table's first read.
+  - _Pass-by._ The source skips a stream whose kept envelope its sphere misses (census, hits, the
+    sky's `members_in_shell_over`); `list_for` builds the new `GlobalListSource::streams_read_with`.
+  - _Server._ `GlobalListService::tubes` takes a `Priority`; `list_for` builds a few tables at once
+    at interactive priority, so a cold query keeps about one more table's shares queued. The
+    warm-up keeps every table's envelope. `GLOBAL_LIST_CACHE_BYTES` 4 → 8 MiB (lean, 2026-11-05).
+  - _List at bulk (brief step 3)._ 0.15 s on an idle pool of eight; not changed.
+  - _Tests._ Fast, `global_list::{members, tube, source}::tests`: `the_census_s_sums_…`,
+    `an_envelope_misses_…`, `kept_envelopes_…`. Slow, by name:
+    `galaxy::global_list::source::tests::a_drawn_galaxy_s_census_is_the_old_path_s_bit_for_bit`.
+  - _Left._ An envelope is its table's: before a stream's first read or warm-up (test servers warm
+    none) a query still builds every table whose shell it meets. The sky's handler builds every
+    stream `sky::census::streams_seen_in` names; it could take the envelopes as `streams_read_with`.

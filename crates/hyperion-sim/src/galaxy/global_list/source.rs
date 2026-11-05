@@ -14,13 +14,16 @@
 //!   which its shell holds.
 //! - **A stream**: its table through the caller's [`TubeLookup`], the tube cells touching the
 //!   sphere ([`TubeTable::cells_touching`]) and their members ([`stream_cell_members`]). The
-//!   census is the exact sum of the means ([`expected_members`]) of the cells touching the
+//!   census is the exact sum of the means
+//!   ([`expected_members`](super::members::expected_members)) of the cells touching the
 //!   unpadded radius, band by band, which errs high, as [`SystemSource`]'s contract allows, since
 //!   a cell can touch the sphere and hold no member inside it, and a member can lie outside the
 //!   root cube or, from 26, its shell. The hits take the cells touching the radius padded band by
 //!   band at the larger of the band's layer's [`pad_speed`](crate::galaxy::query::pad_speed) and
 //!   the tube's own members' bound ([`TubeTable::member_speed_bound`]), plan 09's rule for a
-//!   feature (P09.T23.b).
+//!   feature (P09.T23.b). A stream whose [`TubeEnvelope`] the list's models keep, and the sphere
+//!   misses out to where its cells are read, yields no cell, and its table is not read
+//!   ([`GlobalListModels`]).
 //! - **A dwarf core**: plan 09's nested-grid walk on its model ([`DwarfCoreModel`], P10.T7.b),
 //!   as a catalogue feature's: the census sums the expected candidates of the owned cells touching
 //!   the unpadded radius, and the hits read the cells within the padded one at its own bound
@@ -46,7 +49,7 @@
 
 use std::borrow::Cow;
 use std::num::NonZeroU32;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 #[cfg(doc)]
 use crate::galaxy::features::interior::MemberClassTable;
@@ -64,15 +67,15 @@ use crate::galaxy::query::{
 };
 use crate::id::{SystemId, SystemIdKind};
 use crate::time::UniverseTime;
-use crate::units::{LightYears, Seconds};
+use crate::units::{KilometresPerSecond, LightYears, Seconds};
 
 use super::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_member};
 use super::members::{
-    GlobalMemberRecord, StreamBandShares, expected_members, resolve_stream_member,
+    GlobalMemberRecord, StreamBandShares, expected_touching, resolve_stream_member,
     stream_cell_members,
 };
 use super::{
-    BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, TubeLookup, TubeTable,
+    BoundingShell, GlobalEntryKind, GlobalList, StreamNumber, TubeEnvelope, TubeLookup, TubeTable,
     in_stream_shell,
 };
 
@@ -94,20 +97,25 @@ const BANDS_COARSEST_FIRST: [MassBand; 5] = [
 ];
 
 /// What a global list's source reads of its galaxy that no query changes: each dwarf core's model,
-/// and each stream's band shares once a query first reaches it (P09.T37's bench).
+/// each stream's band shares once a query first reaches it (P09.T37's bench), and each stream's
+/// tube envelope once its table is first read ([`TubeEnvelope`]).
 ///
-/// Both are functions of the galaxy and its list alone (a dwarf stream's shares read its core's
-/// keyed metallicity stream), so which query makes a stream's shares first moves nothing, and a
-/// caller may keep one for every query of the galaxy, lent through its [`TubeLookup::models`]. Made
-/// for each source instead, the cores' models took 3.8 ms and the 121 streams' shares some 9.5 ms
-/// of every Sun-like 50 ly query under every 27 hold, warm or cold (measured 2026-11-01, pod, 16
-/// vCPU).
+/// All are functions of the galaxy and its list alone (a dwarf stream's shares read its core's
+/// keyed metallicity stream, and an envelope is its table's, which is the galaxy's and the
+/// stream's), so which query makes one first moves nothing, and a caller may keep one for every
+/// query of the galaxy, lent through its [`TubeLookup::models`]. Made for each source instead, the
+/// cores' models took 3.8 ms and the 121 streams' shares some 9.5 ms of every Sun-like 50 ly query
+/// under every 27 hold, warm or cold (measured 2026-11-01, pod, 16 vCPU). A source passes by the
+/// table of a stream whose envelope it holds and a sphere misses, so a caller that keeps the
+/// envelopes when its tables are evicted builds none of those again (perf-range-census-streams).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GlobalListModels {
     /// Each dwarf core's model in number order, `None` for one that fails its headroom check.
     cores: Vec<Option<DwarfCoreModel>>,
     /// Each stream's band shares in number order, made when a query first reaches it.
     shares: Vec<OnceLock<StreamBandShares>>,
+    /// Each stream's tube envelope in number order, kept when its table is first read.
+    envelopes: Vec<OnceLock<TubeEnvelope>>,
 }
 
 impl GlobalListModels {
@@ -131,17 +139,20 @@ impl GlobalListModels {
                 model.check_index_headroom().is_ok().then_some(model)
             })
             .collect();
-        let shares = list
-            .debris()
-            .streams()
-            .iter()
-            .map(|_| OnceLock::new())
-            .collect();
-        Self { cores, shares }
+        let streams = list.debris().streams();
+        let shares = streams.iter().map(|_| OnceLock::new()).collect();
+        let envelopes = streams.iter().map(|_| OnceLock::new()).collect();
+        Self {
+            cores,
+            shares,
+            envelopes,
+        }
     }
 
     /// The bytes it owns on the heap, by its buffers' capacities and each core's class table's
-    /// ([`MemberClassTable::heap_bytes`]): what a byte-bounded cache charges it.
+    /// ([`MemberClassTable::heap_bytes`]): what a byte-bounded cache charges it. A stream's shares
+    /// and envelope are held in place, so the count is the same before and after they are made:
+    /// about 2.1 kB a stream, 683 kB for the server tests' galaxy's 321 (measured 2026-11-05).
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.cores.capacity() * size_of::<Option<DwarfCoreModel>>()
@@ -152,6 +163,27 @@ impl GlobalListModels {
                 .map(|model| model.table().heap_bytes())
                 .sum::<usize>()
             + self.shares.capacity() * size_of::<OnceLock<StreamBandShares>>()
+            + self.envelopes.capacity() * size_of::<OnceLock<TubeEnvelope>>()
+    }
+
+    /// The envelope of stream `number`'s tube, if its table has been read through these models
+    /// or kept with [`keep_envelope`](Self::keep_envelope).
+    #[must_use]
+    pub fn envelope(&self, number: StreamNumber) -> Option<&TubeEnvelope> {
+        self.envelopes
+            .get(usize::from(number.get()))
+            .and_then(OnceLock::get)
+    }
+
+    /// Keeps the envelope of `table`, the tube of a stream of the list these are the models of,
+    /// unless one is kept already: for a caller that builds a table outside a source, as a
+    /// server's warm-up does, so that a query need not read it again. A table of a stream the list
+    /// lacks is passed by; one of another galaxy's list would make a source pass by streams it
+    /// should read, and is the caller's to keep out.
+    pub fn keep_envelope(&self, table: &TubeTable) {
+        if let Some(kept) = self.envelopes.get(usize::from(table.stream().get())) {
+            kept.get_or_init(|| TubeEnvelope::of(table));
+        }
     }
 
     /// Whether these are the models of `list`'s debris, by its counts of cores and streams.
@@ -159,6 +191,7 @@ impl GlobalListModels {
     fn fit(&self, list: &GlobalList) -> bool {
         self.cores.len() == list.debris().cores().len()
             && self.shares.len() == list.debris().streams().len()
+            && self.envelopes.len() == list.debris().streams().len()
     }
 }
 
@@ -378,6 +411,25 @@ impl<'a> GlobalListSource<'a> {
         })
     }
 
+    /// Stream `number`'s table, read through the lookup with its envelope kept, or `None` if its
+    /// envelope is kept already and misses `reach` about `centre`, where the table yields no cell
+    /// ([`TubeEnvelope::may_touch`]).
+    fn tube_near(
+        &self,
+        number: StreamNumber,
+        centre: &GalacticPosition,
+        reach: LightYears,
+    ) -> Option<Arc<TubeTable>> {
+        if let Some(envelope) = self.models.envelope(number)
+            && !envelope.may_touch(centre, reach)
+        {
+            return None;
+        }
+        let tube = self.lookup.tube(number);
+        self.models.keep_envelope(&tube);
+        Some(tube)
+    }
+
     /// The streams and the cores whose shells `sphere`, out to its padded radius, meets, in list
     /// order, each with its shell (module documentation).
     fn entries_near<'s>(
@@ -419,6 +471,73 @@ impl<'a> GlobalListSource<'a> {
             .collect()
     }
 
+    /// The streams of [`streams_read`](Self::streams_read) whose tables a source reads for `query`
+    /// through `models`, `list`'s: those of them whose envelopes `models` does not keep, and those
+    /// whose envelopes the query's sphere meets out to the farthest any stellar band's cells are
+    /// read ([`TubeEnvelope`]).
+    ///
+    /// A caller that builds tables off the query's thread and keeps the envelopes beside the list
+    /// builds these, so that the query reads no table cold and no table is built for a stream that
+    /// holds nothing there. The Sun-like 50 ly query of the server tests' galaxy meets 121 streams'
+    /// shells and touches none of their tubes (measured 2026-11-05, pod, 16 vCPU).
+    ///
+    /// # Panics
+    ///
+    /// As [`streams_read`](Self::streams_read), and if `models` are not `list`'s by their counts.
+    ///
+    /// # Examples
+    ///
+    /// Not run: the tables need the full potential and sprays of some seconds each.
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::global_list::{
+    ///     GlobalList, GlobalListModels, GlobalListSource, TubeTable,
+    /// };
+    /// use hyperion_sim::galaxy::query::RangeQuery;
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(0x4d2)).with_full_potential();
+    /// let list = GlobalList::build(&galaxy);
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).ok_or("out of range")?;
+    /// let query = RangeQuery::builder(sun, LightYears::new(50.0)).build()?;
+    /// // With no envelope kept, every stream whose shell the query meets: 121 of them.
+    /// let models = GlobalListModels::new(&galaxy, &list);
+    /// let shelled = GlobalListSource::streams_read(&galaxy, &list, &query);
+    /// assert_eq!(GlobalListSource::streams_read_with(&galaxy, &list, &models, &query), shelled);
+    /// // Once their tables have been built, as a server's warm-up builds them, and their envelopes
+    /// // kept, only those the query may touch: 10 of them.
+    /// for &number in &shelled {
+    ///     let spec = list.stream(number).ok_or("a stream of the list")?;
+    ///     models.keep_envelope(&TubeTable::build(&galaxy, spec)?);
+    /// }
+    /// let read = GlobalListSource::streams_read_with(&galaxy, &list, &models, &query);
+    /// assert!(read.len() < shelled.len() && read.iter().all(|n| shelled.contains(n)));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn streams_read_with(
+        galaxy: &Galaxy,
+        list: &GlobalList,
+        models: &GlobalListModels,
+        query: &RangeQuery,
+    ) -> Vec<StreamNumber> {
+        assert!(models.fit(list), "the models of the list");
+        let mut read = Self::streams_read(galaxy, list, query);
+        read.retain(|&number| {
+            models.envelope(number).is_none_or(|envelope| {
+                let bound = envelope.member_speed_bound();
+                let reach =
+                    farthest_reach(query.radius(), query.time(), BANDS_COARSEST_FIRST, bound)
+                        .expect("the stellar bands are five");
+                envelope.may_touch(query.centre(), reach)
+            })
+        });
+        read
+    }
+
     /// Each stream's and dwarf core's member of `band` that may lie within `outer` of `centre` at
     /// some time of `window`, born by its end, given to `each` in the source's order: the list's
     /// entries in list order, a stream's tube cells or a core's nested cells, those of the part
@@ -452,7 +571,14 @@ impl<'a> GlobalListSource<'a> {
         for (kind, shell) in self.entries_near(&padded) {
             match kind {
                 GlobalEntryKind::Stream(number) => {
+                    if let Some(envelope) = self.models.envelope(number) {
+                        let within = member_reach(outer, farthest, envelope.member_speed_bound());
+                        if !envelope.may_touch(centre, within) {
+                            continue;
+                        }
+                    }
                     let tube = self.lookup.tube(number);
+                    self.models.keep_envelope(&tube);
                     let shares = self.shares(number);
                     let within = member_reach(outer, farthest, tube.member_speed_bound());
                     for cell in tube.cells_touching(centre, within) {
@@ -562,18 +688,19 @@ impl SystemSource for GlobalListSource<'_> {
             let layer = band.layer();
             counts.set(layer, counts.get(layer) + expected);
         };
-        let (mut cells, mut core_cells) = (Vec::new(), Vec::new());
+        let mut core_cells = Vec::new();
         for (kind, _) in self.entries_near(&at_epoch) {
             match kind {
                 GlobalEntryKind::Stream(number) => {
-                    let tube = self.lookup.tube(number);
-                    let shares = self.shares(number);
-                    cells.clear();
-                    cells.extend(tube.cells_touching(sphere.centre(), radius));
-                    for band in BANDS_COARSEST_FIRST {
-                        let expected = cells.iter().fold(0.0, |sum, &cell| {
-                            sum + expected_members(&tube, shares, cell, band)
-                        });
+                    // A stream whose table yields no cell there sums no mean, zero in each band.
+                    let expected =
+                        self.tube_near(number, sphere.centre(), radius)
+                            .map_or([0.0; 5], |tube| {
+                                let shares = self.shares(number);
+                                let sphere = (sphere.centre(), radius);
+                                expected_touching(&tube, shares, sphere, BANDS_COARSEST_FIRST)
+                            });
+                    for (band, expected) in BANDS_COARSEST_FIRST.into_iter().zip(expected) {
                         add(band, expected);
                     }
                 }
@@ -626,7 +753,17 @@ impl SystemSource for GlobalListSource<'_> {
         for (kind, shell) in self.entries_near(&padded) {
             match kind {
                 GlobalEntryKind::Stream(number) => {
+                    if let Some(envelope) = self.models.envelope(number) {
+                        let bands = BANDS_COARSEST_FIRST
+                            .into_iter()
+                            .filter(|band| layers.contains(band.layer()));
+                        let reach = farthest_reach(radius, t, bands, envelope.member_speed_bound());
+                        if !reach.is_some_and(|reach| envelope.may_touch(sphere.centre(), reach)) {
+                            continue;
+                        }
+                    }
                     let tube = self.lookup.tube(number);
+                    self.models.keep_envelope(&tube);
                     let shares = self.shares(number);
                     let query = StreamQuery {
                         shell: &shell,
@@ -671,6 +808,28 @@ impl SystemSource for GlobalListSource<'_> {
         self.check(galaxy);
         false
     }
+}
+
+/// The farthest from a sphere's centre that [`stream_hits`] reads a stream's cells for `bands`, for
+/// a sphere of `radius` at `t` and members below `bound`: the largest of their [`band_reach`]es,
+/// none of which is below `radius`, or `None` for no band.
+#[must_use]
+fn farthest_reach(
+    radius: LightYears,
+    t: UniverseTime,
+    bands: impl IntoIterator<Item = MassBand>,
+    bound: KilometresPerSecond,
+) -> Option<LightYears> {
+    bands
+        .into_iter()
+        .map(|band| band_reach(radius, t, band.layer(), bound))
+        .reduce(|far, reach| {
+            if reach.value() > far.value() {
+                reach
+            } else {
+                far
+            }
+        })
 }
 
 /// The sphere of `outer` about `centre` at the farthest time of `window` from the epoch, padded at
