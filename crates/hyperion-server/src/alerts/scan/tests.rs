@@ -216,6 +216,102 @@ async fn a_background_walk_in_slab_jobs_gives_the_interactive_walks_pushes_each_
     server.shutdown().await.unwrap();
 }
 
+/// Seed 9's galaxy at generator version 29, whose core collapses' walks read the features' lists
+/// (the sim's `listed`), with its kinematic tables, as the server's galaxies are built.
+fn galaxy_at_29() -> &'static Galaxy {
+    static GALAXY: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
+    GALAXY.get_or_init(|| {
+        let seed = hyperion_sim::Seed::new(crate::alerts::testing::SEED);
+        Galaxy::from_params_at_version(
+            seed,
+            hyperion_sim::galaxy::params::GalaxyParams::from_seed(
+                seed,
+                hyperion_sim::galaxy::imf::MassFunctionKind::default(),
+            ),
+            hyperion_sim::GeneratorVersion::new(29),
+        )
+        .unwrap()
+        .with_full_potential()
+    })
+}
+
+/// From generator version 29 a background walk of the core collapses in slab jobs gives the
+/// interactive walk's pushes with the features' lists' (the sim's `listed`), each once: 0.2 ly
+/// spinward of a nursery's supernova that goes off 234.8 years after the epoch at
+/// [−12,727.7, 26,883.1, 204.0] ly in seed 9's galaxy at 29, through a V sensor that reaches some
+/// 700 ly, over the first scan's year and its walk back. Its member's onset is detected, and the
+/// jobs draw the lists' candidates beside the cells'.
+#[tokio::test]
+async fn from_29_a_background_walk_gives_the_interactive_walks_listed_pushes() {
+    let (server, _data_dir) = server(|config| config).await;
+    let state = server.state();
+    let galaxy = galaxy_at_29();
+    let key = GalaxyKey::new(
+        crate::alerts::testing::SEED,
+        hyperion_sim::GeneratorVersion::new(29),
+    );
+    let host = hyperion_sim::id::SystemId::from_raw(0xe65a_0018_f000_0003).unwrap();
+    let far = GalacticPosition::from_light_years([-12_727.473, 26_883.128, 204.046]).unwrap();
+    // Its light arrives 234.997 years after the epoch, inside the first scan's year.
+    let start = UniverseTime::from_julian_years(234).unwrap();
+    let (subscription, first) = core_collapses(far, start, reaching(700.0));
+    let spec = ScanSpec::new(key, &subscription, &first).unwrap();
+    let class = ClassId::CORE_COLLAPSE;
+    let token = CancelToken::new();
+    let plan = background_plan(galaxy, &spec, class, 1).unwrap();
+    let jobs: Vec<_> = plan
+        .jobs()
+        .iter()
+        .cloned()
+        .map(|slabs| walk_slabs(state, galaxy, &spec, &plan, slabs, &token).unwrap())
+        .collect();
+    let whole = ScanResult::of_jobs(jobs);
+    let sphere = plan.sphere.as_ref().expect("the sensor sees the class");
+    let cells: u64 = occupied_cells(
+        galaxy,
+        &CoreCollapseProcess::new(galaxy),
+        cells_in_sphere(class, sphere),
+    )
+    .iter()
+    .map(|&(_, count)| u64::from(count))
+    .sum();
+    assert!(
+        whole.drawn().is_some_and(|drawn| drawn > cells),
+        "the lists' candidates beside the cells' {cells}: {:?}",
+        whole.drawn()
+    );
+    let interactive = walk_interactive(state, galaxy, &spec, &mut LocalEventsCache::default());
+    assert_eq!(
+        interactive.background().count(),
+        0,
+        "{:?}",
+        interactive.census()
+    );
+    let interactive: Vec<_> = interactive
+        .tracks()
+        .iter()
+        .filter(|track| track.detection().class() == Some(class))
+        .cloned()
+        .collect();
+    let pushes = pushes_of(&subscription, &first, whole.tracks().to_vec());
+    assert_eq!(pushes, pushes_of(&subscription, &first, interactive));
+    let once: BTreeSet<_> = pushes.iter().collect();
+    assert_eq!(once.len(), pushes.len(), "each push once: {pushes:?}");
+    let listed = whole
+        .tracks()
+        .iter()
+        .find(|track| track.detection().host() == host)
+        .expect("the listed supernova is tracked");
+    let event = listed.detection().event();
+    assert!(
+        pushes
+            .iter()
+            .any(|&(_, e, crossing)| e == event && crossing == Crossing::Detect),
+        "the listed supernova is detected: {pushes:?}"
+    );
+    server.shutdown().await.unwrap();
+}
+
 /// A sensor that sees across the galaxy, V 10⁻¹² W m⁻², plans its core collapses as the root
 /// cube's 256 x-slabs of 512 ly cells, in order and without a gap: 256 jobs of the service's one
 /// slab, 64 of four, and at most 256 however few slabs a job is asked to take. The plan holds the slabs, never a list of the

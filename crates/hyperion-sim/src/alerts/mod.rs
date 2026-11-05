@@ -24,6 +24,9 @@
 //!   the luminous blue variables' giant eruptions (P12.T5.c);
 //! - the galactic centre's walk ([`centre`]), its black hole's flares and tidal disruptions, and
 //!   the local events of a range query's systems ([`local`](mod@local), P12.T5.e);
+//! - the recently dead of the features' and the centre's lists ([`listed`]), which the core
+//!   collapses' and the Type Ia's walks read beside their cells from generator version 29
+//!   (P09.T36);
 //! - "what went off?" ([`alerts_in`], [`census`]): the census per class (Design note 7), each
 //!   class's walk, the global list's centre and the local events, merged (P12.T5.d).
 //!
@@ -39,6 +42,7 @@ use crate::coords::GalacticPosition;
 use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::{ALL_CLASSES, CatalogueCellKey, ClassId};
+use crate::galaxy::features::catalogue::{FeatureCellCache, NoFeatureCache};
 use crate::galaxy::gas::ccm::Band;
 use crate::galaxy::gas::extinction::{NoiseMode, SIGHTLINE_QUALITY, Sightline, sightline};
 use crate::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
@@ -54,6 +58,7 @@ pub mod census;
 pub mod centre;
 mod cut;
 pub mod light;
+pub mod listed;
 pub mod local;
 pub mod oneshot;
 pub mod reach;
@@ -69,6 +74,7 @@ pub use census::{
 };
 pub use centre::{TAIL_TEMPERATURE, centre_detections};
 pub use light::{band_share, binary_luminosity, binary_peak, supernova_luminosity, supernova_peak};
+pub use listed::listed_scan_slab;
 pub use local::{LocalEventsCache, local_events};
 pub use oneshot::{
     NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, OneShotLight, one_shot_detections,
@@ -846,13 +852,16 @@ impl AlertResult {
 /// them, each cell is generated for its visit. T5.d's is plan 10's [`GlobalList`]
 /// ([`with_global_list`](Self::with_global_list)), through whose entries [`alerts_in`] walks the
 /// galactic centre; without it, the centre is not walked and the result says so. Plan 09's
-/// feature-level lists hold no class yet (P09.T36), so no feature catalogue joins it.
+/// feature cells ([`with_feature_cells`](Self::with_feature_cells)) are where the core collapses'
+/// and the Type Ia's walks find the features whose lists they read from generator version 29
+/// ([`listed`]); without them, each feature cell is generated for its lookup.
 pub struct AlertContext<'a> {
     noise: &'a mut NoiseCache,
     gas: &'a dyn GasModifierSource,
     one_shot_cells: Option<&'a mut dyn OneShotCells>,
     magnetar_cells: Option<&'a mut dyn MagnetarCells>,
     global_list: Option<&'a GlobalList>,
+    feature_cells: Option<&'a dyn FeatureCellCache>,
     /// The modifiers of the last line of sight, kept for its allocation.
     modifiers: Vec<GasModifier>,
 }
@@ -873,8 +882,25 @@ impl<'a> AlertContext<'a> {
             one_shot_cells: None,
             magnetar_cells: None,
             global_list: None,
+            feature_cells: None,
             modifiers: Vec::new(),
         }
+    }
+
+    /// The same context, lending the walks of the lists' recently dead plan 09's feature cells from
+    /// `cells` (P09.T36, [`listed`]): a cache of `galaxy`'s own, as a cell cache must be.
+    #[must_use]
+    pub fn with_feature_cells(self, cells: &'a dyn FeatureCellCache) -> Self {
+        Self {
+            feature_cells: Some(cells),
+            ..self
+        }
+    }
+
+    /// The feature cells lent, or the cache that keeps nothing.
+    #[must_use]
+    pub(crate) fn feature_cells(&self) -> &'a dyn FeatureCellCache {
+        self.feature_cells.unwrap_or(&NoFeatureCache)
     }
 
     /// The same context, lending [`alerts_in`] `galaxy`'s global list, `list` (P12.T5.d): it

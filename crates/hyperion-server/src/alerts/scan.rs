@@ -18,8 +18,11 @@
 //!
 //! Each detection is tracked on its own light ([`Tracked::of`], P12.T8.b.1), through the gas of the
 //! features at the epoch while they are served: so a host's light is the same whichever scan lists
-//! it, as the schedule asks (lean, 2026-11-01). The centre is not walked: the server holds no
-//! universe's global list, so its census says so (`Unwalked::NoGlobalList`; lean, 2026-11-01).
+//! it, as the schedule asks (lean, 2026-11-01). The centre's black hole is not walked: the server
+//! holds no universe's global list, so its census says so (`Unwalked::NoGlobalList`; lean,
+//! 2026-11-01). From generator version 29 the core collapses' and the Type Ia's walks read the
+//! recently dead of the features' lists and the centre's beside their cells (the sim's `listed`),
+//! through the server's feature cells, interactive and in the background jobs' slabs alike.
 
 use std::mem::size_of;
 use std::ops::Range;
@@ -29,7 +32,7 @@ use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BuildAlertQueryError, ClassCensus, ClassSet, ClassStatus,
     Detection, LocalEventsCache, LongestRise, ProductionAlertClasses, RecurrentProcess, Route,
     TransientKind, TransientRow, alerts_in_with, class_longest_rise, class_reach, kind_reach,
-    magnetar_scan_cell, one_shot_scan_cell, recurrent_reach,
+    listed_scan_slab, magnetar_scan_cell, one_shot_scan_cell, recurrent_reach,
 };
 use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
@@ -223,8 +226,8 @@ pub(crate) struct ScanKey {
 pub(crate) struct ScanResult {
     tracks: Vec<Tracked>,
     census: Vec<ClassCensus>,
-    /// The candidates a background walk's cells drew, or `None` for an interactive walk or a
-    /// class no background walk reads.
+    /// The candidates a background walk's cells drew, with its lists' from 29, or `None` for an
+    /// interactive walk or a class no background walk reads.
     drawn: Option<u64>,
 }
 
@@ -256,9 +259,9 @@ impl ScanResult {
         }
     }
 
-    /// The candidates a background walk's cells drew within its class's reach, its census's
-    /// count of hosts (lean, 2026-11-01): `None` for an interactive walk, or a class no
-    /// background walk reads.
+    /// The candidates a background walk's cells drew within its class's reach, and from 29 its
+    /// features' lists, its census's count of hosts (lean, 2026-11-01): `None` for an interactive
+    /// walk, or a class no background walk reads.
     #[must_use]
     pub(crate) const fn drawn(&self) -> Option<u64> {
         self.drawn
@@ -363,7 +366,7 @@ pub(crate) fn walk_interactive(
     let feature_cells = state.feature_cells.handle(key);
     let gas = WalkGas::of(state, galaxy, &feature_cells);
     let mut noise = NoiseCache::with_capacity(NOISE_ENTRIES);
-    let mut ctx = AlertContext::new(&mut noise, gas.source());
+    let mut ctx = AlertContext::new(&mut noise, gas.source()).with_feature_cells(&feature_cells);
     let mut detections = Vec::new();
     let mut census = Vec::new();
     for class in spec.query.classes().iter() {
@@ -551,7 +554,9 @@ fn reaches(query: &AlertQuery, reach: LightYears, key: &CatalogueCellKey) -> boo
 /// magnetars, each kind where it can reach the sensor, cut to the candidates whose time read first
 /// can light the window (`one_shot_scan_cell`, `magnetar_scan_cell`); or, for a class walked
 /// through its recurrent events alone, those events where they can reach the sensor
-/// (`RecurrentProcess::scan_cell`, every candidate read). `None` if `token` was
+/// (`RecurrentProcess::scan_cell`, every candidate read). For the core collapses and the Type Ia,
+/// from generator version 29, each slab's features' lists of their recently dead too
+/// (`listed_scan_slab`), their candidates counted with the cells'. `None` if `token` was
 /// cancelled before the last cell.
 ///
 /// Over every job of the plan, in any order, the tracks are the class's own in
@@ -568,7 +573,7 @@ pub(crate) fn walk_slabs(
     let feature_cells = state.feature_cells.handle(spec.galaxy);
     let gas = WalkGas::of(state, galaxy, &feature_cells);
     let mut noise = NoiseCache::with_capacity(NOISE_ENTRIES);
-    let mut ctx = AlertContext::new(&mut noise, gas.source());
+    let mut ctx = AlertContext::new(&mut noise, gas.source()).with_feature_cells(&feature_cells);
     let mut detections = Vec::new();
     let mut drawn: u64 = 0;
     let process = plan.process.as_ref();
@@ -626,6 +631,16 @@ pub(crate) fn walk_slabs(
                 }
             }
         }
+        // The recently dead on the lists of the features whose centres lie in the slab, from 29
+        // (the sim's `listed`): nothing for a class whose lists no walk reads, or below 29.
+        drawn += listed_scan_slab(
+            galaxy,
+            &mut ctx,
+            &query,
+            (class, sphere),
+            x,
+            &mut detections,
+        );
     }
     Some(SlabsWalked {
         tracks: spec.tracked(detections),

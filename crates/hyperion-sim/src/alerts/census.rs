@@ -29,7 +29,11 @@
 //!    global list in the context ([`AlertContext::with_global_list`]) neither is walked.
 //! 3. **The other sources** of class members, which hold none yet and answer none
 //!    ([`SourceCensus`]): the dwarf cores' feature-level lists on the global list (P10.T7.b) and
-//!    the catalogue features' (P09.T36), through plan 09's `FeatureCatalogue::near` once they do.
+//!    the catalogue features' (P09.T36). From generator version 29 the core collapses' and the
+//!    Type Ia's walks read the catalogue features' and the centre's lists of their recently dead
+//!    beside their cells, under their own census (part 1, [`listed`](super::listed)), and the
+//!    lists' source names what is left on them: their luminous blue variables (P09.T43) and plan
+//!    11's binary classes (P11.T8.f).
 //! 4. **The local events** of an observed range result's systems ([`local_events`], P12.T5.e),
 //!    with the same query.
 //!
@@ -62,6 +66,7 @@ use crate::units::consts::SPEED_OF_LIGHT;
 use crate::units::{LightYears, MetresPerSecond};
 
 use super::centre::centre_detections;
+use super::listed::ListedWalk;
 use super::local::{LocalEventsCache, local_events};
 use super::oneshot::one_shot_detections;
 use super::reach::class_reach;
@@ -86,7 +91,10 @@ pub enum AlertSource {
     Centre,
     /// The dwarf cores of the global list, through their feature-level lists.
     DwarfCores,
-    /// Plan 09's catalogue features within reach, through their feature-level lists.
+    /// Plan 09's catalogue features within reach, through their feature-level lists. From
+    /// generator version 29 their recently dead are walked with their classes, the core collapses
+    /// and the Type Ia (part 1 of the module documentation), and this source's census names what
+    /// the lists hold that no walk reads: their luminous blue variables and plan 11's binaries.
     FeatureLists,
 }
 
@@ -184,8 +192,11 @@ pub trait AlertClasses {
 /// The production walks of the catalogue classes, as built:
 ///
 /// - [`ClassId::CORE_COLLAPSE`]: its supernovae ([`one_shot_detections`], P12.T5.b) and its
-///   magnetars ([`magnetar_detections`], P12.T5.c), on plan 09's process;
-/// - [`ClassId::TYPE_IA`]: its supernovae, on plan 09's process (P09.T34.a);
+///   magnetars ([`magnetar_detections`], P12.T5.c), on plan 09's process, and from generator
+///   version 29 those of the recently dead on the features' and the centre's lists
+///   ([`listed`](super::listed));
+/// - [`ClassId::TYPE_IA`]: its supernovae, on plan 09's process (P09.T34.a), and from 29 the
+///   lists';
 /// - [`ClassId::STELLAR_MERGER`] and [`ClassId::NEUTRON_STAR_MERGER`]: their luminous red novae
 ///   and kilonovae ([`one_shot_detections`], P12.T5.b), on plan 11's processes, read from their
 ///   scan marks;
@@ -210,18 +221,20 @@ impl AlertClasses for ProductionAlertClasses {
         match class {
             ClassId::CORE_COLLAPSE => {
                 let process = || CoreCollapseProcess::new(galaxy);
-                class_alerts(galaxy, query, class, process, |process| {
+                let walk = |ctx: &mut AlertContext<'_>, process: &_, out: &mut _| {
                     one_shot_detections(galaxy, ctx, query, process, out);
                     magnetar_detections(galaxy, ctx, query, process, out);
-                })
+                };
+                listed_class_alerts(galaxy, (ctx, query), class, process, walk, out)
             }
             ClassId::TYPE_IA => {
                 // Its process costs some 37 ms (its delay-time distribution; pod, 16 vCPU), so it
                 // is built only for a class whose cells are counted.
                 let process = || TypeIaProcess::new(galaxy);
-                class_alerts(galaxy, query, class, process, |process| {
+                let walk = |ctx: &mut AlertContext<'_>, process: &_, out: &mut _| {
                     one_shot_detections(galaxy, ctx, query, process, out);
-                })
+                };
+                listed_class_alerts(galaxy, (ctx, query), class, process, walk, out)
             }
             ClassId::STELLAR_MERGER => {
                 let process = || StellarMergers::new(galaxy);
@@ -328,6 +341,102 @@ pub fn class_alerts<P: ClassProcess>(
     process: impl FnOnce() -> P,
     walk: impl FnOnce(&P),
 ) -> ClassCensus {
+    match counted_cells(galaxy, query, class, process) {
+        Counted::Done(census) => census,
+        Counted::Cells(cells) => {
+            let status = status_of(cells.expected, query);
+            if status == ClassStatus::Complete {
+                walk(&cells.process);
+            }
+            cells.census(class, cells.expected, status)
+        }
+    }
+}
+
+/// [`class_alerts`] for a class whose recently dead the features' and the centre's lists hold too
+/// (P09.T36; [`listed`](super::listed)): where its cells alone leave it complete, the lists its
+/// walk reads add their expected candidates to its cells', and a class still complete is walked,
+/// `walk` over its cells, then its lists, into `out`. Below the lists' version
+/// (`LISTED_ALERTS_VERSION`) it is [`class_alerts`] bit for bit.
+/// A class its cells send to the background or put over its limit is not counted further: a
+/// background walk counts the candidates its lists drew ([`listed_scan_slab`](super::listed_scan_slab)).
+///
+/// # Panics
+///
+/// As [`class_alerts`], and as the lists' walk does.
+#[must_use]
+fn listed_class_alerts<P: ClassProcess>(
+    galaxy: &Galaxy,
+    (ctx, query): (&mut AlertContext<'_>, &AlertQuery),
+    class: ClassId,
+    process: impl FnOnce() -> P,
+    walk: impl FnOnce(&mut AlertContext<'_>, &P, &mut Vec<Detection>),
+    out: &mut Vec<Detection>,
+) -> ClassCensus {
+    match counted_cells(galaxy, query, class, process) {
+        Counted::Done(census) => census,
+        Counted::Cells(cells) => {
+            let listed = (status_of(cells.expected, query) == ClassStatus::Complete)
+                .then(|| ListedWalk::find(galaxy, ctx.feature_cells(), query, class))
+                .flatten();
+            let expected = listed
+                .as_ref()
+                .map_or(cells.expected, |listed| cells.expected + listed.expected());
+            let status = status_of(expected, query);
+            if status == ClassStatus::Complete {
+                walk(ctx, &cells.process, out);
+                if let Some(listed) = &listed {
+                    listed.detections(galaxy, ctx, query, class, out);
+                }
+            }
+            cells.census(class, expected, status)
+        }
+    }
+}
+
+/// A class's census as far as its cells: done, or its cells' expected hosts with its process.
+enum Counted<P> {
+    /// Decided without its hosts: a class the sensor cannot see, or one whose walk spans too many
+    /// cells.
+    Done(ClassCensus),
+    /// Its cells counted.
+    Cells(CountedCells<P>),
+}
+
+/// A class's reach, its cells' expected hosts and its process, built for them.
+struct CountedCells<P> {
+    reach: LightYears,
+    expected: f64,
+    process: P,
+}
+
+impl<P> CountedCells<P> {
+    /// The census of `class` of `expected` hosts and `status`.
+    #[must_use]
+    const fn census(&self, class: ClassId, expected: f64, status: ClassStatus) -> ClassCensus {
+        ClassCensus {
+            class,
+            reach: self.reach,
+            expected_hosts: Some(expected),
+            status,
+        }
+    }
+}
+
+/// [`class_alerts`]' census of `class`'s cells for `query` (module documentation): its reach, the
+/// candidates of its walk's cells and the process `process` builds for them, or the census of a
+/// class decided without them.
+///
+/// # Panics
+///
+/// As [`class_alerts`].
+#[must_use]
+fn counted_cells<P: ClassProcess>(
+    galaxy: &Galaxy,
+    query: &AlertQuery,
+    class: ClassId,
+    process: impl FnOnce() -> P,
+) -> Counted<P> {
     let reach = class_reach(class, query.sensor());
     let census = |expected_hosts, status| ClassCensus {
         class,
@@ -336,7 +445,7 @@ pub fn class_alerts<P: ClassProcess>(
         status,
     };
     if reach <= LightYears::ZERO {
-        return census(Some(0.0), ClassStatus::Complete);
+        return Counted::Done(census(Some(0.0), ClassStatus::Complete));
     }
     let sphere = QuerySphere::new(
         *query.observer_position(),
@@ -351,7 +460,7 @@ pub fn class_alerts<P: ClassProcess>(
         .take(BACKGROUND_THRESHOLD_CELLS + 1)
         .count();
     if cells > BACKGROUND_THRESHOLD_CELLS {
-        return census(None, ClassStatus::NeedsBackgroundScan);
+        return Counted::Done(census(None, ClassStatus::NeedsBackgroundScan));
     }
     let process = process();
     debug_assert_eq!(
@@ -362,11 +471,11 @@ pub fn class_alerts<P: ClassProcess>(
     let expected = cells_in_sphere(class, &sphere).fold(0.0, |sum, key| {
         sum + process.bound(galaxy, &key).value() * key.volume_ly3()
     });
-    let status = status_of(expected, query);
-    if status == ClassStatus::Complete {
-        walk(&process);
-    }
-    census(Some(expected), status)
+    Counted::Cells(CountedCells {
+        reach,
+        expected,
+        process,
+    })
 }
 
 /// The status of a class expecting `expected` hosts for `query` (Design note 7).
@@ -534,7 +643,7 @@ pub fn alerts_in_with<L: AlertClasses + ?Sized, S: StarsCache>(
         },
         SourceCensus {
             source: AlertSource::FeatureLists,
-            status: SourceStatus::Unwalked(Unwalked::NotBuilt("P09.T36")),
+            status: SourceStatus::Unwalked(Unwalked::NotBuilt(ListedWalk::unwalked_by(galaxy))),
         },
     ];
     local_events(galaxy, ctx, query, observed, stars, cache, &mut detections);

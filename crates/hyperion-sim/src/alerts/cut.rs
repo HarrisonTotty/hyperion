@@ -20,6 +20,10 @@
 //!
 //! A cut cell is not the whole cell: no walk lends it to the context's
 //! [`OneShotCells`](super::OneShotCells) or [`MagnetarCells`](super::MagnetarCells).
+//!
+//! A feature's or the galactic centre's list (P09.T36) is cut the same way about a ball that holds
+//! every site its deaths can have, in place of a cell's box ([`one_shot_ball`],
+//! [`magnetars_ball`]): its deaths' times are read first too, from their lifetimes and delays.
 
 use crate::coords::GalacticPosition;
 use crate::galaxy::catalogue_classes::CatalogueCellKey;
@@ -28,6 +32,7 @@ use crate::galaxy::catalogue_classes::ClassProcess;
 use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use crate::stellar::events::magnetar::MAX_BURST_DURATION;
 use crate::time::{Span, UniverseTime};
+use crate::units::LightYears;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 
 use super::AlertQuery;
@@ -67,6 +72,16 @@ impl BoxLight {
             far: years(far.sqrt()),
         }
     }
+
+    /// The light times from the closed ball of `radius` about `centre` to `observer`.
+    #[must_use]
+    fn of_ball(observer: &GalacticPosition, centre: &GalacticPosition, radius: LightYears) -> Self {
+        let distance = LightYears::from(observer.distance_to(centre)).value();
+        Self {
+            near: years((distance - radius.value()).max(0.0)),
+            far: years(distance + radius.value()),
+        }
+    }
 }
 
 /// `years` Julian years as a span.
@@ -97,7 +112,28 @@ pub(crate) fn one_shot(
     query: &AlertQuery,
     key: &CatalogueCellKey,
 ) -> impl Fn(UniverseTime) -> bool {
-    let light = BoxLight::of(query.observer_position(), key);
+    one_shot_from(query, BoxLight::of(query.observer_position(), key))
+}
+
+/// The one-shot cut for `query` of the deaths whose sites lie in the ball of `radius` about
+/// `centre` (module documentation): a list's, as [`one_shot`] is a cell's.
+///
+/// # Panics
+///
+/// Never, as [`one_shot`].
+pub(crate) fn one_shot_ball(
+    query: &AlertQuery,
+    centre: &GalacticPosition,
+    radius: LightYears,
+) -> impl Fn(UniverseTime) -> bool {
+    one_shot_from(
+        query,
+        BoxLight::of_ball(query.observer_position(), centre, radius),
+    )
+}
+
+/// The one-shot cut for `query` of sites whose light times to its observer are `light`.
+fn one_shot_from(query: &AlertQuery, light: BoxLight) -> impl Fn(UniverseTime) -> bool {
     let window = query.window();
     let back = years(SUPERNOVA_LIGHT_YEARS)
         .checked_add(light.far)
@@ -125,7 +161,29 @@ pub(crate) fn magnetars(
     query: &AlertQuery,
     key: &CatalogueCellKey,
 ) -> impl Fn(UniverseTime) -> bool {
-    let light = BoxLight::of(query.observer_position(), key);
+    magnetars_from(query, BoxLight::of(query.observer_position(), key))
+}
+
+/// The magnetar cut for `query` of the deaths whose sites lie in the ball of `radius` about
+/// `centre`, each remnant within [`LIFETIME_REACH`] of its site (module documentation): a list's,
+/// as [`magnetars`] is a cell's.
+///
+/// # Panics
+///
+/// Never, as [`one_shot`].
+pub(crate) fn magnetars_ball(
+    query: &AlertQuery,
+    centre: &GalacticPosition,
+    radius: LightYears,
+) -> impl Fn(UniverseTime) -> bool {
+    magnetars_from(
+        query,
+        BoxLight::of_ball(query.observer_position(), centre, radius),
+    )
+}
+
+/// The magnetar cut for `query` of sites whose light times to its observer are `light`.
+fn magnetars_from(query: &AlertQuery, light: BoxLight) -> impl Fn(UniverseTime) -> bool {
     let reach = years(LIFETIME_REACH.value());
     let window = query.window();
     let back = years(MAGNETAR_ACTIVE_SPAN.value())
@@ -169,5 +227,23 @@ mod tests {
         assert!(close(beside.near, 512.0), "{beside:?}");
         let corner = (1_024.0_f64 * 1_024.0 + 2.0 * 256.0 * 256.0).sqrt();
         assert!(close(beside.far, corner), "{beside:?}");
+    }
+
+    /// A ball's light times are its nearest and farthest points' distances: zero for an observer
+    /// inside it, and from outside it the distance less and plus its radius.
+    #[test]
+    fn a_balls_light_times_are_its_nearest_and_farthest_points() {
+        let at = |ly: [f64; 3]| GalacticPosition::from_light_years(ly).unwrap();
+        let close = |span: Span, ly: f64| (span.as_julian_years_f64() - ly).abs() < 1e-6;
+        let centre = at([100.0, 26_000.0, 0.0]);
+        let inside = BoxLight::of_ball(&at([110.0, 26_000.0, 0.0]), &centre, LightYears::new(50.0));
+        assert_eq!(inside.near, Span::ZERO);
+        assert!(close(inside.far, 60.0), "{inside:?}");
+        let outside =
+            BoxLight::of_ball(&at([500.0, 26_000.0, 0.0]), &centre, LightYears::new(50.0));
+        assert!(
+            close(outside.near, 350.0) && close(outside.far, 450.0),
+            "{outside:?}"
+        );
     }
 }

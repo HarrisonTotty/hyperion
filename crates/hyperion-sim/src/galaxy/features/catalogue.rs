@@ -114,7 +114,7 @@ use crate::galaxy::fields::VerticalProfile;
 pub const MAX_FEATURE_REACH: LightYears = LightYears::new(4_096.0);
 
 /// A feature cell's edge, ly.
-pub(super) const EDGE: f64 = 4_096.0;
+pub(crate) const EDGE: f64 = 4_096.0;
 
 /// A feature cell's index capacity: 2¹⁴ candidates.
 pub const INDEX_CAPACITY: u32 = 1 << 14;

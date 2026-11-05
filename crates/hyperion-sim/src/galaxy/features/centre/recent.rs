@@ -51,13 +51,13 @@ use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::catalogue_classes::CatalogueMotion;
 use crate::galaxy::catalogue_classes::lbv::{horizon_window, may_host};
 use crate::galaxy::catalogue_classes::supernova::{
-    DeathMarks, SupernovaEntry, SupernovaInterval, Surroundings, claimed_window,
+    DeathMarks, SupernovaEntry, SupernovaInterval, SupernovaKind, Surroundings, claimed_window,
 };
 use crate::galaxy::catalogue_classes::type_ia::{DelayTimeDistribution, IaLeftover, IaProgenitor};
 use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
 use crate::galaxy::features::interior::{ClassProfile, ProfileShape};
 use crate::galaxy::features::members::recent::{
-    Candidates, FeatureClassesRules, ListedDeath, RecentClass, moved, uniform_ages,
+    Candidates, FeatureClassesRules, ListedDeath, ListedExplosion, RecentClass, moved, uniform_ages,
 };
 use crate::galaxy::features::members::{FeatureLevelList, ListClass, ListIndex, MemberZero};
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
@@ -402,7 +402,7 @@ impl CentrePlace {
                         member,
                         death: None,
                         motion: CatalogueMotion::straight(position, member.velocity()),
-                        supernova: None,
+                        explosion: None,
                     });
                 };
                 Some(CentreRecentEntry::kicked(
@@ -460,7 +460,7 @@ impl CentrePlace {
                     member,
                     death: Some((site, window)),
                     motion: CatalogueMotion::straight(position, member.velocity()),
-                    supernova: None,
+                    explosion: Some(ListedExplosion::TypeIa(progenitor.channel())),
                 })
             }
         }
@@ -576,14 +576,14 @@ pub(crate) fn recent_listed(
 }
 
 /// One recent entry of the centre's list: its class, its member, for a death its site and the
-/// window of its shell, how it moves, and for a core collapse its shell's entry.
+/// window of its shell, how it moves, and what it explodes as ([`ListedExplosion`]).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CentreRecentEntry {
     class: RecentClass,
     member: CentreMemberRecord,
     death: Option<(ExplosionSite, ShellWindow)>,
     motion: CatalogueMotion,
-    supernova: Option<SupernovaEntry>,
+    explosion: Option<ListedExplosion>,
 }
 
 impl CentreRecentEntry {
@@ -613,24 +613,8 @@ impl CentreRecentEntry {
             member,
             death: Some((death.site, *death.supernova.window())),
             motion: death.motion,
-            supernova: Some(death.supernova),
+            explosion: Some(ListedExplosion::CoreCollapse(death.supernova)),
         }
-    }
-}
-
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the range query reads an entry's member and motion alone (P09.T37); its tests \
-                  read its class, site, window and shell"
-    )
-)]
-impl CentreRecentEntry {
-    /// Its class.
-    #[must_use]
-    pub(crate) const fn class(&self) -> RecentClass {
-        self.class
     }
 
     /// Its member.
@@ -645,12 +629,6 @@ impl CentreRecentEntry {
         self.death.as_ref().map(|(site, _)| site)
     }
 
-    /// The window of its shell, for a death: none for a luminous blue variable.
-    #[must_use]
-    pub(crate) fn window(&self) -> Option<&ShellWindow> {
-        self.death.as_ref().map(|(_, window)| window)
-    }
-
     /// How it moves: a core collapse on its progenitor's line broken at its death, where its
     /// remnant takes its natal kick (fix-p09-recent-kicks); any other entry on one straight line at
     /// its velocity.
@@ -663,7 +641,36 @@ impl CentreRecentEntry {
     /// remnant's kick, which the remnant's offset, its bow shock and its nebula read.
     #[must_use]
     pub(crate) const fn supernova(&self) -> Option<&SupernovaEntry> {
-        self.supernova.as_ref()
+        ListedExplosion::supernova_of(self.explosion.as_ref())
+    }
+
+    /// What explodes, for a death: a core collapse's shell's kind, or a Type Ia of its channel
+    /// (plan 12's alert walks read its light by it).
+    #[must_use]
+    pub(crate) fn explosion_kind(&self) -> Option<SupernovaKind> {
+        self.explosion.as_ref().map(ListedExplosion::kind)
+    }
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the range query and the alert walks read no entry's class or window (P09.T37); \
+                  its tests do"
+    )
+)]
+impl CentreRecentEntry {
+    /// Its class.
+    #[must_use]
+    pub(crate) const fn class(&self) -> RecentClass {
+        self.class
+    }
+
+    /// The window of its shell, for a death: none for a luminous blue variable.
+    #[must_use]
+    pub(crate) fn window(&self) -> Option<&ShellWindow> {
+        self.death.as_ref().map(|(_, window)| window)
     }
 }
 

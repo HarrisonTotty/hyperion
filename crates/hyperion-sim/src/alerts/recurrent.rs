@@ -208,7 +208,11 @@ impl StarRecipe {
     ///
     /// Never: a record's primary is of 0.08–150 M☉ with a finite age (`SystemRecord::from_parts`).
     #[must_use]
-    fn of_record(galaxy: &Galaxy, record: &SystemRecord, composition: Composition) -> Self {
+    pub(super) fn of_record(
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        composition: Composition,
+    ) -> Self {
         Self::new(
             record.primary_initial_mass(),
             composition,
@@ -881,8 +885,8 @@ pub fn magnetar_scan_cell<P: MagnetarClass>(
 }
 
 /// Appends to `out` the detections of each of `active`'s hosts of `class` over its emission
-/// interval, a cell's, unsorted.
-fn hosts_detections(
+/// interval, a cell's or a list's, unsorted.
+pub(super) fn hosts_detections(
     galaxy: &Galaxy,
     ctx: &mut AlertContext<'_>,
     query: &AlertQuery,
@@ -907,7 +911,7 @@ fn hosts_detections(
 
 /// Sorts detections by arrival and then by event, the [`AlertResult`](super::AlertResult)'s
 /// order.
-fn sort_detections(detections: &mut [Detection]) {
+pub(super) fn sort_detections(detections: &mut [Detection]) {
     detections.sort_by(|a, b| {
         a.arrival()
             .cmp(&b.arrival())
@@ -941,7 +945,7 @@ const DAY: Span = Span::from_seconds(86_400);
 /// Never: an [`AlertQuery`]'s observer is in the root cube and its window on the clock, and a host
 /// moves below light's speed, which [`MagnetarHost::new`] checks.
 #[must_use]
-fn emission_of(
+pub(super) fn emission_of(
     host: &MagnetarHost,
     observer: &GalacticPosition,
     query: &AlertQuery,

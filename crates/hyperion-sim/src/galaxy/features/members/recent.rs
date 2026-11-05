@@ -71,10 +71,12 @@ use crate::galaxy::ages::AgeDistribution;
 use crate::galaxy::catalogue_classes::core_collapse::feature_runaway;
 use crate::galaxy::catalogue_classes::lbv::{NODES, horizon_window, host_ages, may_host};
 use crate::galaxy::catalogue_classes::supernova::{
-    BubbleInterior, DeathMarks, SupernovaEntry, SupernovaInterval, Surroundings, claimed_window,
-    claims,
+    BubbleInterior, DeathMarks, SupernovaEntry, SupernovaInterval, SupernovaKind, Surroundings,
+    claimed_window, claims,
 };
-use crate::galaxy::catalogue_classes::type_ia::{DelayTimeDistribution, IaLeftover, IaProgenitor};
+use crate::galaxy::catalogue_classes::type_ia::{
+    DelayTimeDistribution, IaChannel, IaLeftover, IaProgenitor,
+};
 use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId};
 #[cfg(doc)]
 use crate::galaxy::displaced::death_in_interval;
@@ -592,6 +594,7 @@ impl FeatureStars {
     /// Entry `index` of the list, of class `class`, at `position`: the candidate's draws and the
     /// class's test (module documentation), or `None` if the test rejects it or the index names no
     /// entry.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn entry(
         &self,
@@ -599,6 +602,22 @@ impl FeatureStars {
         class: RecentClass,
         index: u16,
         position: &GalacticPosition,
+    ) -> Option<RecentEntry> {
+        self.entry_when(galaxy, class, index, position, &|_| true)
+    }
+
+    /// [`entry`](Self::entry), less a death whose time, read first, `wanted` refuses: a core
+    /// collapse's from its lifetime before its stars are built, a Type Ia's from its delay before
+    /// its window is cut (plan 12's alert walks, P09.T36 there). Every entry it keeps is
+    /// [`entry`](Self::entry)'s, bit for bit; a luminous blue variable has no death to read.
+    #[must_use]
+    pub(crate) fn entry_when(
+        &self,
+        galaxy: &Galaxy,
+        class: RecentClass,
+        index: u16,
+        position: &GalacticPosition,
+        wanted: &dyn Fn(UniverseTime) -> bool,
     ) -> Option<RecentEntry> {
         match class {
             RecentClass::CoreCollapse | RecentClass::LuminousBlueVariable => {
@@ -612,25 +631,29 @@ impl FeatureStars {
                         site: None,
                         window: None,
                         motion: CatalogueMotion::straight(*record.epoch_position(), self.velocity),
-                        supernova: None,
+                        explosion: None,
                     });
                 }
                 let death = self.core_collapse_death(galaxy, record, range)?;
+                if !wanted(death.death) {
+                    return None;
+                }
                 self.core_collapse_entry(galaxy, position, &death)
             }
-            RecentClass::TypeIa => self.type_ia(galaxy, index, position),
+            RecentClass::TypeIa => self.type_ia(galaxy, index, position, wanted),
         }
     }
 
     /// Entry `index`, a Type Ia: its progenitor delay first on the members' ages, exploding in the
     /// interval, what it leaves, and its window in the feature's surroundings; a globular's with
-    /// none.
+    /// none. `None` too for an explosion whose time `wanted` refuses.
     #[must_use]
     fn type_ia(
         &self,
         galaxy: &Galaxy,
         index: u16,
         position: &GalacticPosition,
+        wanted: &dyn Fn(UniverseTime) -> bool,
     ) -> Option<RecentEntry> {
         let system = self.member_system(index)?;
         let key = ObjectKey::from(system);
@@ -646,6 +669,9 @@ impl FeatureStars {
             interval.start(),
             interval.end(),
         )?;
+        if !wanted(progenitor.explosion()) {
+            return None;
+        }
         let mut stream = Stream::open(galaxy.seed(), tags::CLASS_TYPE_IA_LEFTOVER, key);
         let leftover = IaLeftover::draw(progenitor.channel(), &mut stream);
         let site = ExplosionSite::new(
@@ -674,7 +700,7 @@ impl FeatureStars {
             site: Some(site),
             window,
             motion: CatalogueMotion::straight(*record.epoch_position(), self.velocity),
-            supernova: None,
+            explosion: Some(ListedExplosion::TypeIa(progenitor.channel())),
         })
     }
 
@@ -820,7 +846,7 @@ impl FeatureStars {
             site: Some(listed.site),
             window: Some(*listed.supernova.window()),
             motion: listed.motion,
-            supernova: Some(listed.supernova),
+            explosion: Some(ListedExplosion::CoreCollapse(listed.supernova)),
         })
     }
 
@@ -1221,8 +1247,44 @@ impl ListedDeath {
     }
 }
 
+/// What a listed death explodes as: a core collapse's shell's entry, or a Type Ia's channel, which
+/// plan 12's alert walks read its light by (P09.T36 there).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a core collapse's entry is held inline, as the entry held it before the Type Ia's \
+              channel joined it; entries are built one at a time and few are held"
+)]
+pub(crate) enum ListedExplosion {
+    /// A core collapse: its shell's entry, its kind, its window and its remnant.
+    CoreCollapse(SupernovaEntry),
+    /// A Type Ia of its channel.
+    TypeIa(IaChannel),
+}
+
+impl ListedExplosion {
+    /// What exploded.
+    #[must_use]
+    pub(crate) const fn kind(&self) -> SupernovaKind {
+        match self {
+            Self::CoreCollapse(supernova) => supernova.kind(),
+            Self::TypeIa(channel) => SupernovaKind::TypeIa(*channel),
+        }
+    }
+
+    /// The shell's entry of `explosion`, if it is a core collapse's.
+    #[must_use]
+    pub(crate) const fn supernova_of(explosion: Option<&Self>) -> Option<&SupernovaEntry> {
+        match explosion {
+            Some(Self::CoreCollapse(supernova)) => Some(supernova),
+            Some(Self::TypeIa(_)) | None => None,
+        }
+    }
+}
+
 /// One recent entry of a feature's list: its class, its member, for a death its site and the
-/// window of its shell, how it moves, and for a core collapse its shell's entry.
+/// window of its shell, how it moves, and what it explodes as: for a core collapse its shell's
+/// entry, for a Type Ia its channel.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecentEntry {
     class: RecentClass,
@@ -1230,7 +1292,7 @@ pub struct RecentEntry {
     site: Option<ExplosionSite>,
     window: Option<ShellWindow>,
     motion: CatalogueMotion,
-    supernova: Option<SupernovaEntry>,
+    explosion: Option<ListedExplosion>,
 }
 
 impl RecentEntry {
@@ -1271,7 +1333,14 @@ impl RecentEntry {
     /// remnant's kick, which the remnant's offset, its bow shock and its nebula read.
     #[must_use]
     pub const fn supernova(&self) -> Option<&SupernovaEntry> {
-        self.supernova.as_ref()
+        ListedExplosion::supernova_of(self.explosion.as_ref())
+    }
+
+    /// What explodes, for a death: a core collapse's shell's kind, or a Type Ia of its channel
+    /// (plan 12's alert walks read its light by it).
+    #[must_use]
+    pub(crate) fn explosion_kind(&self) -> Option<SupernovaKind> {
+        self.explosion.as_ref().map(ListedExplosion::kind)
     }
 }
 

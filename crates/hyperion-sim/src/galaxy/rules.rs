@@ -14,6 +14,8 @@
 //!
 //! The holds, each a field:
 //!
+//! - [`listed_alerts`](GalaxyRules::listed_alerts), whether the alert walks read the features' and
+//!   the centre's lists of the recently dead, from 29 (`alerts::listed::LISTED_ALERTS_VERSION`);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -22,6 +24,7 @@
 //! inside [`StellarRules`].
 
 use crate::GeneratorVersion;
+use crate::alerts::listed::ListedAlertsRules;
 use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
@@ -49,6 +52,10 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
+    /// Whether the core collapses' and the Type Ia's alert walks read the recently dead of the
+    /// features' and the centre's lists beside their cells (P09.T36 in plan 12's walks): from 29,
+    /// [`ListedAlertsRules::of_version`]. Read only when a walk runs.
+    pub(crate) listed_alerts: ListedAlertsRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -63,6 +70,7 @@ impl GalaxyRules {
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
+            listed_alerts: ListedAlertsRules::of_version(version),
             stellar: StellarRules::of_version(version),
         }
     }
@@ -149,4 +157,21 @@ mod tests {
             );
         }
     }
+
+    /// The lists' alert walks are held below 29 and walked from it on (`LISTED_ALERTS_VERSION`).
+    #[test]
+    fn the_listed_alerts_turn_on_at_29() {
+        for v in [23, 27, 28] {
+            assert_eq!(
+                GalaxyRules::of_version(GeneratorVersion::new(v)).listed_alerts,
+                ListedAlertsRules::FieldAlone,
+                "{v}"
+            );
+        }
+        assert_eq!(
+            GalaxyRules::of_version(crate::alerts::listed::LISTED_ALERTS_VERSION).listed_alerts,
+            ListedAlertsRules::Lists
+        );
+    }
+
 }

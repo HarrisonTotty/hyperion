@@ -72,10 +72,12 @@ use crate::galaxy::catalogue_classes::binary::{
     MergerEntry, NeutronStarMergers, NsmEntry, StellarMergers,
 };
 use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseEntry, CoreCollapseProcess};
-use crate::galaxy::catalogue_classes::supernova::{SupernovaEntry, SupernovaKind};
+use crate::galaxy::catalogue_classes::supernova::{
+    SupernovaEntry, SupernovaKind, explosion_event_of,
+};
 use crate::galaxy::catalogue_classes::type_ia::{TypeIaEntry, TypeIaProcess};
 use crate::galaxy::catalogue_classes::{
-    CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassProcess, cells_in_sphere,
+    CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassId, ClassProcess, cells_in_sphere,
     entries_when,
 };
 use crate::galaxy::query::QuerySphere;
@@ -152,6 +154,25 @@ impl OneShotEvent {
             host: entry.system(),
             light: OneShotLight::Supernova(entry.kind()),
             emitted: entry.explosion(),
+            motion,
+        }
+    }
+
+    /// The explosion of `kind` at `explosion` of member 0 `host`, which moves by `motion`: a death a
+    /// feature's or the centre's list holds (P09.T36), its event the one a [`SupernovaEntry`] of
+    /// it names ([`SupernovaEntry::explosion_event`]).
+    #[must_use]
+    pub(crate) fn of_explosion(
+        host: SystemId,
+        explosion: UniverseTime,
+        kind: SupernovaKind,
+        motion: CatalogueMotion,
+    ) -> Self {
+        Self {
+            event: explosion_event_of(host),
+            host,
+            light: OneShotLight::Supernova(kind),
+            emitted: explosion,
             motion,
         }
     }
@@ -468,7 +489,7 @@ impl OneShotCells for NoOneShotCells {
 /// An event the walk keeps for its line of sight: its arrival and phase, and its luminosity in
 /// each band when the phase reads it.
 #[derive(Debug, Clone, Copy)]
-struct Candidate {
+pub(super) struct Candidate {
     event: OneShotEvent,
     arrival: UniverseTime,
     phase: DetectionPhase,
@@ -551,7 +572,7 @@ pub fn one_shot_detections<P: OneShotClass>(
     }
     let start = out.len();
     for candidate in candidates {
-        if let Some(detection) = detect(galaxy, ctx, query, process, kind, &candidate) {
+        if let Some(detection) = detect(galaxy, ctx, query, class, kind, &candidate) {
             out.push(detection);
         }
     }
@@ -645,7 +666,7 @@ pub fn one_shot_scan_cell<P: OneShotClass>(
         .collect();
     let start = out.len();
     for candidate in candidates {
-        if let Some(detection) = detect(galaxy, ctx, query, process, kind, &candidate) {
+        if let Some(detection) = detect(galaxy, ctx, query, class, kind, &candidate) {
             out.push(detection);
         }
     }
@@ -659,7 +680,7 @@ pub fn one_shot_scan_cell<P: OneShotClass>(
 /// `event` as the walk keeps it for `query`, if its light arrives in the window or arrived before
 /// it, and its unextinguished flux then reaches the detection limit in one of the sensor's bands.
 #[must_use]
-fn candidate(
+pub(super) fn candidate(
     event: &OneShotEvent,
     observer: &GalacticPosition,
     query: &AlertQuery,
@@ -707,15 +728,15 @@ fn candidate(
     })
 }
 
-/// The detection of `candidate` by `query`'s sensor, if its flux through its line of sight reaches
-/// the detection limit in one of the sensor's bands: in the band where it stands highest over the
-/// limit, the first on a tie.
+/// The detection of `candidate`, of `class` and `kind`, by `query`'s sensor, if its flux through
+/// its line of sight reaches the detection limit in one of the sensor's bands: in the band where it
+/// stands highest over the limit, the first on a tie.
 #[must_use]
-fn detect<P: OneShotClass>(
+pub(super) fn detect(
     galaxy: &Galaxy,
     ctx: &mut AlertContext<'_>,
     query: &AlertQuery,
-    process: &P,
+    class: ClassId,
     kind: TransientKind,
     candidate: &Candidate,
 ) -> Option<Detection> {
@@ -768,7 +789,7 @@ fn detect<P: OneShotClass>(
     Some(Detection::new(
         event.event,
         event.host,
-        Some(process.class()),
+        Some(class),
         kind,
         candidate.phase,
         band,

@@ -955,6 +955,16 @@ impl FeatureLevelList {
             && self.counts.iter().all(|&n| n == 0)
     }
 
+    /// The expected candidates of `class` on the list, the mean its count was drawn on, 0 if it is
+    /// not registered: what plan 12's census counts a list's hosts by (P09.T36 there).
+    #[must_use]
+    pub(crate) fn expected(&self, class: ClassId) -> f64 {
+        self.classes
+            .iter()
+            .find(|c| c.class == class)
+            .map_or(0.0, |c| c.expected)
+    }
+
     /// The count of `class` on the list, 0 if it is not registered.
     #[must_use]
     pub fn count(&self, class: ClassId) -> u32 {
@@ -1113,10 +1123,23 @@ impl FeatureLevelList {
     /// an index of no such class, past the list, or a candidate the class's test rejects.
     #[must_use]
     pub fn recent_entry(&self, galaxy: &Galaxy, index: u16) -> Option<RecentEntry> {
+        self.recent_entry_when(galaxy, index, &|_| true)
+    }
+
+    /// [`recent_entry`](Self::recent_entry), less a death whose time, read first, `wanted` refuses
+    /// (`FeatureStars::entry_when`): what plan 12's alert walks build, the deaths whose light can
+    /// reach their window (P09.T36 there). Every entry it gives is `recent_entry`'s, bit for bit.
+    #[must_use]
+    pub(crate) fn recent_entry_when(
+        &self,
+        galaxy: &Galaxy,
+        index: u16,
+        wanted: &dyn Fn(UniverseTime) -> bool,
+    ) -> Option<RecentEntry> {
         let stars = self.stars.as_ref()?;
         let entry = self.entry(index)?;
         let class = RecentClass::of(entry.class())?;
-        stars.entry(galaxy, class, index, entry.position())
+        stars.entry_when(galaxy, class, index, entry.position(), wanted)
     }
 
     /// Every entry of the recent classes that their tests keep, in index order.

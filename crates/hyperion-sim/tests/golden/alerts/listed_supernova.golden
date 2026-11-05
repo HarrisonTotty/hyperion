@@ -1,0 +1,6 @@
+# generator_version = 27
+CoreCollapse Some(ClassId(0)) Onset in Photometric(V)
+event e65a0018f0000003:0202000000000000
+host = 0xe65a0018f0000003
+arrival 7415937178 s 232418434 ns
+flux = 0x4075d535151155dc  # 349.325459544865

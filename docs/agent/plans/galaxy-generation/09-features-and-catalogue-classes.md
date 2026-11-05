@@ -1534,7 +1534,8 @@ _The field half built behind its hold (lane `p09-t2c`, step 2, 2026-10-31, at `G
   the interval predicate is part of the one shared test", after P09.T35; main's ruling, 2026-10-15.)
 
 _Built behind its hold (lane `p09-t2c`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24, no output
-moved): see Risks, "P09.T36 as built"._
+moved): see Risks, "P09.T36 as built". The alert walks read its lists from 29 (lane
+`fix-p09-alert-walk-features`, 2026-11-05): see Risks, "P09.T36 in the alert walks"._
 
 #### P09.T37 Merge into the range query
 
@@ -6083,3 +6084,27 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Then, too._ Refresh the constant's cost sentence and re-bless the sky's goldens. The index's
     52 MB leave the 160 MiB tables budget one galaxy, and its 7 CPU-s join the tables' 31 (budget
     30).
+- **P09.T36 in the alert walks (lane `fix-p09-alert-walk-features`, 2026-11-05, at 27, behind
+  `LISTED_ALERTS_VERSION` = 29; no output moved).** Train 27's finding: the walks saw the field's
+  deaths alone.
+  - _Hold._ `alerts::listed::{LISTED_ALERTS_VERSION, ListedAlertsRules::{FieldAlone, Lists}}`,
+    `GalaxyRules::listed_alerts`.
+  - _Bump._ 29 deletes them, the `match` in `ListedWalk::rules_read`, `unwalked_by`'s held arm, the
+    tripwire and `the_listed_alerts_turn_on_at_29`, and moves `listed/tests.rs`' 27 arms.
+  - _Names (alerts)._ `alerts::listed_scan_slab(galaxy, ctx, query, (class, sphere), x, out) -> u64`,
+    which the server's `walk_slabs` calls; `AlertContext::with_feature_cells`; from 29
+    `ScanResult::drawn` counts the lists' drawn candidates too.
+  - _Names (plan 09)._ `FeatureLevelList::{expected, recent_entry_when}`, `FeatureStars::entry_when`
+    (`entry` is test-only), `ListedExplosion` and `{RecentEntry, CentreRecentEntry}::explosion_kind`
+    (a listed Type Ia keeps its channel), `supernova::explosion_event_of`.
+  - _Classes walked (lean, 2026-11-05)._ `CORE_COLLAPSE` (supernovae, magnetars) and `TYPE_IA` alone:
+    the lists' LBVs (P09.T43) and plan 11's binaries (P11.T8.f) are not, and
+    `AlertSource::FeatureLists` names those two tasks from 29.
+  - _Census (lean, 2026-11-05)._ The lists' expected candidates join the cells' only where the cells
+    leave the class complete, and their deaths are read in the same pass; a background walk adds
+    the lists' drawn candidates.
+  - _Centre (lean, 2026-11-05)._ The centre's recent dead are walked with their classes, without the
+    global list, so the server's scans see them.
+  - _Lookup (lean, 2026-11-05)._ A list is read through a ball about its feature (its reach plus its
+    bulk travel, capped at `LIFETIME_REACH`), the features found at `UNBOUND_PAD_SPEED`; lists are
+    built afresh each walk, not from the interior cache, whose `listed_of` builds every death.

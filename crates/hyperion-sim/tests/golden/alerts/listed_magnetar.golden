@@ -1,0 +1,91 @@
+# generator_version = 27
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f0bc00
+host = 0xe859e183f000000c
+arrival 1267764980 s 152260067 ns
+flux = 0x3fe8817356771419  # 0.7658020676395864
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f0d300
+host = 0xe859e183f000000c
+arrival 1267785527 s 670466817 ns
+flux = 0x3fccc774c63cf544  # 0.22483691863627986
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f0d903
+host = 0xe859e183f000000c
+arrival 1267790489 s 97474940 ns
+flux = 0x40155551ff2bdf9f  # 5.333320605328395
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f0db00
+host = 0xe859e183f000000c
+arrival 1267792278 s 918610542 ns
+flux = 0x4006878f8dd7ad03  # 2.816191776413349
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f0e100
+host = 0xe859e183f000000c
+arrival 1267797526 s 848977041 ns
+flux = 0x3fe436bc97bcfdd5  # 0.6316817248952541
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f0f001
+host = 0xe859e183f000000c
+arrival 1267811449 s 554830805 ns
+flux = 0x3fe619abc43fbc06  # 0.6906336625087313
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f0f100
+host = 0xe859e183f000000c
+arrival 1267812392 s 71226291 ns
+flux = 0x3fef9b45f97cffaf  # 0.9877042649095439
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f11300
+host = 0xe859e183f000000c
+arrival 1267843057 s 29936735 ns
+flux = 0x3fefc3aa86330df8  # 0.9926350232203154
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f11801
+host = 0xe859e183f000000c
+arrival 1267847016 s 874358787 ns
+flux = 0x3fccabc304a9a450  # 0.22399175384205927
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f11c00
+host = 0xe859e183f000000c
+arrival 1267851206 s 939268515 ns
+flux = 0x3fdc279baf130623  # 0.4399174890241701
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f12b00
+host = 0xe859e183f000000c
+arrival 1267864630 s 77642269 ns
+flux = 0x3fd34311e620f6ee  # 0.3009686229087113
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f16801
+host = 0xe859e183f000000c
+arrival 1267919873 s 321252246 ns
+flux = 0x3fd89d06757f2d5f  # 0.3845840594701339
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f20500
+host = 0xe859e183f000000c
+arrival 1268061172 s 163748016 ns
+flux = 0x3fea76a3de0602f3  # 0.8269824348827498
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f20b00
+host = 0xe859e183f000000c
+arrival 1268066076 s 364659399 ns
+flux = 0x3fd31f375b04b6e0  # 0.2987802876331056
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f22e00
+host = 0xe859e183f000000c
+arrival 1268098159 s 778826946 ns
+flux = 0x3fe13f16f72770fd  # 0.538951380465306
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f28e00
+host = 0xe859e183f000000c
+arrival 1268184679 s 777329311 ns
+flux = 0x3fd0107b99bb6c3f  # 0.2510060311594237
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f36500
+host = 0xe859e183f000000c
+arrival 1268377819 s 871858842 ns
+flux = 0x4011efe532e05dee  # 4.484272761291761
+MagnetarBurst Some(ClassId(0)) Onset in XRay
+event e859e183f000000c.0000:0104000014f40200
+host = 0xe859e183f000000c
+arrival 1268519316 s 662643190 ns
+flux = 0x3feeba91cfd95b66  # 0.9602746066619658

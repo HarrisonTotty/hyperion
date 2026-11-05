@@ -236,17 +236,9 @@ impl SupernovaEntry {
     }
 
     /// The explosion as an event: tag [`SUPERNOVA`], bin 0, number 0, on member 0.
-    ///
-    /// # Panics
-    ///
-    /// Never: bin 0 is in range.
     #[must_use]
     pub fn explosion_event(&self) -> EventId {
-        let bin = EventBin::new(0).expect("bin 0 is in range");
-        EventId::new(
-            EventSubject::System(self.system),
-            EventWord::new(SUPERNOVA, bin, 0),
-        )
+        explosion_event_of(self.system)
     }
 
     /// The entry at `t`: the progenitor before T, the supernova from T, the bare remnant from T +
@@ -593,6 +585,22 @@ impl SupernovaTerms {
                 * WATTS_PER_ERG_S,
         )
     }
+}
+
+/// The explosion of member 0 `system` as an event: tag [`SUPERNOVA`], bin 0, number 0, the ID
+/// [`SupernovaEntry::explosion_event`] gives its entry, and that plan 12's alerts give a death a
+/// feature's list holds without one (a Type Ia's, P09.T36).
+///
+/// # Panics
+///
+/// Never: bin 0 is in range.
+#[must_use]
+pub(crate) fn explosion_event_of(system: SystemId) -> EventId {
+    let bin = EventBin::new(0).expect("bin 0 is in range");
+    EventId::new(
+        EventSubject::System(system),
+        EventWord::new(SUPERNOVA, bin, 0),
+    )
 }
 
 /// How far an entry's fastest member may travel from its site over the entry's whole lifetime:
