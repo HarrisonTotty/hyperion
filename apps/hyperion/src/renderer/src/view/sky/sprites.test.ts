@@ -1,6 +1,7 @@
+import { METRES_PER_LIGHT_YEAR } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../../geometry/vec3";
+import { normalise, vec3 } from "../../geometry/vec3";
 import { decodedSky, skyPayload } from "../../test/skyFixtures";
 import { pixelSolidAngle, project } from "../camera/projection";
 import { illuminanceLx, pixelLuminance, psfPixelWeights } from "../photometry/magnitude";
@@ -58,6 +59,45 @@ describe("skySpriteStars", () => {
     const x1 = project(after.direction, CAMERA, VIEWPORT).xPx;
     expect(Math.abs(x1 - x0)).toBeGreaterThan(7.5);
     expect(Math.abs(x1 - x0)).toBeLessThan(9.5);
+  });
+
+  it("makes each frame's sprites of a selection kept as made afresh, bit for bit, and another sky's its own (lane perf-render-thread-2)", () => {
+    // Five stars in five directions, near and far.
+    const placed = [
+      { direction: [0.6, 0, -0.8] as const, distanceLy: 0.1, vMag: 1 },
+      { direction: [0, 0.28, -0.96] as const, distanceLy: 2, vMag: 3.5 },
+      { direction: [-0.48, -0.6, 0.64] as const, distanceLy: 40, vMag: -1.2 },
+      { direction: [0, 1, 0] as const, distanceLy: 900, vMag: 6 },
+      { direction: [0.8, -0.36, 0.48] as const, distanceLy: 12_000, vMag: 9.75 },
+    ];
+    const stars = decodedSky(skyPayload(placed, 2, null), placed.length).stars;
+    const indices = Uint32Array.from([4, 0, 2, 1]);
+    // Each sprite as the arithmetic makes it from the sky's arrays, nothing kept.
+    const afresh = (sky: typeof stars, cameraM: ReturnType<typeof vec3>) =>
+      Array.from(indices, (index) => {
+        const distanceM = (sky.distanceLy[index] ?? 0) * METRES_PER_LIGHT_YEAR;
+        const [x = 0, y = 0, z = 0] = sky.directions.subarray(index * 3, index * 3 + 3);
+        return {
+          id: String(index),
+          direction: normalise(
+            vec3(x * distanceM - cameraM.x, y * distanceM - cameraM.y, z * distanceM - cameraM.z),
+          ),
+          illuminanceRgbLx: starIlluminanceRgbLx(
+            sky.vMag[index] ?? 0,
+            sky.chroma[index * 2] ?? 0,
+            sky.chroma[index * 2 + 1] ?? 0,
+          ),
+        };
+      });
+    const offsets = [vec3(0, 0, 0), vec3(3e11, -2e10, 7.5e9), vec3(-1.25e12, 4e12, 1)];
+    const other = skyOf([5, 6, 7, 8, 9]);
+    expect([
+      ...offsets.map((offset) => skySpriteStars(stars, indices, offset)),
+      skySpriteStars(other, indices, offsets[1] ?? vec3(0, 0, 0)),
+    ]).toEqual([
+      ...offsets.map((offset) => afresh(stars, offset)),
+      afresh(other, offsets[1] ?? vec3(0, 0, 0)),
+    ]);
   });
 
   it("gives a sprite the light a baked star of the same V and colour takes", () => {
