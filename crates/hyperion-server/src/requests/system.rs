@@ -19,16 +19,16 @@ use hyperion_protocol::{
     BodyDetailRequest, BodyEventsRequest, RequestError, ResponseBody, SystemBodiesRequest,
     SystemSummaryDto, SystemSummaryRequest,
 };
-use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::QueryMode;
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::{Drift, Observer, curvature_error, retarded};
-use hyperion_sim::planetary::{HostKind, ResolveBodyError, SystemContext};
+use hyperion_sim::planetary::{HostKind, PlanetarySystem, ResolveBodyError, SystemContext};
 
 use super::global_list::listing_refused;
 use super::universe::openable_universe;
+use super::viewer::is_viewer;
 use crate::AppState;
 use crate::compute::{
     CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Listing, Priority,
@@ -37,7 +37,7 @@ use crate::convert::{
     BodiesRequest, DetailRequest, EventsRequest, MotionReads, SummaryRequest, SystemLine,
     body_detail, body_events, body_refusal, hosts_request, starless_summary,
     starless_summary_observed, system_bodies, system_summary, system_summary_observed,
-    unknown_system, untraced,
+    unknown_system, untraced, viewer_summary,
 };
 
 /// Every star of one system at the request's time, and the orbits that hold them; in observed mode
@@ -223,14 +223,15 @@ pub(crate) async fn bodies(
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
         let (ctx, planets) = system.as_ref();
-        let hosts = hosts_of(&shared, (key, &galaxy), ctx, &request, wanted.time())?;
-        Ok::<_, RequestError>(system_bodies(
-            wanted,
-            hosts,
-            ctx,
-            planets,
-            Seed::new(key.seed()),
-        ))
+        let hosts = hosts_of(
+            &shared,
+            (key, &galaxy),
+            (ctx, planets),
+            &request,
+            wanted.time(),
+        )?;
+        // The system's own seed: the universe's, but a viewer system's own (rendering plan R15).
+        Ok::<_, RequestError>(system_bodies(wanted, hosts, ctx, planets, planets.seed()))
     };
     let receiver = state
         .pool
@@ -243,7 +244,9 @@ pub(crate) async fn bodies(
 
 /// The hosts of the planetary system `ctx` as `system_bodies` sends them at `time`: its stars'
 /// summary from the system cache, or for a rogue planet, which has none, its starless summary
-/// (P14.T27.b), so that an empty host list is an answer and never a refusal.
+/// (P14.T27.b), so that an empty host list is an answer and never a refusal; and for a viewer
+/// system (rendering plan R15), whose synthetic star no system cache holds, its context's star's
+/// summary in the universe of its bodies' seed.
 ///
 /// # Errors
 ///
@@ -252,12 +255,20 @@ pub(crate) async fn bodies(
 fn hosts_of(
     state: &AppState,
     (key, galaxy): (GalaxyKey, &Galaxy),
-    ctx: &SystemContext,
+    (ctx, planets): (&SystemContext, &PlanetarySystem),
     request: &SystemBodiesRequest,
     time: hyperion_sim::time::UniverseTime,
 ) -> Result<SystemSummaryDto, RequestError> {
     if ctx.host_kind() == HostKind::RoguePlanet {
         return Ok(starless_summary(hosts_request(request), ctx, time));
+    }
+    if is_viewer(ctx.id()) {
+        return Ok(viewer_summary(
+            hosts_request(request),
+            ctx,
+            planets.seed(),
+            time,
+        ));
     }
     let stars = state
         .systems
@@ -360,13 +371,24 @@ pub(crate) async fn events(
 /// there first if it holds none, so that the stars are evolved once for both caches. The context
 /// is refused as [`SystemContext::for_system`] refuses the ID ([`SystemContext::for_stars`]). A
 /// rogue planet, which has no stars for the system cache to hold, takes its context from
-/// [`SystemContext::for_system`] itself (P14.T27.b).
+/// [`SystemContext::for_system`] itself (P14.T27.b). A viewer system (rendering plan R15) is the
+/// server's viewer store's, refused `NoSuchSystem` once it is evicted, since its ID cannot be
+/// generated again.
 pub(crate) async fn bodies_of(
     state: &Arc<AppState>,
     key: GalaxyKey,
     galaxy: &Arc<Galaxy>,
     id: SystemId,
 ) -> Result<Arc<GeneratedSystem>, GenerateBodiesError> {
+    // A viewer system is the server's store's, and no galaxy resolves its ID (rendering plan R15).
+    if is_viewer(id) {
+        return state
+            .viewer
+            .get(key, id)
+            .ok_or(GenerateBodiesError::NoSuchSystem(
+                ResolveSystemError::NoSuchSystem,
+            ));
+    }
     let shared = Arc::clone(state);
     let galaxy = Arc::clone(galaxy);
     state

@@ -160,3 +160,10 @@ every galaxy system takes the code it took before. No `GENERATOR_VERSION` change
   keeps one per galaxy.
 - R15.T1 (lean, 2026-11-05): a lone given planet lies in its host's plane, with no mutual
   inclination; its host's class is kept as drawn.
+- R15.T2 (built): the protocol's `PlanetInputsDto`, `ViewerPlanetRequest` and `ViewerPlanetDto`,
+  `ViewerRandomizeRequest` and `ViewerDrawDto`, `ViewerInputsRequest` and `ViewerReadDto`, with
+  `ViewerDrawnDto`. The server's `compute::ViewerSystems` keeps 16 systems a galaxy key and 4
+  density grids. `bodies_of`, `hosts_of` (`convert::viewer_summary`), the sky's `check_exclude` and
+  `discs`, and the surface service's seed check read a viewer ID from it.
+- R15.T2: `system_bodies` takes `planets.seed()` in place of the universe's seed, which is the same
+  for every galaxy system. A refused input names `inputs.<field>`.

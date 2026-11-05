@@ -54,6 +54,7 @@ mod surface;
 #[cfg(test)]
 pub(crate) mod testing;
 mod universe;
+mod viewer;
 
 pub use alerts::{
     AlertBandDto, AlertsAcknowledgeRequest, AlertsNotification, AlertsObserverRequest,
@@ -144,6 +145,10 @@ pub use surface::{
 };
 pub use universe::{
     CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList, UniverseStatus,
+};
+pub use viewer::{
+    PlanetInputsDto, ViewerDrawDto, ViewerDrawnDto, ViewerInputsRequest, ViewerPlanetDto,
+    ViewerPlanetRequest, ViewerRandomizeRequest, ViewerReadDto,
 };
 
 /// The version of the wire protocol, sent in every `welcome`.

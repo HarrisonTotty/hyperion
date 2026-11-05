@@ -248,7 +248,7 @@ pub(crate) fn body_refusal(body: &BodyIdHex, error: ResolveBodyError) -> Request
 /// The refusal of a body ID whose system part names no system of the universe: `unknown_system`,
 /// on the field `body`, which holds it.
 #[must_use]
-pub(super) fn unknown_body_system(
+pub(crate) fn unknown_body_system(
     body: &BodyIdHex,
     reason: impl std::fmt::Display,
 ) -> RequestError {

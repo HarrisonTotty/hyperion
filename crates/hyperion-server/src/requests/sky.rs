@@ -70,6 +70,7 @@ use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::pad_speed;
 use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::Observer;
+use hyperion_sim::planetary::viewer::host_discs_of_context;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::band::{BandMarch, BandTexel};
 use hyperion_sim::sky::caps::{LayerCap, REAL_LIMIT_LY};
@@ -91,6 +92,7 @@ use tokio::sync::mpsc;
 
 use super::global_list::tube_refused;
 use super::universe::openable_universe;
+use super::viewer::is_viewer;
 use super::{Replies, request_error};
 use crate::AppState;
 use crate::bulk::sky::{
@@ -247,7 +249,7 @@ async fn computed(
 ) -> Result<Answer, RequestError> {
     let galaxy = state.galaxies.get(key).await?;
     if let (Some(system), Some(named)) = (asked.exclude, &request.exclude_system) {
-        check_exclude(state, &galaxy, system, named, token.clone()).await?;
+        check_exclude(state, (key, &galaxy), system, named, token.clone()).await?;
     }
     let pool = &state.pool;
     let tables = state.sky_tables.get(key, &galaxy).await?;
@@ -739,6 +741,19 @@ async fn discs(
         query.observer().time(),
     );
     compute::sky::bulk(&state.pool, token, move |_: &CancelToken| {
+        // A viewer system's synthetic star is its store's context's (rendering plan R15); one
+        // evicted since the check has no disc to draw.
+        if is_viewer(system) {
+            return shared
+                .viewer
+                .get(key, system)
+                .map_or_else(Vec::new, |kept| {
+                    host_discs_of_context(&kept.0, t)
+                        .iter()
+                        .map(host_disc)
+                        .collect()
+                });
+        }
         match shared
             .systems
             .get_or_generate(key, &galaxy, system, &Listing::Unlisted)
@@ -990,11 +1005,19 @@ fn unknown_exclude(system: &SystemIdHex, reason: impl fmt::Display) -> RequestEr
 /// from a client, in an interactive pool job, as the scene resolves its frames.
 async fn check_exclude(
     state: &AppState,
-    galaxy: &Arc<Galaxy>,
+    (key, galaxy): (GalaxyKey, &Arc<Galaxy>),
     system: SystemId,
     named: &SystemIdHex,
     token: CancelToken,
 ) -> Result<(), RequestError> {
+    // A viewer system is the viewer store's, which no galaxy resolves (rendering plan R15).
+    if is_viewer(system) {
+        return state
+            .viewer
+            .get(key, system)
+            .map(|_| ())
+            .ok_or_else(|| unknown_exclude(named, ResolveSystemError::NoSuchSystem));
+    }
     let galaxy = Arc::clone(galaxy);
     let check = move |_: &CancelToken| resolve(&galaxy, system).map(|_| ());
     let receiver = state.pool.try_submit(Priority::Interactive, token, check)?;

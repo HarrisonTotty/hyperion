@@ -27,6 +27,7 @@ mod scene;
 mod scene_fixture;
 mod stellar;
 mod surface;
+mod viewer;
 
 use std::error::Error;
 use std::fmt;
@@ -96,19 +97,20 @@ pub(crate) use self::observe::{
 use self::placement::grid_placement;
 pub(crate) use self::planetary::{
     BodiesRequest, DetailRequest, ListedBody, body_detail, body_refusal, detail_level,
-    hosts_request, scene_body, scene_system, system_bodies,
+    hosts_request, scene_body, scene_system, system_bodies, unknown_body_system,
 };
 pub(crate) use self::scene::{
     ShipRequest, unknown_frame_body, unknown_frame_system, untraced_frame_system,
 };
 pub(crate) use self::stellar::{
     SummaryRequest, brief_dto, starless_summary, starless_summary_observed, system_summary,
-    system_summary_observed, unknown_system, wire_time,
+    system_summary_observed, unknown_system, viewer_summary, wire_time,
 };
 pub(crate) use self::surface::{
     FieldRequest, SurveyRequest, cover_dto, open_surveys_refusal, record_section,
     record_survey_refusal, surface_header, surface_refusal, surface_revision,
 };
+pub(crate) use self::viewer::{generate_refusal, inputs_dto, planet_inputs, viewer_planet};
 use crate::compute::{
     CodeDepth, GalaxyKey, MapKey, MapResolution, PerLy2, QuantisedMap, RawDensityMap,
 };

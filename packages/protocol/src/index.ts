@@ -293,6 +293,15 @@ import type { StreamTrackWire } from "./generated/StreamTrackWire";
 import type { TrackPointWire } from "./generated/TrackPointWire";
 import type { TrackStatusWire } from "./generated/TrackStatusWire";
 import type { TrackWire } from "./generated/TrackWire";
+// The planet viewer's kinds (rendering plan R15).
+import type { PlanetInputsDto } from "./generated/PlanetInputsDto";
+import type { ViewerDrawDto } from "./generated/ViewerDrawDto";
+import type { ViewerDrawnDto } from "./generated/ViewerDrawnDto";
+import type { ViewerInputsRequest } from "./generated/ViewerInputsRequest";
+import type { ViewerPlanetDto } from "./generated/ViewerPlanetDto";
+import type { ViewerPlanetRequest } from "./generated/ViewerPlanetRequest";
+import type { ViewerRandomizeRequest } from "./generated/ViewerRandomizeRequest";
+import type { ViewerReadDto } from "./generated/ViewerReadDto";
 import type { Unit } from "./generated/Unit";
 import type { UniverseIdHex } from "./generated/UniverseIdHex";
 import type { UniverseInfo } from "./generated/UniverseInfo";
@@ -356,6 +365,14 @@ export type {
   TrackPointWire,
   TrackStatusWire,
   TrackWire,
+  PlanetInputsDto,
+  ViewerDrawDto,
+  ViewerDrawnDto,
+  ViewerInputsRequest,
+  ViewerPlanetDto,
+  ViewerPlanetRequest,
+  ViewerRandomizeRequest,
+  ViewerReadDto,
   BeltComponentDto,
   BeltCompositionDto,
   BeltDto,

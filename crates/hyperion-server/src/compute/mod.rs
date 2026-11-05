@@ -50,6 +50,7 @@ mod sky_tables;
 mod systems;
 mod thread_priority;
 mod tube_tables;
+mod viewer;
 
 pub use bodies::{BodyCacheCounters, GenerateBodiesError, GeneratedSystem, SharedBodyCache};
 pub use cancel::{CancelOnDrop, CancelToken};
@@ -93,6 +94,7 @@ pub use sky_cells::SkyCellCounters;
 pub use sky_tables::SkyTablesCounters;
 pub use systems::{SharedBriefCache, SharedSystemCache, SystemStarsHandle};
 pub use tube_tables::{ListedTubes, Listing, TubeKey, TubeTableCache};
+pub use viewer::{DENSITY_GRIDS, VIEWER_SYSTEMS_PER_GALAXY, ViewerSystems};
 
 pub(crate) use pool::panic_message;
 pub(crate) use sky_cells::SharedSkyCellCache;

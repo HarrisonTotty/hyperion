@@ -24,6 +24,7 @@ use hyperion_sim::planetary::record::{BodyRecord, RecordSection, Section};
 use hyperion_sim::planetary::surface::{
     CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass_spread,
 };
+use hyperion_sim::planetary::viewer::is_viewer_system;
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
@@ -1069,7 +1070,8 @@ fn log_prefetch_failure(key: FieldKey, error: SurfaceJobError) {
 
 /// Panics unless `system` is the planetary system of `key`'s body in `key`'s universe: its system
 /// ID is the body's, and where the body has a surface seed, it is the one the key's universe draws
-/// for the body, so the system was generated from that universe's seed; and unless the key's
+/// for the body, so the system was generated from that universe's seed (a viewer system's, from
+/// its own inputs' seed, rendering plan R15); and unless the key's
 /// generator version is one this build generates, as the galaxy cache requires, so that no field
 /// is kept under another version's key.
 fn check_system(key: FieldKey, system: &GeneratedSystem) {
@@ -1084,12 +1086,19 @@ fn check_system(key: FieldKey, system: &GeneratedSystem) {
         key.body().system(),
         "a body's coarse field is computed from its own system, and this is another's"
     );
+    // A viewer system's streams are its inputs' seed's (rendering plan R15); every other's the
+    // universe's.
+    let seed = if is_viewer_system(planets.system()) {
+        planets.seed()
+    } else {
+        Seed::new(key.galaxy().seed())
+    };
     if let Ok(index) = BodyIndex::try_from(key.body().body_index())
-        && let Ok(Some(seed)) = planets.surface_seed(index)
+        && let Ok(Some(drawn)) = planets.surface_seed(index)
     {
         assert_eq!(
-            seed,
-            surface_seed(Seed::new(key.galaxy().seed()), key.body()),
+            drawn,
+            surface_seed(seed, key.body()),
             "a body's coarse field is computed from its own universe's system, and this is another \
              universe's"
         );
@@ -1130,7 +1139,7 @@ fn compute(
     let detail = match record.hooks() {
         Section::Ok(hooks) => hooks.detail_seed(),
         Section::NotModelled | Section::NotResolved | Section::NotApplicable => {
-            detail_seed(Seed::new(key.galaxy().seed()), key.body())
+            detail_seed(system.1.seed(), key.body())
         }
     };
     let scale = field_albedo_scale(&field, record.photometry(), detail);

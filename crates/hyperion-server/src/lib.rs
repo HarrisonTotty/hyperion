@@ -119,6 +119,11 @@ pub(crate) struct AppState {
     /// The planetary systems generated so far, each with its context, in the configured byte
     /// budget: what `system_bodies` and `body_detail` read (plan 14, P14.T36).
     pub(crate) bodies: SharedBodyCache,
+    /// The planet viewer's systems and density grids (rendering plan R15), which [`bodies`] and the
+    /// sky's host discs read for a viewer system's ID in place of the galaxy.
+    ///
+    /// [`bodies`]: AppState::bodies
+    pub(crate) viewer: compute::ViewerSystems,
     /// Plan 09's feature cells generated so far, in the configured byte budget: what the feature
     /// requests, the range query's feature members and the sky's feature gas look features up in
     /// (P09.T40.a).
@@ -275,6 +280,7 @@ impl Server {
                 systems,
                 briefs,
                 bodies,
+                viewer: compute::ViewerSystems::new(),
                 feature_cells,
                 cluster_models,
                 class_cells,

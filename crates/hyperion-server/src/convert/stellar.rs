@@ -30,7 +30,7 @@ use hyperion_sim::id::SystemId;
 use hyperion_sim::math;
 use hyperion_sim::observe::{CurvatureError, Retardation};
 use hyperion_sim::orbit::KeplerElements;
-use hyperion_sim::planetary::SystemContext;
+use hyperion_sim::planetary::{SystemContext, viewer};
 use hyperion_sim::stellar::binary::{BinaryClass, CvKind, HmxbKind, XrbKind};
 use hyperion_sim::stellar::events::{StarEvent, StarEventKind};
 use hyperion_sim::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
@@ -222,18 +222,45 @@ fn summary_dto(
     summary: &SystemSummary,
     observed: Option<ObservedDto>,
 ) -> SystemSummaryDto {
+    let age = stars.record().age_at(summary.time());
+    models_summary_dto(request, (age, stars.stars()), summary, observed)
+}
+
+/// The hosts of a viewer system (rendering plan R15), whose single synthetic star its context
+/// `ctx` holds, as `system_bodies` sends them at `time`: [`system_summary`]'s answer for the star
+/// the sim's viewer summarises ([`viewer::summary_of`]), in the universe of `seed`, its streams'.
+#[must_use]
+pub(crate) fn viewer_summary(
+    request: SystemSummaryRequest,
+    ctx: &SystemContext,
+    seed: hyperion_sim::Seed,
+    time: UniverseTime,
+) -> SystemSummaryDto {
+    let summary = viewer::summary_of(ctx, seed, time);
+    models_summary_dto(request, (ctx.age_at(time), ctx.stars()), &summary, None)
+}
+
+/// [`summary_dto`] of the stars whose models are `models`, by body index, in a system aged `age`
+/// at `summary`'s time.
+#[must_use]
+fn models_summary_dto(
+    request: SystemSummaryRequest,
+    (age, models): (Years, &[StarModel]),
+    summary: &SystemSummary,
+    observed: Option<ObservedDto>,
+) -> SystemSummaryDto {
     SystemSummaryDto {
         universe: request.universe,
         system: request.system,
         time: request.time,
         existence: existence(summary.existence()),
-        age_myr: Megayears::from(stars.record().age_at(summary.time())).value(),
+        age_myr: Megayears::from(age).value(),
         fe_h_dex: summary.composition().fe_h().value(),
         stars: summary
             .stars()
             .iter()
             .map(|star| {
-                let model = &stars.stars()[usize::from(star.body().body_index())];
+                let model = &models[usize::from(star.body().body_index())];
                 star_summary(model, star)
             })
             .collect(),

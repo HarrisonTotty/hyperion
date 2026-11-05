@@ -44,6 +44,10 @@ use crate::sky::{SkyRequest, SkyResponse};
 use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
 use crate::surface::{SurfaceFieldDto, SurfaceFieldRequest, SurveyPassDto, SurveyPassRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
+use crate::viewer::{
+    ViewerDrawDto, ViewerInputsRequest, ViewerPlanetDto, ViewerPlanetRequest,
+    ViewerRandomizeRequest, ViewerReadDto,
+};
 
 /// A request's ID, chosen by the client and unique among its requests in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
@@ -352,6 +356,12 @@ pub enum RequestBody {
     GlobalFeatures(GlobalFeaturesRequest),
     /// One stream's track (plan 10).
     StreamTrack(StreamTrackRequest),
+    /// Generate one planet from its inputs (the planet viewer, rendering plan R15).
+    ViewerPlanet(ViewerPlanetRequest),
+    /// Draw a real planet's inputs from the galaxy (the planet viewer, rendering plan R15).
+    ViewerRandomize(ViewerRandomizeRequest),
+    /// A served planet's inputs, read back (the planet viewer, rendering plan R15).
+    ViewerInputs(ViewerInputsRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -421,6 +431,12 @@ pub enum ResponseBody {
     GlobalFeatures(GlobalFeatures),
     /// The stream's track, or that it is pending.
     StreamTrack(StreamTrackWire),
+    /// The planet generated.
+    ViewerPlanet(Box<ViewerPlanetDto>),
+    /// The planet's inputs drawn.
+    ViewerRandomize(Box<ViewerDrawDto>),
+    /// The planet's inputs read.
+    ViewerInputs(Box<ViewerReadDto>),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -457,6 +473,9 @@ pub const REQUEST_KINDS: &[&str] = &[
     "alerts_acknowledge",
     "global_features",
     "stream_track",
+    "viewer_planet",
+    "viewer_randomize",
+    "viewer_inputs",
 ];
 
 #[cfg(test)]
@@ -493,6 +512,7 @@ mod tests {
     use crate::surface::{CellRangeDto, RecordSectionDto, SurveyScopeDto, SurveySourceDto};
     use crate::testing::{assert_wire_form, assert_wire_strings};
     use crate::universe::UniverseStatus;
+    use crate::viewer;
 
     fn universe() -> UniverseIdHex {
         UniverseIdHex::from_u64(42)
@@ -779,7 +799,25 @@ mod tests {
                     stream: 0,
                 }))
             }
-            Some(RequestBody::StreamTrack(_)) => None,
+            Some(RequestBody::StreamTrack(_)) => {
+                Some(RequestBody::ViewerPlanet(ViewerPlanetRequest {
+                    universe,
+                    inputs: viewer::tests::earth(),
+                }))
+            }
+            Some(RequestBody::ViewerPlanet(_)) => {
+                Some(RequestBody::ViewerRandomize(ViewerRandomizeRequest {
+                    universe,
+                    draw_seed: SeedHex::from_u64(7),
+                }))
+            }
+            Some(RequestBody::ViewerRandomize(_)) => {
+                Some(RequestBody::ViewerInputs(ViewerInputsRequest {
+                    universe,
+                    body: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                }))
+            }
+            Some(RequestBody::ViewerInputs(_)) => None,
         }
     }
 
@@ -1009,7 +1047,26 @@ mod tests {
                     track: TrackWire::Pending,
                 }))
             }
-            Some(ResponseBody::StreamTrack(_)) => None,
+            Some(ResponseBody::StreamTrack(_)) => Some(ResponseBody::ViewerPlanet(Box::new(
+                viewer::tests::planet(),
+            ))),
+            Some(ResponseBody::ViewerPlanet(_)) => {
+                Some(ResponseBody::ViewerRandomize(Box::new(ViewerDrawDto {
+                    universe,
+                    draw_seed: SeedHex::from_u64(7),
+                    inputs: viewer::tests::earth(),
+                    source: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                })))
+            }
+            Some(ResponseBody::ViewerRandomize(_)) => {
+                Some(ResponseBody::ViewerInputs(Box::new(ViewerReadDto {
+                    universe,
+                    body: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                    inputs: viewer::tests::earth(),
+                    multiple_stars: false,
+                })))
+            }
+            Some(ResponseBody::ViewerInputs(_)) => None,
         }
     }
 
@@ -1309,6 +1366,9 @@ mod tests {
                 "alerts_acknowledge",
                 "global_features",
                 "stream_track",
+                "viewer_planet",
+                "viewer_randomize",
+                "viewer_inputs",
             ]
         );
     }

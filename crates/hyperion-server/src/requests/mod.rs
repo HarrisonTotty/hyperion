@@ -28,6 +28,7 @@ mod sky;
 mod surface;
 mod system;
 mod universe;
+mod viewer;
 
 pub(crate) use sky::SkyReplyCache;
 
@@ -316,6 +317,16 @@ impl Handler for Handlers {
             RequestBody::StreamTrack(request) => {
                 Box::pin(global_list::track(state, request).map(answered))
             }
+            // The planet viewer's kinds (rendering plan R15).
+            RequestBody::ViewerPlanet(request) => {
+                Box::pin(viewer::planet(state, request, token).map(answered))
+            }
+            RequestBody::ViewerRandomize(request) => {
+                Box::pin(viewer::randomize(state, request, token).map(answered))
+            }
+            RequestBody::ViewerInputs(request) => {
+                Box::pin(viewer::inputs(state, request, token).map(answered))
+            }
         }
     }
 
@@ -377,6 +388,9 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::BlackHoleState(_) => "black_hole_state",
         RequestBody::GlobalFeatures(_) => "global_features",
         RequestBody::StreamTrack(_) => "stream_track",
+        RequestBody::ViewerPlanet(_) => "viewer_planet",
+        RequestBody::ViewerRandomize(_) => "viewer_randomize",
+        RequestBody::ViewerInputs(_) => "viewer_inputs",
     }
 }
 
@@ -396,7 +410,7 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// `features_in_range` can, as `systems_in_range` can, and so can its `galaxy_features`, a list
 /// over the whole galaxy; one feature's detail and the black hole's state cannot. Plan 10's
 /// `global_features` can, a list over the whole galaxy too; one stream's track, at most 256 points,
-/// cannot.
+/// cannot. The planet viewer's answers (rendering plan R15) are one planet's inputs each.
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
@@ -429,6 +443,9 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::BlackHoleState(_)
         | ResponseBody::AlertsObserver
         | ResponseBody::AlertsAcknowledge
+        | ResponseBody::ViewerPlanet(_)
+        | ResponseBody::ViewerRandomize(_)
+        | ResponseBody::ViewerInputs(_)
         | ResponseBody::StreamTrack(_) => false,
     }
 }
@@ -1280,12 +1297,13 @@ mod tests {
         FeatureDetailRequest, FeatureIdHex, FeatureKindWire, FeaturesInRangeRequest,
         FramePositionDto, GalacticPosition, GalaxyFeaturesRequest, GalaxyParametersRequest,
         GlobalFeaturesRequest, KinematicsDto, MapFeatureKindWire, MapPopulation, MapView,
-        MassLayer, OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
-        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
-        StreamTrackRequest, SubscribeRequest, Subscribed, SubscriptionTopic, SurfaceFieldRequest,
-        SurveyPassRequest, SurveyScopeDto, SurveySourceDto, SystemBodiesRequest, SystemIdHex,
-        SystemSummaryRequest, SystemsInRangeRequest, TargetExtinction, UniverseIdHex, UniverseTime,
-        UnsubscribeRequest,
+        MassLayer, OpenUniverseRequest, PlanetInputsDto, SceneCamerasRequest, SceneClockDto,
+        SceneClockStateDto, SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest,
+        SkyRequest, StreamTrackRequest, SubscribeRequest, Subscribed, SubscriptionTopic,
+        SurfaceFieldRequest, SurveyPassRequest, SurveyScopeDto, SurveySourceDto,
+        SystemBodiesRequest, SystemIdHex, SystemSummaryRequest, SystemsInRangeRequest,
+        TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest, ViewerInputsRequest,
+        ViewerPlanetRequest, ViewerRandomizeRequest,
     };
 
     use tokio::time::timeout;
@@ -1454,6 +1472,32 @@ mod tests {
             RequestBody::StreamTrack(StreamTrackRequest {
                 universe: UniverseIdHex::from_u64(42),
                 stream: 0,
+            }),
+            RequestBody::ViewerPlanet(ViewerPlanetRequest {
+                universe: UniverseIdHex::from_u64(42),
+                inputs: PlanetInputsDto {
+                    seed: hyperion_protocol::SeedHex::from_u64(7),
+                    star_mass_msun: 1.0,
+                    fe_h_dex: 0.0,
+                    age_gyr: 4.57,
+                    mass_mearth: 1.0,
+                    semi_major_axis_au: 1.0,
+                    eccentricity: 0.0,
+                    formed_at_au: None,
+                    day_hours: None,
+                    tilt_deg: None,
+                    water_rank: None,
+                    carbon_rank: None,
+                    nitrogen_rank: None,
+                },
+            }),
+            RequestBody::ViewerRandomize(ViewerRandomizeRequest {
+                universe: UniverseIdHex::from_u64(42),
+                draw_seed: hyperion_protocol::SeedHex::from_u64(7),
+            }),
+            RequestBody::ViewerInputs(ViewerInputsRequest {
+                universe: UniverseIdHex::from_u64(42),
+                body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
             }),
         ]
     }
