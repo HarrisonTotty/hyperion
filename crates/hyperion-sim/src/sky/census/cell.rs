@@ -47,7 +47,7 @@
 //! each record that passes it is bounded again star by star, before its system is generated
 //! ([`StarBounds`]; decided 2026-10-05, `decision-r06-census-cost.md`, and amended 2026-10-07,
 //! `decision-p11-t16-hierarchy-bound.md`): plan 11's [`hierarchy_bound`] gives every star of
-//! every attempt the generator can keep, exactly, plan 11's [`pair_light_bound`](crate::stellar::binary::pair_light_bound) says what each
+//! every attempt the generator can keep, exactly, plan 11's [`pair_light_bound`] says what each
 //! pair of two stars can hold, and R06.T8.m's phase envelope ([`PhaseEnvelope`]) bounds each star
 //! at its own mass, \[Fe/H\], η and age relative to its lifetime. A record with a pair that plan
 //! 11 cannot bound keeps the widened bound alone. Both bounds are bounds, so a record either
@@ -843,7 +843,7 @@ fn flux_bound_over(
 }
 
 /// What a star's pair leaves of the star's own bound (R06.T8.g): plan 11's
-/// [`pair_light_bound`](crate::stellar::binary::pair_light_bound) verdict, read for one of the
+/// [`pair_light_bound`] verdict, read for one of the
 /// pair's two stars (`decision-p11-t16-hierarchy-bound.md` §5).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StarLight {
@@ -1073,7 +1073,7 @@ impl RecordLight {
 /// 2. plan 11's [`hierarchy_bound`], the generator's own draw at every redraw attempt it can keep,
 ///    so each star's initial mass is exact, with its body and attempt, and so is each star–star
 ///    pair's drawn periastron;
-/// 3. each such pair's [`pair_light_bound`](crate::stellar::binary::pair_light_bound) over the
+/// 3. each such pair's [`pair_light_bound`] over the
 ///    record's light-time ages;
 /// 4. for each star, R06.T8.m's phase envelope ([`PhaseEnvelope::brightest`]) at its own mass,
 ///    \[Fe/H\], η and age relative to its lifetime, read by [`brightest`](Self::brightest).
