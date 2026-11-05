@@ -14,6 +14,8 @@
 //!
 //! The holds, each a field:
 //!
+//! - [`binary_tables`](GalaxyRules::binary_tables), plan 15's binary class tables refitted on the
+//!   generator's own pairs from 29 (P15.T10.b, [`BinaryTableRules`]);
 //! - [`listed_alerts`](GalaxyRules::listed_alerts), whether the alert walks read the features' and
 //!   the centre's lists of the recently dead, from 29 (`alerts::listed::LISTED_ALERTS_VERSION`);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
@@ -28,6 +30,7 @@
 use crate::GeneratorVersion;
 use crate::alerts::listed::ListedAlertsRules;
 use crate::galaxy::ages::FieldShareRules;
+use crate::galaxy::catalogue_classes::binary::BinaryTableRules;
 use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::kinds::nursery::SuperbubbleRules;
@@ -55,6 +58,10 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
+    /// Which of plan 15's fitted binary class tables the galaxy reads (P15.T10.b's refit at 29,
+    /// [`BinaryTableRules`]): its share matrix's class shares, read where the galaxy is built, so
+    /// that `Galaxy::with_rules` refuses to change it, and its binary classes' samplers and rows.
+    pub(crate) binary_tables: BinaryTableRules,
     /// Whether the core collapses' and the Type Ia's alert walks read the recently dead of the
     /// features' and the centre's lists beside their cells (P09.T36 in plan 12's walks): from 29,
     /// [`ListedAlertsRules::of_version`]. Read only when a walk runs.
@@ -79,6 +86,7 @@ impl GalaxyRules {
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
+            binary_tables: BinaryTableRules::of_version(version),
             listed_alerts: ListedAlertsRules::of_version(version),
             stellar: StellarRules::of_version(version),
             superbubbles: SuperbubbleRules::of_version(version),
@@ -86,9 +94,10 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 29 in force, for a test that asserts a 29 figure: the
-    /// version's rules from 29: the alert walks' lists (P09.T36), the superbubbles' merge (P09.T5)
-    /// and the stellar holds ([`StellarRules::every_29_hold`], P11.T4's). The 29 bump deletes it
-    /// with them.
+    /// version's rules from 29: the binary class tables refitted on the generator's own pairs
+    /// (P15.T10.b, [`BinaryTableRules::Published`]), the alert walks' lists (P09.T36), the
+    /// superbubbles' merge (P09.T5) and the stellar holds ([`StellarRules::every_29_hold`],
+    /// P11.T4's). The 29 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_29_hold() -> Self {

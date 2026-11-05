@@ -1,8 +1,12 @@
-//! The tests of plan 15's fitted binary tables (P15.T10.b), refitted at 27: a galaxy reads them
-//! in its processes and its class shares; the fitted tables' shapes; and, slow, the fitted rows'
-//! Milky Way counts over ten seeds and each fitted sampler's marks against the engine's members at
-//! 27 by a weighted two-sample Kolmogorov–Smirnov test, over the half of a 10⁷-record census that
-//! `hyperion-fit`'s tasks `binary_awd` and `binary_xrb` were not fitted to.
+//! The tests of plan 15's fitted binary tables (P15.T10.b), refitted at 29 on the pairs the
+//! generator draws at a record's first attempt (the `_29` items, under every 29 hold;
+//! `tables_hold`): a galaxy reads them in its processes and its class shares; the fitted tables'
+//! shapes; and, slow, the fitted rows' Milky Way counts over ten seeds and each fitted sampler's
+//! marks against the engine's members at 29 by a weighted two-sample Kolmogorov–Smirnov test, over
+//! the half of a 10⁷-record census that `hyperion-fit`'s tasks `binary_awd` and `binary_xrb` were
+//! not fitted to. The version's tables (27's refit, run again at 28), fitted on a census that drew
+//! each record's first attempt under `Free` multiplicity on its primary's own draws, are not tested
+//! against the engine here.
 //!
 //! The tests are at the shape's resolution (P15.T10.b's refit, lean of 2026-11-02): a mark passes
 //! where its distance from the engine's held-out half is within the 1% critical distance of its
@@ -11,7 +15,8 @@
 //! are in the table's shares, as the fits weight them.
 //!
 //! They were P15.T10.b's hold's tests (`tables_hold.rs`) until the bump to 27 put the tables on
-//! the record; its tripwire and its comparisons with the scratch tables went with it.
+//! the record; its tripwire and its comparisons with the scratch tables went with it. The refit at
+//! 29 moved them to its own tables.
 
 use std::sync::OnceLock;
 
@@ -24,6 +29,7 @@ use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::imf::{BandShares, MassBand};
 use crate::galaxy::params::GalaxyParams;
+use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
 use crate::math;
 use crate::orbit::Eccentricity;
@@ -37,9 +43,9 @@ use crate::stellar::binary::testing::{
     CensusPart, CensusRecords, CensusSite, ClassMember, class_census_in,
 };
 use crate::tables::binary::{
-    AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark, AwdPick, BLACK_HOLE_TRANSIENT_SHARE,
-    CLASS_SHARES, ClassSamplerTable, ClassShareTable, SCRATCH_CLASS_SHARES, SamplerKey,
-    XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
+    AWD_FAST_SAMPLER_29, AWD_SLOW_SAMPLER_29, AwdDonorKind, AwdMark, AwdPick,
+    BLACK_HOLE_TRANSIENT_SHARE, CLASS_SHARES_29, ClassSamplerTable, ClassShareTable,
+    SCRATCH_CLASS_SHARES, SamplerKey, XRB_SAMPLER_29, XrbHostKind, XrbMark, XrbPick,
 };
 use crate::time::LIGHT_CROSSING_L;
 use crate::units::consts::SECONDS_PER_DAY;
@@ -50,7 +56,7 @@ use crate::{GeneratorVersion, Seed};
 const SEED: u64 = 0x0b17_15a0_0000_0001;
 
 /// The refit's generator version: the manifests'.
-const REFIT_VERSION: GeneratorVersion = GeneratorVersion::new(27);
+const REFIT_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
 /// The fits' census galaxy: the version's rules with the scratch class shares
 /// (`Galaxy::from_params_for_binary_refit`).
@@ -66,20 +72,27 @@ fn census_galaxy() -> &'static Galaxy {
     })
 }
 
-/// The fixture: the version's galaxy, the fitted tables its own.
+/// The fixture: the galaxy under every 29 hold, the refitted tables its own.
 fn fitted() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| {
-        Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
-            .expect("the Milky Way fixture builds")
-    })
+    GALAXY.get_or_init(|| at_29(Seed::new(SEED)))
+}
+
+/// The Milky Way fixture of `seed` under every 29 hold.
+fn at_29(seed: Seed) -> Galaxy {
+    Galaxy::from_params_with_rules(
+        seed,
+        GalaxyParams::milky_way_like(),
+        GalaxyRules::every_29_hold(),
+    )
+    .expect("the Milky Way fixture builds")
 }
 
 /// The fitted accreting sampler of `side`.
 const fn awd_table(side: AwdSide) -> &'static ClassSamplerTable<AwdMark, AwdPick> {
     match side {
-        AwdSide::Fast => &AWD_FAST_SAMPLER,
-        AwdSide::Slow => &AWD_SLOW_SAMPLER,
+        AwdSide::Fast => &AWD_FAST_SAMPLER_29,
+        AwdSide::Slow => &AWD_SLOW_SAMPLER_29,
     }
 }
 
@@ -94,7 +107,10 @@ fn a_galaxy_carries_the_fitted_binary_tables() {
         let process = AwdProcess::new(fitted(), side);
         assert_eq!(process.sampler().table(), awd_table(side), "{side:?}");
     }
-    assert_eq!(XrayBinaries::new(fitted()).sampler().table(), &XRB_SAMPLER);
+    assert_eq!(
+        XrayBinaries::new(fitted()).sampler().table(),
+        &XRB_SAMPLER_29
+    );
     let carved = |table: &ClassShareTable, population, band| {
         table.rows().iter().fold(0.0, |sum, row| {
             sum + row.hosts_per_formed_mass(population) * row.layer_share(band)
@@ -106,7 +122,7 @@ fn a_galaxy_carries_the_fitted_binary_tables() {
                 .feature_shares()
                 .class_share(population, band);
             let fitted_share = fitted().feature_shares().class_share(population, band);
-            let expected = carved(&CLASS_SHARES, population, band)
+            let expected = carved(&CLASS_SHARES_29, population, band)
                 / carved(&SCRATCH_CLASS_SHARES, population, band);
             assert!(
                 (fitted_share - scratch_share * expected).abs() <= 1e-12 * scratch_share.abs(),
@@ -167,7 +183,7 @@ fn the_fitted_tables_are_in_shape() {
         }
         let process = AwdProcess::new(fitted(), side);
         assert_eq!(process.recurrence_ranks(), (0.0, 1.0), "{side:?}");
-        let row = CLASS_SHARES.row(side.carved());
+        let row = CLASS_SHARES_29.row(side.carved());
         let layers = MassBand::ALL
             .iter()
             .fold(0.0, |sum, &band| sum + row.layer_share(band));
@@ -178,14 +194,14 @@ fn the_fitted_tables_are_in_shape() {
         }
     }
     for mark in XrbMark::ALL {
-        let law = XRB_SAMPLER.mark(mark);
+        let law = XRB_SAMPLER_29.mark(mark);
         assert_laws_in_shape(law, &format!("{mark:?}"));
         let conditional = mark == XrbMark::LowMassDonorMass;
         assert_eq!(law.median().is_some(), conditional, "{mark:?}");
         assert_eq!(law.node_residuals().is_some(), conditional, "{mark:?}");
     }
-    let low = XRB_SAMPLER.pick(XrbPick::LowMassKind).weights();
-    let high = XRB_SAMPLER.pick(XrbPick::HighMassKind).weights();
+    let low = XRB_SAMPLER_29.pick(XrbPick::LowMassKind).weights();
+    let high = XRB_SAMPLER_29.pick(XrbPick::HighMassKind).weights();
     assert_eq!(low.len(), XrbHostKind::LOW_MASS.len());
     assert_eq!(high.len(), XrbHostKind::HIGH_MASS.len());
     let both = low.iter().chain(high).sum::<f64>();
@@ -195,7 +211,7 @@ fn the_fitted_tables_are_in_shape() {
         .position(|&k| k == XrbHostKind::BlackHoleTransient)
         .expect("a low-mass kind");
     assert!((low[transients] - BLACK_HOLE_TRANSIENT_SHARE).abs() < 1e-15);
-    let row = CLASS_SHARES.row(CarvedClass::XrayBinary);
+    let row = CLASS_SHARES_29.row(CarvedClass::XrayBinary);
     let layers = MassBand::ALL
         .iter()
         .fold(0.0, |sum, &band| sum + row.layer_share(band));
@@ -206,7 +222,7 @@ fn the_fitted_tables_are_in_shape() {
     }
     for class in [CarvedClass::StellarMerger, CarvedClass::NeutronStarMerger] {
         assert_eq!(
-            CLASS_SHARES.row(class),
+            CLASS_SHARES_29.row(class),
             SCRATCH_CLASS_SHARES.row(class),
             "{class:?}"
         );
@@ -266,11 +282,7 @@ fn the_fitted_rows_give_the_milky_way_counts() {
     );
     let pc3 = LIGHT_YEARS_PER_PARSEC * LIGHT_YEARS_PER_PARSEC * LIGHT_YEARS_PER_PARSEC;
     for k in 0..10_u64 {
-        let galaxy = Galaxy::from_params(
-            Seed::new(0x0b17_08a0_0000_0100 | k),
-            GalaxyParams::milky_way_like(),
-        )
-        .expect("the Milky Way fixture builds");
+        let galaxy = at_29(Seed::new(0x0b17_08a0_0000_0100 | k));
         let [fast, slow] = [AwdSide::Fast, AwdSide::Slow]
             .map(|side| AwdProcess::new(&galaxy, side).expected_hosts(&galaxy));
         let density = [AwdSide::Fast, AwdSide::Slow]
@@ -680,11 +692,7 @@ const BLACK_HOLE_TRANSIENTS: (f64, f64) = (1_300.0, 400.0);
 #[ignore = "slow: ten galaxies built"]
 fn the_fitted_x_ray_binaries_give_the_milky_way_counts() {
     for k in 0..10_u64 {
-        let galaxy = Galaxy::from_params(
-            Seed::new(0x0b17_08a0_0000_0100 | k),
-            GalaxyParams::milky_way_like(),
-        )
-        .expect("the Milky Way fixture builds");
+        let galaxy = at_29(Seed::new(0x0b17_08a0_0000_0100 | k));
         let process = XrayBinaries::new(&galaxy);
         let total = process.expected_hosts(&galaxy);
         let transients = process.expected_hosts_of(&galaxy, XrbHostKind::BlackHoleTransient);
@@ -830,8 +838,8 @@ fn xrb_index(kind: XrbHostKind) -> usize {
 /// The fitted table's kind weights, in [`XrbHostKind::ALL`]'s order.
 fn xrb_table_weights() -> [f64; 9] {
     let mut weights = [0.0; 9];
-    let low = XRB_SAMPLER.pick(XrbPick::LowMassKind).weights();
-    let high = XRB_SAMPLER.pick(XrbPick::HighMassKind).weights();
+    let low = XRB_SAMPLER_29.pick(XrbPick::LowMassKind).weights();
+    let high = XRB_SAMPLER_29.pick(XrbPick::HighMassKind).weights();
     for (kind, &w) in XrbHostKind::LOW_MASS.iter().zip(low) {
         weights[xrb_index(*kind)] = w;
     }
@@ -854,7 +862,7 @@ fn xrb_weighted(pool: &[XrayMarks], mark: XrbMark, weights: &[f64; 9]) -> Vec<(f
 /// `conditions` drawn the same way for the low-mass donor's mass: hosts drawn through the table,
 /// as the class's scan draws the mark.
 fn table_draws(mark: XrbMark, conditions: &[f64]) -> Vec<(f64, f64)> {
-    let sampler = ClassSampler::new(&XRB_SAMPLER);
+    let sampler = ClassSampler::new(&XRB_SAMPLER_29);
     (0..DRAWS)
         .map(|i| {
             let rank = (f64::from(i) + 0.5) / f64::from(DRAWS);
@@ -928,9 +936,9 @@ fn the_x_ray_binary_sampler_against_the_engine() {
         .collect();
     let mut misses = Vec::new();
     for (k, mark) in XrbMark::ALL.into_iter().enumerate() {
-        let high_mass = XRB_SAMPLER.mark(mark).name().contains("bex")
-            || XRB_SAMPLER.mark(mark).name().contains("supergiant")
-            || XRB_SAMPLER.mark(mark).name().contains("high_mass");
+        let high_mass = XRB_SAMPLER_29.mark(mark).name().contains("bex")
+            || XRB_SAMPLER_29.mark(mark).name().contains("supergiant")
+            || XRB_SAMPLER_29.mark(mark).name().contains("high_mass");
         let (pool, pool_fitted) = if high_mass {
             (&young, &young_fitted)
         } else {
@@ -938,7 +946,7 @@ fn the_x_ray_binary_sampler_against_the_engine() {
         };
         let held_out = xrb_weighted(pool, mark, &weights);
         let fitted_half = xrb_weighted(pool_fitted, mark, &weights);
-        let name = XRB_SAMPLER.mark(mark).name();
+        let name = XRB_SAMPLER_29.mark(mark).name();
         if held_out.len() < MIN_MEMBERS || fitted_half.len() < MIN_MEMBERS {
             println!(
                 "  {name}: {} and {} engine members, not compared",

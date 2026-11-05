@@ -6,12 +6,12 @@ name = "binary_awd"
 path = "binary.rs"
 task = "binary_awd"
 revision = 0
-inputs_sha256 = "ca8ee2a1730f3e8b4efee680b0f54ad72d372590159681e500e800e9e172aa97"
-body_sha256 = "4b002411341240a9cdb72c860aa958d9688d6b16462183c63f9a81b341ec7d7c"
+inputs_sha256 = "e71e8ac98ac7f0c000eaa965a97a406fe701ad0d655697e02aa4b58160f3c9aa"
+body_sha256 = "ec34267c9f767b0eba56ba4e1dd75a42f5f9ef2558f81163a109a3ba0dc9c760"
 fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 1.0960630250705998, 21.0, 1.0, 0.6529028848978797, 0.0322439496270119, 0.000000000012255222349553427]
-since_generator_version = 27
+since_generator_version = 28
 provisional = false
-acceptance = "kind scales 1.6635e-1/7.4574e-2/1.0634e-2; fast: 2501 members, own nodes 0/15/14/0/6/17/0/4/16/17/17, donors 0.992/0.000/0.008, layers C 0.108 D 0.868 E 0.024, rates a system 7.01e-7/5.50e-5/1.11e-5/1.54e-5/1.96e-5/2.03e-5/6.31e-6, not its own: HeliumPeriod Scratch, HeliumDonorMass Scratch; slow: 25487 members, own nodes 0/16/17/16/5/17/16/9/17/17/17, donors 0.891/0.108/0.001, layers C 0.378 D 0.608 E 0.014, rates a system 4.91e-6/5.20e-4/8.53e-4/6.95e-4/6.23e-4/6.26e-4/1.01e-3; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_accreting_white_dwarf_samplers_against_the_engine`"
+acceptance = "kind scales 1.6742e-1/7.4770e-2/1.0658e-2; fast: 2485 members, own nodes 0/15/14/0/6/17/0/4/16/17/17, donors 0.992/0.000/0.008, layers C 0.108 D 0.873 E 0.019, rates a system 7.01e-7/5.46e-5/1.11e-5/1.54e-5/1.96e-5/2.03e-5/6.31e-6, not its own: HeliumPeriod Scratch, HeliumDonorMass Scratch; slow: 25335 members, own nodes 0/16/17/16/5/17/16/9/17/17/17, donors 0.892/0.108/0.001, layers C 0.379 D 0.610 E 0.011, rates a system 4.91e-6/5.17e-4/8.48e-4/6.97e-4/6.23e-4/6.20e-4/9.99e-4; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_accreting_white_dwarf_samplers_against_the_engine`"
 
 [[table]]
 name = "binary_cooling_floor"
@@ -78,12 +78,12 @@ name = "binary_xrb"
 path = "binary.rs"
 task = "binary_xrb"
 revision = 0
-inputs_sha256 = "e34ffb8e7bd93fbacdbb5d112a530ed8c1996a427892ccf0a29baab44424f3ce"
-body_sha256 = "a11e71042090a3d28b5206f0818ad57aea14db6e1fd001b2d85039fc49deed84"
+inputs_sha256 = "10bd856ea7f7acebe8112f6d5d4f45bbb904ec87ba352c6678af3ed66490b7f5"
+body_sha256 = "47b09bad89eec84f9e72166136febf41437bc4665cdd8ee822f085f63fd39503"
 fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 25.0, 1.0, 1.55261502182327, 1.3396048261069489, -1.5866839897114011]
-since_generator_version = 27
+since_generator_version = 28
 provisional = false
-acceptance = "slab members by kind 274/7347/5/67/9/0/968/4/0; young members by kind 423/288/96/133/1046/6/128/0/8; census kinds 0.0315/0.8849/0.0005/0.0060/0.0012/0.0000/0.0755/0.0003/0.0000; weights 0.0276/0.7746/0.0004/0.1300/0.0661/0.0003 and 0.0010/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 60); high-mass hosts 10; donor mass's own nodes 13; layers C 0.000 D 0.240 E 0.760; rates a system 1.49e-4/1.86e-4/1.17e-4/1.17e-4/1.32e-4/1.27e-4/3.29e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
+acceptance = "slab members by kind 385/9707/4/91/7/0/991/4/0; young members by kind 544/399/107/168/874/4/123/0/4; census kinds 0.0365/0.8952/0.0007/0.0067/0.0008/0.0000/0.0598/0.0002/0.0000; weights 0.0320/0.7841/0.0006/0.1300/0.0524/0.0002 and 0.0007/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 67); high-mass hosts 7; donor mass's own nodes 14; layers C 0.000 D 0.185 E 0.815; rates a system 1.56e-4/2.46e-4/1.65e-4/1.31e-4/1.95e-4/1.35e-4/3.08e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
 
 [[table]]
 name = "bowl_permanent_shadow"

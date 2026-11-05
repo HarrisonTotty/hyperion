@@ -3441,6 +3441,73 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
       Left for train 27's re-pins.
     - Train 27 folded `FITTED_DWARFS` with the bump: the rows keep the fitted range's bounds,
       the scratch range's go, and `binary_awd` is refitted on train 27's engine at 27.
+- **T10.b's refit at 29, on the generator's own pairs (2026-11-05; train 27's finding; held at 29,
+  nothing moves at 28; redone on v28, land/next at 3d74d21a, from train 28's refit at 28,
+  `4802b55e`, whose bodies are 27's).**
+  - _The census._ `class_census_in`'s `members_of` drew every record's first attempt under `Free`
+    multiplicity on its primary's own draws. The generator shows a displaced record single and
+    runs a retained one's pair on its primary's kept attempt of plan 08's kick loop. Of a probe
+    census of 9,409 young-thin-disc records of layer E (part 32 of 64), 52 of the 113 members were
+    displaced remnants, all X-ray binaries, and 14 of the other 61 (retained, speed bin 0)
+    differed from the generator's first attempt. Train 27's case: the retained
+    `0x826787a000000099` was a Be/X binary in the census and is none at the generator's attempt 0.
+  - _The fix._ `members_of` builds `SystemStars::generate_at` at `RedrawAttempt::FIRST` under
+    `grid_multiplicity` (its primary `primary_model`'s, the kick loop's kept attempt), and skips a
+    record the carve-out never redraws (`carve::redraws`). The census's first attempt stays the
+    carve-out's, so its members are the pairs the grid gives up.
+    `a_record_s_members_are_its_pairs_at_the_generator_s_first_attempt` pins four records. It
+    moves no fast test: the sim's and the fit's fast suites, the fingerprints included, pass on it
+    alone.
+  - _The hold._ `BinaryTableRules` (`galaxy::catalogue_classes::binary`'s `tables_hold`,
+    `PUBLISHED_CENSUS_VERSION` 29), the galaxy rules' `binary_tables` field:
+    - `RawCensus` (27, 28): 27's tables, frozen verbatim in `tables::binary`'s `refit_27` module;
+    - `Published` (29): the tasks' blocks, `AWD_FAST_SAMPLER_29`, `AWD_SLOW_SAMPLER_29`,
+      `XRB_SAMPLER_29` and `CLASS_SHARES_29`.
+    - Every reader goes through it: the galaxy's build (its class shares), the accreting and
+      X-ray classes, the merger classes' hosts, the feature lists and the centre's forecast.
+      `Galaxy::with_rules` refuses to change it. It sits beside 29's `listed_alerts` and
+      `superbubbles`, and `GalaxyRules::every_29_hold()` reaches all three.
+  - _Deviation: the since lines are 28, not 29._ The emitter refuses a `--since` other than
+    `GENERATOR_VERSION`, and `check` fails a table whose since is ahead of it (design note 10). So
+    the blocks are emitted `--since 28`, a changed body on a since of 27, and the hold keeps them
+    from every galaxy below 29. The bump to 29 stamps them. Their bodies are the earlier refit's
+    at 27 to the byte (`binary_awd` `ec34267c…`, `binary_xrb` `47b09bad…`), so the figures below
+    are the same.
+  - _The fits._ The manifests and the fingerprints run at 29. Its other holds, the alert walks'
+    lists and the superbubbles, reach no census: the census reads the grid's cells and the
+    engine, and neither reads them. A mark too few members define keeps the version's law.
+    `binary_awd` took 36.9 min and `binary_xrb` 50.0 min, at 8 threads each. The first run on v28
+    started from the earlier refit's blocks, came out byte for byte the same, and kept their
+    since of 27 as unchanged; the blocks were set back to land/next's and the fits run again, so
+    that the emitter compared with the version's tables.
+  - _Moved figures_ (the lock's acceptance, 28 → 29; 28's are 27's, run again unchanged):
+    - Accreting white dwarfs: kind scales 0.16635/0.074574/0.010634 → 0.16742/0.074770/0.010658.
+    - Fast: 2,501 → 2,485 members; layers C/D/E 0.108/0.868/0.024 → 0.108/0.873/0.019.
+    - Slow: 25,487 → 25,335 members; donors 0.891/0.108/0.001 → 0.892/0.108/0.001; layers
+      0.378/0.608/0.014 → 0.379/0.610/0.011.
+    - X-ray binaries, slab members by kind (NS persistent, NS transient, BH persistent, BH
+      transient, Be/X, supergiant, ultracompact, symbiotic, BH high-mass):
+      274/7,347/5/67/9/0/968/4/0 → 385/9,707/4/91/7/0/991/4/0.
+    - Young thin disc's members by kind: 423/288/96/133/1,046/6/128/0/8 →
+      544/399/107/168/874/4/123/0/4.
+    - Low-mass kinds' weights: 0.0276/0.7746/0.0004/0.1300/0.0661/0.0003 →
+      0.0320/0.7841/0.0006/0.1300/0.0524/0.0002; high-mass 0.0010/0/0 → 0.0007/0/0.
+    - The census's black-hole transients 60 → 67; high-mass hosts 10 → 7; layers D/E
+      0.240/0.760 → 0.185/0.815.
+    - Rates a system by population: 1.49/1.86/1.17/1.17/1.32/1.27/0.329 × 10⁻⁴ →
+      1.56/2.46/1.65/1.31/1.95/1.35/0.308 × 10⁻⁴.
+  - _Why the X-ray binaries gain (likely; not checked record by record)._ The retained remnants'
+    kept kicks are their bins' (most bin 0, slow), where their own draws' kicks often unbound the
+    pair. So the low-mass hosts, mostly
+    neutron-star transients, gain a third, and the young Be/X binaries, many displaced, lose a
+    sixth.
+  - _Tests._ `fitted_tables`' tests read the `_29` tables under every 29 hold, the K–S tests
+    against the fixed census at 29. The version's tables (27's, run again at 28) are not tested
+    against the engine any more.
+  - _At 29, beside 29's other holds._ Blessed under every 29 hold in a scratch tree, the 29
+    goldens (`alerts::listed`'s three, `gas_merging`, the alerts' century) are byte for byte
+    land/next's: the hold moves none of them. Nine golden tests fail on land/next 3d74d21a
+    itself, their files' headers at 27 under version 28, and fail the same here.
 - **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
   research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
   - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is

@@ -141,7 +141,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_awd",
         revision: 0,
-        since_generator_version: 27,
+        since_generator_version: 28,
         provisional: false,
     },
     TableInfo {
@@ -177,7 +177,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_xrb",
         revision: 0,
-        since_generator_version: 27,
+        since_generator_version: 28,
         provisional: false,
     },
     TableInfo {

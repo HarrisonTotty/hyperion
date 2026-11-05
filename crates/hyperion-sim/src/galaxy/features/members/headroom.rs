@@ -84,6 +84,7 @@
 //! "P11.T8.e.b as built", after "The centre's feature-level index, ruled"). Against 13 bits, 393
 //! of the 10³ seeds failed (P11.T8.e, "as measured").
 
+use crate::GENERATOR_VERSION;
 use crate::galaxy::features::centre::events::victims::expected_victims;
 use crate::galaxy::features::centre::recent::forecast_candidates;
 use crate::galaxy::features::centre::{BuildCentreError, CentreClasses, CentreProfile};
@@ -95,9 +96,12 @@ use crate::galaxy::imf::MassFunction;
 use crate::galaxy::params::GalaxyParams;
 #[cfg(doc)]
 use crate::galaxy::placement::check_index_headroom;
+use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, POPULATIONS};
 use crate::stellar::binary::CarvedClass;
-use crate::tables::binary::{CLASS_SHARES, ClassShareRow};
+#[cfg(doc)]
+use crate::tables::binary::CLASS_SHARES;
+use crate::tables::binary::{ClassShareRow, ClassShareTable};
 use crate::units::SolarMasses;
 
 #[cfg(doc)]
@@ -149,17 +153,19 @@ pub struct CentreListForecast {
 
 impl CentreListForecast {
     /// The forecast of the centre of `profile`, for primaries on `mass_function`, at
-    /// `mean_formed_mass` formed per system (module documentation).
+    /// `mean_formed_mass` formed per system, its classes' rates `class_shares`' (module
+    /// documentation).
     #[must_use]
     fn from_parts(
         profile: &CentreProfile,
         mass_function: &dyn MassFunction,
         mean_formed_mass: SolarMasses,
+        class_shares: &ClassShareTable,
     ) -> Self {
         let classes = CentreClasses::new(profile, mass_function);
         let primaries_formed = classes.primaries_formed();
         let formed = primaries_formed * mean_formed_mass.value();
-        let hosts = CLASS_SHARES
+        let hosts = class_shares
             .rows()
             .map(|row| (row.class(), formed * largest_rate(&row)));
         let candidates = hosts
@@ -339,6 +345,9 @@ pub fn centre_list_forecast(params: &GalaxyParams) -> Result<CentreListForecast,
         &CentreProfile::from_params(params)?,
         mass_function.as_ref(),
         params.mean_formed_mass(),
+        GalaxyRules::of_version(GENERATOR_VERSION)
+            .binary_tables
+            .class_shares(),
     ))
 }
 
@@ -357,6 +366,7 @@ fn galaxy_centre_forecast(galaxy: &Galaxy) -> Result<CentreListForecast, BuildCe
         &profile,
         galaxy.mass_function(),
         galaxy.mean_formed_mass(),
+        galaxy.rules().binary_tables.class_shares(),
     ))
 }
 
@@ -417,6 +427,7 @@ mod tests {
     use crate::galaxy::imf::{MASS_LIMIT_HI, MASS_LIMIT_LO, MassFunctionKind};
     use crate::galaxy::params::{GalaxyParamsBuilder, NuclearClusterParams};
     use crate::galaxy::quad::gl32_log;
+    use crate::tables::binary::CLASS_SHARES;
     use crate::units::Dex;
     use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::pins::Tolerance;

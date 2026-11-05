@@ -20,7 +20,9 @@
 //! Plan 15's P15.T10.b fits the accreting white dwarfs' and the X-ray binaries' tables against the
 //! engine at generator version 27's rules: `tables::binary`'s samplers, one for each accreting
 //! class and the X-ray binaries', and their rows of the share table, read where the galaxy is built
-//! (the share matrix's class shares) and where a class's process is built.
+//! (the share matrix's class shares) and where a class's process is built. From 29 a galaxy reads
+//! them refitted on the generator's own pairs (`BinaryTableRules`, the crate's `tables_hold`
+//! module).
 
 mod awd;
 pub(crate) mod feature;
@@ -29,6 +31,7 @@ mod fitted_tables;
 mod hosts;
 mod merger;
 mod nsm;
+mod tables_hold;
 mod xrb;
 
 pub use awd::{
@@ -40,6 +43,7 @@ pub use feature::{BinaryHost, HostPlace, ListedBinary, ListedHost, is_listed_bin
 pub use hosts::{ClassHosts, HostComponent};
 pub use merger::{MergerCandidate, MergerEntry, MergerPair, StellarMergers};
 pub use nsm::{Inspiral, NeutronStarMergers, NsmCandidate, NsmEntry};
+pub(crate) use tables_hold::BinaryTableRules;
 pub use xrb::{
     BE_DONOR_ATTEMPTS, DONOR_TURN_OFF_SHARE, EVOLVED_DONOR_LOBE_SHARE, EVOLVED_DONOR_MIN_CORE_MASS,
     SUPERGIANT_DONOR_CORE_SHARE, SUPERGIANT_DONOR_LIFE_SHARE, XrayBinaries, XrbBinary,

@@ -21,6 +21,7 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
 use crate::stellar::binary::scan::engine_calls;
 use crate::stellar::binary::testing::MemberCells;
+use crate::tables::binary::CLASS_SHARES;
 
 /// The seed of the tests' Milky Way.
 const SEED: u64 = 0x1108_f000_0000_0001;

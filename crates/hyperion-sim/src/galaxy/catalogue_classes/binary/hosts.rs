@@ -20,6 +20,7 @@ use crate::galaxy::{Galaxy, PointLy};
 use crate::id::CatalogueSystemId;
 use crate::rng::DomainTag;
 use crate::stellar::binary::CarvedClass;
+#[cfg(doc)]
 use crate::tables::binary::CLASS_SHARES;
 use crate::units::PerCubicLightYear;
 
@@ -54,10 +55,11 @@ pub struct ClassHosts {
 }
 
 impl ClassHosts {
-    /// The hosts of `class` in `galaxy`, from the row of [`CLASS_SHARES`] of `carved`.
+    /// The hosts of `class` in `galaxy`, from the row of `carved` of the galaxy's share table
+    /// ([`CLASS_SHARES`] below 29).
     #[must_use]
     pub(crate) fn new(galaxy: &Galaxy, class: ClassId, carved: CarvedClass) -> Self {
-        let row = CLASS_SHARES.row(carved);
+        let row = galaxy.rules().binary_tables.class_shares().row(carved);
         let formed = galaxy.mean_formed_mass().value();
         let fields = galaxy.fields();
         let components = fields

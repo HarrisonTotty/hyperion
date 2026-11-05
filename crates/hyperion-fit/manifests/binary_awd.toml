@@ -1,20 +1,21 @@
 # The accreting white dwarfs' samplers and share rows (plan 15, P15.T10.b; read by plan 11's
-# P11.T8.a classes from generator version 27), fitted against plan 11's engine at generator
-# version 28's rules through the sim's own census (`stellar::binary::testing::class_census_in`),
-# on the Milky Way fixture with the binary classes' scratch tables. The slab's census is 10^7
-# records of layers C–E about the solar circle in the band shares' proportion; each population
-# scarce there has 3 × 10^5 records of its own at a site where it lies ([x, y, z, half-widths] in
-# ly). The fit takes parts 0–31 of 64 of every census's cells, and the sim's slow tests the rest.
-# The rows scale each donor kind to its observed figure: the cataclysmic variables to Pala et al.
-# 2020 (MNRAS 494, 3799), the AM CVn stars to Carter et al. 2013 (MNRAS 429, 2143), the symbiotic
-# stars to Lü, Yungelson and Han 2006 (MNRAS 372, 1389), scaled. A mark or a node's law is fitted to
-# at least 50 members. A slow host's recurrence is held at 10^10 years, under the universe clock's
-# 2.9 × 10^11.
+# P11.T8.a classes from generator version 27, refitted for 29), fitted against plan 11's engine at
+# generator version 29's rules through the sim's own census
+# (`stellar::binary::testing::class_census_in`) of the pairs the generator draws at each record's
+# first attempt (train 27's finding), on the Milky Way fixture with the binary classes' scratch
+# tables. The slab's census is 10^7 records of layers C–E about the solar circle in the band shares'
+# proportion; each population scarce there has 3 × 10^5 records of its own at a site where it lies
+# ([x, y, z, half-widths] in ly). The fit takes parts 0–31 of 64 of every census's cells, and the
+# sim's slow tests the rest. The rows scale each donor kind to its observed figure: the cataclysmic
+# variables to Pala et al. 2020 (MNRAS 494, 3799), the AM CVn stars to Carter et al. 2013 (MNRAS
+# 429, 2143), the symbiotic stars to Lü, Yungelson and Han 2006 (MNRAS 372, 1389), scaled. A mark or
+# a node's law is fitted to at least 50 members. A slow host's recurrence is held at 10^10 years,
+# under the universe clock's 2.9 × 10^11.
 task = "binary_awd"
 
 [params]
 seed = 0x0b17_15a0_0000_0001
-generator_version = 28
+generator_version = 29
 records = 10_000_000
 population_records = 300_000
 parts = 32

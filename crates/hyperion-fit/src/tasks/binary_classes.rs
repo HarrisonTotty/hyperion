@@ -33,11 +33,13 @@
 //!
 //! # The galaxy
 //!
-//! Each task fits at its manifest's `generator_version`, 28 (the refit at 27, run again at 28,
-//! whose census reads no rule 28 moved): its census galaxy is
-//! the version's, every hold that version turns on in force, with the binary classes' scratch
-//! share rows in its class shares (`Galaxy::from_params_for_binary_refit`), so that the field the
-//! census's records come from does not read the rows the task fits (plan 15's lean of 2026-11-01).
+//! Each task fits at its manifest's `generator_version`, 29 for the refit on the generator's own
+//! pairs (the census's first attempts as the generator draws them, train 27's finding), into its
+//! block's `_29` items, which a galaxy reads from 29, the version's tables (the refit at 27, run
+//! again at 28 unchanged) kept apart until then. Its census galaxy is the version's, every hold
+//! that version turns on in force, with the binary classes' scratch share rows in its class shares
+//! (`Galaxy::from_params_for_binary_refit`), so that the field the census's records come from does
+//! not read the rows the task fits (plan 15's lean of 2026-11-01).
 //!
 //! # A sampler
 //!
@@ -90,22 +92,22 @@ pub const AWD_VERSION: u32 = 0;
 /// The accreting white dwarfs' block's items, in its order: each side's sampler, then each side's
 /// share row.
 pub const AWD_ITEMS: [&str; 16] = [
-    "AWD_FAST_RESIDUALS_27",
-    "AWD_FAST_NODE_RESIDUALS_27",
-    "AWD_FAST_MEDIAN_SPANS_27",
-    "AWD_FAST_MEDIANS_27",
-    "AWD_FAST_LIMITS_27",
-    "AWD_FAST_DONOR_KINDS_27",
-    "AWD_SLOW_RESIDUALS_27",
-    "AWD_SLOW_NODE_RESIDUALS_27",
-    "AWD_SLOW_MEDIAN_SPANS_27",
-    "AWD_SLOW_MEDIANS_27",
-    "AWD_SLOW_LIMITS_27",
-    "AWD_SLOW_DONOR_KINDS_27",
-    "AWD_FAST_HOSTS_PER_FORMED_MASS_27",
-    "AWD_FAST_LAYER_SHARES_27",
-    "AWD_SLOW_HOSTS_PER_FORMED_MASS_27",
-    "AWD_SLOW_LAYER_SHARES_27",
+    "AWD_FAST_RESIDUALS_29",
+    "AWD_FAST_NODE_RESIDUALS_29",
+    "AWD_FAST_MEDIAN_SPANS_29",
+    "AWD_FAST_MEDIANS_29",
+    "AWD_FAST_LIMITS_29",
+    "AWD_FAST_DONOR_KINDS_29",
+    "AWD_SLOW_RESIDUALS_29",
+    "AWD_SLOW_NODE_RESIDUALS_29",
+    "AWD_SLOW_MEDIAN_SPANS_29",
+    "AWD_SLOW_MEDIANS_29",
+    "AWD_SLOW_LIMITS_29",
+    "AWD_SLOW_DONOR_KINDS_29",
+    "AWD_FAST_HOSTS_PER_FORMED_MASS_29",
+    "AWD_FAST_LAYER_SHARES_29",
+    "AWD_SLOW_HOSTS_PER_FORMED_MASS_29",
+    "AWD_SLOW_LAYER_SHARES_29",
 ];
 
 /// The bands a census runs: the three whose primaries can make a class's member.
@@ -126,7 +128,7 @@ const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 
 /// The generator version the fingerprints' galaxy is built at: the refit's, the manifests'
 /// (a test holds the four manifests to it).
-const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(28);
+const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
 /// The fingerprints' galaxy: the Milky Way fixture of [`FINGERPRINT_SEED`] at
 /// [`FINGERPRINT_VERSION`], with the binary classes' scratch share rows, as a census galaxy is
@@ -900,7 +902,7 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
     for (side, sampler) in fit.samplers.iter().enumerate() {
         let (prefix, name) = (SIDES[side], SIDE_NAMES[side]);
         items.push(TableItem::Nested {
-            name: format!("AWD_{prefix}_RESIDUALS_27"),
+            name: format!("AWD_{prefix}_RESIDUALS_29"),
             doc: vec![
                 format!("The {name} accreting white dwarfs' marks' residual quantiles at the ranks k ÷ 16 over all their"),
                 "members, in [`AwdMark`]'s order, each in its mark's unit.".to_owned(),
@@ -908,7 +910,7 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
             rows: sampler.marks.iter().map(|m| m.residual.to_vec()).collect(),
         });
         items.push(static_rows(
-            &format!("AWD_{prefix}_NODE_RESIDUALS_27"),
+            &format!("AWD_{prefix}_NODE_RESIDUALS_29"),
             &[
                 format!("The {name} accreting white dwarfs' marks' residual laws at their medians' 17 nodes: each mark's"),
                 "17 rows in [`AwdMark`]'s order, each row its node's quantiles at the ranks k ÷ 16; the".to_owned(),
@@ -917,7 +919,7 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
             &sampler.marks.iter().flat_map(FittedMark::node_rows).collect::<Vec<_>>(),
         ));
         items.push(TableItem::Tuples {
-            name: format!("AWD_{prefix}_MEDIAN_SPANS_27"),
+            name: format!("AWD_{prefix}_MEDIAN_SPANS_29"),
             doc: vec![
                 format!("The {name} accreting white dwarfs' marks' medians' spans of their conditions, first and last"),
                 "node, in [`AwdMark`]'s order; the recurrence's, which is unconditional, is not read.".to_owned(),
@@ -925,7 +927,7 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
             rows: sampler.marks.iter().map(|m| vec![m.span.0, m.span.1]).collect(),
         });
         items.push(TableItem::Nested {
-            name: format!("AWD_{prefix}_MEDIANS_27"),
+            name: format!("AWD_{prefix}_MEDIANS_29"),
             doc: vec![
                 format!("The {name} accreting white dwarfs' marks' medians at their 17 nodes, in [`AwdMark`]'s order;"),
                 "the recurrence's is zero.".to_owned(),
@@ -933,14 +935,14 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
             rows: sampler.marks.iter().map(|m| m.median.to_vec()).collect(),
         });
         items.push(TableItem::Tuples {
-            name: format!("AWD_{prefix}_LIMITS_27"),
+            name: format!("AWD_{prefix}_LIMITS_29"),
             doc: vec![format!(
                 "The {name} accreting white dwarfs' marks' least and greatest values, in [`AwdMark`]'s order."
             )],
             rows: sampler.marks.iter().map(|m| vec![m.limits.0, m.limits.1]).collect(),
         });
         items.push(TableItem::Array {
-            name: format!("AWD_{prefix}_DONOR_KINDS_27"),
+            name: format!("AWD_{prefix}_DONOR_KINDS_29"),
             doc: vec![format!(
                 "The {name} accreting white dwarfs' donors' kinds' shares, in [`AwdDonorKind`]'s order."
             )],
@@ -950,14 +952,14 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
     for (side, row) in fit.rows.iter().enumerate() {
         let (prefix, name) = (SIDES[side], SIDE_NAMES[side]);
         items.push(TableItem::Array {
-            name: format!("AWD_{prefix}_HOSTS_PER_FORMED_MASS_27"),
+            name: format!("AWD_{prefix}_HOSTS_PER_FORMED_MASS_29"),
             doc: vec![format!(
                 "The {name} accreting white dwarfs' hosts per solar mass formed, M☉⁻¹, by population in [`POPULATIONS`]' order."
             )],
             values: row.hosts_per_formed_mass.to_vec(),
         });
         items.push(TableItem::Array {
-            name: format!("AWD_{prefix}_LAYER_SHARES_27"),
+            name: format!("AWD_{prefix}_LAYER_SHARES_29"),
             doc: vec![format!(
                 "The share of the {name} accreting white dwarfs' hosts whose primary lies in each layer, A–E."
             )],
@@ -972,9 +974,9 @@ fn awd_items(fit: &AwdFit) -> Vec<TableItem> {
 pub fn render_awd(fit: &AwdFit) -> RustTable {
     RustTable {
         summary: vec![
-            "The accreting white dwarfs' samplers and share rows fitted against plan 11's engine at"
+            "The accreting white dwarfs' samplers and share rows refitted against plan 11's engine at"
                 .to_owned(),
-            "generator version 27 (plan 15, P15.T10.b), held until 27 (`catalogue_classes::binary`'s hold)."
+            "generator version 29 on the generator's own pairs (plan 15, P15.T10.b), held until 29."
                 .to_owned(),
         ],
         notes: awd_notes(fit),
@@ -988,7 +990,7 @@ fn awd_notes(fit: &AwdFit) -> Vec<String> {
     let p = &fit.params;
     let text = format!(
         "\
-Read by `AWD_FAST_SAMPLER_27`, `AWD_SLOW_SAMPLER_27` and `CLASS_SHARES_27`, after the block. Each
+Read by `AWD_FAST_SAMPLER_29`, `AWD_SLOW_SAMPLER_29` and `CLASS_SHARES_29`, after the block. Each
 class's marks are fitted to its own members of the engine near the solar circle at generator
 version {version}'s rules (hyperion-fit's `tasks::binary_classes`): a median that follows the
 mark's condition on 17 nodes, the weighted median under a triangle two node spacings wide, the
@@ -1193,9 +1195,9 @@ mod tests {
             let error = AwdParams::of(&manifest(|t| t.replacen(from, to, 1))).unwrap_err();
             assert!(error.to_string().contains(key), "{from} → {to}: {error}");
         };
-        assert_eq!(params.census.version, GeneratorVersion::new(28));
+        assert_eq!(params.census.version, GeneratorVersion::new(29));
         refused(
-            "generator_version = 28",
+            "generator_version = 29",
             "generator_version = 23",
             "generator_version",
         );

@@ -74,7 +74,9 @@ use self::shares::ShareMatrix;
 use self::snr::WindowCaps;
 use self::substellar::{SubstellarAbundance, SubstellarParams};
 use crate::coords::GalacticPosition;
-use crate::tables::binary::{CLASS_SHARES, ClassShareTable};
+#[cfg(doc)]
+use crate::tables::binary::CLASS_SHARES;
+use crate::tables::binary::ClassShareTable;
 use crate::units::SolarMasses;
 use crate::{GENERATOR_VERSION, Seed};
 
@@ -421,6 +423,11 @@ impl Galaxy {
              `Galaxy::from_params_with_rules`"
         );
         debug_assert_eq!(
+            rules.binary_tables, self.rules.binary_tables,
+            "the binary class tables' shares are read when a galaxy is built: build it under the \
+             new rules with `Galaxy::from_params_with_rules`"
+        );
+        debug_assert_eq!(
             rules.displaced, self.rules.displaced,
             "the displaced classes' arm is read when a galaxy is built: build it under the new \
              rules with `Galaxy::from_params_with_rules`"
@@ -455,11 +462,11 @@ impl Galaxy {
         params: GalaxyParams,
         rules: GalaxyRules,
     ) -> Result<Self, BuildGalaxyError> {
-        Self::build_with_class_shares(seed, params, rules, &CLASS_SHARES)
+        Self::build_with_class_shares(seed, params, rules, rules.binary_tables.class_shares())
     }
 
     /// [`build`](Self::build) with the share matrix's class shares from `class_shares`
-    /// ([`CLASS_SHARES`], or the census galaxy's scratch rows).
+    /// (the rules' fitted rows, [`CLASS_SHARES`] below 29, or the census galaxy's scratch rows).
     ///
     /// This is the one `match` on the displaced classes (P08.T12.a; [`DisplacedRules`], E4′ of
     /// decision-stellar-holds, lean of 2026-10-31). The field galaxy is built first. The class

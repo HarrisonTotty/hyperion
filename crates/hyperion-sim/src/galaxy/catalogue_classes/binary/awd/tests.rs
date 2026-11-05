@@ -26,7 +26,9 @@ use crate::galaxy::placement;
 use crate::id::SystemId;
 use crate::stellar::binary::BinaryClass;
 use crate::stellar::binary::scan::{engine_calls, scan_cell};
-use crate::tables::binary::MILKY_WAY_FORMED_MASS;
+use crate::tables::binary::{
+    AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, CLASS_SHARES, MILKY_WAY_FORMED_MASS,
+};
 use crate::time::{SourceHorizon, UniverseTime};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
