@@ -151,6 +151,12 @@ export class ViewsProbe implements EngineProbe {
   /** The timestamp of the animation frame whose callback is running, or `null` between them. */
   #frameMs: number | null = null;
   readonly #frames = new Map<number, FrameEntry>();
+  /**
+   * The timestamps of the frames each view drew in, in order, for {@link ViewsProbe.drawTimes}
+   * (lane perf-render-thread-ground): the frame profile asks for its draws four times a second, and
+   * a filter over every frame kept took the main thread 5 to 24 ms a draw by a run's end.
+   */
+  readonly #drawsByView = new Map<string, number[]>();
   readonly #resolves = new Map<string, ResolveEntry>();
   readonly #times = new Map<string, PassTimes>();
   readonly #allocations: TimedAllocation[] = [];
@@ -241,10 +247,14 @@ export class ViewsProbe implements EngineProbe {
       return;
     }
     const frame = this.#frameAt(frameMs);
-    const part = frame.views.get(view) ?? { submitMs: 0, resolves: [] };
+    const known = frame.views.get(view);
+    const part = known ?? { submitMs: 0, resolves: [] };
     part.submitMs += cpuMs;
     part.resolves.push(...keys);
     frame.views.set(view, part);
+    if (known === undefined) {
+      this.#drawOf(view, frameMs);
+    }
   }
 
   dispatched(kernel: string, workgroups: number | null, pass: string | undefined): void {
@@ -323,10 +333,8 @@ export class ViewsProbe implements EngineProbe {
 
   /** The timestamps of the animation frames from `startMs` up to `endMs` in which `view` drew, in order. */
   drawTimes(view: string, startMs: number, endMs: number): number[] {
-    return [...this.#frames.values()]
-      .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs && frame.views.has(view))
-      .map((frame) => frame.atMs)
-      .toSorted((a, b) => a - b);
+    const draws = this.#drawsByView.get(view) ?? [];
+    return draws.slice(firstAtOrAfter(draws, startMs), firstAtOrAfter(draws, endMs));
   }
 
   sized(owner: string, kind: "view" | "target", size: ViewSize): void {
@@ -621,6 +629,19 @@ export class ViewsProbe implements EngineProbe {
     return `${String(this.#generation)}/${String(resolve)}`;
   }
 
+  /** Notes that `view` drew in the frame at `frameMs`, its times kept in order. */
+  #drawOf(view: string, frameMs: number): void {
+    let draws = this.#drawsByView.get(view);
+    if (draws === undefined) {
+      draws = [];
+      this.#drawsByView.set(view, draws);
+    }
+    const at = firstAtOrAfter(draws, frameMs);
+    if (draws[at] !== frameMs) {
+      draws.splice(at, 0, frameMs);
+    }
+  }
+
   #frameAt(atMs: number): FrameEntry {
     const known = this.#frames.get(atMs);
     if (known !== undefined) {
@@ -695,4 +716,19 @@ export function faultLine(fault: GraphicsFault): string {
       break;
   }
   return line;
+}
+
+/** The index of the first of the ascending `times` at or after `atMs`: `times.length` with none. */
+function firstAtOrAfter(times: ReadonlyArray<number>, atMs: number): number {
+  let low = 0;
+  let high = times.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if ((times[mid] ?? Number.POSITIVE_INFINITY) < atMs) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
 }

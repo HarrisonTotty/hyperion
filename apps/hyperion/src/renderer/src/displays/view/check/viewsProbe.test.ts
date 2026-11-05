@@ -420,6 +420,30 @@ describe("the views probe", () => {
     expect(probe.window(0, 200, [{ name: "view", style: "wireframe" }])).toEqual(window);
   });
 
+  it("gives each view's draws within a window, each frame once, from its own times (lane perf-render-thread-ground)", async () => {
+    const { probe, page, engine } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const instrument = engine.createView(document.createElement("canvas"), "instrument-1");
+    for (let k = 0; k < 40; k += 1) {
+      inFrame(page, 100 + 16 * k, () => {
+        if (k % 2 === 0) {
+          primary.render(frame("tonemap"));
+          primary.render(frame("tonemap"));
+        }
+        if (k % 3 === 0) {
+          instrument.render(frame("tonemap"));
+        }
+      });
+    }
+    expect([
+      probe.drawTimes("view", 0, Number.POSITIVE_INFINITY).length,
+      probe.drawTimes("view", 132, 228),
+      probe.drawTimes("instrument-1", 148, 244),
+      probe.drawTimes("instrument-1", 244, 244),
+      probe.drawTimes("nothing", 0, 1_000),
+    ]).toEqual([20, [132, 164, 196], [148, 196], [], []]);
+  });
+
   it("summarises a window of more resolves than an argument list takes (a terrain run's minutes)", async () => {
     const { probe, page } = await probed();
     // Two hundred renders of a thousand resolves each: some 10⁵ resolves in a window, as a
