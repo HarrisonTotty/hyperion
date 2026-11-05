@@ -47,11 +47,16 @@ import {
   CLUSTER_CULL_OCCLUSION_KERNEL,
   CULL_INPUT_WHOLE,
   cullMarksTwin,
+  cullOverTwin,
   cullTwin,
   NO_MARK,
 } from "../clusters/cull";
 import { type CameraCullPass, type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
-import { CLUSTER_FLAG_MAY_DISCARD, type ClusterRecord } from "../clusters/record";
+import {
+  CLUSTER_FLAG_MAY_DISCARD,
+  CLUSTER_FLAG_MEASURED,
+  type ClusterRecord,
+} from "../clusters/record";
 import {
   TERRAIN_CLUSTERS_PER_PAGE,
   TERRAIN_MASK_LEVELS,
@@ -64,6 +69,7 @@ import {
   edgeBandMOfHalf,
   INSTANCE_FINEST,
   NO_STRIDE_BAND,
+  NO_STRIDE_SCALE,
   type StrideScale,
   strideNeedM,
 } from "../clusters/strides";
@@ -118,6 +124,7 @@ import {
   cascadeHorizonTexelM,
   BAND_SLEW_PER_STEP,
   castsInto,
+  effectiveTauPx,
   meanRadiusM,
   morphRangeM,
   TerrainPass,
@@ -551,6 +558,11 @@ function parseLitPass(words: Uint32Array | Float32Array, index: number): CameraC
     horizon: f(28) > 0 ? { axis: vec(112), planeM: f(24), sin: f(28), cos: f(124) } : null,
     order: "ordered",
   };
+}
+
+/** The copies of the cull's counts of strides past τ′ `made` has dispatched (plan R14, R14.T3.e). */
+function overCopies(made: Made): number {
+  return made.engine.dispatched.filter((d) => d.kernel === "cluster over counts").length;
 }
 
 /** The high setting's geometry with every cascade rendered every frame (plan R14, R14.T6.b). */
@@ -2188,6 +2200,274 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     expect([finest.some(Boolean), finest.every(Boolean)]).toEqual([true, false]);
     // Its scale stands: its vertices still morph, held at the contact as the CDLOD morph is.
     expect(stridesOf(made).every(({ strideScale }) => strideScale.perErrorM > 0)).toBe(true);
+  });
+
+  describe("the triangle budget and the count of strides past τ′ (plan R14, R14.T3.e)", () => {
+    const BUDGETED: GeometrySettings = { ...STRIDED, terrainBudget: "triangles" };
+    /** The lit cull's `CullParams` word that names the arguments' first count of strides past τ′. */
+    const overWordOf = (made: Made): number => {
+      const params = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL)?.bindings
+        .uniforms["params"];
+      return params === undefined ? Number.NaN : (new Uint32Array(params.buffer)[55] ?? Number.NaN);
+    };
+    const litToleranceOf = (made: Made): number =>
+      parseLitPass(
+        made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL)?.bindings.uniforms[
+          "passes"
+        ] ?? new Uint32Array(),
+        5,
+      ).toleranceRad;
+
+    it("counts its strides past τ′ in the lit pass's cull wherever the strides are on, whatever the budget, at the view's τ′ over its px per radian, copying the counts back every frame, and nothing with the strides off (research-leans-42)", async () => {
+      const made = await measuredPass();
+      const counted = (): [boolean, boolean, number] => {
+        const copies = overCopies(made);
+        made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+        const { viewport, fovXRad } = frameOf(NEAR, true).view;
+        // Design note 3's τ′, unslewed: the view's τ, raised where the budget binds.
+        const tauPrimePx = effectiveTauPx(
+          TERRAIN_SETTINGS.high.tauPx,
+          made.pass.lastStep?.selection.limitExcess ?? Number.NaN,
+          1,
+        );
+        const tauRad = (2 * Math.tan(fovXRad / 2) * tauPrimePx) / viewport.widthPx;
+        return [
+          overWordOf(made) > 0,
+          Math.abs(litToleranceOf(made) / tauRad - 1) < 1e-6,
+          overCopies(made) - copies,
+        ];
+      };
+      const patches = counted();
+      made.pass.setGeometry(BUDGETED);
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+      const triangles = counted();
+      made.pass.setGeometry(SETTINGS.high.geometry);
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+      made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+      expect([patches, triangles, [overWordOf(made), litToleranceOf(made)]]).toEqual([
+        [true, true, 1],
+        [true, true, 1],
+        [0, 0],
+      ]);
+    });
+
+    /**
+     * The twin's count of strides the lit pass drew past its τ′ in `made`'s last frame, from the
+     * frame's dispatch, instance records, cull inputs and slots' cluster records.
+     */
+    function twinPastOf(made: Made): number {
+      const cull = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL) ?? fail();
+      const lit = parseLitPass(cull.bindings.uniforms["passes"] ?? new Uint32Array(), 5);
+      const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+      const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+      const per = INSTANCE_RECORD_BYTES / 4;
+      const strides = stridesOf(made);
+      const records = clusterRecordsOf(made.engine);
+      // The records' measured errors, e₁ to e₈ in half floats, beside their places.
+      const errorsBySlot = new Map<number, DataView>();
+      for (const write of made.engine.writes) {
+        if (write.buffer === "terrain cluster records") {
+          errorsBySlot.set(
+            write.offsetBytes / (TERRAIN_PAGE_CLUSTERS * 32),
+            new DataView(write.data.slice().buffer),
+          );
+        }
+      }
+      // The dispatch's instances alone, a workgroup each.
+      const count = Array.isArray(cull.workgroups) ? (cull.workgroups[0] ?? 0) : 0;
+      const counts = cullOverTwin({
+        instances: instanceOrigins(made.engine, `terrain interior instances (${PRIMARY})`)
+          .slice(0, count)
+          .map(({ originM, page }, n) => ({
+            originM,
+            page,
+            passMask: (inputs[2 * n] ?? 0) & ~CULL_INPUT_WHOLE,
+            unitM: f32Of(inputs[2 * n + 1] ?? 0),
+            whole: ((inputs[2 * n] ?? 0) & CULL_INPUT_WHOLE) !== 0,
+            subWord: words[per * n + 8] ?? 0,
+            quadrantWord: strides[n]?.quadrant ?? 0,
+            holdFadesWord: words[per * n + 14] ?? 0,
+            strideScale: strides[n]?.strideScale ?? NO_STRIDE_SCALE,
+            edgeBandsM: Float64Array.from(strides[n]?.edges ?? []),
+          })),
+        records: (page, cluster) => {
+          const record = records(page, cluster);
+          const view = errorsBySlot.get(page);
+          const at = cluster * 32;
+          const flags = view?.getUint32(at + 28, true) ?? 0;
+          if (view === undefined || (flags & CLUSTER_FLAG_MEASURED) === 0) {
+            return record;
+          }
+          const x = view.getUint32(at + 16, true);
+          const y = view.getUint32(at + 20, true);
+          return { ...record, strideErrorBits: [x & 0xffff, x >>> 16, y & 0xffff, y >>> 16] };
+        },
+        clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
+        rotationColumns: [
+          { x: 1, y: 0, z: 0 },
+          { x: 0, y: 1, z: 0 },
+          { x: 0, y: 0, z: 1 },
+        ],
+        passes: [null, null, null, null, null, lit],
+        places: Array.from({ length: 6 }, (_, k) => ({ bucketBase: TEMPLATES * k, listBase: 0 })),
+        templates: TEMPLATES,
+        viewAxis: { x: 0, y: 0, z: -1 },
+      });
+      return counts.get(5) ?? 0;
+    }
+
+    it("under the patches' budget with the strides on, states DETAIL LIMITED while a tightened τ′ leaves the strides, a slew behind it, past it, and clears once they catch up (research-leans-42)", async () => {
+      // Rough ground, e₂ to e₈ of 2 to 8 m, so that a stride's own error is not lost in E_L's.
+      const rough = new Float16Array(4 * TERRAIN_CLUSTERS_PER_PAGE);
+      for (let c = 0; c < TERRAIN_CLUSTERS_PER_PAGE; c += 1) {
+        rough.set([0, 2, 4, 8], 4 * c);
+      }
+      const made = await measuredPass(rough);
+      // At lax tolerances, so that the selection's budget binds nowhere and states nothing.
+      const at = (tauPx: number): TerrainPassView => ({ ...passView(PRIMARY, NEAR), tauPx });
+      // The bands slew 2% a step: from the pass's 1 px to 16 px in some 140 steps.
+      const settleBands = (tauPx: number): void => {
+        for (let n = 0; n < 400 && (n === 0 || !made.pass.bandsAtTarget(PRIMARY)); n += 1) {
+          made.pass.step({ views: [at(tauPx)], grounded: [] });
+          made.lane().bakeDemand(made.pass);
+          made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+        }
+      };
+      settleBands(16);
+      // The device's counts as the twin made them of the latest frame drawn, as each read comes back.
+      let answer = 0;
+      vi.spyOn(made.engine, "readBuffer").mockImplementation(() =>
+        Promise.resolve().then(() => {
+          const words = new Uint32Array(8);
+          words[5] = answer;
+          return words.buffer;
+        }),
+      );
+      // A step and its frame, the twin's count of it read back by the next frame's copy, and the
+      // conditions of the frame after, which reads it.
+      const frame = async (tauPx: number): Promise<[number, boolean]> => {
+        made.pass.step({ views: [at(tauPx)], grounded: [] });
+        made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+        answer = twinPastOf(made);
+        made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+        await Promise.resolve();
+        await Promise.resolve();
+        const conditions = made.pass.drawFor(PRIMARY, frameOf(NEAR, true)).conditions;
+        return [answer, conditions.detailLimited];
+      };
+      const steady = await frame(16);
+      // τ′ halves at once; the strides' scale follows it 2% a step.
+      const [past, limited] = await frame(8);
+      settleBands(8);
+      const caught = await frame(8);
+      expect([steady, past > 0, limited, caught, made.pass.lastStep?.selection.limited]).toEqual([
+        [0, false],
+        true,
+        true,
+        [0, false],
+        false,
+      ]);
+    });
+
+    it("states DETAIL LIMITED once a count of strides past τ′ comes back above 0, and not while it is 0", async () => {
+      const made = await measuredPass();
+      made.pass.setGeometry(BUDGETED);
+      // At a lax τ, so that the budget does not bind and the selection alone states nothing.
+      const lax = { ...passView(PRIMARY, NEAR), tauPx: 64 };
+      for (let n = 0; n < 4; n += 1) {
+        made.pass.step({ views: [lax], grounded: [] });
+      }
+      // The lit pass's counts, its own and its late pass's, as the copy reads them back.
+      const answer = new Uint32Array(8);
+      vi.spyOn(made.engine, "readBuffer").mockImplementation(() =>
+        Promise.resolve(answer.slice().buffer),
+      );
+      const limited = async (): Promise<boolean> => {
+        const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+        await Promise.resolve();
+        await Promise.resolve();
+        return frame.conditions.detailLimited;
+      };
+      const before = [await limited(), await limited()];
+      answer[5] = 3;
+      await limited();
+      const after = await limited();
+      answer[5] = 0;
+      await limited();
+      expect([made.pass.lastStep?.selection.limited, before, after, await limited()]).toEqual([
+        false,
+        [false, false],
+        true,
+        false,
+      ]);
+    });
+
+    it("makes its counts' kernel and ring again after a restore, and counts as a fresh pass does (Design note 16)", async () => {
+      const made = await measuredPass();
+      made.pass.setGeometry(BUDGETED);
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+      made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+      const kernels = (): number =>
+        made.engine.kernelPairs.filter((pair) => pair.name === "cluster over counts").length;
+      const before = kernels();
+      const created: string[] = [];
+      const off = made.engine.onAllocation((event) => {
+        if (event.kind === "created") {
+          created.push(event.name);
+        }
+      });
+      made.engine.loseDevice();
+      made.engine.restore();
+      await made.pass.ready();
+      made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+      made.lane().clusterErrors = ERRORS;
+      stream(made, [passView(PRIMARY, NEAR)], 24);
+      made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+      off();
+      const fresh = await measuredPass();
+      fresh.pass.setGeometry(BUDGETED);
+      fresh.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+      fresh.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+      expect([
+        kernels() > before,
+        created.includes(`terrain clusters (${PRIMARY}) over counts 1`),
+        overWordOf(made),
+        litToleranceOf(made),
+      ]).toEqual([true, true, overWordOf(fresh), litToleranceOf(fresh)]);
+    });
+
+    it("counts nothing on the low setting, which states DETAIL LIMITED wherever it draws lit terrain", async () => {
+      const made = await litPass("low");
+      made.pass.setReducedMotion(true);
+      made.pass.setGeometry(SETTINGS.low.geometry);
+      made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+      made.lane().clusterErrors = ERRORS;
+      for (let n = 0; n < 24; n += 1) {
+        made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+        made.lane().bakeDemand(made.pass);
+      }
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+      const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+      expect([
+        SETTINGS.low.geometry.terrainBudget,
+        made.engine.dispatched.some((d) => d.kernel === LIT_CULL),
+        overWordOf(made),
+        overCopies(made),
+        frame.conditions.detailLimited,
+      ]).toEqual(["triangles", true, 0, 0, true]);
+    });
+
+    it("selects as the patches' budget alone at the setting's held cache, one view's patches each within a whole grid", async () => {
+      const made = await measuredPass();
+      const selection = (): [string[], boolean | undefined] => [
+        [...(made.pass.lastStep?.selection.patches.keys() ?? [])],
+        made.pass.lastStep?.selection.limited,
+      ];
+      const patches = selection();
+      made.pass.setGeometry(BUDGETED);
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
+      expect(selection()).toEqual(patches);
+    });
   });
 });
 

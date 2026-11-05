@@ -260,6 +260,8 @@ export interface GeometryOverride {
   readonly occlusion?: "off" | "hzb";
   /** R14.T2: the lit pass's interior patches shaded forward, or by the visibility buffer. */
   readonly shading?: "forward" | "visibility";
+  /** R14.T3.e: the lit pass's selection budget, its patches alone or its lit triangles too. */
+  readonly terrainBudget?: "patches" | "triangles";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

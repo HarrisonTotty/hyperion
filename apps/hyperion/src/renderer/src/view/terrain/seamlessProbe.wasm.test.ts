@@ -34,6 +34,7 @@ import {
   clusterStrideBandsM,
   EDGE_BANDS,
   edgeBandMOfHalf,
+  INSTANCE_FINEST,
   largestStrideErrorsM,
   NO_STRIDE_BAND,
   STRIDE_BAND_FRACTION,
@@ -79,6 +80,7 @@ import { type BodyFigure, type PlanetGeometry, spheroidNormal, surfacePoint } fr
 import {
   FLIP_S,
   isDrawnHalving,
+  percentile,
   POP_NORMAL_DEG,
   POP_PX,
   type SeamChainLink,
@@ -177,6 +179,14 @@ import type { WorkerLike } from "./workers/pool";
  *   drawn into a depth `SEAM_OCCLUSION_SCALE` (4) times coarser a side than the view's, and the rest
  *   tested against its pyramid by the occlusion's twin: those it refuses, and those the late raster
  *   draws, counted. Off by default.
+ * - `SEAM_COUNTS=1` (plan R14, R14.T3.e): every `SEAM_COUNT_STRIDE`th frame (4) the budget's
+ *   counts ({@link BudgetFrames}): the patches selected and drawn, the lit triangles the drawn
+ *   blocks and strips draw at the strides the cull's twin gives them and at stride 1 beside the
+ *   triangle budget's reckoning, the cache's slots in use and pinned, the bakes answered and the
+ *   demand, and the step's and the draw's wall time (pod). `SEAM_CACHE_SCALE` (1) multiplies the
+ *   lit cache's bytes (`TerrainSessionOptions.litTerrain`), its slots and so `maxPatches` with
+ *   them; and `SEAM_BUDGET` (`patches` or `triangles`) is the passes'
+ *   `GeometrySettings.terrainBudget`, the setting's unset.
  */
 const SLOW = import.meta.env["HYPERION_SLOW_TESTS"] === "1";
 
@@ -238,6 +248,11 @@ const STRIDE_WINDOW: StrideWindow = {
 const OCCLUDED = knob("SEAM_OCCLUSION") === "hzb";
 const OCCLUSION_STRIDE = Math.max(1, Math.round(numberKnob("SEAM_OCCLUSION_STRIDE", 4)));
 const OCCLUSION_SCALE = Math.max(1, numberKnob("SEAM_OCCLUSION_SCALE", 4));
+const COUNTS = knob("SEAM_COUNTS") === "1";
+const COUNT_STRIDE = Math.max(1, Math.round(numberKnob("SEAM_COUNT_STRIDE", 4)));
+const CACHE_SCALE = Math.max(0.1, numberKnob("SEAM_CACHE_SCALE", 1));
+const BUDGET_KNOB = knob("SEAM_BUDGET");
+const BUDGET = BUDGET_KNOB === "patches" || BUDGET_KNOB === "triangles" ? BUDGET_KNOB : null;
 
 /** The settings the slow run plays: `SEAM_SETTING`'s alone, or both. */
 function settingsPlayed(): QualitySetting[] {
@@ -1479,6 +1494,317 @@ function mergeStrideSummaries(parts: ReadonlyArray<StrideSummary>): StrideSummar
   );
 }
 
+/** One counted frame of the budget's counts (plan R14, R14.T3.e): see {@link BudgetFrames}. */
+interface BudgetFrame {
+  readonly tS: number;
+  /** The camera's height above the datum, m. */
+  readonly altitudeM: number;
+  /** Patches selected that the view sees, and patches drawn, standing in and missing. */
+  readonly selected: number;
+  readonly drawn: number;
+  readonly standingIn: number;
+  readonly missing: number;
+  readonly limitExcess: number;
+  /**
+   * The lit triangles of the drawn instances' blocks and skirt strips on screen, 8,704 a whole patch
+   * at stride 1 as the triangle budget counts them: at the strides the cull's twin gives a whole
+   * patch on the path, stride 1 for the rest; and all at stride 1. Those of the instances drawn at
+   * stride 1 throughout (the forced region's, kept whole, a sub-patch, unmeasured, or the lit
+   * mesh's) are `litAtStride1Only`.
+   */
+  readonly litTriangles: number;
+  readonly litTrianglesAtStride1: number;
+  readonly litAtStride1Only: number;
+  /**
+   * The primary view's lit triangles as the triangle budget reckoned its last selection
+   * (`Selection.litTriangles`), `NaN` without a budget.
+   */
+  readonly reckonedTriangles: number;
+  /** The cache's slots: in use, pinned (the forced region, and the selection's chain and draws). */
+  readonly slots: number;
+  readonly usedSlots: number;
+  readonly pinnedForced: number;
+  readonly pinnedDrawn: number;
+  /** Bakes answered since the run began, and the selection's demand (patches it asks baked). */
+  readonly bakesAnswered: number;
+  readonly demand: number;
+  /** The step's and the primary view's draw's wall time this frame, ms (pod). */
+  readonly stepMs: number;
+  readonly drawMs: number;
+}
+
+/** A lit-mesh template's triangles a skirt strip at stride 1 (`clusters/templates.ts`): 16 ÷ s at s. */
+const STRIP_TRIANGLES = 16;
+
+/**
+ * Strip `c` (64 to 95) of a page: its edge in `gpu/resources.ts`' numbering (0 y = 0, 1 x = 64,
+ * 2 y = 64, 3 x = 0, anticlockwise), and the grid vertex at its middle.
+ */
+function stripOf(c: number): { readonly edge: number; readonly x: number; readonly y: number } {
+  const edge = Math.floor((c - 64) / 8);
+  const m = (c - 64) % 8;
+  const along = 8 * m + 4;
+  const back = 8 * (7 - m) + 4;
+  switch (edge) {
+    case 0:
+      return { edge, x: along, y: 0 };
+    case 1:
+      return { edge, x: 64, y: along };
+    case 2:
+      return { edge, x: back, y: 64 };
+    default:
+      return { edge, x: 0, y: back };
+  }
+}
+
+/**
+ * The budget's counts (`SEAM_COUNTS=1`; plan R14, R14.T3.e's draft): each counted frame's patches,
+ * lit triangles, cache and bakes. A drawn instance's blocks and strips are counted where their
+ * centres fall on screen ({@link onScreen}), each at the stride the cull's twin gives it where the
+ * instance is a whole patch on the cluster path with measured errors and a scale, as
+ * {@link StrideFrames} counts them, and at stride 1 otherwise: a mask one to three levels down its
+ * own blocks and its strips along its set's sides (`terrainMaskCluster`), one drawn by the lit mesh
+ * or deeper its whole grid where any block of its area is on screen.
+ */
+class BudgetFrames {
+  readonly frames: BudgetFrame[] = [];
+
+  frame(
+    planet: PlanetGeometry,
+    cam: FrameCamera,
+    records: SlotRecords,
+    drawn: ReadonlyMap<string, DrawnInstance>,
+    figures: Omit<
+      BudgetFrame,
+      "altitudeM" | "litTriangles" | "litTrianglesAtStride1" | "litAtStride1Only"
+    >,
+  ): void {
+    const { figure } = planet;
+    const pass = { strideCap: 8 } as const;
+    let litTriangles = 0;
+    let litTrianglesAtStride1 = 0;
+    let litAtStride1Only = 0;
+    for (const inst of drawn.values()) {
+      const { slot } = inst;
+      const origin = inst.held.bake.originM;
+      const own = inst.held.bake.clusterErrors;
+      const masked = inst.onPath && inst.levels >= 1 && inst.levels <= 3;
+      const side = inst.levels <= 3 ? 8 >> inst.levels : 1;
+      const b0x =
+        inst.levels <= 3 ? inst.partI * side : Math.floor((8 * inst.partI) / 2 ** inst.levels);
+      const b0y =
+        inst.levels <= 3 ? inst.partJ * side : Math.floor((8 * inst.partJ) / 2 ** inst.levels);
+      const strided =
+        inst.onPath && inst.levels === 0 && own !== undefined && inst.strideScale.perErrorM > 0;
+      const recordOf = (_page: number, c: number): ClusterRecord =>
+        c < 64
+          ? {
+              centreM: vec3(0, 0, 0),
+              radiusM: 0,
+              mode: "strided",
+              strideErrorBits: own === undefined ? null : errorBitsOf(own, c),
+              templateRef: 8 * (c % 8) + ((8 * Math.floor(c / 8)) << 8),
+              shape: "terrain-block",
+              mayDiscard: false,
+              material: 0,
+            }
+          : {
+              centreM: vec3(0, 0, 0),
+              radiusM: 0,
+              mode: "strided",
+              strideErrorBits: own === undefined ? null : errorBitsOf(own, c),
+              templateRef: stripOf(c).edge << 16,
+              shape: "terrain-skirt",
+              mayDiscard: false,
+              material: 0,
+            };
+      // The clusters it draws: a whole patch's 64 blocks and 32 strips, a mask's own blocks and its
+      // strips along its set's sides, or the one block of a deeper sub-patch's area.
+      const clusters: number[] = [];
+      for (let by = b0y; by < b0y + side; by += 1) {
+        for (let bx = b0x; bx < b0x + side; bx += 1) {
+          clusters.push(8 * by + bx);
+        }
+      }
+      if (inst.levels === 0) {
+        for (let c = 64; c < 96; c += 1) {
+          clusters.push(c);
+        }
+      } else if (masked) {
+        for (let c = 64; c < 96; c += 1) {
+          if ((c - 64) % 8 < side) {
+            clusters.push(c);
+          }
+        }
+      }
+      let seenBlocks = 0;
+      let instanceTriangles = 0;
+      let instanceAtStride1 = 0;
+      for (const c of clusters) {
+        const sphere = records.sphere(slot, c);
+        if (sphere === null) {
+          continue;
+        }
+        const centre = vec3(
+          origin.x + sphere.centreM.x - cam.positionM.x,
+          origin.y + sphere.centreM.y - cam.positionM.y,
+          origin.z + sphere.centreM.z - cam.positionM.z,
+        );
+        const place = c < 64 ? { x: 8 * (c % 8) + 4, y: 8 * Math.floor(c / 8) + 4 } : stripOf(c);
+        const up = spheroidNormal(figure, vertexDir(inst.held.key, place.x, place.y));
+        if (!onScreen(cam, centre, vec3(up[0], up[1], up[2]))) {
+          continue;
+        }
+        seenBlocks += c < 64 ? 1 : 0;
+        const level = strided
+          ? cameraPassStrideLevel(
+              {
+                kind: "camera",
+                planes: [],
+                horizon: null,
+                order: "ordered",
+                toleranceRad: 0,
+                ...pass,
+              },
+              { ...recordOf(slot, c), centreM: sphere.centreM, radiusM: sphere.radiusM },
+              c,
+              {
+                originM: vec3(0, 0, 0),
+                page: slot,
+                passMask: 0,
+                unitM: 0,
+                strideScale: inst.strideScale,
+                edgeBandsM: inst.edgeBandsM,
+                quadrantWord: inst.quadrantWord,
+                holdFadesWord: inst.holdFadesWord,
+              },
+              { records: recordOf, clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE },
+              centre,
+            )
+          : 0;
+        instanceTriangles +=
+          c < 64 ? BLOCK_TRIANGLES / (1 << level) ** 2 : STRIP_TRIANGLES / (1 << level);
+        instanceAtStride1 += c < 64 ? BLOCK_TRIANGLES : STRIP_TRIANGLES;
+      }
+      if (!inst.onPath || inst.levels > 3) {
+        // The lit mesh, or a deeper sub-patch's own grid, whole wherever any of it is on screen.
+        const whole = 64 * BLOCK_TRIANGLES + 32 * STRIP_TRIANGLES;
+        instanceTriangles = seenBlocks > 0 ? whole : 0;
+        instanceAtStride1 = instanceTriangles;
+      }
+      litTriangles += instanceTriangles;
+      litTrianglesAtStride1 += instanceAtStride1;
+      if (!strided || (inst.quadrantWord & INSTANCE_FINEST) !== 0) {
+        litAtStride1Only += instanceTriangles;
+      }
+    }
+    const r = norm(cam.positionM);
+    const datum =
+      r > 0
+        ? surfacePoint(figure, [cam.positionM.x / r, cam.positionM.y / r, cam.positionM.z / r], 0)
+        : ([0, 0, 0] as const);
+    this.frames.push({
+      ...figures,
+      altitudeM: r - Math.hypot(datum[0], datum[1], datum[2]),
+      litTriangles,
+      litTrianglesAtStride1,
+      litAtStride1Only,
+    });
+  }
+}
+
+/** The altitude bands the budget's counts are summarised in, m, as the counting harness's. */
+const BUDGET_BANDS: ReadonlyArray<{
+  readonly name: string;
+  readonly fromM: number;
+  readonly toM: number;
+}> = [
+  { name: "above 100 km", fromM: 1e5, toM: Infinity },
+  { name: "10-100 km", fromM: 1e4, toM: 1e5 },
+  { name: "1-10 km", fromM: 1e3, toM: 1e4 },
+  { name: "below 1 km", fromM: -Infinity, toM: 1e3 },
+  { name: "whole run", fromM: -Infinity, toM: Infinity },
+];
+
+/** A figure's mean, p95 and largest over frames, `null` for none. */
+function spreadOf(values: ReadonlyArray<number>): {
+  readonly mean: number;
+  readonly p95: number;
+  readonly max: number;
+} | null {
+  if (values.length === 0) {
+    return null;
+  }
+  let sum = 0;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const v of values) {
+    sum += v;
+    max = Math.max(max, v);
+  }
+  return { mean: sum / values.length, p95: percentile(values, 95) ?? max, max };
+}
+
+/** A run's budget's counts by altitude band (plan R14, R14.T3.e). */
+function budgetSummaryOf(frames: ReadonlyArray<BudgetFrame>): Record<string, unknown> {
+  return Object.fromEntries(
+    BUDGET_BANDS.flatMap(({ name, fromM, toM }) => {
+      const band = frames.filter((f) => f.altitudeM >= fromM && f.altitudeM < toM);
+      if (band.length === 0) {
+        return [];
+      }
+      const pick = (of: (f: BudgetFrame) => number): ReturnType<typeof spreadOf> =>
+        spreadOf(band.map(of));
+      // Bakes a second over the band's own spans of consecutive counted frames.
+      let bakes = 0;
+      let spanS = 0;
+      for (let n = 1; n < band.length; n += 1) {
+        const a = band[n - 1];
+        const b = band[n];
+        if (a !== undefined && b !== undefined && b.tS - a.tS < 0.5) {
+          bakes += b.bakesAnswered - a.bakesAnswered;
+          spanS += b.tS - a.tS;
+        }
+      }
+      const lit = band.reduce((sum, f) => sum + f.litTriangles, 0);
+      const at1 = band.reduce((sum, f) => sum + f.litTrianglesAtStride1, 0);
+      const reckoned = band.filter((f) => Number.isFinite(f.reckonedTriangles));
+      return [
+        [
+          name,
+          {
+            frames: band.length,
+            selected: pick((f) => f.selected),
+            drawn: pick((f) => f.drawn),
+            standingIn: pick((f) => f.standingIn),
+            missing: pick((f) => f.missing),
+            limitedShare: band.filter((f) => f.limitExcess > 1).length / band.length,
+            limitExcess: pick((f) => f.limitExcess),
+            litTriangles: pick((f) => f.litTriangles),
+            litTrianglesAtStride1: pick((f) => f.litTrianglesAtStride1),
+            litAtStride1Only: pick((f) => f.litAtStride1Only),
+            litShare: at1 > 0 ? lit / at1 : null,
+            reckonedTriangles: reckoned.length === 0 ? null : pick((f) => f.reckonedTriangles),
+            // The most the drawn passed the reckoned in a frame, and the frames it did.
+            drawnPastReckonedMax:
+              reckoned.length === 0
+                ? null
+                : Math.max(...reckoned.map((f) => f.litTriangles - f.reckonedTriangles)),
+            framesDrawnPastReckoned: reckoned.filter((f) => f.litTriangles > f.reckonedTriangles)
+              .length,
+            slots: band[0]?.slots ?? null,
+            usedSlots: pick((f) => f.usedSlots),
+            pinned: pick((f) => f.pinnedForced + f.pinnedDrawn),
+            demand: pick((f) => f.demand),
+            bakesPerS: spanS > 0 ? bakes / spanS : null,
+            stepMs: pick((f) => f.stepMs),
+            drawMs: pick((f) => f.drawMs),
+          },
+        ],
+      ];
+    }),
+  );
+}
+
 /** One frame's model of the lit pass's two rasters (plan R14, R14.T3.d): see {@link OcclusionFrames}. */
 interface OcclusionFrame {
   readonly tS: number;
@@ -2116,6 +2442,8 @@ interface Played {
   readonly strideWindow: StrideWindow | null;
   /** Each modelled frame's two rasters, with `SEAM_OCCLUSION=hzb` (plan R14, R14.T3.d); else none. */
   readonly occlusion: ReadonlyArray<OcclusionFrame>;
+  /** Each counted frame's budget's counts, with `SEAM_COUNTS=1` (plan R14, R14.T3.e); else none. */
+  readonly budget: ReadonlyArray<BudgetFrame>;
 }
 
 /** Plays TERRAIN TEST's script from `fromS` to `toS` at {@link HZ} and records the drawn ground. */
@@ -2146,9 +2474,23 @@ async function play(options: ProbeOptions): Promise<Played> {
     ...(LOOKAHEAD ? { lookaheadClockMs: () => Date.now() } : {}),
     morphInMs: MORPH_MS,
     ...budgetHoldKnob(),
-    ...(strideWindow === null
+    ...(strideWindow === null && BUDGET === null
       ? {}
-      : { geometry: { ...SETTINGS[setting].geometry, strides: "measured" } }),
+      : {
+          geometry: {
+            ...SETTINGS[setting].geometry,
+            ...(strideWindow === null ? {} : { strides: "measured" }),
+            ...(BUDGET === null ? {} : { terrainBudget: BUDGET }),
+          },
+        }),
+    ...(CACHE_SCALE === 1
+      ? {}
+      : {
+          litTerrain: {
+            ...SETTINGS[setting].terrain,
+            cacheBytes: Math.round(CACHE_SCALE * SETTINGS[setting].terrain.cacheBytes),
+          },
+        }),
   });
   link.onSurface((event) => {
     if (event.kind === "revisions") {
@@ -2217,6 +2559,7 @@ async function play(options: ProbeOptions): Promise<Played> {
   const masks = new SurveyMasks();
   const strideFrames = new StrideFrames();
   const occlusionFrames = new OcclusionFrames();
+  const budgetFrames = new BudgetFrames();
   let frameIndex = 0;
   const slotRecords = new SlotRecords();
   let drawnBefore = new Map<string, DrawnInstance>();
@@ -2357,12 +2700,14 @@ async function play(options: ProbeOptions): Promise<Played> {
       const viewReport = reportAt(tS);
       session.noteView(PRIMARY_VIEW_ID, viewReport);
       rebaked.length = 0;
+      const stepStartMs = performance.now();
       session.step();
+      const stepMs = performance.now() - stepStartMs;
       watch();
       // The step's draw in the primary view, as the app draws it, and its change from the frame
       // before's; the engine's records cleared first, as a run's would fill the memory, the slots'
       // cluster records kept, which the strides' measure reads.
-      if (strideWindow !== null || OCCLUDED) {
+      if (strideWindow !== null || OCCLUDED || COUNTS) {
         slotRecords.take(engine);
       }
       engine.writes.length = 0;
@@ -2373,11 +2718,12 @@ async function play(options: ProbeOptions): Promise<Played> {
       const seenBody = viewReport.scene.bodies.find((b) => b.id === body);
       const passView =
         seenBody === undefined ? null : terrainPassViewOf(PRIMARY_VIEW_ID, viewReport, seenBody);
-      const drawnNow =
+      const drawStartMs = performance.now();
+      const drew =
         passView !== null &&
-        session.drawTerrain(PRIMARY_VIEW_ID, body, frameInputOf(passView, tS)) !== null
-          ? instancesOf(engine, slots)
-          : new Map<string, DrawnInstance>();
+        session.drawTerrain(PRIMARY_VIEW_ID, body, frameInputOf(passView, tS)) !== null;
+      const drawMs = performance.now() - drawStartMs;
+      const drawnNow = drew ? instancesOf(engine, slots) : new Map<string, DrawnInstance>();
       const drawingPass = session.pass(body);
       const camBefore = drawnCamera;
       const camNow = passView === null ? null : frameCameraOf(passView);
@@ -2420,6 +2766,37 @@ async function play(options: ProbeOptions): Promise<Played> {
         );
       }
       frameIndex += 1;
+      const counted = drawingPass?.lastStep ?? null;
+      if (
+        COUNTS &&
+        frameIndex % COUNT_STRIDE === 0 &&
+        drawingPass !== null &&
+        camNow !== null &&
+        counted !== null
+      ) {
+        const pressure = drawingPass.cachePressure;
+        let seen = 0;
+        for (const patch of counted.selection.patches.values()) {
+          seen += patch.seen ? 1 : 0;
+        }
+        budgetFrames.frame(drawingPass.planet, camNow, slotRecords, drawnNow, {
+          tS,
+          selected: seen,
+          drawn: counted.drawSet.count,
+          standingIn: counted.drawSet.standingIn,
+          missing: counted.drawSet.missing,
+          limitExcess: counted.selection.limitExcess,
+          slots: drawingPass.layout.slots.slotCount,
+          usedSlots: drawingPass.usedSlots,
+          pinnedForced: pressure.forced,
+          pinnedDrawn: pressure.drawn,
+          bakesAnswered: answers.count,
+          demand: counted.selection.demand.length,
+          reckonedTriangles: counted.selection.litTriangles?.[0] ?? Number.NaN,
+          stepMs,
+          drawMs,
+        });
+      }
       if (
         OCCLUDED &&
         frameIndex % OCCLUSION_STRIDE === 0 &&
@@ -2630,6 +3007,7 @@ async function play(options: ProbeOptions): Promise<Played> {
     strides: strideFrames.frames,
     strideWindow,
     occlusion: occlusionFrames.frames,
+    budget: budgetFrames.frames,
   };
 }
 
@@ -2694,6 +3072,18 @@ function report(played: Played, summary: SeamSummary): Record<string, unknown> {
       ? {}
       : { strides: strideSummaryOf(played.strides, played.strideWindow) }),
     ...(OCCLUDED ? { occlusion: occlusionSummaryOf(played.occlusion) } : {}),
+    ...(COUNTS
+      ? {
+          budget: {
+            cacheScale: CACHE_SCALE,
+            countStride: COUNT_STRIDE,
+            strides:
+              played.strideWindow === null ? SETTINGS[run.setting].geometry.strides : "measured",
+            terrainBudget: BUDGET ?? SETTINGS[run.setting].geometry.terrainBudget,
+            bands: budgetSummaryOf(played.budget),
+          },
+        }
+      : {}),
     ...(RECORD ? { record: run } : {}),
   };
 }

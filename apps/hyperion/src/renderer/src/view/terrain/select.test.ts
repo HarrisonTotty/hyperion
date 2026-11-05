@@ -33,9 +33,12 @@ import {
   planetGeometry,
   surfacePoint,
 } from "./planet";
+import { terrainClusterMesh } from "../clusters/templates";
 import {
   type HeightRangeLookup,
   inheritedHeightRangeM,
+  PATCH_LIT_TRIANGLES,
+  patchLitTriangles,
   PatchLeafSet,
   pruneSelectionMemo,
   SAGITTA_FACTOR,
@@ -45,7 +48,9 @@ import {
   selectPatches,
   screenSpaceErrorPx,
   splitKeysOf,
+  type StrideErrorsM,
   type SurveyLookup,
+  type TriangleBudget,
   type ViewSelectionInput,
 } from "./select";
 import { SurveyedCells } from "./surveyLookup";
@@ -724,6 +729,172 @@ describe("selection under a patch budget", () => {
       maxPatches: 10,
     });
     expect(forced.filter((k) => tight.patches.get(k)?.forced !== true)).toEqual([]);
+  });
+});
+
+/** A triangle budget of `patches` whole grids, every patch's errors `errorsM` (plan R14, R14.T3.e). */
+function trianglesBudget(
+  patches: number,
+  errorsM?: StrideErrorsM,
+  tolerancesPx: ReadonlyArray<number> = [],
+): TriangleBudget {
+  return {
+    maxTriangles: patches * PATCH_LIT_TRIANGLES[0],
+    bandFraction: 0.002,
+    tolerancesPx,
+    strideErrorsM: () => errorsM,
+  };
+}
+
+/**
+ * A patch's reckoning at `distanceM` of E_L 10 m and e₂, e₄, e₈ 1, 2 and 4 m at τ 1 mrad, its
+ * bands 11,022, 12,024 and 14,028 m, `standIn` levels from its baked ancestor.
+ */
+function reckonedAt(distanceM: number, standIn: number | null = 0): number {
+  return patchLitTriangles(10, [1, 2, 4], distanceM, 1e-3, 0.002, standIn);
+}
+
+describe("selection under a triangle budget (plan R14, R14.T3.e)", () => {
+  const pose = (): ViewSelectionInput => view(LOW, lookingDown(LOW, 1.2));
+  const selected = (more: Partial<SelectionInput>): Selection =>
+    selectPatches({ planet: PLANET, views: [pose()], setting: "high", grounded: [], ...more });
+
+  it("counts a patch's 64 blocks and 32 strips at each stride, as the cluster mesh's templates draw them, and a mask one to three levels down at stride 1 as a whole patch at stride 2^levels", () => {
+    const strided = terrainClusterMesh().templates.filter((t) => !t.mayDiscard);
+    const at = (shape: string, stride: number): number =>
+      strided.find((t) => t.shape === shape && t.stride === stride)?.triangles ?? Number.NaN;
+    // A mask l levels down: (8 ÷ 2^l)² blocks and 4 × 8 ÷ 2^l strips at stride 1 (`terrainMaskCluster`).
+    const mask = (l: number): number =>
+      (8 / 2 ** l) ** 2 * at("terrain-block", 1) + 4 * (8 / 2 ** l) * at("terrain-skirt", 1);
+    expect([
+      [1, 2, 4, 8].map((s) => 64 * at("terrain-block", s) + 32 * at("terrain-skirt", s)),
+      [1, 2, 3].map(mask),
+    ]).toEqual([[...PATCH_LIT_TRIANGLES], PATCH_LIT_TRIANGLES.slice(1)]);
+  });
+
+  it("reckons a measured patch at the coarsest stride whose every band its nearest point is past, a stand-in as its mask or its whole grid draws, and an unmeasured patch its whole grid", () => {
+    const at = reckonedAt;
+    expect([
+      at(11_000),
+      at(11_023),
+      at(13_000),
+      at(14_029),
+      at(14_029, 1),
+      at(14_029, 2),
+      at(14_029, 3),
+      at(14_029, 4),
+      at(14_029, null),
+      patchLitTriangles(10, undefined, 1e9, 1e-3, 0.002, 0),
+      patchLitTriangles(10, [1, 2, Infinity], 1e9, 1e-3, 0.002, 0),
+    ]).toEqual([8_704, 2_304, 640, 192, 2_304, 640, 192, 8_704, 0, 8_704, 640]);
+  });
+
+  it("selects as the patch budget alone where every patch reckons its whole grid and the budget is that many grids", () => {
+    const patches = selected({ maxPatches: 300 });
+    const both = selected({ maxPatches: 300, triangleBudget: trianglesBudget(300) });
+    expect([[...both.patches.keys()], both.limited, both.limitExcess]).toEqual([
+      [...patches.patches.keys()],
+      patches.limited,
+      patches.limitExcess,
+    ]);
+  });
+
+  it("holds each view to the budget alone, so that a second view seeing the same patches binds no sooner, and reports each view's reckoning (research-leans-42)", () => {
+    const both = [pose(), pose()];
+    const patches = selected({ views: both, maxPatches: 300 });
+    const triangles = selected({
+      views: both,
+      maxPatches: 300,
+      triangleBudget: trianglesBudget(300),
+    });
+    const seen = [...triangles.patches.values()].filter((patch) => patch.seen).length;
+    expect([[...triangles.patches.keys()], triangles.litTriangles, patches.litTriangles]).toEqual([
+      [...patches.patches.keys()],
+      [seen * PATCH_LIT_TRIANGLES[0], seen * PATCH_LIT_TRIANGLES[0]],
+      undefined,
+    ]);
+  });
+
+  it("stops at the triangle budget where it binds before the patches, and says so", () => {
+    const patches = selected({ maxPatches: 100 });
+    const triangles = selected({ maxPatches: 300, triangleBudget: trianglesBudget(100) });
+    expect([[...triangles.patches.keys()], triangles.limited]).toEqual([
+      [...patches.patches.keys()],
+      true,
+    ]);
+  });
+
+  it("selects more patches at the same triangles where the patches stride, within the budget", () => {
+    const v = pose();
+    const tauRad = (2 * Math.tan(v.fovXRad / 2) * v.tauPx) / v.viewport.widthPx;
+    const smooth = selected({
+      maxPatches: 10_000,
+      triangleBudget: trianglesBudget(300, [0, 0, 0]),
+    });
+    const reckoned = [...smooth.patches.values()]
+      .filter((patch) => patch.seen)
+      .reduce(
+        (sum, patch) =>
+          sum +
+          patchLitTriangles(
+            selectionErrorM(PLANET, patch.key.level),
+            [0, 0, 0],
+            distanceToBoxM(relativeBounds(patch.bounds, v.camera.positionM)),
+            tauRad,
+            0.002,
+            0,
+          ),
+        0,
+      );
+    expect({
+      more: smooth.patches.size > 300,
+      within: reckoned <= 300 * PATCH_LIT_TRIANGLES[0] * (1 + 1e-9),
+    }).toEqual({ more: true, within: true });
+  });
+
+  it("reckons each view's strides at its own tolerance, so that a view whose strides take a laxer τ′ reckons fewer triangles and selects more", () => {
+    // Rough ground, each stride's error 5 m: at τ few patches stride; at 8 τ most do.
+    const rough = selected({ maxPatches: 10_000, triangleBudget: trianglesBudget(150, [5, 5, 5]) });
+    const lax = selected({
+      maxPatches: 10_000,
+      triangleBudget: trianglesBudget(150, [5, 5, 5], [8]),
+    });
+    expect([rough.limited, lax.patches.size > rough.patches.size]).toEqual([true, true]);
+  });
+
+  it("keeps every forced patch whatever the triangle budget", () => {
+    const contact: GroundContact = { positionM: above(5), radiusM: 20 };
+    const free = selected({ grounded: [contact] });
+    const forced = [...free.patches.values()]
+      .filter((p) => p.forced)
+      .map((p) => patchKeyString(p.key));
+    const tight = selected({ grounded: [contact], triangleBudget: trianglesBudget(10) });
+    expect([
+      forced.length > 4,
+      forced.filter((k) => tight.patches.get(k)?.forced !== true),
+    ]).toEqual([true, []]);
+  });
+
+  it("weighs its leaves through every split and undo, as their own weights sum", () => {
+    const tree = new PatchLeafSet<PatchKey>(
+      () => true,
+      2,
+      (key, weight) => (weight === 0 ? key.level + 1 : 1),
+    );
+    const sum = (): number => [...tree.values()].reduce((total, key) => total + key.level + 1, 0);
+    for (const face of FACES) {
+      tree.addRoot(rootKey(face), rootKey(face));
+    }
+    const weights = [tree.weight === sum()];
+    tree.splitBalanced(rootKey(0), (child) => child);
+    weights.push(tree.weight === sum());
+    tree.begin();
+    tree.splitBalanced({ face: 0, level: 1, i: 0, j: 0 }, (child) => child);
+    tree.splitBalanced({ face: 0, level: 2, i: 0, j: 0 }, (child) => child);
+    weights.push(tree.weight === sum());
+    tree.rollback();
+    weights.push(tree.weight === sum(), tree.weight === 6 + 4 * 2 - 1, tree.weightOf(1) === 9);
+    expect(weights).toEqual([true, true, true, true, true, true]);
   });
 });
 

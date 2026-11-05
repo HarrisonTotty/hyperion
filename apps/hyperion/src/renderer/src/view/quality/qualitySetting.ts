@@ -204,6 +204,19 @@ export interface GeometrySettings {
    * (T2.e; Design note 17): low waits on the UHD 620's.
    */
   readonly shading: "forward" | "visibility";
+  /**
+   * R14.T3.e: the lit pass's selection budget. `patches`, as before: at most half the cache's
+   * slots. `triangles`: that, and the lit triangles the selected patches draw, reckoned at the
+   * strides the cull takes (`select.ts`' `patchLitTriangles`), at most the setting's
+   * `TERRAIN_TRIANGLE_BUDGET`, the stride-1 frame of its own patch budget at its held cache, so that
+   * a larger cache selects more patches at no more lit triangles than that frame as selection
+   * reckons them, each lit view held to it alone. Read where `litClusters` is on. `triangles` on
+   * low, where the strides are on, and `patches` on high, where they are off (a lean, 2026-11-05).
+   * Whatever it says, where the strides are on but on low (which states it wherever it draws lit
+   * terrain), `TERRAIN: DETAIL LIMITED` is raised too wherever the cull draws a stride past the
+   * view's τ′ (`clusters/overCount.ts`; research-leans-42).
+   */
+  readonly terrainBudget: "patches" | "triangles";
 }
 
 /**
@@ -231,6 +244,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   strides: "off",
   occlusion: "off",
   shading: "forward",
+  terrainBudget: "patches",
 };
 
 /**
@@ -409,6 +423,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       strides: "measured",
       occlusion: "off",
       shading: "forward",
+      terrainBudget: "patches",
     },
     decoration: true,
     scatterDensity: 1,
@@ -458,6 +473,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       strides: "measured",
       occlusion: "off",
       shading: "forward",
+      terrainBudget: "triangles",
     },
     decoration: false,
     scatterDensity: 0,

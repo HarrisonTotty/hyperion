@@ -92,6 +92,8 @@ import type {
 } from "./terrainPass";
 import { type HorizonLayerSetting, PALETTE_NONE, type TerrainLayers } from "./workers/messages";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "./workers/pool";
+import { SETTINGS, type TerrainSettings } from "../quality/qualitySetting";
+import { terrainSlotLayout } from "./slotLayout";
 
 const UNIVERSE: UniverseIdHex = "000000000000002a";
 const MOON: BodyIdHex = SESSION_MOON;
@@ -167,6 +169,7 @@ async function harness(
   horizonMap?: HorizonLayerSetting,
   lookaheadClockMs?: () => number,
   handoverAtCells?: boolean,
+  litTerrain?: TerrainSettings,
 ): Promise<Harness> {
   const hook = renderHook(() => useServerLink(), { wrapper: ServerLinkHarness });
   act(() => {
@@ -190,6 +193,7 @@ async function harness(
     ...(horizonMap === undefined ? {} : { horizonMap }),
     ...(lookaheadClockMs === undefined ? {} : { lookaheadClockMs }),
     ...(handoverAtCells === undefined ? {} : { handoverAtCells }),
+    ...(litTerrain === undefined ? {} : { litTerrain }),
   });
   return {
     socket: () => FakeWebSocket.latest(),
@@ -415,6 +419,28 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     it("is made for the body handed over", async () => {
       const { h } = await handedOverTwice();
       expect([...h.session.passBodies]).toEqual([MOON]);
+    });
+
+    it("makes its lit pass's cache of the given terrain settings' bytes, and of the setting's without (plan R14, R14.T3.e's probe)", async () => {
+      // Half as large again: within the fake device's 128 MiB binding, whose clamp it does not meet.
+      const larger = {
+        ...SETTINGS.high.terrain,
+        cacheBytes: 1.5 * SETTINGS.high.terrain.cacheBytes,
+      };
+      const slotsOf = async (litTerrain?: TerrainSettings): Promise<number | undefined> => {
+        const h = await harness("high", undefined, undefined, undefined, litTerrain);
+        h.session.noteView(PRIMARY, notHanding(5e6));
+        h.session.step();
+        await answerField(h);
+        h.session.step();
+        h.session.noteView(PRIMARY, handing(5e6));
+        h.session.step();
+        return h.session.pass(MOON)?.layout.slots.slotCount;
+      };
+      expect([await slotsOf(), await slotsOf(larger)]).toEqual([
+        terrainSlotLayout(SETTINGS.high.terrain, "lit").slotCount,
+        terrainSlotLayout(larger, "lit").slotCount,
+      ]);
     });
 
     it("is the one pass at every later step", async () => {

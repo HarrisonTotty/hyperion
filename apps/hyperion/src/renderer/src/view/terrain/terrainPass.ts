@@ -116,10 +116,12 @@ import {
   NO_STRIDE_EDGE_BANDS,
   NO_STRIDE_SCALE,
   patchStrideScale,
+  STRIDE_BAND_FRACTION,
   type StrideErrorsM,
   type StrideScale,
 } from "../clusters/strides";
 import { resolveUniforms } from "../clusters/resolve";
+import { ClusterOverCounts } from "../clusters/overCount";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
 import { TERRAIN_PAGE_CLUSTERS, TERRAIN_SUB_PATCH_MASK } from "../clusters/terrain";
 import { type Stride, TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
@@ -220,6 +222,7 @@ import {
 } from "./grounded";
 import {
   MAX_SELECTION_VIEWS,
+  PATCH_LIT_TRIANGLES,
   type PatchRequest,
   type Selection,
   type SelectionInput,
@@ -227,8 +230,10 @@ import {
   selectPatches,
   splitKeysOf,
   type SurveyLookup,
+  type TriangleBudget,
   type ViewSelectionInput,
 } from "./select";
+import { PatchKeyTable } from "./patchKeyTable";
 import {
   LOOKAHEAD_COST_STEPS,
   LOOKAHEAD_SAMPLES,
@@ -1174,6 +1179,12 @@ interface Device {
   readonly stillDraws: WeakMap<DrawItem, DrawItem>;
   /** Each resident patch's layers' summary and request, by key string. */
   readonly residents: Map<string, Resident>;
+  /**
+   * Each resident measured interior patch's largest errors towards strides 2, 4 and 8
+   * (`Resident.strideErrors`' `largestM`), by key, which the triangle budget's selection reads
+   * (plan R14, R14.T3.e).
+   */
+  readonly largestStrideErrors: PatchKeyTable<StrideErrorsM>;
   /** The resident patches asked for again by the rebake rule, at their last requests. */
   readonly rebakes: Map<string, PatchRequest>;
   /** The blocks whose rebakes are still to land, oldest first. */
@@ -1414,6 +1425,11 @@ interface ViewClusters {
   resolveBeside: BucketDrawBase | null;
   device: Device | null;
   stats: ClusterStats | null;
+  /**
+   * The cull's counts of the lit pass's strides drawn past τ′, read every frame under the triangle
+   * budget (plan R14, R14.T3.e); `null` before.
+   */
+  over: ClusterOverCounts | null;
 }
 
 /** No caster passes: a frame that draws no cascades. */
@@ -1857,6 +1873,20 @@ export function effectiveTauPx(tauPx: number, limitExcess: number, weight: numbe
 export const BUDGET_HOLD_MARGIN = 0.15;
 
 /**
+ * Each setting's triangle budget (plan R14, R14.T3.e; `GeometrySettings.terrainBudget`
+ * `triangles`): the most lit triangles the lit pass's selection may reckon the patches one view sees
+ * to draw in it, each lit view held to it alone (research-leans-42), the stride-1 frame of the
+ * setting's own patch budget at its held cache, half its slots (604 high of 1,208, 187 low of 375;
+ * decision-r10-t14b-constants) at a whole patch's 8,704 each, its 64 blocks and 32 skirt strips
+ * ({@link PATCH_LIT_TRIANGLES}). It is held when the cache is re-sized, so that a larger cache
+ * selects more patches at no more lit triangles than that frame (a lean, 2026-11-05).
+ */
+export const TERRAIN_TRIANGLE_BUDGET: Readonly<Record<QualitySetting, number>> = {
+  high: 604 * PATCH_LIT_TRIANGLES[0],
+  low: 187 * PATCH_LIT_TRIANGLES[0],
+};
+
+/**
  * The most a view's morph bands' tolerance moves a step, as a fraction (plan R10, R10.T16.i; a
  * hand value): the budget's τ′ steps by up to 50 to 63 times between selections (TERRAIN TEST,
  * research-terrain-seamless), and a vertex in its band moves by about 6 Δτ′ ÷ τ′ in k, so that the
@@ -2238,6 +2268,14 @@ export class TerrainPass {
    */
   get cachePressure(): CachePressure {
     return this.#device.cache.pressure();
+  }
+
+  /**
+   * The current device's patch cache's slots holding a patch or a rebaked patch's older bake
+   * ({@link PatchCache.usedSlots}), of {@link TerrainPass.layout}'s slots.
+   */
+  get usedSlots(): number {
+    return this.#device.cache.usedSlots;
   }
 
   /** How the pass shades its patches ({@link terrainShadingOf}). */
@@ -3123,6 +3161,8 @@ export class TerrainPass {
       // for the wireframe's, whose τ and depth are the same on both settings (R10.T11).
       detailLimited:
         (selection.limited && selection.limitExcess > (view?.weight ?? 1)) ||
+        // Where the strides are on, a stride the cull drew past τ′ (plan R14, R14.T3.e).
+        (this.#overCounting() && this.#overCount(state) > 0) ||
         (this.#setting === "low" &&
           TERRAIN_SHADING_TRAITS[this.#shading].coarserOnLow &&
           count > 0),
@@ -3386,6 +3426,7 @@ export class TerrainPass {
     this.#nearestGround.delete(id);
     this.#margins.delete(id);
     this.#views.get(id)?.clusters?.stats?.dispose();
+    this.#views.get(id)?.clusters?.over?.dispose();
     if (this.#views.delete(id)) {
       this.#device.resources.releaseView(id);
     }
@@ -3414,6 +3455,7 @@ export class TerrainPass {
       device.pool.terminate();
       for (const state of this.#views.values()) {
         state.clusters?.stats?.dispose();
+        state.clusters?.over?.dispose();
       }
       this.#views.clear();
       this.#stepped.clear();
@@ -3592,6 +3634,7 @@ export class TerrainPass {
       clusterDepthMaterial: null,
       cullKernel: null,
       residents: new Map(),
+      largestStrideErrors: new PatchKeyTable(),
       rebakes: new Map(),
       gates: [],
       asked: new Map(),
@@ -3621,6 +3664,7 @@ export class TerrainPass {
     for (const [id, state] of this.#views) {
       // The lost device's counters went with it; the view's next measured frame makes its own.
       state.clusters?.stats?.dispose();
+      state.clusters?.over?.dispose();
       this.#views.set(id, { ...this.#viewState(id), debounce: state.debounce });
     }
     this.#rangesVersion += 1;
@@ -3742,6 +3786,14 @@ export class TerrainPass {
               largestM: largestStrideErrorsM(bake.clusterErrors),
             },
     });
+    // An interior bake's alone: an edge patch's may-discard clusters draw at stride 1 (R14.T3.e).
+    const held = device.residents.get(keyString);
+    const largestM = held?.interior === true ? held.strideErrors?.largestM : undefined;
+    if (largestM === undefined) {
+      device.largestStrideErrors.delete(bake.key);
+    } else {
+      device.largestStrideErrors.set(bake.key, largestM);
+    }
     device.graticules.delete(keyString);
     device.rebakes.delete(keyString);
     this.#draft(device, bake, keyString);
@@ -3824,6 +3876,10 @@ export class TerrainPass {
   #forget(device: Device, keyString: string): void {
     if (device.drafts.delete(keyString)) {
       device.pool.dropRefinement?.(keyString);
+    }
+    const key = device.residents.get(keyString)?.request.key;
+    if (key !== undefined) {
+      device.largestStrideErrors.delete(key);
     }
     device.residents.delete(keyString);
     device.givenUp.delete(keyString);
@@ -4145,6 +4201,7 @@ export class TerrainPass {
       setting: this.#setting,
       grounded: input.grounded,
       maxPatches: this.maxPatches,
+      ...(this.#triangleBudgetOn() ? { triangleBudget: this.#triangleBudget(views) } : {}),
       heightRanges: this.#device.cache,
       skirtMarginM: WORKER_SKIRT_MARGIN_M,
       ...(this.#survey === null ? {} : { survey: this.#survey }),
@@ -5040,6 +5097,7 @@ export class TerrainPass {
       resolveBeside: null,
       device: null,
       stats: null,
+      over: null,
     });
     if (clusters.device !== device) {
       clusters.litBase = null;
@@ -5682,6 +5740,7 @@ export class TerrainPass {
       resolveBeside: null,
       device: null,
       stats: null,
+      over: null,
     });
     if (clusters.device !== device) {
       clusters.casterBase = null;
@@ -5844,6 +5903,37 @@ export class TerrainPass {
       finDepthBase: fins ? clusters.finDepthBase : null,
       idBase: lit && device.idRaster !== null ? clusters.idBase : null,
       resolveDraw: lit && forms.resolve !== null ? clusters.resolveDraw : null,
+    };
+  }
+
+  /**
+   * Whether the geometry asks the lit pass's triangle budget (plan R14, R14.T3.e): the cluster path,
+   * its lit pass on it and `terrainBudget` `triangles`, in the lit style.
+   */
+  #triangleBudgetOn(): boolean {
+    const geometry = this.#geometry;
+    return (
+      this.#shading === "lit" &&
+      geometry.clusterPath &&
+      geometry.litClusters &&
+      geometry.terrainBudget === "triangles"
+    );
+  }
+
+  /**
+   * The lit pass's triangle budget for `views` (plan R14, R14.T3.e): its setting's
+   * {@link TERRAIN_TRIANGLE_BUDGET}, its patches' strides reckoned from their bakes' largest errors
+   * at each view's slewed τ′, as its strides are drawn this frame, its τ before a selection, where the
+   * camera strides are on, and at stride 1 where they are off.
+   */
+  #triangleBudget(views: ReadonlyArray<PassSelectionView>): TriangleBudget {
+    const table = this.#device.largestStrideErrors;
+    const strides = this.#stridesOn();
+    return {
+      maxTriangles: TERRAIN_TRIANGLE_BUDGET[this.#setting],
+      bandFraction: STRIDE_BAND_FRACTION,
+      tolerancesPx: views.map((view) => this.#views.get(view.id)?.bandTauPx ?? view.bandTauPx),
+      strideErrorsM: (key) => (strides ? table.get(key) : undefined),
     };
   }
 
@@ -6056,7 +6146,9 @@ export class TerrainPass {
           ).map((pass, index) => (due[index] === true ? pass : null));
     const strides = this.#stridesOn();
     const early = this.#earlyOcclusion(state, held, clusters, input);
-    const litPass = clusters.litBase !== null ? this.#litCullPass(input, strides) : null;
+    // Where the strides are on the lit pass counts its strides past the view's τ′ (R14.T3.e).
+    const overRad = this.#overCounting() ? this.#overToleranceRad(state, input) : 0;
+    const litPass = clusters.litBase !== null ? this.#litCullPass(input, strides, overRad) : null;
     const passes: Array<CullPass | null> = [
       ...cascades,
       clusters.overlay ? this.#overlayCullPass(input) : null,
@@ -6086,6 +6178,7 @@ export class TerrainPass {
       viewAxis,
       firstShape: CLUSTER_SHAPE_CODE["terrain-block"],
       discardTemplates: TERRAIN_DISCARD_TEMPLATES,
+      ...(overRad > 0 ? { overWord: buckets.overWord } : {}),
     };
     packCullParams(params, held.params);
     // The first dispatch's pyramid is none: only a late pass reads it (R14.T3.d).
@@ -6136,17 +6229,63 @@ export class TerrainPass {
       };
       return;
     }
-    this.#sampleClusters(state, buckets);
+    this.#sampleClusters(state, buckets, overRad > 0);
   }
 
-  /** Samples view `state`'s buckets' counts into its counters, behind the measurement switch. */
-  #sampleClusters(state: ViewState, buckets: ClusterBuckets): void {
+  /**
+   * Samples view `state`'s buckets' counts into its counters, behind the measurement switch, and,
+   * where the cull counted them (`over`), its strides past τ′ every frame (plan R14, R14.T3.e).
+   */
+  #sampleClusters(state: ViewState, buckets: ClusterBuckets, over: boolean): void {
     const held = state.clusters;
-    if (!this.#measuring || held === null) {
+    if (held === null) {
+      return;
+    }
+    if (over) {
+      held.over ??= new ClusterOverCounts(this.#engine, `terrain clusters (${state.id})`);
+      held.over.sample(buckets);
+    }
+    if (!this.#measuring) {
       return;
     }
     held.stats ??= new ClusterStats(this.#engine, `terrain clusters (${state.id})`);
     held.stats.sample(buckets, TERRAIN_CLUSTER_MESH.templates, CLUSTER_PASS_NAMES);
+  }
+
+  /**
+   * Whether the lit pass's cull counts its strides drawn past τ′ (plan R14, R14.T3.e;
+   * `clusters/overCount.ts`): wherever the camera strides are on, whatever `terrainBudget` says
+   * (research-leans-42), but on the low setting, which states `TERRAIN: DETAIL LIMITED` wherever it
+   * draws lit terrain (R05 Design note 26), so that its weakest target reads nothing back a frame
+   * for a line it shows anyway.
+   */
+  #overCounting(): boolean {
+    return (
+      this.#stridesOn() &&
+      !(this.#setting === "low" && TERRAIN_SHADING_TRAITS[this.#shading].coarserOnLow)
+    );
+  }
+
+  /**
+   * View `state`'s τ′ over its px per radian, the tolerance its strides past which the cull counts
+   * (plan R14, R14.T3.e): Design note 3's, the unslewed `effectiveTauPx` of its last selection, which
+   * its morph bands and strides reach a step at a time; 0 before one.
+   */
+  #overToleranceRad(state: ViewState, input: TerrainViewFrameInput): number {
+    const { viewport, fovXRad } = input.view;
+    const tauPx = state.targetTauPx ?? 0;
+    return tauPx > 0 ? (2 * Math.tan(fovXRad / 2) * tauPx) / viewport.widthPx : 0;
+  }
+
+  /**
+   * View `state`'s strides drawn past τ′ in its last counted frame, the lit pass's and its late
+   * pass's together (plan R14, R14.T3.e), 0 before a count came back.
+   */
+  #overCount(state: ViewState): number {
+    const latest = state.clusters?.over?.latest() ?? null;
+    return latest === null
+      ? 0
+      : (latest[CLUSTER_LIT_PASS] ?? 0) + (latest[CLUSTER_LIT_LATE_PASS] ?? 0);
   }
 
   /**
@@ -6275,7 +6414,7 @@ export class TerrainPass {
     this.#compactLitPass(clusters, clusters.compact, late.count, CLUSTER_LIT_LATE_PASS);
     state.occlusionBuilds = late.occlusion.pyramid.builds;
     state.lastLate = true;
-    this.#sampleClusters(state, buckets);
+    this.#sampleClusters(state, buckets, (late.params.overWord ?? 0) > 0);
     const draws = buckets.drawItems(
       CLUSTER_LIT_LATE_PASS,
       clusters.mesh,
@@ -6332,7 +6471,11 @@ export class TerrainPass {
    * R05's horizon occluder seen from it (`horizonCone`), its kept clusters marked for the stable
    * compaction; at stride 1, or with `strides` up to 8 by its instances' bands (plan R14, R14.T3.c).
    */
-  #litCullPass(input: TerrainViewFrameInput, strides: boolean): CameraCullPass {
+  #litCullPass(
+    input: TerrainViewFrameInput,
+    strides: boolean,
+    overToleranceRad: number,
+  ): CameraCullPass {
     const { view } = input;
     const frustum = frustumOf(
       { orientation: view.orientation, fovXRad: view.fovXRad, viewport: view.viewport },
@@ -6345,7 +6488,8 @@ export class TerrainPass {
     return {
       kind: "camera",
       planes: frustum.planes,
-      toleranceRad: 0,
+      // The τ′ its strides past which the cull counts (R14.T3.e); no record of terrain's is a DAG's.
+      toleranceRad: overToleranceRad,
       strideCap: strides ? 8 : 1,
       horizon: cullHorizonOf(view.cameraM, occluderRadiusM),
       order: "ordered",

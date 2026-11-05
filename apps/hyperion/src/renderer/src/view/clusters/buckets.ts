@@ -15,6 +15,9 @@
  *   reads its entries from its list's base, which it carries in its `Draw` as `clusterBase`.
  * - **Each frame** {@link ClusterBuckets.clear} writes every argument afresh, the counts zero,
  *   through the queue, so that they precede the cull's dispatch and follow the last frame's draws.
+ * - **After them**, one `u32` a pass from {@link ClusterBuckets.overWord}: the cull's count of the
+ *   clusters the pass draws at a stride past its τ′ (plan R14, R14.T3.e; `clusters/overCount.ts`),
+ *   cleared with the rest.
  */
 
 import { BUFFER_USAGE } from "../engine/gpuFlags";
@@ -71,6 +74,11 @@ export class ClusterBuckets {
   readonly passes: number;
   readonly lists: BufferHandle;
   readonly args: BufferHandle;
+  /**
+   * The word of {@link ClusterBuckets.args} at which the passes' counts of their strides drawn past
+   * τ′ begin, pass by pass (plan R14, R14.T3.e): just past every bucket's arguments.
+   */
+  readonly overWord: number;
   readonly #cleared: Uint32Array;
   /**
    * Each pass's draws, and the mesh, bases and cap they were made with: up to
@@ -127,9 +135,10 @@ export class ClusterBuckets {
       category: "geometry-clusters",
     });
     const buckets = passes * templates.length;
+    this.overWord = buckets * (BUCKET_ARGS_BYTES / 4);
     this.args = engine.createBuffer({
       name: `${name} arguments`,
-      bytes: Math.max(BUCKET_ARGS_BYTES, buckets * BUCKET_ARGS_BYTES),
+      bytes: Math.max(BUCKET_ARGS_BYTES, buckets * BUCKET_ARGS_BYTES + passes * 4),
       usage:
         BUFFER_USAGE.STORAGE |
         BUFFER_USAGE.INDIRECT |
@@ -137,7 +146,7 @@ export class ClusterBuckets {
         BUFFER_USAGE.COPY_SRC,
       category: "geometry-clusters",
     });
-    this.#cleared = new Uint32Array(buckets * (BUCKET_ARGS_BYTES / 4));
+    this.#cleared = new Uint32Array(this.overWord + passes);
     for (let pass = 0; pass < passes; pass += 1) {
       templates.forEach((template, t) => {
         const at = (pass * templates.length + t) * (BUCKET_ARGS_BYTES / 4);

@@ -287,6 +287,12 @@ export interface TerrainSessionOptions {
    * the hand-over as R10.T10.e built it.
    */
   readonly handoverAtCells?: boolean;
+  /**
+   * Its lit passes' terrain settings over their setting's (`TerrainPassOptions.terrain`): the
+   * seamless probe's larger caches, by which plan R14's T3.e counts the bakes a cache asks for at
+   * one frame's cost; absent, the setting's.
+   */
+  readonly litTerrain?: TerrainSettings;
 }
 
 /**
@@ -1010,6 +1016,8 @@ export class TerrainSession {
   #reducedMotion = false;
   readonly #budgetHoldMargin: number | null | undefined;
   readonly #handoverAtCells: boolean;
+  /** Its lit passes' terrain settings, `null` for their setting's. */
+  readonly #litTerrain: TerrainSettings | null;
   /** Each view's reliefs its frames hand over by ({@link TerrainSession.reliefsFor}). */
   readonly #frameReliefs = new Map<ViewId, HandoverReliefSource>();
   #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
@@ -1039,6 +1047,7 @@ export class TerrainSession {
     this.#morphInMs = options.morphInMs;
     this.#budgetHoldMargin = options.budgetHoldMargin;
     this.#handoverAtCells = options.handoverAtCells ?? HANDOVER_AT_CELLS;
+    this.#litTerrain = options.litTerrain ?? null;
     // A readout worker beside the bake workers, so that the readout, which a choice of BASELINE
     // asks at once, never waits behind their bakes (R10.T12.c).
     const pool = new HeightWorkerPool({
@@ -1983,7 +1992,7 @@ export class TerrainSession {
     let material: string;
     switch (shading) {
       case "lit":
-        terrain = null;
+        terrain = this.#litTerrain;
         weights = "baked";
         normals = "baked";
         material = "terrain material";

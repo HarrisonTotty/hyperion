@@ -37,6 +37,7 @@ import {
   NO_STRIDE_EDGE_BANDS,
   type StrideEdgeBandsM,
   strideFadingEdges,
+  strideNeedM,
   type StrideScale,
 } from "./strides";
 import { STRIDES } from "./templates";
@@ -524,6 +525,87 @@ export function cameraPassStrideLevel(
     cluster,
   );
   return cameraStrideLevel(bands, cap, distance(centreM, record.radiusM));
+}
+
+/**
+ * Whether camera `pass` draws strided `record` at stride level `level` past its τ′ (plan R14,
+ * R14.T3.e; `clusterCull.wgsl`'s `drawn_over`, `clusters/overCount.ts`): its own need at the
+ * stride under `instance`'s scale, (E_L + e_s) ÷ τ_rad, beyond its sphere's nearest point d at
+ * `centreM` times τ′ ÷ τ, τ′ the pass's `toleranceRad`; never at stride 1, for a cascade, a DAG
+ * record, or without a tolerance or a scale. In `f64` but for the need, which is the kernel's
+ * `f32` (`strideNeedM`): at a boundary the two may differ.
+ */
+export function drawnPastTolerance(
+  pass: CullPass,
+  record: ClusterRecord,
+  instance: CullInstance,
+  centreM: Vec3,
+  level: number,
+): boolean {
+  const scale = instance.strideScale;
+  if (
+    pass.kind !== "camera" ||
+    record.mode !== "strided" ||
+    level <= 0 ||
+    !(pass.toleranceRad > 0) ||
+    scale === undefined ||
+    !(scale.perErrorM > 0)
+  ) {
+    return false;
+  }
+  const bits = record.strideErrorBits;
+  HALF_BITS[0] = bits?.[level] ?? 0x7c00;
+  const errorM = bits === null ? Number.POSITIVE_INFINITY : (HALF[0] ?? Number.POSITIVE_INFINITY);
+  const needM = strideNeedM(scale, errorM);
+  return (
+    needM > 0 && needM > distance(centreM, record.radiusM) * pass.toleranceRad * scale.perErrorM
+  );
+}
+
+/**
+ * The twin of a dispatch's counts of its strides drawn past τ′ (plan R14, R14.T3.e; the kernel's
+ * `note_over`): for each camera pass, keyed by its index among the buckets (its first bucket ÷
+ * the templates a pass has), the clusters it draws, at a template, that
+ * {@link drawnPastTolerance} holds; the ordered pass's as {@link cullMarksTwin} marks them.
+ */
+export function cullOverTwin(
+  input: CullTwinInput,
+  slackScale = 1,
+  occlusion?: CullOcclusionTwin,
+): ReadonlyMap<number, number> {
+  const counts = new Map<number, number>();
+  const note = (p: number): void => {
+    const at = Math.floor((input.places[p]?.bucketBase ?? 0) / Math.max(1, input.templates));
+    counts.set(at, (counts.get(at) ?? 0) + 1);
+  };
+  const ordered = orderedPass(input);
+  const marks = ordered === null ? null : cullMarksTwin(input, slackScale, occlusion);
+  eachCluster(input, (n, instance, cluster, record, centre) => {
+    input.passes.forEach((pass, p) => {
+      if (pass?.kind !== "camera" || pass.strideCap <= 1 || instance.whole === true) {
+        return;
+      }
+      const drawn =
+        ordered !== null && p === ordered.p
+          ? (marks?.[n * input.clustersPerPage + cluster] ?? NO_MARK) !== NO_MARK
+          : pass.order === "appended" &&
+            recordKept(input, pass, p, instance, cluster, record, centre, slackScale) &&
+            templateOf(record, cluster, pass, instance, input, centre) < input.templates;
+      if (
+        drawn &&
+        drawnPastTolerance(
+          pass,
+          record,
+          instance,
+          centre,
+          cameraPassStrideLevel(pass, record, cluster, instance, input, centre),
+        )
+      ) {
+        note(p);
+      }
+    });
+  });
+  return counts;
 }
 
 /**

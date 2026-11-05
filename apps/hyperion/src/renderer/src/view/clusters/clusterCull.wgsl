@@ -88,6 +88,12 @@
 //   a block or a strip on an edge whose coarse–fine hold at k = 0 is set (bits 2 to 5 of that word:
 //   a finer patch touches it), whose level-2 vertices stay, or fading in or out (its byte of the
 //   instance's shares word, `Instance.holdFades`, word 14, not 0), whose level-2 vertices move.
+// - _Strides past τ′_ (T3.e; `clusters/overCount.ts`): where `shapes.w` is not 0, each cluster a
+//   camera pass draws at a stride above 1 whose own need at it, (E_L + e_s) ÷ τ_rad under its
+//   instance's scale (τ the slewed tolerance its stride was chosen at), lies beyond its sphere's
+//   nearest point d × τ′ ÷ τ, τ′ the pass's tolerance, rad (`scalars.x`, 0 for none), is counted
+//   into `args` at word `shapes.w` + the pass's index among its buckets (its first bucket ÷ the
+//   templates a pass has): an `atomicAdd`, so that the count is the same whatever the order.
 // - _The bucket_: the record's shape (its flags' bits 0–3) less the consumer's first shape
 //   (`shapes.x`) × STRIDE_LEVELS + l, from the pass's first bucket; or, for a record that may
 //   discard (its flags' bit 5) of a shape with a may-discard template (`shapes.y` and `shapes.z`,
@@ -515,6 +521,23 @@ fn camera_stride_level(cull_pass : CullPass, record : ClusterRecord, bands : vec
   return level;
 }
 
+// Whether a camera pass draws a strided record at stride level `level` past its τ′ (see the
+// module's head), `distance` the record's sphere's nearest point, `scale` its instance's.
+fn drawn_over(cull_pass : CullPass, record : ClusterRecord, scale : vec2f, level : u32, distance : f32) -> bool {
+  let tolerance = cull_pass.scalars.x;
+  if (level == 0u || tolerance <= 0.0 || scale.y <= 0.0 || cull_pass.header.x == PASS_CASCADE) {
+    return false;
+  }
+  return stride_need(scale, record_error(record, level - 1u)) > distance * tolerance * scale.y;
+}
+
+// Counts a cluster drawn past its pass's τ′ (see the module's head), where the dispatch counts.
+fn note_over(cull_pass : CullPass, drawn : bool, over : bool) {
+  if (drawn && over && params.shapes.w > 0u) {
+    atomicAdd(&args[params.shapes.w + cull_pass.header.z / max(params.templates, 1u)], 1u);
+  }
+}
+
 // A record's template in the pass (see the module's head) at stride level `level`, the pass's for
 // a strided one, 0 for a DAG one's; a may-discard record's shape's may-discard template where it
 // has one.
@@ -621,20 +644,27 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
         (whole || masked == 2u || pass_keeps(cull_pass, centre, record.radius)) &&
         (!dag || dag_drawn(cull_pass, record, centre, parent_centre, parent_radius));
       var level = 0u;
+      var over = false;
       if (cull_pass.header.x == PASS_CASCADE) {
         level = stride_level(cull_pass, unit);
       } else if (cull_pass.header.y > 0u && !whole) {
-        level = camera_stride_level(cull_pass, record, bands, quadrant, hold_fades, group_distance(centre, record.radius));
+        let distance = group_distance(centre, record.radius);
+        level = camera_stride_level(cull_pass, record, bands, quadrant, hold_fades, distance);
+        over = drawn_over(cull_pass, record, scale, level, distance);
       }
       let t = template_of(cull_pass, shape, record.flags, level);
       let mark = instance * clusters + c;
       if (cull_pass.header.x == PASS_CAMERA_ORDERED) {
-        marks[mark] = select(NO_MARK, t, keeps && t < params.templates);
+        let drawn = keeps && t < params.templates;
+        marks[mark] = select(NO_MARK, t, drawn);
+        note_over(cull_pass, drawn, over);
         continue;
       }
       if (cull_pass.header.x == PASS_CAMERA_EARLY) {
         let seen = !sub && occlusion_seen(word, bit);
-        marks[mark] = select(NO_MARK, t, keeps && seen && t < params.templates);
+        let drawn = keeps && seen && t < params.templates;
+        marks[mark] = select(NO_MARK, t, drawn);
+        note_over(cull_pass, drawn, over);
         continue;
       }
       if (cull_pass.header.x == PASS_CAMERA_LATE) {
@@ -642,6 +672,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
         let visible =
           keeps && t < params.templates && (whole || masked == 2u || !occlusion_refuses(centre, record.radius));
         marks[mark] = select(NO_MARK, t, visible && !early);
+        note_over(cull_pass, visible && !early, over);
         if (!sub) {
           occlusion_write(word, bit, visible);
         }
@@ -650,6 +681,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
       if (!keeps || t >= params.templates) {
         continue;
       }
+      note_over(cull_pass, true, over);
       let at = atomicAdd(&args[(cull_pass.header.z + t) * 5u + 1u], 1u);
       if (at < template_capacity(t)) {
         lists[cull_pass.header.w + template_offset(t) + at] = (instance << 8u) | c;

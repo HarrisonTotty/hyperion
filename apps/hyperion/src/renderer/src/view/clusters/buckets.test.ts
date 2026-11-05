@@ -40,22 +40,25 @@ const BASE: Omit<DrawItem, "mesh" | "indirect" | "instanceCount"> = {
 };
 
 describe("the cluster path's buckets (plan R14, R14.T1.b)", () => {
-  it("writes each bucket's arguments as its template's index count and first index, its count zero", async () => {
+  it("writes each bucket's arguments as its template's index count and first index, its count zero, and each pass's count of strides past τ′ after them zero (R14.T3.e)", async () => {
     const engine = new CountingRenderEngine(await fakeDevice());
     const buckets = new ClusterBuckets(engine, "test clusters", 2, templates, CAPACITIES);
     buckets.clear();
     const write = engine.writes.at(-1);
     const words = [...new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0))];
-    const expected = [0, 1].flatMap(() =>
-      templates.flatMap((t) => [t.indexCount, 0, t.firstIndex, 0, 0]),
-    );
-    expect([write?.buffer, write?.offsetBytes, words]).toEqual([
+    const expected = [
+      ...[0, 1].flatMap(() => templates.flatMap((t) => [t.indexCount, 0, t.firstIndex, 0, 0])),
+      0,
+      0,
+    ];
+    expect([write?.buffer, write?.offsetBytes, words, buckets.overWord]).toEqual([
       "test clusters arguments",
       0,
       expected,
+      2 * templates.length * (BUCKET_ARGS_BYTES / 4),
     ]);
     expect([buckets.args.bytes, buckets.lists.bytes]).toEqual([
-      2 * templates.length * BUCKET_ARGS_BYTES,
+      2 * templates.length * BUCKET_ARGS_BYTES + 2 * 4,
       2 * 4 * 10 * (64 + 32) * 4,
     ]);
   });

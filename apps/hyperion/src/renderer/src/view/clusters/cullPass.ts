@@ -32,7 +32,8 @@
  * templates a pass has, each template's first list entry within its pass and its capacity, by
  * template, four to a `vec4u`, four `vec4u` of each, and `shapes` (the consumer's first shape's
  * code, R14.T4.b; then its may-discard templates, a byte a shape code 0 to 7 over two words,
- * R14.T1.g; then zero), by which a record's shape picks its template: (shape − first) × 4 + log₂ s,
+ * R14.T1.g; then the `args` word its strides past τ′ are counted from, R14.T3.e, 0 for none), by
+ * which a record's shape picks its template: (shape − first) × 4 + log₂ s,
  * or, for a record that may discard, its shape's may-discard template at stride 1 where the
  * consumer has one.
  */
@@ -375,6 +376,12 @@ export interface CullParams {
    * elsewhere.
    */
   readonly discardTemplates: ReadonlyArray<number>;
+  /**
+   * The word of the buckets' arguments from which the camera passes' strides drawn past their τ′
+   * are counted, one word a pass by its index among the buckets (plan R14, R14.T3.e;
+   * `ClusterBuckets.overWord`, `clusters/overCount.ts`); absent or 0, none are counted.
+   */
+  readonly overWord?: number;
 }
 
 /**
@@ -428,4 +435,5 @@ export function packCullParams(params: CullParams, out: ArrayBuffer): void {
   discardTemplates.forEach((template, code) => {
     view.setUint8(212 + code, template);
   });
+  view.setUint32(220, params.overWord ?? 0, true);
 }

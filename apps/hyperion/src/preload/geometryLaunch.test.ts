@@ -58,6 +58,25 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     expect(parseGeometryOverride("shading=forward")).toEqual({ shading: "forward" });
   });
 
+  it("reads and writes the lit selection's budget, last in the fields' order (R14.T3.e)", () => {
+    const override = parseGeometryOverride("terrainBudget=triangles,occlusion=off");
+    expect([
+      override,
+      geometryText(override),
+      parseGeometryOverride("terrainBudget=patches"),
+    ]).toEqual([
+      { terrainBudget: "triangles", occlusion: "off" },
+      "occlusion=off,terrainBudget=triangles",
+      { terrainBudget: "patches" },
+    ]);
+  });
+
+  it("refuses a lit selection's budget other than patches or triangles (R14.T3.e)", () => {
+    for (const text of ["terrainBudget=frames", "terrainBudget=on", "terrainBudget="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("terrainBudget is patches or triangles");
+    }
+  });
+
   it("refuses an occlusion other than off or hzb (R14.T3.d)", () => {
     for (const text of ["occlusion=none", "occlusion=on", "occlusion="]) {
       expect(() => parseGeometryOverride(text)).toThrow("occlusion is off or hzb");

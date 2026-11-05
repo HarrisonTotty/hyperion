@@ -18,6 +18,7 @@ import {
   CULL_ROUNDING_M,
   type CullInstance,
   cullMarksTwin,
+  cullOverTwin,
   cullTwin,
   cullVisibilityTwin,
   horizonRefuses,
@@ -697,6 +698,55 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
       cameraStride(PAGE_BLOCK, 1_000, { strideScale: NO_STRIDE_SCALE }),
       cameraStride(PAGE_BLOCK, 1_000, { strideScale: SCALE, whole: true }),
     ]).toEqual([1, 2, 1, 1]);
+  });
+
+  /**
+   * The twin's count of {@link PAGE_BLOCK}'s strides past τ′ `toleranceRad` in a camera pass,
+   * `order`ed, of an instance at {@link SCALE}, its cluster `distanceM` ahead (plan R14, R14.T3.e).
+   */
+  function pastTolerance(
+    distanceM: number,
+    toleranceRad: number,
+    order: CameraCullPass["order"] = "appended",
+    extra: Partial<CullInstance> = {},
+  ): number {
+    const counts = cullOverTwin({
+      instances: [
+        {
+          originM: { x: 0, y: 0, z: 0 },
+          page: 0,
+          passMask: 0b1,
+          unitM: 1,
+          strideScale: SCALE,
+          ...extra,
+        },
+      ],
+      records: (_page, c) =>
+        c === INNER
+          ? { ...PAGE_BLOCK, centreM: { x: 0, y: 0, z: -distanceM } }
+          : { ...PAGE_BLOCK, radiusM: -1 },
+      clustersPerPage: 116,
+      rotationColumns: [X, Y, Z],
+      passes: [{ ...CAMERA, strideCap: 8, toleranceRad, order }],
+      places: [{ bucketBase: 0, listBase: 0 }],
+      templates: 8,
+      viewAxis: { x: 0, y: 0, z: -1 },
+    });
+    return counts.get(0) ?? 0;
+  }
+
+  it("counts a cluster a camera pass draws at a stride past its τ′: none at the tolerance its stride was chosen at, one where τ′ is tighter than its need there, none at stride 1, without a tolerance or with the instance kept whole (R14.T3.e)", () => {
+    // At 300 m the block takes stride 4 at SCALE's 0.01 rad, its own need 200 m: past τ′ below
+    // 200 ÷ (300 × 100) rad.
+    expect([
+      pastTolerance(300, 0.01),
+      pastTolerance(300, 0.0067),
+      pastTolerance(300, 0.0066),
+      pastTolerance(300, 0.0066, "ordered"),
+      pastTolerance(50, 1e-6),
+      pastTolerance(300, 0),
+      pastTolerance(300, 0.0066, "appended", { whole: true }),
+    ]).toEqual([0, 0, 1, 1, 0, 0, 0]);
   });
 
   it("holds a block or a strip on an edge a finer patch touches at stride 4, and none on another edge (R14.T3.c)", () => {

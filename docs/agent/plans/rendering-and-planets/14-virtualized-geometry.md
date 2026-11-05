@@ -993,6 +993,7 @@ through `lit_place`.
     | `shading`         | `visibility` (after T2.e)                                                  | `forward` until the owner's UHD 620 run (lean, T2.e)                       | One shading a pixel where it pays                      |
     | `strides`         | `measured` (after T3.c)                                                    | `measured`                                                                 | Drawn error within τ′; stride 1 in the forced region   |
     | `occlusion`       | `hzb` (after T3.d)                                                         | `hzb` (after T3.d; the UHD 620's run may turn it off)                      | Exact                                                  |
+    | `terrainBudget`   | `patches` while `strides` is off (T3.e)                                    | `triangles` (T3.e)                                                         | Held stride-1 frame's triangles; ⌊slots ÷ 2⌋ patches   |
     | `pageBytes`       | 128 MiB                                                                    | 32 MiB                                                                     | Within the memory ceilings                             |
     | `meshTolerancePx` | camera 1, wireframe occluder half the stroke width (lean)                  | camera 2, the same occluder rule (lean)                                    | A mesh's DAG cut within τ; hidden-line removal holds   |
     | `farCascadeRate`  | 4 (lean, T6.b)                                                             | 4 (no cascades on low)                                                     | Far cascades' edges within a texel; 1 the way back     |
@@ -1506,6 +1507,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
     anywhere seen. With strides chosen on the GPU the CPU cannot know that, so the cull counts the
     clusters it draws over τ′ into a `bit-exact` reduction read each frame, which raises it (or the
     cull's twin decides it on the CPU).
+  - _Built_ (`r14-t3e-triangle-budget`; behind `terrainBudget`, `triangles` on low, on its lean;
+    the draft and its counts in the lane's outbox): records at the end of Risks.
 
 ### R14.T4 The first non-terrain consumers
 
@@ -2620,3 +2623,54 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     per pass; on the Mac each split pass's attachment loads and stores), and the UHD 620's for low
     (`just views-check --terrain --hidden --setting low --geometry shading=visibility`); Windows
     NOT RUN.
+  - The device check (part 15) composes the frame itself, the bodies pass's figures, the raster,
+    then the forward draws loading colour and depth (`drawnByIds`), at `LOW_AT_STRIDE_1`: the
+    renderer's passes are T2.d's, and a strided template's IDs are not drawn on the pod. Counts are
+    unchanged, `forward` on both settings; `TERRAIN_CLUSTER_ID_MESH` is made with every clustered
+    lit layout.
+- **R14.T3.e** (`r14-t3e-triangle-budget`, lean 2026-11-05, with research-leans-42's review; the
+  draft for the ruling, its counts, in the lane's outbox):
+  - `GeometrySettings.terrainBudget` (`patches` | `triangles`; `--geometry terrainBudget=`; results
+    files without it read `patches`): `triangles` on low, `patches` on high while its strides are
+    off.
+  - The rule: `SelectionInput.triangleBudget` (`TriangleBudget`: `maxTriangles`, `bandFraction`,
+    `tolerancesPx`, `strideErrorsM`) refuses a split as `maxPatches` does, the patches each reckoned
+    a view by `patchLitTriangles` (`PATCH_LIT_TRIANGLES` 8,704 / 2,304 / 640 / 192) at the view's
+    slewed τ′ (`bandTauPx`), from `Device.largestStrideErrors`; `Selection.litTriangles` reports it.
+  - Each lit view is held to the budget alone, not their sum (`PatchLeafSet`'s `weights` a view,
+    `weight` their largest sum, `weightOf`).
+  - Stand-ins are reckoned as drawn (a mask one to three levels down as a patch at stride 2^levels,
+    deeper, or of an edge or unmeasured bake, a whole grid), edge and unmeasured bakes whole.
+  - A reckoning, not a bound: a neighbour's band or a fade (kept whole) can draw finer; the probe
+    logs the drawn beside the reckoned (`drawnPastReckonedMax`).
+  - B and every count include the skirts: 8,704 a whole patch, its 64 blocks' 8,192 and its 32
+    strips' 512 (the probe's drawn and stride-1 counts took the strips in, research-leans-42).
+  - `maxPatches` stays ⌊slots ÷ 2⌋ (the pins ran to 1.4 times the patches at the budget).
+  - `TERRAIN_TRIANGLE_BUDGET` is the held stride-1 frame, 604 and 187 × 8,704: at the held caches
+    one view's selection is the patches' bit for bit; a re-sized cache's frame stays within it as
+    reckoned.
+  - `TERRAIN: DETAIL LIMITED`: the selection's budget beyond τ, as before, or, wherever strides are
+    on whatever `terrainBudget` says (research-leans-42), the cull's count of strides drawn past τ′
+    above 0. Not counted on low (R05 Design note 26 states it there), nor at stride 1.
+  - The count is a cluster's own need at its chosen stride: a block whose side vertices take a
+    neighbour's coarser band (T3.c's mixed mesh) is not counted; the draft takes it to the ruling.
+  - The count: `clusterCull.wgsl`'s `drawn_over` and `note_over` into `args` past the buckets
+    (`ClusterBuckets.overWord`, `CullParams.overWord` at byte 220, 0 for none); the lit pass's
+    `toleranceRad` is Design note 3's τ′ in rad.
+  - Read back each frame by `clusters/overCount.ts`' `ClusterOverCounts` (`CLUSTER_OVER_KERNEL`,
+    `bit-exact`); twin `cull.ts`' `drawnPastTolerance`, `cullOverTwin`; part 7 holds the device's
+    count between the twin's exact and widened ones.
+  - Timed: one more dispatch a counted lit view-frame, `terrain clusters (<view>) over counts`.
+    Bytes: 4 B a pass in each view's `args`, and a ring of 3 × 4 B a pass (`geometry-clusters`).
+  - T3.c's error rule stays the stated one (T3.a's verdict); the caches are not grown: bakes are
+    the wall, and growing them trades DETAIL LIMITED for STREAMING (research-leans-42).
+  - The re-size's trigger, for decision-r10-t14b-constants §3: at 8 workers, the grown cache's
+    stand-in p95 on the probe no worse than today's (66 low, 393 high).
+  - And: the drawn at most the reckoned on the probe.
+  - And, on high, the strides on first, and the casters counted.
+  - For the probe: `TerrainSessionOptions.litTerrain`, `TerrainPass.usedSlots`, and
+    `SEAM_COUNTS`, `SEAM_COUNT_STRIDE`, `SEAM_CACHE_SCALE`, `SEAM_STRIDE_MOVES=0`, `SEAM_BUDGET`.
+  - Not built: strides for sub-patch stand-ins (most of a strided frame's lit triangles); a budget
+    of GPU time.
+  - Pending: the owner's Mac (`views-check --terrain --hidden --setting high|low`, on high with
+    `--geometry strides=measured,terrainBudget=triangles` and without) and RTX runs; Windows NOT RUN.

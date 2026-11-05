@@ -32,6 +32,9 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
   const shadingText = parameters.get("geometry-shading");
   const shading =
     shadingText === "forward" || shadingText === "visibility" ? shadingText : undefined;
+  const budgetText = parameters.get("geometry-terrainBudget");
+  const terrainBudget =
+    budgetText === "patches" || budgetText === "triangles" ? budgetText : undefined;
   const rate = parameters.get("geometry-farCascadeRate");
   const farCascadeRate = rate === "1" ? 1 : rate === "2" ? 2 : rate === "4" ? 4 : undefined;
   const toleranceText = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(
@@ -59,5 +62,6 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(strides === undefined ? {} : { strides }),
     ...(occlusion === undefined ? {} : { occlusion }),
     ...(shading === undefined ? {} : { shading }),
+    ...(terrainBudget === undefined ? {} : { terrainBudget }),
   };
 }

@@ -33,6 +33,11 @@
  * Every seventh instance is a stand-in's mask of its page's own blocks (plan R14, Design note 19;
  * word 8's bit 31) one to three levels down, so that every pass keeps its blocks alone, by their
  * spheres, and its strips whatever theirs.
+ *
+ * The lit and the seventh passes take a τ′ ({@link PAST_TOLERANCE_RAD}) tighter than the instances'
+ * own tolerances, and the dispatch counts their strides drawn past it (plan R14, R14.T3.e): each
+ * pass's count, read back from its word past the buckets, held between its twin's
+ * (`cullOverTwin`) over the exact and the doubly widened tests' clusters, the seventh's above 0.
  */
 
 import type { Vec3 } from "../geometry/vec3";
@@ -48,6 +53,7 @@ import {
 import {
   CLUSTER_CULL_KERNEL,
   cullMarksTwin,
+  cullOverTwin,
   cullTwin,
   type CullTwinInput,
   NO_MARK,
@@ -108,6 +114,13 @@ const ORDERED = CASCADES + 1;
 
 /** The striding camera pass's index, the seventh (R14.T3.c): every instance enters it. */
 const STRIDING = ORDERED + 1;
+
+/**
+ * The lit and the striding passes' τ′ for the count of strides drawn past it (R14.T3.e), rad: a
+ * sixth to a half of the instances' own 1 ÷ 1,000 to 1 ÷ 300 rad (`smokeScaleOf`), so that a cluster
+ * within 2 to 6.7 times its own need of the camera is counted and one farther is not.
+ */
+const PAST_TOLERANCE_RAD = 0.0005;
 
 /** The second compaction's instances: more than its scan's 128 threads, several a thread. */
 const MANY_INSTANCES = 1_300;
@@ -385,13 +398,14 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
     horizon: cullHorizonOf(toCamera, 20_000),
     order: "ordered",
     strideCap: 8,
+    toleranceRad: PAST_TOLERANCE_RAD,
   };
   // A camera pass of no planes, which keeps every cluster, at strides up to 8 by its instances'
   // bands (R14.T3.c).
   const striding: CameraCullPass = {
     kind: "camera",
     planes: [],
-    toleranceRad: 0,
+    toleranceRad: PAST_TOLERANCE_RAD,
     strideCap: 8,
     horizon: null,
     order: "appended",
@@ -478,6 +492,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
         viewAxis,
         firstShape: 0,
         discardTemplates: TERRAIN_DISCARD_TEMPLATES,
+        overWord: buckets.overWord,
       },
       paramBytes,
     );
@@ -596,6 +611,19 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       "R14.T3.c a camera pass's strides on the device are its twin's: every stride of both shapes taken, none past an instance held at stride 1 or of no bands",
       missing === 0 && extra === 0 && taken.size === 8 && held === 0,
       `the striding pass's ${String(strided.length)} entries at templates ${[...taken].toSorted((a, b) => a - b).join(", ")} of terrain's 8 strided ones, ${String(held)} past their instances' hold; the lit pass's marks at ${[...ordered.strides].toSorted((a, b) => a - b).join(", ")}; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
+    );
+    // The strides drawn past τ′ (R14.T3.e), each pass's word past its buckets, as the compaction
+    // left them, between its twin's over the exact and the doubly widened tests' clusters.
+    const pastExact = cullOverTwin(input, 0);
+    const pastWidened = cullOverTwin(input, 2);
+    const past = passes.map((_, pass) => args[buckets.overWord + pass] ?? 0);
+    const pastHeld = past.every(
+      (count, pass) => count >= (pastExact.get(pass) ?? 0) && count <= (pastWidened.get(pass) ?? 0),
+    );
+    checks.check(
+      "R14.T3.e the cull counts on the device the strides its camera passes draw past their τ′, as its twin does, and none in a cascade or a pass at stride 1",
+      pastHeld && (past[STRIDING] ?? 0) > 0 && past.slice(0, ORDERED).every((count) => count === 0),
+      `by pass ${past.join(", ")}; the exact twin's ${passes.map((_, pass) => String(pastExact.get(pass) ?? 0)).join(", ")}, the widened twin's ${passes.map((_, pass) => String(pastWidened.get(pass) ?? 0)).join(", ")}`,
     );
     checks.check(
       "R14.T2.a the lit pass's marks on the device are its twin's, its horizon refusing some, and the stable compaction writes its twin's lists byte for byte, in the draw set's order",

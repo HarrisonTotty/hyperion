@@ -2713,6 +2713,7 @@ describe("the schema check", () => {
         strides: "measured",
         occlusion: "hzb",
         shading: "visibility",
+        terrainBudget: "triangles",
       },
       segments: [
         {
@@ -2760,7 +2761,7 @@ describe("the schema check", () => {
     const markdown = summaryMarkdown(results);
     expect(markdown).toContain("## Geometry (plan R14)");
     expect(markdown).toContain(
-      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders, the lit pass's edge patches by clusters, the camera's strides by measured error, occlusion two-pass against the depth pyramid, the lit pass's interior patches shaded by the visibility buffer.",
+      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders, the lit pass's edge patches by clusters, the camera's strides by measured error, occlusion two-pass against the depth pyramid, the lit pass's interior patches shaded by the visibility buffer, the lit selection's budget its patches and lit triangles.",
     );
     expect(markdown).toContain(
       "| orbit coast | 59 (61) | 33 (33) | 20 (30) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
@@ -2804,6 +2805,7 @@ describe("the schema check", () => {
             strides: "off",
             occlusion: "off",
             shading: "forward",
+            terrainBudget: "patches",
           },
           segments,
         },
@@ -2849,6 +2851,9 @@ describe("the schema check", () => {
       // The lit pass's shading (R14.T2): `forward` or `visibility` where the file holds it.
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, shading: "visibility" })),
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, shading: "deferred" })),
+      // The lit selection's budget (R14.T3.e): `patches` or `triangles` where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, terrainBudget: "triangles" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, terrainBudget: "frames" })),
       validateResults(
         JSON.parse(
           JSON.stringify({
@@ -2880,9 +2885,11 @@ describe("the schema check", () => {
       [],
       malformed,
       [],
+      malformed,
+      [],
     ]);
     expect(summaryMarkdown(results)).toContain(
-      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh, the camera's strides off, occlusion off, the lit pass's interior patches shaded forward.",
+      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh, the camera's strides off, occlusion off, the lit pass's interior patches shaded forward, the lit selection's budget its patches.",
     );
   });
 
