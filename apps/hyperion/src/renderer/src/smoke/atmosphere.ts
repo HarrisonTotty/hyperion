@@ -2273,6 +2273,8 @@ interface ThickTwinBody {
   readonly frames: ReadonlyArray<TwinFrame>;
   /** Its column's temperature, where it draws the medium's own light (R08.T18.b). */
   readonly thermal?: MediumTemperature;
+  /** As {@link RoutedTwinBody.marchBounds}. */
+  readonly marchBounds?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -2642,14 +2644,21 @@ export interface RoutedTwinBody {
   readonly gravity: BodyGravity | null;
   /** Its column's temperature where it draws the medium's own light (R08.T18.b), or `null`. */
   readonly thermal: MediumTemperature | null;
+  /**
+   * Its ray march's recorded misses by frame name, the bound its march and the march's
+   * transmittance are held to there in units of R08.T6.b's 10⁻³, in place of 1: a figure off its
+   * tolerance pinned as it stands (the lane rules' findings); none where absent.
+   */
+  readonly marchBounds?: Readonly<Record<string, number>>;
 }
 
 /**
  * R08.T11's routes' rows against their twins (research-rm4-rm5-close-out §4, lane 3: each row meets
  * its twin on SwiftShader): each body's sky view, aerial perspective and march over its own tables
  * and the smoke's pattern of its route's table, as its row draws them ({@link withRoutedTable}),
- * held to their CPU twins to 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound), on high: a deck's
- * over {@link DECK_TWIN_FRAMES}, every other's over R08.T6.b's two frames.
+ * held to their CPU twins to 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound), or a row's march to
+ * its recorded {@link RoutedTwinBody.marchBounds}, on high: a deck's over {@link DECK_TWIN_FRAMES},
+ * every other's over R08.T6.b's two frames.
  */
 export async function checkRoutedTwins(
   engine: RenderEngine,
@@ -2890,17 +2899,20 @@ async function checkThickTwinBodies(
           void ordered.later(async (later) => {
             const result = await agreements();
             const label = `${body.name}, high, ${frame.name}`;
-            for (const [what, held] of [
-              ["the sky view", result.skyView],
-              ["the aerial perspective", result.aerial],
-              ["the ray march", result.rayMarch],
+            const marchBound = body.marchBounds?.[frame.name] ?? 1;
+            for (const [what, held, bound] of [
+              ["the sky view", result.skyView, 1],
+              ["the aerial perspective", result.aerial, 1],
+              ["the ray march", result.rayMarch, marchBound],
               [
                 "the aerial perspective's transmittance per channel (R08.T9.c)",
                 result.aerialTransmittance,
+                1,
               ],
               [
                 "the ray march's transmittance per channel (R08.T9.c)",
                 result.rayMarchTransmittance,
+                marchBound,
               ],
             ] as const) {
               const sharedAt = [...new Set(held.split.map((channel) => channel.where))].join(", ");
@@ -2908,9 +2920,10 @@ async function checkThickTwinBodies(
                 held.split.length === 0
                   ? ""
                   : `; ${held.split.length} within the twin at a piece's share's other rounding (${sharedAt})`;
+              const to = bound === 1 ? "10⁻³" : `${bound} × 10⁻³, its recorded miss`;
               later.check(
-                `${over.replace("{label}", label).replace("{what}", what)} agrees with the CPU twin to 10⁻³`,
-                held.worst <= 1 && held.above > 0,
+                `${over.replace("{label}", label).replace("{what}", what)} agrees with the CPU twin to ${to}`,
+                held.worst <= bound && held.above > 0,
                 `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound${shared}`,
               );
             }

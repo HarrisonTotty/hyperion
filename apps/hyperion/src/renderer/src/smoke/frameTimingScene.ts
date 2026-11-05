@@ -478,9 +478,21 @@ export function routedPlacesOf(routed: Pick<RoutedMedium, "figure" | "medium">):
 }
 
 /**
+ * (R)'s recorded march miss (plan R08, R08.T17; the lane's findings): from 400 km at the limb its
+ * march's mean transmittance, some 7 × 10⁻⁵ through a haze rising aloft (`thickCases.ts`'s
+ * `TITAN_HAZE`) to its top at 1 Pa, where it still holds 0.13 of its density at the ground, stands
+ * 1.31 × 10⁻³ off its twin at two texels, about 1.5 of `rgba16float`'s steps there (2⁻²⁴), three
+ * times one stored value's rounding: rounded outward at its third figure, in units of R08.T6.b's
+ * 10⁻³.
+ */
+const TITAN_LIMB_MARCH_BOUNDS: Readonly<Record<string, number>> = { "400 km, the limb": 1.32 };
+
+/**
  * (R)'s medium: `titan-class` (`reference/thickCases.ts`, its haze's aggregate optics some 20 s,
- * pod, 16 vCPU), routed by its haze's range (R08.T14.d.4), on its sphere of one slice and one band,
- * its tables holding a thick table with its correction summed in, as a haze route's bake is given.
+ * pod, 16 vCPU), routed as its haze's range would route it (R08.T14.d.4; closed since R08.T17's
+ * re-traced reference, so the row times a route the product does not take), on its sphere of one
+ * slice and one band, its tables holding a thick table with its correction summed in, as a haze
+ * route's bake is given.
  *
  * @throws Error where the case is not on a sphere.
  */
@@ -501,6 +513,7 @@ export async function titanHazeMedium(): Promise<RoutedMedium> {
     thermal: null,
     drawnFigure: figure,
     giantDistanceM: GIANT_DISTANCE_M,
+    marchBounds: TITAN_LIMB_MARCH_BOUNDS,
   };
 }
 

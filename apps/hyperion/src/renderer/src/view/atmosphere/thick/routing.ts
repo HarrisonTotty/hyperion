@@ -7,7 +7,8 @@
  * `decision-r08-t13c2-classes.md` §6). Elsewhere a thick world is drawn by the analytic term under
  * `ATMOSPHERE: APPROXIMATE`. A Titan-class haze's range opens on `titan-class`'s gate alone, its
  * recorded verdict passing with its named exceptions ({@link HAZE_GATE_TALLIES},
- * {@link HAZE_GATE_EXCEPTIONS}, R08.T14.d.4), which it does. A
+ * {@link HAZE_GATE_EXCEPTIONS}, R08.T14.d.4), which since R08.T17's haze rising aloft it does not:
+ * a Titan-class world is drawn by the analytic term. A
  * `cloudDeck` world routes to its deck's bake only within the range its
  * passing deck gates cover ({@link DECK_ROUTE_RANGE}, R08.T15.b.2): a gas envelope's, open on
  * `giant-deck`'s envelope variant alone on the `closed` giant route, whose recorded verdict passes
@@ -65,7 +66,7 @@ export interface ThickRouteRange {
  * of it stand a Mars-class dust's forward peak (ḡ 0.71–0.76, τ ḡ 0.36–0.38), which stays
  * `ATMOSPHERE: APPROXIMATE` (precondition 2, main's ruling with the split), and the Venus- and
  * Titan-class columns (τ 7–77): Venus's is a deck's (R08.T15.b.2), and Titan's has a range of its
- * own, {@link HAZE_ROUTE_RANGE}, open on its gate with its named exceptions. Neither the absorbers' depth, which
+ * own, {@link HAZE_ROUTE_RANGE}, which its gate opens with its named exceptions (closed since R08.T17). Neither the absorbers' depth, which
  * the channels leave out (only `earth`'s ozone is gated), nor the radius over the scale height, on
  * which the pseudo-spherical beam's low sun depends, is bounded.
  */
@@ -338,29 +339,27 @@ export const SURFACE_DECK_GATE_TALLIES: Readonly<
  * `titan-class`'s recorded verdict by image through its route (R08.T14.d.4): `vectorGate.json`'s
  * `titanClass.routed.images`, its whole column baked at m ≤ 2 with its correction as a haze route
  * bakes it, its green and blue at their own wavelengths and its diffuse streams on their curved
- * paths (`bake.ts`'s "Own wavelengths" and "Curved streams"), against the re-traced reference's
- * vector I (R08.T12.h's), held to the file by the test. 160 of its 360 values pass, 25 miss and 175
- * are refused; every miss is red:
- *
- * - the sky at s30 (v30, a45 and a180: 1.07 and 1.10 of the reference), within the gate at m < 8;
- * - the disc at p60 (1.07), mode-free, the red still the bins' (its methane's curve at the floor);
- * - the low sun, dim: s80's forward view at v60 (0.92) and the horizon's 21 views at s90
- *   (0.76–0.88), the pseudo-spherical beam past its model's limit.
+ * paths (`bake.ts`'s "Own wavelengths" and "Curved streams"), against the reference re-traced for
+ * R08.T17's haze rising aloft, its vector I, held to the file by the test. 68 of its 360 values
+ * pass, 117 miss and 175 are refused. On the images it judges 22 miss, all but three red: the sky
+ * at s30 (v30, a90) and at s60 (17, 0.86–0.93 of the reference, the route dim under a low sun),
+ * the disc at p30, p60 and p85 (1.10, 1.04 and 0.72), and the aerial view at 32 km; every one but
+ * the disc at p60 unlisted, so the gate closes (R08.T17's rule E).
  */
 export const HAZE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
-  { image: "ground-s0", comparisons: 12, passes: 12, misses: 0, refusals: 0 },
-  { image: "ground-s30", comparisons: 60, passes: 48, misses: 2, refusals: 10 },
-  { image: "ground-s60", comparisons: 60, passes: 36, misses: 0, refusals: 24 },
-  { image: "ground-s80", comparisons: 63, passes: 33, misses: 1, refusals: 29 },
-  { image: "ground-s90", comparisons: 63, passes: 0, misses: 21, refusals: 42 },
-  { image: "ground-s95", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
-  { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
-  { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
-  { image: "disc-p60", comparisons: 3, passes: 2, misses: 1, refusals: 0 },
-  { image: "disc-p75", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
-  { image: "disc-p85", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
-  { image: "limb", comparisons: 15, passes: 12, misses: 0, refusals: 3 },
-  { image: "aerial", comparisons: 9, passes: 5, misses: 0, refusals: 4 },
+  { image: "ground-s0", comparisons: 12, passes: 8, misses: 0, refusals: 4 },
+  { image: "ground-s30", comparisons: 60, passes: 38, misses: 1, refusals: 21 },
+  { image: "ground-s60", comparisons: 60, passes: 13, misses: 17, refusals: 30 },
+  { image: "ground-s80", comparisons: 63, passes: 0, misses: 33, refusals: 30 },
+  { image: "ground-s90", comparisons: 63, passes: 0, misses: 28, refusals: 35 },
+  { image: "ground-s95", comparisons: 63, passes: 0, misses: 34, refusals: 29 },
+  { image: "disc-p0", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
+  { image: "disc-p30", comparisons: 3, passes: 0, misses: 1, refusals: 2 },
+  { image: "disc-p60", comparisons: 3, passes: 0, misses: 1, refusals: 2 },
+  { image: "disc-p75", comparisons: 3, passes: 2, misses: 0, refusals: 1 },
+  { image: "disc-p85", comparisons: 3, passes: 0, misses: 1, refusals: 2 },
+  { image: "limb", comparisons: 15, passes: 5, misses: 0, refusals: 10 },
+  { image: "aerial", comparisons: 9, passes: 1, misses: 1, refusals: 7 },
 ];
 
 /**
@@ -379,9 +378,28 @@ export interface GateMiss {
  * {@link HAZE_UNJUDGED_IMAGES}, held to the file by the test.
  */
 export const HAZE_GATE_MISSES: ReadonlyArray<GateMiss> = [
-  { image: "ground-s30", value: "ground-s30-v30-a45/r", ratio: 1.039095 },
-  { image: "ground-s30", value: "ground-s30-v30-a180/r", ratio: 1.637087 },
-  { image: "disc-p60", value: "disc-p60/r", ratio: 1.075547 },
+  { image: "ground-s30", value: "ground-s30-v30-a90/r", ratio: 1.194134 },
+  { image: "ground-s60", value: "ground-s60-v30-a0/r", ratio: 1.703285 },
+  { image: "ground-s60", value: "ground-s60-v30-a0/g", ratio: 1.034178 },
+  { image: "ground-s60", value: "ground-s60-v30-a45/r", ratio: 1.110212 },
+  { image: "ground-s60", value: "ground-s60-v60-a45/r", ratio: 1.566796 },
+  { image: "ground-s60", value: "ground-s60-v60-a90/r", ratio: 1.396606 },
+  { image: "ground-s60", value: "ground-s60-v60-a135/r", ratio: 1.041316 },
+  { image: "ground-s60", value: "ground-s60-v75-a0/r", ratio: 1.992406 },
+  { image: "ground-s60", value: "ground-s60-v75-a45/r", ratio: 1.695752 },
+  { image: "ground-s60", value: "ground-s60-v75-a90/r", ratio: 1.361608 },
+  { image: "ground-s60", value: "ground-s60-v75-a135/r", ratio: 1.105267 },
+  { image: "ground-s60", value: "ground-s60-v85-a0/r", ratio: 1.798349 },
+  { image: "ground-s60", value: "ground-s60-v85-a45/r", ratio: 1.621675 },
+  { image: "ground-s60", value: "ground-s60-v85-a90/r", ratio: 1.512734 },
+  { image: "ground-s60", value: "ground-s60-v85-a90/g", ratio: 1.047713 },
+  { image: "ground-s60", value: "ground-s60-v85-a135/r", ratio: 1.198912 },
+  { image: "ground-s60", value: "ground-s60-v85-a180/r", ratio: 1.169705 },
+  { image: "ground-s60", value: "ground-s60-v85-a180/g", ratio: 1.094049 },
+  { image: "disc-p30", value: "disc-p30/r", ratio: 1.319177 },
+  { image: "disc-p60", value: "disc-p60/r", ratio: 1.036881 },
+  { image: "disc-p85", value: "disc-p85/r", ratio: 3.880784 },
+  { image: "aerial", value: "aerial-32km/r", ratio: 1.148176 },
 ];
 
 /**
@@ -397,7 +415,8 @@ export interface GateException {
 
 /**
  * The haze gate's named exceptions (R08.T14.d.4; main's ruling (1) of 2026-11-01): `titan-class`'s
- * three misses on the images it judges, each held to its bound, as Earth's route passed with its
+ * misses on the images it judges that it would pass with, each held to its bound (one since R08.T17's
+ * re-traced reference, whose other misses close the route), as Earth's route passed with its
  * named misses (research-leans-4 §3). Each reads no closer to the reference through the analytic
  * path, the one an unrouted world is drawn by, than through the route, judged per image in the
  * gate's edge units (main's reading of ruling (1), research-leans-28 §4: a pixel takes its three
@@ -407,22 +426,10 @@ export interface GateException {
  */
 export const HAZE_GATE_EXCEPTIONS: ReadonlyArray<GateException> = [
   {
-    value: "ground-s30-v30-a45/r",
+    value: "disc-p60/r",
     bound: 1.04,
     cause:
-      "the table's azimuthal modes, m <= 2: within the gate at m < 8, the read's modes widened by hand (r08-titan-route); the analytic path's worst channel there 9.86 of the edge",
-  },
-  {
-    value: "ground-s30-v30-a180/r",
-    bound: 1.64,
-    cause:
-      "the table's azimuthal modes, m <= 2, as a45's; the analytic path's worst channel there 11.2 of the edge",
-  },
-  {
-    value: "disc-p60/r",
-    bound: 1.08,
-    cause:
-      "mode-free and red alone: the bins' red conversion, its methane's channel curve at the floor (T14.d.1's record); the image's worst channel through the analytic path, its blue at 2.25 of the edge, is larger than through the route, its red at 1.08 (1.074 before R08.T9.c drew the disc per channel); 1.04 before R08.T16.a.2's march, whose red then stood 0.24% under its own converged march, which it now meets within 0.03% (lean, 2026-11-02)",
+      "mode-free and red alone: the bins' red conversion, its methane's channel curve at the floor (T14.d.1's record, not measured again with R08.T17's haze); the image's worst channel through the analytic path, its red at 2.04 of the edge, is larger than through the route, 1.037; R08.T17's re-traced reference passes ground-s30-v30-a45/r and a180/r, whose exceptions went with it",
   },
 ];
 
@@ -536,12 +543,12 @@ export function thickRouteRangesOf(
 }
 
 /**
- * The ranges a `thickScattering` world routes over (R08.T14.d.4): {@link THICK_ROUTE_RANGE} and
- * {@link HAZE_ROUTE_RANGE}, since `titan-class`'s gate passes with its named exceptions
- * ({@link HAZE_GATE_TALLIES}, {@link HAZE_GATE_EXCEPTIONS}). A Titan-class world is baked as a haze
- * ({@link bakedAsHaze}) and reads `ATMOSPHERE: COMPUTING`, then nothing, but for its low sun
- * ({@link LOW_SUN_REASON}). Its routed frame against `decision-r08-t11-frame.md`'s 16.67 ms is
- * pending, the owner's RTX run, as Earth's was when it routed.
+ * The ranges a `thickScattering` world routes over (R08.T14.d.4): {@link THICK_ROUTE_RANGE} alone
+ * since R08.T17, `titan-class`'s gate missing past its named exceptions ({@link HAZE_GATE_TALLIES},
+ * {@link HAZE_GATE_EXCEPTIONS}), and {@link HAZE_ROUTE_RANGE} beside it were the gate to pass. A
+ * Titan-class world is drawn by the analytic term and reads `ATMOSPHERE: APPROXIMATE`; baked as a
+ * haze ({@link bakedAsHaze}) on a passing gate it read `ATMOSPHERE: COMPUTING`, then nothing, but
+ * for its low sun ({@link LOW_SUN_REASON}).
  */
 export const THICK_ROUTE_RANGES: ReadonlyArray<ThickRouteRange> = thickRouteRangesOf(
   HAZE_GATE_TALLIES,

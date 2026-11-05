@@ -76,6 +76,7 @@ import {
   AtmosphereCache,
   type AtmosphereFrameBody,
   type AtmosphereObserver,
+  type AtmosphereCacheOptions,
   type AtmosphereScene,
   type AtmosphereView,
   type AtmosphereViewReport,
@@ -139,11 +140,17 @@ import {
   THICK_REASON,
 } from "./thick/regime";
 import {
+  bakedAsHaze as routingBakedAsHaze,
   correctionRouted,
   DECK_LOWEST_SUN_SINE,
+  deckRouted,
   type GiantRoute,
+  HAZE_ROUTE_RANGE,
   LOW_SUN_REASON,
   LOW_SUN_SINE,
+  THICK_ROUTE_RANGE,
+  thickBakeRouted,
+  type ThickRouteRange,
   TWILIGHT_REASON,
 } from "./thick/routing";
 import { channelSource, type SpectralColumn } from "./thick/spectralColumn";
@@ -372,6 +379,27 @@ function routesNone(): boolean {
 }
 
 /**
+ * The ranges a `thickScattering` world would route over were `titan-class`'s haze gate to pass
+ * (R08.T14.d.4): the kept cases' and the haze's, the product's before R08.T17's re-traced
+ * reference closed the gate.
+ */
+const HAZE_GATE_OPEN: ReadonlyArray<ThickRouteRange> = [THICK_ROUTE_RANGE, HAZE_ROUTE_RANGE];
+
+/** The product's routing with the haze's gate open ({@link HAZE_GATE_OPEN}). */
+function routesHazeOpen(
+  regime: AtmosphereRegime,
+  medium: AtmosphereMedium,
+  envelope: boolean,
+): boolean {
+  return thickBakeRouted(regime, medium, HAZE_GATE_OPEN) || deckRouted(regime, medium, envelope);
+}
+
+/** The product's haze bake with the haze's gate open ({@link HAZE_GATE_OPEN}). */
+function bakedAsHazeOpen(regime: AtmosphereRegime, medium: AtmosphereMedium): boolean {
+  return routingBakedAsHaze(regime, medium, HAZE_GATE_OPEN);
+}
+
+/**
  * A cache over the fakes, its tables reporting `rowBytes` each, or their per-planet row's, routing
  * its thick bakes by `routes`, or none if absent, and asking polarisation corrections by
  * `corrects`, or none if absent; `product`, the product's routing and corrections in their place
@@ -380,7 +408,7 @@ function routesNone(): boolean {
  */
 function harness(
   rowBytes?: number,
-  routes: ((regime: AtmosphereRegime) => boolean) | "product" = routesNone,
+  routes: NonNullable<AtmosphereCacheOptions<FakeTables>["routes"]> | "product" = routesNone,
   corrects: ((column: SpectralColumn) => boolean) | "product" = routesNone,
   bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
   giantRoute?: GiantRoute,
@@ -3485,7 +3513,7 @@ describe("the product's route (R08.T14.d.4)", () => {
     ]);
   });
 
-  it("bakes a Titan-class world as a haze and corrects it, COMPUTING until both land, then nothing but its low sun", async () => {
+  it("draws a Titan-class world by the analytic term under APPROXIMATE, its haze's gate closed (R08.T17), asking no bake and no correction", () => {
     const titan = titanClassReferenceCase();
     const TITAN: KeptBodyAtmosphere = {
       kind: "medium",
@@ -3493,6 +3521,23 @@ describe("the product's route (R08.T14.d.4)", () => {
       labels: [],
     };
     const h = harness(undefined, "product", "product");
+    const report = keptFrame(h, [[A, TITAN, undefined]]);
+    expect([
+      h.builder.bakes.length,
+      h.builder.corrections.length,
+      report.labels,
+      [...report.reasons],
+    ]).toEqual([0, 0, ["atmosphereApproximate"], [[A, [THICK_REASON]]]]);
+  }, 180_000);
+
+  it("bakes a Titan-class world as a haze and corrects it where its haze's gate passes, COMPUTING until both land, then nothing but its low sun", async () => {
+    const titan = titanClassReferenceCase();
+    const TITAN: KeptBodyAtmosphere = {
+      kind: "medium",
+      built: builtOfCase(titan, "titan-class"),
+      labels: [],
+    };
+    const h = harness(undefined, routesHazeOpen, "product", bakedAsHazeOpen);
     const asked = keptFrame(h, [[A, TITAN, undefined]]);
     const { ask } = latestBake(h);
     const levers = [ask.ownWavelengths, ask.curvedStreams, ask.horizonTerms];

@@ -6022,7 +6022,8 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       "R08.T14.d.4's Titan-class gate"); with the horizon's terms, 3 misses are left (Risks,
       "R08.T14.d.4's horizon terms"); the estimator check keeps the route closed (Risks,
       "R08.T14.d.4's estimator check"). Titan-class routed 2026-11-01, its low sun labelled and its
-      three misses named (Risks, "R08.T14.d.4's haze route, opened").
+      three misses named (Risks, "R08.T14.d.4's haze route, opened"); closed again by R08.T17's
+      re-traced reference (Risks, "Titan-class's haze rises aloft, as built").
   - _Ruled with the split_ (main, 2026-10-29):
     - An unrouted thick world takes no correction (question 3): `CORRECTION_ROUTED` turns on in
       T14.d.4's routing commit, for thin worlds and routed thick worlds alone. This amends Design
@@ -25135,3 +25136,21 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - `ModeProfile::new` takes an exponent above −1; the wire's `AerosolModeDto.f_sed` may be
     negative above −1, and `bodiesWire.ts` reads it (a deck's `f_sed` stays non-negative).
   - The ice giants' haze (−0.5) stays well mixed: no version holds its own exponent.
+  - Client: `TITAN_HAZE.mixingExponent` −0.83 (`reference/thickCases.ts`, `test/bakeFixtures.ts`);
+    `titan-class.case.json` rewritten and its reference re-traced; `refusals.json`,
+    `sanityRanges.json` and `vectorGate.json`'s `titanClass` re-blessed.
+  - The haze gate closes (rule E): `HAZE_GATE_TALLIES` and `HAZE_GATE_MISSES` follow the record,
+    `HAZE_GATE_EXCEPTIONS` keeps `disc-p60/r` alone (bound 1.04), and `THICK_ROUTE_RANGES` is
+    `[THICK_ROUTE_RANGE]`: `TEST TITAN` draws by the analytic term under `ATMOSPHERE: APPROXIMATE`.
+  - `reference/titanColour.test.ts` holds the disc's I/F to R/G ≥ 0.95 and B/G ≤ 0.6 through the
+    path it is drawn by. The smoke's routed rows take `RoutedTwinBody.marchBounds`; (R)'s limb
+    is held at 1.32 × 10⁻³ (`TITAN_LIMB_MARCH_BOUNDS`).
+  - Pending: the owner's RTX run for row (R), which now times a closed route.
+  - Re-pinned on the Titan-class fixture: the bake's IMS share 18.6% (bound 0.19, was 0.11); its
+    bins-only m = 0 down to −3.0 × 10⁻⁶ of its largest (held at −4 × 10⁻⁶; the haze route's bake
+    stays ≥ 0); T14.e's tests 4 and 5 at 2.7, 4.9, 0.65% and 1.9 (were 1, 1.3, 0.5% and 1.1).
+  - The re-trace refuses the discs' vector green and blue for noise at the pilot's counts (232 of
+    768 values refused): reopening the route needs a deeper disc trace.
+  - "R08.T14.d.4's haze route, opened"'s UX-list draft is withdrawn: Titan-class reads
+    `ATMOSPHERE: APPROXIMATE` again, and `ATMOSPHERE: COMPUTING`'s "Titan-class" example no longer
+    holds.

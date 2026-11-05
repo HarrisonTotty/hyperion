@@ -20,7 +20,9 @@ import {
 import { mediumTableRadiusM } from "../assemble";
 import { MARS_FIT_COLUMN } from "../channels";
 import { BAKE_BIN_COUNT, BAKE_WAVELENGTHS_NM, CHANNEL_WAVELENGTHS_NM } from "../medium";
-import { MARS_CASE, MARS_REFERENCE_RADIUS_M } from "../reference/cases";
+import { MARS_CASE, MARS_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "../reference/cases";
+import { titanClassReferenceCase } from "../reference/thickCases";
+import { twinBakeBody } from "../reference/twin";
 import { normalizedAssociatedLegendre } from "./discreteOrdinates";
 import { tablesPlanOf } from "../tables";
 import {
@@ -65,7 +67,7 @@ import {
   venusClassFixture,
 } from "../../../test/bakeFixtures";
 import { doubleGaussQuadrature } from "./discreteOrdinates";
-import { keptColumnOf, sphereBakeBody } from "./keptBake";
+import { bakeKeptCase, keptColumnOf, sphereBakeBody } from "./keptBake";
 import { type SpectralColumn, spectralOptics, type SpectralTerm } from "./spectralColumn";
 
 /** A value computed on its first use, so that a describe block's setup runs inside its tests. */
@@ -102,14 +104,47 @@ const venus = once(async (): Promise<Baked> => bakedOf(await venusClassFixture()
 const titan = once(async (): Promise<Baked> => Promise.resolve(bakedOf(titanClassFixture())));
 
 /**
+ * `titan-class`'s band-0 table as a haze route bakes it (R08.T14.d.4, as `vectorGate.test.ts`'s
+ * `titanClass` does): the channels its lights allow at their own wavelengths, and its streams'
+ * curved paths.
+ */
+const titanHaze = once(async (): Promise<MsSourceTable> => {
+  const titanCase = titanClassReferenceCase();
+  const lights = referenceCaseBakeLights(titanCase);
+  const [table] = bakeKeptCase(titanCase, lights, twinBakeBody(titanCase.figure), {
+    ownWavelengths: true,
+    curvedStreams: true,
+  });
+  if (table === undefined) {
+    throw new Error("titan-class has a band");
+  }
+  return Promise.resolve(table);
+});
+
+/**
  * The thick fixtures: measured 3.9 × 10⁻² and 1.2 × 10⁻² for Venus's CO₂, 1.7 × 10⁻³ for Titan's
- * methane; IMS 1.2% and 5.0% (2026-10-26), and Titan's 10.45% once the grid took its rows below the
- * horizontal (R08.T14.d.2).
+ * methane; IMS 1.2% and 5.0% (2026-10-26), Titan's 10.45% once the grid took its rows below the
+ * horizontal (R08.T14.d.2), and 18.6% with its haze rising aloft (R08.T17, 2026-11-03).
  */
 const FIXTURES: ReadonlyArray<readonly [string, FixtureCase]> = [
   ["Venus-class column", { baked: venus, fitBounds: [0.04, 0.013], imsBound: 0.02 }],
-  ["Titan-class column", { baked: titan, fitBounds: [2e-3, 2e-3], imsBound: 0.11 }],
+  ["Titan-class column", { baked: titan, fitBounds: [2e-3, 2e-3], imsBound: 0.19 }],
 ];
+
+/**
+ * The bakes whose m = 0 is never negative: the Venus-class column's, and the Titan-class column's
+ * as a haze route bakes it. On the bins alone, the Titan-class column's blue, converted by weights
+ * negative over 500–620 nm (the module's "Own wavelengths"), goes to −3.0 × 10⁻⁶ of its largest
+ * deep in the column under a low or set sun, where its haze above took the blue (R08.T17,
+ * 2026-11-03); a Titan-class world is baked as a haze route, never so.
+ */
+const NON_NEGATIVE: ReadonlyArray<readonly [string, () => Promise<MsSourceTable>]> = [
+  ["Venus-class column", async () => (await venus()).table],
+  ["Titan-class column baked as a haze route", titanHaze],
+];
+
+/** The least m = 0 the Titan-class column's bins-only bake stores, over its channel's largest. */
+const TITAN_BINS_LEAST_SHARE = -4e-6;
 
 /** A table's one slot, or a test failure. */
 function slotOf(table: MsSourceTable): MsSourceTable["slots"][number] {
@@ -159,15 +194,35 @@ describe("the thick bake on the thick fixtures", () => {
     },
   );
 
-  it.for(FIXTURES)(
+  it.for(NON_NEGATIVE)(
     "never stores a negative m = 0 for the %s",
     { timeout: BAKE_TIMEOUT_MS },
-    async ([, { baked }]) => {
-      const { values } = slotOf((await baked()).table);
+    async ([, baked]) => {
+      const { values } = slotOf(await baked());
       const negative = values.filter(
         (value, i) => Math.floor(i / 3) % THICK_BAKE_MODES === 0 && !(value >= 0),
       );
       expect(negative.length).toBe(0);
+    },
+  );
+
+  it(
+    "stores the Titan-class column's bins-only m = 0 no further below 0 than recorded",
+    { timeout: BAKE_TIMEOUT_MS },
+    async () => {
+      const { values } = slotOf((await titan()).table);
+      const least = [0, 0, 0];
+      const largest = [0, 0, 0];
+      for (const [i, value] of values.entries()) {
+        if (Math.floor(i / 3) % THICK_BAKE_MODES === 0) {
+          const c = i % 3;
+          least[c] = Math.min(least[c] ?? 0, value);
+          largest[c] = Math.max(largest[c] ?? 0, value);
+        }
+      }
+      expect(
+        least.map((value, c) => value / (largest[c] ?? Number.NaN) >= TITAN_BINS_LEAST_SHARE),
+      ).toEqual([true, true, true]);
     },
   );
 

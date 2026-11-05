@@ -63,6 +63,7 @@ import {
   deckRouteRangeOf,
   ENVELOPE_GATE_TALLIES,
   ENVELOPE_ROUTE_RANGE,
+  type GateException,
   type GateImageTally,
   type GateMiss,
   GIANT_ROUTE,
@@ -862,6 +863,13 @@ function titan(): { readonly medium: AtmosphereMedium; readonly regime: Atmosphe
   return { medium, regime: classifyRegime(medium, CLEAR_COVER) };
 }
 
+/** Whether one of the haze gate's named exceptions passes `miss`, within its bound. */
+function excusedByTheGate(miss: GateMiss): boolean {
+  return HAZE_GATE_EXCEPTIONS.some(
+    (exception) => exception.value === miss.value && miss.ratio <= exception.bound,
+  );
+}
+
 describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
   /**
    * Every image the gate judges passing, one value of each refused, and those it does not judge
@@ -941,25 +949,21 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
     );
   });
 
-  it("opens the haze's route on the recorded verdict: titan-class misses only its named exceptions on the images it judges", () => {
+  it("closes the haze's route on the recorded verdict (R08.T17): titan-class misses past its named exceptions on the images it judges", () => {
+    const unexcused = HAZE_GATE_MISSES.filter(
+      (miss) => !HAZE_UNJUDGED_IMAGES.includes(miss.image) && !excusedByTheGate(miss),
+    );
     expect([
       hazeGatePasses(HAZE_GATE_TALLIES, HAZE_GATE_MISSES),
       THICK_ROUTE_RANGES,
-      HAZE_GATE_EXCEPTIONS.map((exception) => exception.value),
-    ]).toEqual([
-      true,
-      [THICK_ROUTE_RANGE, HAZE_ROUTE_RANGE],
-      ["ground-s30-v30-a45/r", "ground-s30-v30-a180/r", "disc-p60/r"],
-    ]);
+      unexcused.length > 0,
+    ]).toEqual([false, [THICK_ROUTE_RANGE], true]);
   });
 
   it("routes titan-class if and only if its gate passes with the listed exceptions", () => {
     const { medium, regime } = titan();
     const unlisted: GateMiss = { image: "limb", value: "limb-3H/g", ratio: 1.01 };
-    const closed = thickRouteRangesOf(missing([...HAZE_GATE_MISSES, unlisted]), [
-      ...HAZE_GATE_MISSES,
-      unlisted,
-    ]);
+    const closed = thickRouteRangesOf(missing([unlisted]), [unlisted]);
     expect([
       regime.kind,
       thickBakeRouted(regime, medium),
@@ -967,11 +971,19 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
       thickBakeRouted(regime, medium, thickRouteRangesOf(passing, [])),
       closed,
       thickBakeRouted(regime, medium, closed),
-    ]).toEqual(["thickScattering", true, true, true, [THICK_ROUTE_RANGE], false]);
+    ]).toEqual(["thickScattering", false, false, true, [THICK_ROUTE_RANGE], false]);
   }, 180_000);
 
   it("closes on an unlisted miss, a listed one past its bound, or a miss its list leaves out", () => {
-    const listed = HAZE_GATE_MISSES;
+    // A fixture's exceptions, so that the rule is held whatever the recorded verdict.
+    const exceptions: ReadonlyArray<GateException> = [
+      { value: "ground-s30-v30-a45/r", bound: 1.04, cause: "a fixture's" },
+      { value: "disc-p60/r", bound: 1.08, cause: "a fixture's" },
+    ];
+    const listed: ReadonlyArray<GateMiss> = [
+      { image: "ground-s30", value: "ground-s30-v30-a45/r", ratio: 1.039 },
+      { image: "disc-p60", value: "disc-p60/r", ratio: 1.075 },
+    ];
     const unlisted: GateMiss = { image: "ground-s60", value: "ground-s60-v0-a0/b", ratio: 1.001 };
     const past = listed.map((miss) =>
       miss.value === "ground-s30-v30-a45/r" ? { ...miss, ratio: 1.041 } : miss,
@@ -980,11 +992,11 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
       miss.value === "ground-s30-v30-a45/r" ? { ...miss, ratio: 1.04 } : miss,
     );
     expect([
-      hazeGatePasses(missing(listed), listed),
-      hazeGatePasses(missing(atBound), atBound),
-      hazeGatePasses(missing([...listed, unlisted]), [...listed, unlisted]),
-      hazeGatePasses(missing(past), past),
-      hazeGatePasses(missing([...listed, unlisted]), listed),
+      hazeGatePasses(missing(listed), listed, exceptions),
+      hazeGatePasses(missing(atBound), atBound, exceptions),
+      hazeGatePasses(missing([...listed, unlisted]), [...listed, unlisted], exceptions),
+      hazeGatePasses(missing(past), past, exceptions),
+      hazeGatePasses(missing([...listed, unlisted]), listed, exceptions),
       hazeGatePasses(missing(listed), listed, []),
     ]).toEqual([true, true, false, false, false, false]);
   });
@@ -1014,11 +1026,12 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
     const earth = cases.EARTH_CASE.medium;
     const earthRegime = classifyRegime(earth, CLEAR_COVER);
     expect([
+      bakedAsHaze(regime, medium, [THICK_ROUTE_RANGE, HAZE_ROUTE_RANGE]),
       bakedAsHaze(regime, medium),
       bakedAsHaze(regime, medium, [THICK_ROUTE_RANGE]),
       bakedAsHaze(earthRegime, earth),
       bakedAsHaze({ kind: "thin" }, medium),
-    ]).toEqual([true, false, false, false]);
+    ]).toEqual([true, false, false, false, false]);
   }, 180_000);
 
   it("judges no image whose sun stands at most 0.35 over the horizon, and closes on an image refused throughout", () => {

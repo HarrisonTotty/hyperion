@@ -490,12 +490,21 @@ export function titanColumn(): AtmosphereColumn {
 /**
  * The Titan-class haze: tholin (`materials/tholin.json`) as aggregates of 3,000 monomers of
  * 0.05 µm at D_f 2, after Tomasko et al. 2008's model of Titan's haze (M. G. Tomasko et al.,
- * Planet. Space Sci. 56 (2008) 669–707), well mixed from the ground to 1 Pa, of vertical optical
- * depth 8.1 at 550 nm, the column Huygens' DISR measured (Tomasko et al. 2008's Fig. 47 as A.
- * Bazzon, H. M. Schmid and E. Buenzli, A&A 572 (2014) A6, "HST observations of the limb
- * polarization of Titan", eqs. A.8–A.10, fit it: 3.940 above 80 km, 2.793 from 30 to 80 km and
- * 1.372 below): the thick bake's Titan-class fixture's. Well mixed down to the ground is a model's
- * choice: DISR's haze falls exponentially above 80 km and linearly below, and grows below 30 km.
+ * Planet. Space Sci. 56 (2008) 669–707), from the ground to 1 Pa, of vertical optical depth 8.1 at
+ * 550 nm, the column Huygens' DISR measured (Tomasko et al. 2008's Fig. 47 as A. Bazzon, H. M.
+ * Schmid and E. Buenzli, A&A 572 (2014) A6, "HST observations of the limb polarization of Titan",
+ * eqs. A.8–A.10, fit it: 3.940 above 80 km, 2.793 from 30 to 80 km and 1.372 below): the thick
+ * bake's Titan-class fixture's.
+ *
+ * @remarks
+ * Its mixing ratio rises aloft as (p ÷ p_base)^−0.83, the exponent fitted to DISR's layers on
+ * {@link titanColumn} (plan R08, R08.T17; research-leans-36 §1): τ(550) 3.93 above 80 km, 2.29
+ * from 30 to 80 km and 1.88 below. A single power law cannot match all three layers; it matches
+ * the upper one, which sets the disc's colour, its haze absorbing the blue before N₂'s Rayleigh
+ * scattering beneath sends it back. Mixed with the gas from the ground (exponent 0), 2.6% of the
+ * haze's τ lay above 80 km, and the disc read grey: I/F red over green 0.79 and blue over green
+ * 0.87 against Titan's geometric albedo's 1.40 and 0.55 at 645, 544 and 434 nm (0.284, 0.202 and
+ * 0.111: E. Karkoschka, Icarus 133 (1998) 134, as A. Payne et al. 2025, arXiv:2508.13368, compile it).
  */
 export const TITAN_HAZE: AerosolModeSpec = {
   name: "aerosol:tholin",
@@ -512,7 +521,7 @@ export const TITAN_HAZE: AerosolModeSpec = {
   opticalDepth550: 8.1,
   basePa: TITAN_SURFACE.pressurePa,
   topPa: 1,
-  mixingExponent: 0,
+  mixingExponent: -0.83,
 };
 
 /** `titan-class`: the N₂–CH₄ air, its methane and its haze on {@link titanColumn}. */
