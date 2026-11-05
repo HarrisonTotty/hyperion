@@ -87,7 +87,9 @@ use crate::stellar::remnant::structure::white_dwarf_radius;
 use crate::stellar::sse::{ZCoeffs, zams};
 use crate::stellar::system::{StarModel, SystemStars, track_mass_of};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts, lifetime};
-use crate::tables::binary::{AwdDonorKind, AwdMark, AwdPick};
+use crate::tables::binary::{
+    AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark, AwdPick, CLASS_SHARES,
+};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::{SOLAR_EFFECTIVE_TEMPERATURE_K, SOLAR_RADIUS_M};
 use crate::units::{
@@ -189,11 +191,10 @@ impl AwdProcess {
     /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) and the side's sampler
     /// ([`AWD_FAST_SAMPLER`](crate::tables::binary::AWD_FAST_SAMPLER) or
     /// [`AWD_SLOW_SAMPLER`](crate::tables::binary::AWD_SLOW_SAMPLER)), its recurrence all on its
-    /// side, and from 29 their refits on the generator's own pairs (`_29`).
+    /// side, refitted on the generator's own pairs (P15.T10.b).
     #[must_use]
     pub fn new(galaxy: &Galaxy, side: AwdSide) -> Self {
-        let tables = galaxy.rules().binary_tables;
-        let row = tables.class_shares().row(side.carved());
+        let row = CLASS_SHARES.row(side.carved());
         let formed = galaxy.mean_formed_mass().value();
         let fields = galaxy.fields();
         let components = fields
@@ -210,7 +211,10 @@ impl AwdProcess {
                 })
             })
             .collect();
-        let sampler = ClassSampler::new(tables.awd_sampler(side));
+        let sampler = ClassSampler::new(match side {
+            AwdSide::Fast => &AWD_FAST_SAMPLER,
+            AwdSide::Slow => &AWD_SLOW_SAMPLER,
+        });
         let split = sampler.rank_of(
             AwdMark::Recurrence,
             0.0,

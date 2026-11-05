@@ -14,8 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`binary_tables`](GalaxyRules::binary_tables), plan 15's binary class tables refitted on the
-//!   generator's own pairs from 29 (P15.T10.b, [`BinaryTableRules`]);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -25,7 +23,6 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::FieldShareRules;
-use crate::galaxy::catalogue_classes::binary::BinaryTableRules;
 use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::members::recent::FeatureClassesRules;
@@ -52,10 +49,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
-    /// Which of plan 15's fitted binary class tables the galaxy reads (P15.T10.b's refit at 29,
-    /// [`BinaryTableRules`]): its share matrix's class shares, read where the galaxy is built, so
-    /// that `Galaxy::with_rules` refuses to change it, and its binary classes' samplers and rows.
-    pub(crate) binary_tables: BinaryTableRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -70,15 +63,13 @@ impl GalaxyRules {
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
-            binary_tables: BinaryTableRules::of_version(version),
             stellar: StellarRules::of_version(version),
         }
     }
 
     /// Every galaxy and stellar hold at 29 in force, for a test that asserts a 29 figure: the
-    /// version's rules from 29: the binary class tables refitted on the generator's own pairs
-    /// (P15.T10.b, [`BinaryTableRules::Published`]) and the stellar holds ([`StellarRules::every_29_hold`],
-    /// P11.T4's and P11.T12's wind reach). The 29 bump deletes it with them.
+    /// version's rules from 29, the stellar holds ([`StellarRules::every_29_hold`], P11.T4's and
+    /// P11.T12's wind reach). The 29 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_29_hold() -> Self {

@@ -103,7 +103,6 @@ use super::awd::{
     GIANT_DONOR_CORE_MASS, GIANT_DONOR_TEMPERATURE_K, LIFETIME_MARGIN, donor_state, luminosity_of,
 };
 use super::feature::{HostPlace, catalogue_share};
-use super::tables_hold::BinaryTableRules;
 use crate::coords::GalacticPosition;
 use crate::galaxy::bounds::CellBox;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
@@ -131,9 +130,9 @@ use crate::stellar::sse::wind::REIMERS;
 use crate::stellar::sse::{Track, ZCoeffs, turn_off_mass, zams};
 use crate::stellar::system::{StarModel, SystemStars, track_mass_of};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts, lifetime};
-use crate::tables::binary::{AwdDonorKind, ClassSamplerTable, XrbHostKind, XrbMark, XrbPick};
-#[cfg(doc)]
-use crate::tables::binary::{CLASS_SHARES, XRB_SAMPLER};
+use crate::tables::binary::{
+    AwdDonorKind, CLASS_SHARES, ClassSamplerTable, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
+};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
@@ -279,29 +278,24 @@ pub struct XrayBinaries {
     /// Each side's hosts per solar mass formed over the row's: the low-mass side's, then the
     /// high-mass side's.
     side_scales: (f64, f64),
-    /// The galaxy's fitted binary tables, whose share table holds its row.
-    tables: BinaryTableRules,
 }
 
 impl XrayBinaries {
     /// The class in `galaxy`: its components, from its row of [`CLASS_SHARES`] and
-    /// [`XRB_SAMPLER`]'s high-mass share, plan 15's fitted tables (from 29 their refits on the
-    /// generator's own pairs, `_29`), and the rank of the instability line in the low-mass rate's
-    /// law.
+    /// [`XRB_SAMPLER`]'s high-mass share, plan 15's fitted tables (refitted on the generator's own
+    /// pairs, P15.T10.b), and the rank of the instability line in the low-mass rate's law.
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
-        Self::of_table(galaxy, galaxy.rules().binary_tables.xrb_sampler())
+        Self::of_table(galaxy, &XRB_SAMPLER)
     }
 
-    /// The class in `galaxy` drawing from `table`, its row the galaxy's share table's
-    /// ([`CLASS_SHARES`]' below 29).
+    /// The class in `galaxy` drawing from `table`, its row [`CLASS_SHARES`]'.
     #[must_use]
     pub(crate) fn of_table(
         galaxy: &Galaxy,
         table: &'static ClassSamplerTable<XrbMark, XrbPick>,
     ) -> Self {
-        let tables = galaxy.rules().binary_tables;
-        let row = tables.class_shares().row(CarvedClass::XrayBinary);
+        let row = CLASS_SHARES.row(CarvedClass::XrayBinary);
         let sampler = ClassSampler::new(table);
         let formed = galaxy.mean_formed_mass().value();
         let fields = galaxy.fields();
@@ -356,7 +350,6 @@ impl XrayBinaries {
             sampler,
             rate_split,
             side_scales: (low_scale, high_scale),
-            tables,
         }
     }
 
@@ -370,8 +363,7 @@ impl XrayBinaries {
             XrbSide::LowMass => self.side_scales.0,
             XrbSide::HighMass => self.side_scales.1,
         };
-        self.tables
-            .class_shares()
+        CLASS_SHARES
             .row(CarvedClass::XrayBinary)
             .hosts_per_formed_mass(population)
             * scale

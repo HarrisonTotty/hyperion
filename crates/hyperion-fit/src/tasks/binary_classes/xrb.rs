@@ -548,7 +548,7 @@ pub fn render_xrb(fit: &XrbFit) -> RustTable {
         summary: vec![
             "The X-ray binaries' sampler and share row refitted against plan 11's engine at generator"
                 .to_owned(),
-            "version 29 on the generator's own pairs (plan 15, P15.T10.b), held until 29.".to_owned(),
+            "version 29 on the generator's own pairs (plan 15, P15.T10.b).".to_owned(),
         ],
         notes: xrb_notes(fit),
         items,
@@ -561,7 +561,7 @@ fn xrb_notes(fit: &XrbFit) -> Vec<String> {
     let p = &fit.params;
     let text = format!(
         "\
-Read by `XRB_SAMPLER_29` and `CLASS_SHARES_29`, before the block. The marks are fitted to the
+Read by `XRB_SAMPLER` and `CLASS_SHARES`, before the block. The marks are fitted to the
 engine's members of the nine kinds `XrbHostKind` holds at generator version {version}'s rules
 (hyperion-fit's `tasks::binary_classes::xrb`), each to the kinds the class draws it for: the
 low-mass and history marks to the solar circle's slab, the high-mass marks to the young thin

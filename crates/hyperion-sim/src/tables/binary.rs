@@ -27,7 +27,7 @@
 //! exactly what P11.T8's catalogue classes hold.
 //!
 //! **Fitted** for the accreting white dwarfs and the X-ray binaries, by plan 15's P15.T10.b against
-//! the engine at generator version 27, and **scratch** for the two merger classes: every
+//! the engine at generator version 29, and **scratch** for the two merger classes: every
 //! population makes the same hosts per solar mass formed, scaled so that the Milky Way fixture's
 //! formed mass ([`MILKY_WAY_FORMED_MASS`]) gives the counts above, and each class's layers are a
 //! guess from the stars that make it: a neutron-star merger's primary is the first compact star's,
@@ -44,12 +44,10 @@
 //! [`MERGER_SAMPLER`] is the stellar mergers' (P11.T8.c) and [`NSM_SAMPLER`] the neutron-star
 //! mergers' (P11.T8.d).
 //!
-//! The fitted tables above are 27's, frozen in the `refit_27` module, since their census drew
-//! every record's first attempt under `Free` multiplicity on its primary's own draws, which the
-//! generator does not publish (train 27's finding). Tasks `binary_awd` and `binary_xrb` refit them
-//! on the generator's own pairs into their blocks below, [`AWD_FAST_SAMPLER_29`],
-//! [`AWD_SLOW_SAMPLER_29`], [`XRB_SAMPLER_29`] and [`CLASS_SHARES_29`], which a galaxy reads from
-//! generator version 29 (`galaxy::catalogue_classes::binary`'s `tables_hold`).
+//! The fitted tables are tasks `binary_awd`'s and `binary_xrb`'s blocks below, refitted at 29 on the
+//! census of the pairs the generator itself draws at a record's first attempt (train 27's finding:
+//! the refit at 27 drew every record's first attempt under `Free` multiplicity on its primary's own
+//! draws, which the generator does not publish).
 
 use std::marker::PhantomData;
 
@@ -61,18 +59,6 @@ use crate::stellar::binary::light_curves::XrayAccretor;
 use crate::stellar::binary::{BinaryClass, CarvedClass, HmxbKind, XrbKind};
 use crate::tables::type_ia_delay::DELAY_EDGES;
 use crate::units::Years;
-
-mod refit_27;
-
-pub use refit_27::{
-    AWD_FAST_DONOR_KINDS_27, AWD_FAST_HOSTS_PER_FORMED_MASS_27, AWD_FAST_LAYER_SHARES_27,
-    AWD_FAST_LIMITS_27, AWD_FAST_MEDIAN_SPANS_27, AWD_FAST_MEDIANS_27, AWD_FAST_NODE_RESIDUALS_27,
-    AWD_FAST_RESIDUALS_27, AWD_SLOW_DONOR_KINDS_27, AWD_SLOW_HOSTS_PER_FORMED_MASS_27,
-    AWD_SLOW_LAYER_SHARES_27, AWD_SLOW_LIMITS_27, AWD_SLOW_MEDIAN_SPANS_27, AWD_SLOW_MEDIANS_27,
-    AWD_SLOW_NODE_RESIDUALS_27, AWD_SLOW_RESIDUALS_27, XRB_DONOR_MASS_NODE_RESIDUALS_27,
-    XRB_HIGH_MASS_KINDS_27, XRB_HOSTS_PER_FORMED_MASS_27, XRB_LAYER_SHARES_27, XRB_LIMITS_27,
-    XRB_LOW_MASS_KINDS_27, XRB_MEDIAN_SPANS_27, XRB_MEDIANS_27, XRB_RESIDUALS_27,
-};
 
 /// The Milky Way fixture's initial mass formed, M☉, that the scratch rates are scaled to: its
 /// components' systems (with those not yet born) times the mass formed per system.
@@ -1322,7 +1308,7 @@ const fn node_rows<const N: usize>(
 
 /// An accreting white dwarf sampler's marks from a fitted block's arrays, in [`AwdMark`]'s order:
 /// each mark's residual quantiles over all its members, its laws at its median's nodes, its
-/// median's span and nodes, and its limits (P15.T10.b's refit at 27). The recurrence is
+/// median's span and nodes, and its limits (P15.T10.b). The recurrence is
 /// unconditional, so its median's row and its node laws are not read.
 const fn fitted_awd_marks(
     residuals: &[[f64; 17]; 11],
@@ -1346,48 +1332,9 @@ const fn fitted_awd_marks(
     out
 }
 
-/// The fast accreting white dwarfs' fitted marks (P15.T10.b), from task `binary_awd`'s block.
-const AWD_FAST_MARKS_27: [SamplerMark; 11] = fitted_awd_marks(
-    &AWD_FAST_RESIDUALS_27,
-    &AWD_FAST_NODE_RESIDUALS_27,
-    &AWD_FAST_MEDIAN_SPANS_27,
-    &AWD_FAST_MEDIANS_27,
-    &AWD_FAST_LIMITS_27,
-);
-
-/// The slow accreting white dwarfs' fitted marks (P15.T10.b), from task `binary_awd`'s block.
-const AWD_SLOW_MARKS_27: [SamplerMark; 11] = fitted_awd_marks(
-    &AWD_SLOW_RESIDUALS_27,
-    &AWD_SLOW_NODE_RESIDUALS_27,
-    &AWD_SLOW_MEDIAN_SPANS_27,
-    &AWD_SLOW_MEDIANS_27,
-    &AWD_SLOW_LIMITS_27,
-);
-
-/// The fast accreting white dwarfs' sampler fitted against the engine at generator version 27
-/// (P15.T10.b's refit): [`AwdMark`]'s marks and the donor's kind, each mark fitted to the engine's
-/// fast members alone, so that its recurrence lies all within L and its every rank is the fast
-/// hosts'. Each member is weighted by the hosts its donor's kind stands for in the rows, which the
-/// kinds' shares are, so that the marks the kinds share follow the observed mix of kinds and not
-/// the engine's. Where P11.T8.a's scratch sampler served both classes, split at L, each class has
-/// its own: the engine's two sides differ in their donors and rates, and the fast hosts are an
-/// eighth of the members, too few of a shared law's 17 ranks. A mark too few members define keeps
-/// the scratch sampler's law (task `binary_awd`'s block says which).
-pub const AWD_FAST_SAMPLER: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
-    &AWD_FAST_MARKS_27,
-    &[SamplerPick::new("donor_kind", &AWD_FAST_DONOR_KINDS_27)],
-);
-
-/// The slow accreting white dwarfs' sampler fitted against the engine at 27, as
-/// [`AWD_FAST_SAMPLER`] is the fast ones', its recurrence all beyond L.
-pub const AWD_SLOW_SAMPLER: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
-    &AWD_SLOW_MARKS_27,
-    &[SamplerPick::new("donor_kind", &AWD_SLOW_DONOR_KINDS_27)],
-);
-
 /// The fast accreting white dwarfs' marks refitted at 29 (P15.T10.b), from task `binary_awd`'s
 /// block.
-const AWD_FAST_MARKS_29: [SamplerMark; 11] = fitted_awd_marks(
+const AWD_FAST_MARKS: [SamplerMark; 11] = fitted_awd_marks(
     &AWD_FAST_RESIDUALS_29,
     &AWD_FAST_NODE_RESIDUALS_29,
     &AWD_FAST_MEDIAN_SPANS_29,
@@ -1397,7 +1344,7 @@ const AWD_FAST_MARKS_29: [SamplerMark; 11] = fitted_awd_marks(
 
 /// The slow accreting white dwarfs' marks refitted at 29 (P15.T10.b), from task `binary_awd`'s
 /// block.
-const AWD_SLOW_MARKS_29: [SamplerMark; 11] = fitted_awd_marks(
+const AWD_SLOW_MARKS: [SamplerMark; 11] = fitted_awd_marks(
     &AWD_SLOW_RESIDUALS_29,
     &AWD_SLOW_NODE_RESIDUALS_29,
     &AWD_SLOW_MEDIAN_SPANS_29,
@@ -1405,20 +1352,27 @@ const AWD_SLOW_MARKS_29: [SamplerMark; 11] = fitted_awd_marks(
     &AWD_SLOW_LIMITS_29,
 );
 
-/// The fast accreting white dwarfs' sampler refitted at generator version 29, as
-/// [`AWD_FAST_SAMPLER`] was fitted at 27, on the census of the pairs the generator itself draws at
-/// a record's first attempt (`stellar::binary::testing::class_census_in`, train 27's finding):
-/// under the record's own multiplicity, a displaced record single, and on its primary's kept kick.
-/// A galaxy's classes read it from 29 (`BinaryTableRules::Published`).
-pub const AWD_FAST_SAMPLER_29: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
-    &AWD_FAST_MARKS_29,
+/// The fast accreting white dwarfs' sampler fitted against the engine (P15.T10.b's refit at
+/// generator version 29): [`AwdMark`]'s marks and the donor's kind, each mark fitted to the
+/// engine's fast members alone, so that its recurrence lies all within L and its every rank is the
+/// fast hosts', on the census of the pairs the generator itself draws at a record's first attempt
+/// (`stellar::binary::testing::class_census_in`): under the record's own multiplicity, a displaced
+/// record single, and on its primary's kept kick. Each member is weighted by the hosts its donor's
+/// kind stands for in the rows, which the kinds' shares are, so that the marks the kinds share
+/// follow the observed mix of kinds and not the engine's. Where P11.T8.a's scratch sampler served
+/// both classes, split at L, each class has its own: the engine's two sides differ in their donors
+/// and rates, and the fast hosts are an eighth of the members, too few of a shared law's 17 ranks.
+/// A mark too few members define keeps the scratch sampler's law (task `binary_awd`'s block says
+/// which).
+pub const AWD_FAST_SAMPLER: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
+    &AWD_FAST_MARKS,
     &[SamplerPick::new("donor_kind", &AWD_FAST_DONOR_KINDS_29)],
 );
 
-/// The slow accreting white dwarfs' sampler refitted at 29, as [`AWD_FAST_SAMPLER_29`] is the
-/// fast ones'.
-pub const AWD_SLOW_SAMPLER_29: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
-    &AWD_SLOW_MARKS_29,
+/// The slow accreting white dwarfs' sampler refitted at 29, as [`AWD_FAST_SAMPLER`] is the fast
+/// ones', its recurrence all beyond L.
+pub const AWD_SLOW_SAMPLER: ClassSamplerTable<AwdMark, AwdPick> = ClassSamplerTable::new(
+    &AWD_SLOW_MARKS,
     &[SamplerPick::new("donor_kind", &AWD_SLOW_DONOR_KINDS_29)],
 );
 
@@ -1456,7 +1410,7 @@ const XRB_MARK_NAMES: [&str; 30] = [
     "log_black_hole_high_mass_rate",
 ];
 
-/// The X-ray binaries' fitted marks (P15.T10.b's refit at 27) from task `binary_xrb`'s block, in
+/// The X-ray binaries' fitted marks (P15.T10.b) from task `binary_xrb`'s block, in
 /// [`XrbMark`]'s order: each mark's residual quantiles over all its members, its median's span
 /// and nodes, and its limits. Only the low-mass donor's mass follows a condition, the period, with
 /// its laws at its median's nodes `donor_mass_nodes`; the other marks' median rows are not read.
@@ -1482,33 +1436,8 @@ const fn fitted_xrb_marks(
     out
 }
 
-/// The X-ray binaries' fitted marks.
-const XRB_MARKS_27: [SamplerMark; 30] = fitted_xrb_marks(
-    &XRB_RESIDUALS_27,
-    &XRB_DONOR_MASS_NODE_RESIDUALS_27,
-    &XRB_MEDIAN_SPANS_27,
-    &XRB_MEDIANS_27,
-    &XRB_LIMITS_27,
-);
-
-/// The X-ray binaries' sampler fitted against the engine at generator version 27 (P15.T10.b's
-/// refit): [`XrbMark`]'s marks and the two kind choices over all nine kinds the carving counts,
-/// fitted to the engine's members of each kind, each mark too few members define kept as
-/// P11.T8.b's hand-made scratch sampler had it, from the observed figures of plan 11's design note
-/// 13 (task `binary_xrb`'s block says which). Each kind is weighted by the galaxy's share of the
-/// engine's members of it, but the black-hole transients, pinned at
-/// [`BLACK_HOLE_TRANSIENT_SHARE`], so that the kinds the class draws are those its row counts
-/// (P11.T8.b's fix).
-pub const XRB_SAMPLER: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
-    &XRB_MARKS_27,
-    &[
-        SamplerPick::new("low_mass_kind", &XRB_LOW_MASS_KINDS_27),
-        SamplerPick::new("high_mass_kind", &XRB_HIGH_MASS_KINDS_27),
-    ],
-);
-
 /// The X-ray binaries' marks refitted at 29, from task `binary_xrb`'s block.
-const XRB_MARKS_29: [SamplerMark; 30] = fitted_xrb_marks(
+const XRB_MARKS: [SamplerMark; 30] = fitted_xrb_marks(
     &XRB_RESIDUALS_29,
     &XRB_DONOR_MASS_NODE_RESIDUALS_29,
     &XRB_MEDIAN_SPANS_29,
@@ -1516,12 +1445,17 @@ const XRB_MARKS_29: [SamplerMark; 30] = fitted_xrb_marks(
     &XRB_LIMITS_29,
 );
 
-/// The X-ray binaries' sampler refitted at generator version 29, as [`XRB_SAMPLER`] was fitted at
-/// 27, on the census of the pairs the generator itself draws at a record's first attempt, as
-/// [`AWD_FAST_SAMPLER_29`] is. A galaxy's class reads it from 29
-/// (`BinaryTableRules::Published`).
-pub const XRB_SAMPLER_29: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
-    &XRB_MARKS_29,
+/// The X-ray binaries' sampler fitted against the engine (P15.T10.b's refit at generator version
+/// 29), on the census of the pairs the generator itself draws at a record's first attempt, as
+/// [`AWD_FAST_SAMPLER`] is: [`XrbMark`]'s marks and the two kind choices over all nine kinds the
+/// carving counts, fitted to the engine's members of each kind, each mark too few members define
+/// kept as P11.T8.b's hand-made scratch sampler had it, from the observed figures of plan 11's
+/// design note 13 (task `binary_xrb`'s block says which). Each kind is weighted by the galaxy's
+/// share of the engine's members of it, but the black-hole transients, pinned at
+/// [`BLACK_HOLE_TRANSIENT_SHARE`], so that the kinds the class draws are those its row counts
+/// (P11.T8.b's fix).
+pub const XRB_SAMPLER: ClassSamplerTable<XrbMark, XrbPick> = ClassSamplerTable::new(
+    &XRB_MARKS,
     &[
         SamplerPick::new("low_mass_kind", &XRB_LOW_MASS_KINDS_29),
         SamplerPick::new("high_mass_kind", &XRB_HIGH_MASS_KINDS_29),
@@ -1547,46 +1481,12 @@ pub const BLACK_HOLE_TRANSIENT_SHARE: f64 = 0.13;
 pub const ACCRETING_WHITE_DWARF_MAX_MASS: f64 = 1.38;
 
 /// The share rows (P11.T7, P15.T10.b; module documentation): the accreting white dwarfs' rows
-/// fitted against the engine at generator version 27 from task `binary_awd`'s block, each donor
-/// kind scaled to its observed figure, and the X-ray binaries' from task `binary_xrb`'s, and the
-/// two merger classes' scratch until their own fits, 9 × 10⁴ stellar mergers and 10 neutron-star
-/// mergers in the source horizon at Milky Way parameters.
+/// fitted against the engine at generator version 29 from task `binary_awd`'s block, each donor
+/// kind scaled to its observed figure, and the X-ray binaries' from task `binary_xrb`'s, on the
+/// census of the pairs the generator itself draws, and the two merger classes' scratch until their
+/// own fits, 9 × 10⁴ stellar mergers and 10 neutron-star mergers in the source horizon at Milky Way
+/// parameters.
 pub const CLASS_SHARES: ClassShareTable = ClassShareTable {
-    rows: [
-        ClassShareRow {
-            class: CarvedClass::AccretingWdFast,
-            hosts_per_formed_mass: AWD_FAST_HOSTS_PER_FORMED_MASS_27,
-            layer_shares: AWD_FAST_LAYER_SHARES_27,
-        },
-        ClassShareRow {
-            class: CarvedClass::AccretingWdSlow,
-            hosts_per_formed_mass: AWD_SLOW_HOSTS_PER_FORMED_MASS_27,
-            layer_shares: AWD_SLOW_LAYER_SHARES_27,
-        },
-        ClassShareRow {
-            class: CarvedClass::XrayBinary,
-            hosts_per_formed_mass: XRB_HOSTS_PER_FORMED_MASS_27,
-            layer_shares: XRB_LAYER_SHARES_27,
-        },
-        uniform(
-            CarvedClass::StellarMerger,
-            9.0e4,
-            [0.1, 0.2, 0.5, 0.15, 0.05],
-        ),
-        uniform(
-            CarvedClass::NeutronStarMerger,
-            10.0,
-            [0.0, 0.0, 0.0, 0.0, 1.0],
-        ),
-    ],
-};
-
-/// The share rows refitted at generator version 29, as [`CLASS_SHARES`]' were fitted at 27: the
-/// accreting white dwarfs' rows from task `binary_awd`'s block and the X-ray binaries' from task
-/// `binary_xrb`'s, on the census of the pairs the generator itself draws, and the merger classes'
-/// scratch rows as [`CLASS_SHARES`] holds them. A galaxy reads it from 29
-/// (`BinaryTableRules::Published`).
-pub const CLASS_SHARES_29: ClassShareTable = ClassShareTable {
     rows: [
         ClassShareRow {
             class: CarvedClass::AccretingWdFast,
@@ -1603,8 +1503,16 @@ pub const CLASS_SHARES_29: ClassShareTable = ClassShareTable {
             hosts_per_formed_mass: XRB_HOSTS_PER_FORMED_MASS_29,
             layer_shares: XRB_LAYER_SHARES_29,
         },
-        CLASS_SHARES.rows[3],
-        CLASS_SHARES.rows[4],
+        uniform(
+            CarvedClass::StellarMerger,
+            9.0e4,
+            [0.1, 0.2, 0.5, 0.15, 0.05],
+        ),
+        uniform(
+            CarvedClass::NeutronStarMerger,
+            10.0,
+            [0.0, 0.0, 0.0, 0.0, 1.0],
+        ),
     ],
 };
 

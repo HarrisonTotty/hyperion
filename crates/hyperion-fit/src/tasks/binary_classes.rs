@@ -35,8 +35,7 @@
 //!
 //! Each task fits at its manifest's `generator_version`, 29 for the refit on the generator's own
 //! pairs (the census's first attempts as the generator draws them, train 27's finding), into its
-//! block's `_29` items, which a galaxy reads from 29, the version's tables (the refit at 27, run
-//! again at 28 unchanged) kept apart until then. Its census galaxy is the version's, every hold
+//! block's `_29` items, which `tables::binary`'s samplers and share rows read. Its census galaxy is the version's, every hold
 //! that version turns on in force, with the binary classes' scratch share rows in its class shares
 //! (`Galaxy::from_params_for_binary_refit`), so that the field the census's records come from does
 //! not read the rows the task fits (plan 15's lean of 2026-11-01).
@@ -726,8 +725,8 @@ pub fn awd_samplers(
         AWD_CLASSES.map(|class| awd_members(censuses.slab.iter().flat_map(|c| &c.members), class));
     let pooled: Vec<(AccretingMarks, f64)> = sides.iter().flatten().copied().collect();
     let cap = params.max_log_recurrence;
-    // A mark too few members define keeps the side's sampler's law: P15.T10.b's refit at 27,
-    // itself the scratch law where the refit kept it.
+    // A mark too few members define keeps the side's sampler's law as committed: P15.T10.b's
+    // refit at 29, itself the earlier refit's or the scratch law where a refit kept it.
     let kept = [&AWD_FAST_SAMPLER, &AWD_SLOW_SAMPLER];
     // A side with no member, which only a smoke run's census can have, keeps the side's sampler's
     // shares.
@@ -976,8 +975,7 @@ pub fn render_awd(fit: &AwdFit) -> RustTable {
         summary: vec![
             "The accreting white dwarfs' samplers and share rows refitted against plan 11's engine at"
                 .to_owned(),
-            "generator version 29 on the generator's own pairs (plan 15, P15.T10.b), held until 29."
-                .to_owned(),
+            "generator version 29 on the generator's own pairs (plan 15, P15.T10.b).".to_owned(),
         ],
         notes: awd_notes(fit),
         items: awd_items(fit),
@@ -990,7 +988,7 @@ fn awd_notes(fit: &AwdFit) -> Vec<String> {
     let p = &fit.params;
     let text = format!(
         "\
-Read by `AWD_FAST_SAMPLER_29`, `AWD_SLOW_SAMPLER_29` and `CLASS_SHARES_29`, after the block. Each
+Read by `AWD_FAST_SAMPLER`, `AWD_SLOW_SAMPLER` and `CLASS_SHARES`, after the block. Each
 class's marks are fitted to its own members of the engine near the solar circle at generator
 version {version}'s rules (hyperion-fit's `tasks::binary_classes`): a median that follows the
 mark's condition on 17 nodes, the weighted median under a triangle two node spacings wide, the
