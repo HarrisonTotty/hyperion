@@ -281,9 +281,10 @@ never use them for decoration, branding, chart series or hover effects.
   thin space, never a comma, since many languages write the comma as the decimal marker. The
   console's decimal marker is always the point, so a comma can only be a group's; neither face
   holds a thin space, and a full space in a monospaced field would read as two numbers.
-- A field has a fixed width sized for its longest possible value and its status marks. The one
-  exception is the local chart's census summary, its census line and its counts
-  (`COMPLETE ABOVE 0.08 M☉ S`, `SYSTEMS 9 OF 88 S SHOWN: REMNANTS`, `IN RANGE 88 S`): running
+- A field has a fixed width sized for its longest possible value and its status marks. The
+  exceptions are the local chart's census summary, its census line and its counts
+  (`COMPLETE ABOVE 0.08 M☉ S`, `SYSTEMS 9 OF 88 S SHOWN: REMNANTS`, `IN RANGE 88 S`), and the
+  `PLANET VIEWER`'s folded input groups' summaries (`1 AU · ECC 0.0167 · FORMED AT — AU DRAWN`): running
   text, each value at its own width, which changes only with a new answer or a setting the
   operator changes. A stale value's `S` follows it there with no place kept, and the summary may
   reflow as its answer goes stale. A distance in a list's `DIST` column that would pass the column
