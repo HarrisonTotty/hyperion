@@ -82,15 +82,17 @@ use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::caps::CAPPED_LAYERS;
 use hyperion_sim::sky::census::{
-    CensusTallies, GRID_STAR_BOUND, RecordLight, SkyQuery, StarBounds, flux_bound, merge_census,
-    star_offset_bound,
+    CensusTallies, GRID_STAR_BOUND, RecordLight, SkyQuery, SkyStar, StarBounds, flux_bound,
+    merge_census, star_offset_bound,
 };
 use hyperion_sim::sky::envelope::{BrightnessEnvelope, max_star_mass};
 use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
 use hyperion_sim::sky::phase::PhaseEnvelope;
 use hyperion_sim::sky::photometry::absolute_v_of_state;
 use hyperion_sim::stellar::Phase;
-use hyperion_sim::stellar::system::SystemStars;
+use hyperion_sim::stellar::binary::{PairLight, pair_light_bound};
+use hyperion_sim::stellar::multiplicity::{StarIndex, hierarchy_bound};
+use hyperion_sim::stellar::system::{SystemStars, draw_metallicity};
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::{LightYears, Magnitudes};
 use hyperion_testkit::float;
@@ -154,16 +156,18 @@ fn agree_in(
     let n_max = query.n_max();
     let census = census_parts(g, query.clone(), radii);
     let brute = brute_force_parts(g, query, radii);
-    agree_parts(what, n_max, census, brute, skips)
+    agree_parts(what, n_max, census, brute, &[], skips)
 }
 
 /// [`agree`]'s assertions on the census's parts and its oracle's, a part per cell in the same
-/// order, for a query of `n_max`.
+/// order, for a query of `n_max`, with each layer's `apart` stars of the oracle's accepted taken
+/// out of its parts ([`wind_fed_apart`]; none but in the 1,000 ly test).
 fn agree_parts(
     what: &str,
     n_max: NonZeroU32,
     census: Vec<Part>,
     brute: Vec<Part>,
+    apart: &[(Layer, u64)],
     skips: Skips,
 ) -> Generated {
     assert_eq!(census.len(), brute.len(), "{what}: the cells opened");
@@ -178,7 +182,15 @@ fn agree_parts(
             bl.generated(),
             cl.accepted(),
         );
-        assert_eq!(cl.accepted(), bl.accepted(), "{what}: {layer:?} accepted");
+        let set_apart = apart
+            .iter()
+            .find(|(l, _)| *l == layer)
+            .map_or(0, |&(_, k)| k);
+        assert_eq!(
+            cl.accepted() + set_apart,
+            bl.accepted(),
+            "{what}: {layer:?} accepted"
+        );
         generated.push((layer, cl.generated(), bl.generated()));
     }
     let (whole, oracle) = (
@@ -543,20 +555,137 @@ fn the_census_is_its_oracle_for_the_dwarfs_near_the_sun() {
     generates_under_a_quarter("the dwarfs near the Sun", &generated, &[Layer::B], &[]);
 }
 
+/// Whether star `index` of grid system `id`, seen as `emitted`, is one its partner's wind
+/// moved off its own model, with what it is, for a message: its pair at the attempt the generator
+/// kept is answered `Detached` at the system's age then and its state is not its own model's, as
+/// `sky::census::cell`'s realised check knows one. From generator version 27 a wide pair's
+/// main-sequence star takes its partner's wind (P11.T12), which the bound's `Detached` verdict
+/// reaches only at 28 (its wind reach, retargeted; train 27's findings), so such a star can
+/// outshine the bound the census skips its record by.
+#[cfg(not(target_family = "wasm"))]
+fn wind_fed_star(
+    g: &Galaxy,
+    id: SystemId,
+    index: StarIndex,
+    emitted: UniverseTime,
+) -> (bool, String) {
+    let mut cell = Vec::new();
+    generate_cell(g, CellKey::of(id).expect("a grid system"), &mut cell);
+    let record = cell.iter().find(|r| r.id() == id).expect("in its cell");
+    let stars = SystemStars::generate(g, record);
+    let composition = draw_metallicity(g, record);
+    let hierarchy = hierarchy_bound(g, record, &composition);
+    let age = record.age_at(emitted);
+    let i = usize::from(index.get());
+    let star = stars
+        .state_at(emitted)
+        .expect("a listed star is born")
+        .stars()[i];
+    let departs = Some(star) != stars.stars()[i].state_at(emitted);
+    let detached = hierarchy.attempt(stars.attempt()).is_some_and(|listed| {
+        listed.pairs().iter().any(|pair| {
+            let [first, second] = pair.stars().map(|s| usize::from(s.get()));
+            (first == i || second == i)
+                && pair_light_bound(
+                    listed.stars()[first].initial_mass(),
+                    listed.stars()[second].initial_mass(),
+                    pair.periastron(),
+                    &composition,
+                    age..=age,
+                ) == Some(PairLight::Detached)
+        })
+    });
+    let bounds = StarBounds::of(g, record, (age, age));
+    let bound = core::iter::once(bounds.primary())
+        .chain(bounds.companions())
+        .find(|b| b.index() == index && (i == 0 || b.attempt() == stars.attempt()))
+        .and_then(|b| b.brightest(PhaseEnvelope::shared(), bounds.composition(), (age, age)));
+    let about = format!(
+        "{id:?} star {i}: {:?} of {:?} (born {:?}), M_V {:?} against its bound {bound:?}; \
+         Detached {detached}, off its own model {departs}",
+        star.phase(),
+        star.mass(),
+        stars.stars()[i].initial_mass(),
+        absolute_v_of_state(&star).map(Magnitudes::value),
+    );
+    (detached && departs, about)
+}
+
+/// The oracle's parts less the stars of theirs that the census, a part's stars in its oracle's
+/// order less those of the records it skipped, does not hold, each of which must be a wind-fed
+/// star ([`wind_fed_star`]); with how many each layer sets apart. A star the census lists that its
+/// oracle does not fails.
+#[cfg(not(target_family = "wasm"))]
+fn wind_fed_apart(
+    g: &Galaxy,
+    what: &str,
+    census: &[Part],
+    brute: Vec<Part>,
+) -> (Vec<Part>, Vec<(Layer, u64)>) {
+    let mut apart: Vec<(Layer, u64)> = Vec::new();
+    let parts = census
+        .iter()
+        .zip(brute)
+        .map(|((listed, _), (oracle, tallies))| {
+            let mut next = listed.iter().peekable();
+            let mut kept: Vec<SkyStar> = Vec::with_capacity(listed.len());
+            for star in oracle {
+                if next.peek() == Some(&&star) {
+                    next.next();
+                    kept.push(star);
+                    continue;
+                }
+                let (wind_fed, about) =
+                    wind_fed_star(g, star.system(), star.star(), star.emitted());
+                assert!(
+                    wind_fed,
+                    "{what}: the census misses {about}, which no partner's wind moved"
+                );
+                eprintln!("{what}: set apart, wind-fed: {about}");
+                match apart.iter_mut().find(|(l, _)| *l == star.layer()) {
+                    Some((_, k)) => *k += 1,
+                    None => apart.push((star.layer(), 1)),
+                }
+            }
+            assert!(
+                next.next().is_none(),
+                "{what}: the census lists a star its oracle does not"
+            );
+            (kept, tallies)
+        })
+        .collect();
+    (parts, apart)
+}
+
+/// The census of C to E within 1,000 ly of the Sun is its oracle, star for star and bit for bit,
+/// but for the stars a partner's wind moved off their own models past the bound the census skips
+/// their records by ([`wind_fed_apart`]): from generator version 27 (P11.T12), until the bound's
+/// `Detached` takes the wind's reach at 28, they are set apart from the oracle's and counted, a
+/// finding pinned as measured. At 27 they are 14 of C's 20,246 accepted and 1 of D's 6,376, each
+/// of a Detached pair: giants, core-helium burners and blue stragglers its partner's wind grew,
+/// up to 4.20 mag past their bounds (`0x42006cd5fbc00004`'s early-AGB companion, M<sub>V</sub>
+/// −0.23 against 3.97), the brightest D's `0x6202d8880e000009`, a giant of M<sub>V</sub> −0.96.
 #[cfg(not(target_family = "wasm"))]
 #[test]
 #[ignore = "slow: generates every system of layers C to E within 1,000 ly of the Sun"]
 fn the_census_is_its_oracle_1000_ly_from_the_sun() {
+    let what = "C to E within 1,000 ly of the Sun";
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
-    let generated = agree(
-        "C to E within 1,000 ly of the Sun",
-        query,
-        &within_ly(&[
-            (Layer::C, 1_000.0),
-            (Layer::D, 1_000.0),
-            (Layer::E, 1_000.0),
-        ]),
-        Skips::Asserted,
+    let radii = within_ly(&[
+        (Layer::C, 1_000.0),
+        (Layer::D, 1_000.0),
+        (Layer::E, 1_000.0),
+    ]);
+    let n_max = query.n_max();
+    let census = census_parts(galaxy(), query.clone(), &radii);
+    let brute = brute_force_parts(galaxy(), query, &radii);
+    let (brute, apart) = wind_fed_apart(galaxy(), what, &census, brute);
+    let generated = agree_parts(what, n_max, census, brute, &apart, Skips::Asserted);
+    eprintln!("{what}: the wind-fed stars set apart, by layer: {apart:?}");
+    assert_eq!(
+        apart,
+        [(Layer::C, 14), (Layer::D, 1)],
+        "{what}: the wind-fed stars set apart, by layer"
     );
     generates_under_a_quarter(
         "C to E near the Sun",
@@ -686,7 +815,7 @@ fn agree_in_the_nuclear_disc(quadrant: Quadrant) {
             }
         }
     }
-    agree_parts(&what, forced.n_max(), census, brute, Skips::Asserted);
+    agree_parts(&what, forced.n_max(), census, brute, &[], Skips::Asserted);
 }
 
 /// The nuclear disc's slow identity quadrants partition its D and E within 20 ly: the plan's eight
