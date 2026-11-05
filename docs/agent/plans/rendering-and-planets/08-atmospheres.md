@@ -25202,3 +25202,17 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - `caseGate.json` re-blessed: `mars` 71 pass, 217 miss (was 75, 213); its disc-p0 reads +11%,
     its veil's +35% now uncovered. `vectorGate.json` by hand: only `mars`'s analytic paths and
     `titan-class`'s diagnostic move; every route, `titan-class`'s and the Venus decks', is unchanged.
+- **A decked thin air routed to its bake** (fix-r08-decked-air-opacity step 2, 2026-11-05).
+  `thick/routing.ts`: `DECKED_AIR_ROUTE_RANGE` (the served `42002cae00000004.0300`'s channels at
+  28 over a ground of 0.1), `DECKED_AIR_GATE_TALLIES`, the lever `DECKED_AIR_ROUTE` (`bake`;
+  `analytic` the way back), `deckedAirRouted`, `DECKED_AIR_REASON`; `thickRouteRangesOf` takes the
+  lever and the tallies. Baked as a haze (`bakedAsHaze` unchanged).
+  - The gate (`reference/deckedAirGate.test.ts`, `deckedAirGate.json`; by hand,
+    `HYPERION_DECKED_AIR_GATE=1`): the orbit images alone, their case
+    (`served-decked-orbit.case.json`, 7 figures, levels held 10 cm apart) traced at its own counts
+    (22 thread-h); no miss, the disc at p0–p60 refused throughout. The views from within the air
+    are unjudged: `AtmosphereCache` labels them with `DECKED_AIR_REASON` (`deckedAir` option).
+  - The served world itself does not route: the cache's ground is R07's p q, 0.28–0.35, its clouds
+    among it (`decision-r08-t10a-leans.md` §2, whose trigger the drawn deck meets); main's question.
+  - Fixture: `test/servedDeckedWorld.{json,ts}`; `REFERENCE_SEEDS` 16. Pending: the routed frame
+    on the owner's RTX against 16.67 ms; the views from within the air traced at gate counts.

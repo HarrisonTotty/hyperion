@@ -20,6 +20,7 @@ import {
 } from "../../../test/giantFixtures";
 import { jupiterEnvelopeCase } from "../../../test/jupiterEnvelopeCase";
 import { hotJupiterDetail, jupiterDetail } from "../../../test/planetaryFixture";
+import { servedDeckedCase } from "../../../test/servedDeckedWorld";
 import { assembleMedium } from "../assemble";
 import { R05_EARTH_REFERENCE } from "../earth";
 import servedGiants from "../fixtures/served-giants.json" with { type: "json" };
@@ -30,6 +31,7 @@ import {
   titanClassReferenceCase,
   venusDeckCover,
 } from "../reference/thickCases";
+import committedDecked from "../reference/deckedAirGate.json" with { type: "json" };
 import committedGate from "../reference/vectorGate.json" with { type: "json" };
 import type { AtmosphereMedium } from "../medium";
 import { HORIZON_SUN_COSINE } from "./bake";
@@ -57,6 +59,10 @@ import {
   correctionRouted,
   DECK_LOWEST_SUN_SINE,
   DECK_ROUTE_RANGE,
+  DECKED_AIR_GATE_TALLIES,
+  DECKED_AIR_ROUTE,
+  DECKED_AIR_ROUTE_RANGE,
+  deckedAirRouted,
   deckGatePasses,
   deckRouted,
   type DeckRouteRange,
@@ -965,9 +971,10 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
     );
     expect([
       hazeGatePasses(HAZE_GATE_TALLIES, HAZE_GATE_MISSES),
+      thickRouteRangesOf(HAZE_GATE_TALLIES, HAZE_GATE_MISSES),
       THICK_ROUTE_RANGES,
       unexcused.length > 0,
-    ]).toEqual([false, [THICK_ROUTE_RANGE], true]);
+    ]).toEqual([false, [THICK_ROUTE_RANGE], [THICK_ROUTE_RANGE, DECKED_AIR_ROUTE_RANGE], true]);
   });
 
   it("routes titan-class if and only if its gate passes with the listed exceptions", () => {
@@ -1070,6 +1077,90 @@ describe("the Titan-class haze's gate (R08.T14.d.4)", () => {
       expect(outwardSteps(HAZE_ROUTE_RANGE[key], channels.map(read), side)).toEqual([
         expect.toSatisfy((steps: number) => steps >= 0 && steps < 1),
       ]);
+    },
+    180_000,
+  );
+});
+
+/** The served world over its drawn ground, and its regime (fix-r08-decked-air-opacity). */
+async function servedDrawn(): Promise<{
+  readonly medium: AtmosphereMedium;
+  readonly regime: AtmosphereRegime;
+}> {
+  const { medium } = await servedDeckedCase("drawn");
+  return { medium, regime: classifyRegime(medium, CLEAR_COVER) };
+}
+
+describe("the decked thin air's route (fix-r08-decked-air-opacity)", () => {
+  it("holds the recorded verdict to deckedAirGate.json's routed, image by image", () => {
+    expect(DECKED_AIR_GATE_TALLIES).toEqual(talliesOf(committedDecked.routed.images));
+  });
+
+  it("opens the route on the recorded verdict, where the analytic path's misses would keep it closed", () => {
+    const analytic = talliesOf(committedDecked.analytic.images);
+    expect([
+      DECKED_AIR_ROUTE,
+      deckGatePasses(DECKED_AIR_GATE_TALLIES),
+      deckGatePasses(analytic),
+      analytic.some((image) => image.misses > 0),
+    ]).toEqual(["bake", true, false, true]);
+  });
+
+  it("routes the served world over its drawn ground by the decked range alone, baked as a haze", async () => {
+    const { medium, regime } = await servedDrawn();
+    expect([
+      regime.kind,
+      thickBakeRouted(regime, medium),
+      deckedAirRouted(regime, medium),
+      bakedAsHaze(regime, medium),
+    ]).toEqual(["thickScattering", true, true, true]);
+  }, 180_000);
+
+  it("routes it nowhere on the way back", async () => {
+    const { medium, regime } = await servedDrawn();
+    expect(
+      thickBakeRouted(regime, medium, thickRouteRangesOf(HAZE_GATE_TALLIES, HAZE_GATE_MISSES)),
+    ).toBe(false);
+  }, 180_000);
+
+  it("routes it nowhere where its gate misses", async () => {
+    const { medium, regime } = await servedDrawn();
+    const missing = DECKED_AIR_GATE_TALLIES.map((image) =>
+      image.image === "disc-p85" ? tallied(image, 2, 1, 0) : image,
+    );
+    const ranges = thickRouteRangesOf(
+      HAZE_GATE_TALLIES,
+      HAZE_GATE_MISSES,
+      HAZE_ROUTE_RANGE,
+      "bake",
+      missing,
+    );
+    expect(thickBakeRouted(regime, medium, ranges)).toBe(false);
+  }, 180_000);
+
+  it("routes it nowhere over the atmosphere cache's ground, R07's p q, which the gate does not cover", async () => {
+    const { medium } = await servedDeckedCase("client");
+    expect(thickBakeRouted(classifyRegime(medium, CLEAR_COVER), medium)).toBe(false);
+  }, 180_000);
+
+  it("routes no kept case, Mars's dust, the Venus-class cases nor titan-class by the decked range", () => {
+    const media = [
+      ...cases.REFERENCE_CASES.map((each) => each.medium),
+      titan().medium,
+      ...Object.values(thickReferenceCases()).map((each) => each.medium),
+    ];
+    expect(
+      media.map((medium) => deckedAirRouted(classifyRegime(medium, CLEAR_COVER), medium)),
+    ).toEqual(media.map(() => false));
+  }, 180_000);
+
+  it.each(BOUNDS)(
+    "sets the decked air's %s at the served world's extreme, rounded outward at its third figure",
+    async (key, side, read) => {
+      const { medium } = await servedDeckedCase("drawn");
+      expect(
+        outwardSteps(DECKED_AIR_ROUTE_RANGE[key], regimeChannels(medium).map(read), side),
+      ).toEqual([expect.toSatisfy((steps: number) => steps >= 0 && steps < 1)]);
     },
     180_000,
   );

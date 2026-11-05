@@ -143,6 +143,7 @@ import {
   bakedAsHaze as routingBakedAsHaze,
   correctionRouted,
   DECK_LOWEST_SUN_SINE,
+  DECKED_AIR_REASON,
   deckRouted,
   type GiantRoute,
   HAZE_ROUTE_RANGE,
@@ -412,6 +413,7 @@ function harness(
   corrects: ((column: SpectralColumn) => boolean) | "product" = routesNone,
   bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
   giantRoute?: GiantRoute,
+  deckedAir?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
 ): Harness {
   const seam = new BodyDetailSeam();
   const builder = new ScriptedBuilder();
@@ -425,6 +427,7 @@ function harness(
     ...(corrects === "product" ? {} : { corrects }),
     ...(bakedAsHaze === undefined ? {} : { bakedAsHaze }),
     ...(giantRoute === undefined ? {} : { giantRoute }),
+    ...(deckedAir === undefined ? {} : { deckedAir }),
     tables: (built, slots) => {
       if (factory.throws !== null) {
         throw factory.throws;
@@ -3510,6 +3513,34 @@ describe("the product's route (R08.T14.d.4)", () => {
         undefined,
       ],
       [[[], []], undefined, undefined, [TWILIGHT_REASON], undefined],
+    ]);
+  });
+
+  it("says a world routed by the decked air's range alone draws its sky past its checked range from within its air, at any light, and nothing from orbit (fix-r08-decked-air-opacity)", async () => {
+    const h = harness(
+      undefined,
+      "product",
+      "product",
+      (): boolean => true,
+      undefined,
+      (): boolean => true,
+    );
+    keptFrame(h, [[A, EARTH, undefined]]);
+    await landBake(h);
+    await landCorrectionOfA(h);
+    const at = (heightM: number, lightElevationSine: number): AtmosphereViewReport =>
+      keptFrame(h, [[A, EARTH, { heightM, lightElevationSine }]]);
+    const noon = at(2, 0.9);
+    expect([
+      [noon.labels, [...noon.reasons]],
+      at(2, 0.3).reasons.get(A),
+      at(2, -0.05).reasons.get(A),
+      at(2e6, 0.9).reasons.get(A),
+    ]).toEqual([
+      [["atmosphereApproximate"], [[A, [DECKED_AIR_REASON]]]],
+      [LOW_SUN_REASON],
+      [TWILIGHT_REASON],
+      undefined,
     ]);
   });
 

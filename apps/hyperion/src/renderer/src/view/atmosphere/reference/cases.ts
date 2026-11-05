@@ -149,7 +149,12 @@ export interface ReferenceCase {
  * 1000 (ruling 8). `venus-92bar-albedo` is R08.T5.e's plane-parallel albedo case (`test/venusAlbedo.ts`);
  * the `-spectral-` cases are R08.T17's 15-bin cases (`spectralCases.ts`); `jupiter-envelope` and
  * `saturn-envelope` are R08.T16.a.2's absorbing envelopes (`test/jupiterEnvelopeCase.ts`,
- * `test/saturnEnvelopeCase.ts`).
+ * `test/saturnEnvelopeCase.ts`); `served-decked-orbit` is fix-r08-decked-air-opacity's served
+ * decked world over its orbit images (`test/servedDeckedWorld.ts`), and `served-decked-app-orbit`
+ * the same over the atmosphere cache's ground, untraced, on the same seed, so that a trace's
+ * difference would be the ground's. Both were traced on 16 in a lane beside `saturn-envelope`'s, and
+ * keep it (lean, 2026-11-06): a giant's envelope and an Earth-like decked air follow no common
+ * paths, and no gate judges them together.
  */
 export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   earth: 0,
@@ -169,6 +174,8 @@ export const REFERENCE_SEEDS: Readonly<Record<string, number>> = {
   "mars-spectral-low": 14,
   "jupiter-envelope": 15,
   "saturn-envelope": 16,
+  "served-decked-orbit": 16,
+  "served-decked-app-orbit": 16,
 };
 
 /**

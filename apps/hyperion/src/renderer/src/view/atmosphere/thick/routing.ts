@@ -505,16 +505,86 @@ export const HAZE_ROUTE_RANGE: ThickRouteRange = {
 };
 
 /**
+ * The range a decked thin air routes over to its bake, its gate passing (plan R08,
+ * fix-r08-decked-air-opacity; lean, 2026-11-05): the channels of the served Earth-like
+ * `42002cae00000004.0300` (generator version 28; `test/servedDeckedWorld.json`) as the client draws
+ * it, over the check lane's ground of 0.1, about its drawn ground's, the range its gate covers, as
+ * {@link HAZE_ROUTE_RANGE} is `titan-class`'s. Its water deck, τ(550) 1.72 under a cloud fraction of
+ * 0.67, is drawn uniform at 1.15, under the deck split's τ 10 and its cover of 1 (`regime.ts`'s
+ * `CLOUD_DECK_SPLIT_OPTICAL_DEPTH`), so it classifies `thickScattering`, and Ψ_ms drew its veil
+ * 41–62% over the tracer's (check-atmosphere-opacity); through the bake it reads 0.97–1.01 of it at
+ * disc p0–p30.
+ *
+ * @remarks
+ * Each bound is the case's extreme, rounded outward at its third figure (the test holds them to the
+ * case): τ to 1.805 (blue), ω̄ from 0.99999 (red), ḡ to 0.7931 (red, the deck's 45 µm drops), the
+ * ground to 0.1, τ ḡ to 1.017 (red) and τ (1 − ω̄) to 1.420 × 10⁻⁵ (red). A Mars-class dust lies
+ * outside it by its absorption (ω̄ 0.83–0.97), and a Titan- or Venus-class column by its depth. The
+ * served world itself lies outside it by its ground as the atmosphere cache takes it, R07's p q of
+ * 0.28–0.35 (`decision-r08-t10a-leans.md` §2), its clouds' brightness among it, which the drawn deck
+ * counts again: routed over that ground, its veil on SwiftShader from 2,000 km rose from I/F 0.173
+ * to 0.241 in red and its drawn ground's slope through the air fell from 0.56 to 0.20, a paler disc
+ * than the analytic path's, and that ground is ungated.
+ */
+export const DECKED_AIR_ROUTE_RANGE: ThickRouteRange = {
+  mostOpticalDepth: 1.81,
+  leastSingleScatteringAlbedo: 0.999,
+  mostAsymmetry: 0.794,
+  mostGroundAlbedo: 0.1,
+  mostForwardDepth: 1.02,
+  mostAbsorbedDepth: 1.43e-5,
+};
+
+/**
+ * The served Earth-like world's recorded verdict by image through its route (plan R08,
+ * fix-r08-decked-air-opacity): `reference/deckedAirGate.json`'s `routed.images`, over the ground of
+ * {@link DECKED_AIR_ROUTE_RANGE}, its whole column baked as a haze route bakes it
+ * ({@link bakedAsHaze}), the scalar twin against its trace
+ * (`reference/served-decked-orbit.reference.json`) over the disc and the limb from orbit, the
+ * images traced at the gate's counts, held to the file by the test. No value misses, the worst
+ * 0.51 of the gate's edge (the limb at 0.1 H in red); the disc at p0–p60 is refused throughout, its
+ * trace's σ, about 1%, not falling as N^(−1/2) under the deck's forward peak, so
+ * {@link deckGatePasses} passes those over, Titan's rule; there the route reads 0.95–1.06 of the
+ * trace and the analytic path 1.22–1.56. The analytic path misses 6 values (the record's
+ * `analytic`; disc-p85 2.2 times the trace in red). The views from within the air are not traced,
+ * and read {@link DECKED_AIR_REASON}.
+ */
+export const DECKED_AIR_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
+  { image: "disc-p0", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+  { image: "disc-p30", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+  { image: "disc-p60", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+  { image: "disc-p75", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
+  { image: "disc-p85", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+  { image: "limb", comparisons: 9, passes: 6, misses: 0, refusals: 3 },
+];
+
+/**
+ * Whether a decked thin air takes its bake (plan R08, fix-r08-decked-air-opacity; the lever, with
+ * the way back beside it, as `hillaire.ts`'s `AtmosphereSettings`): `bake`, over
+ * {@link DECKED_AIR_ROUTE_RANGE} where its gate passes, or `analytic`, Ψ_ms under
+ * `ATMOSPHERE: APPROXIMATE`, the way back.
+ */
+export type DeckedAirRoute = "bake" | "analytic";
+
+/** {@link DeckedAirRoute}: `bake`; `analytic` is the way back. */
+export const DECKED_AIR_ROUTE: DeckedAirRoute = "bake";
+
+/**
  * The ranges a `thickScattering` world routes over, given `tallies` and `misses`, the haze gate's
  * recorded verdict (R08.T14.d.4): {@link THICK_ROUTE_RANGE}, and `haze` beside it where the gate
- * passes ({@link hazeGatePasses}).
+ * passes ({@link hazeGatePasses}); and since fix-r08-decked-air-opacity `decked` after them where
+ * `route` is `bake` and the decked air's gate, `deckedTallies`, passes ({@link deckGatePasses}).
  */
 export function thickRouteRangesOf(
   tallies: ReadonlyArray<GateImageTally>,
   misses: ReadonlyArray<GateMiss>,
   haze: ThickRouteRange = HAZE_ROUTE_RANGE,
+  route: DeckedAirRoute = "analytic",
+  deckedTallies: ReadonlyArray<GateImageTally> = DECKED_AIR_GATE_TALLIES,
+  decked: ThickRouteRange = DECKED_AIR_ROUTE_RANGE,
 ): ReadonlyArray<ThickRouteRange> {
-  return hazeGatePasses(tallies, misses) ? [THICK_ROUTE_RANGE, haze] : [THICK_ROUTE_RANGE];
+  const opened = hazeGatePasses(tallies, misses) ? [THICK_ROUTE_RANGE, haze] : [THICK_ROUTE_RANGE];
+  return route === "bake" && deckGatePasses(deckedTallies) ? [...opened, decked] : opened;
 }
 
 /**
@@ -524,11 +594,41 @@ export function thickRouteRangesOf(
  * Titan-class world is drawn by the analytic term and reads `ATMOSPHERE: APPROXIMATE`; baked as a
  * haze ({@link bakedAsHaze}) on a passing gate it read `ATMOSPHERE: COMPUTING`, then nothing, but
  * for its low sun ({@link LOW_SUN_REASON}).
+ * And {@link DECKED_AIR_ROUTE_RANGE} under {@link DECKED_AIR_ROUTE}, since the decked air's gate
+ * passes over the orbit's images ({@link DECKED_AIR_GATE_TALLIES}): baked as a haze, it reads
+ * nothing from orbit and {@link DECKED_AIR_REASON} from within its air; its routed frame against
+ * 16.67 ms is pending the owner's RTX run.
  */
 export const THICK_ROUTE_RANGES: ReadonlyArray<ThickRouteRange> = thickRouteRangesOf(
   HAZE_GATE_TALLIES,
   HAZE_GATE_MISSES,
+  HAZE_ROUTE_RANGE,
+  DECKED_AIR_ROUTE,
 );
+
+/**
+ * Whether a body routed `regime` takes its bake by `decked` alone (plan R08,
+ * fix-r08-decked-air-opacity): routed by `ranges`, `decked` among them, and within neither
+ * {@link THICK_ROUTE_RANGE} nor {@link HAZE_ROUTE_RANGE}, whose gates judge the views from within
+ * the air too.
+ *
+ * @param ranges - The ranges its gates pass over: {@link THICK_ROUTE_RANGES}, or a test's.
+ * @param decked - The decked air's range among them: {@link DECKED_AIR_ROUTE_RANGE}, or a test's.
+ */
+export function deckedAirRouted(
+  regime: AtmosphereRegime,
+  medium: AtmosphereMedium,
+  ranges: ReadonlyArray<ThickRouteRange> = THICK_ROUTE_RANGES,
+  decked: ThickRouteRange = DECKED_AIR_ROUTE_RANGE,
+): boolean {
+  return (
+    thickBakeRouted(regime, medium, ranges) &&
+    ranges.includes(decked) &&
+    !withinRouteRange(medium, THICK_ROUTE_RANGE) &&
+    !withinRouteRange(medium, HAZE_ROUTE_RANGE) &&
+    withinRouteRange(medium, decked)
+  );
+}
 
 /**
  * Whether a body routed `regime` is baked as a haze route's bake is (R08.T14.d.4): the channels its
@@ -803,6 +903,15 @@ export const LOW_SUN_SINE = 0.35;
  */
 export const LOW_SUN_REASON =
   "multiple scattering: computed beyond its checked range, the brightest star low over the local horizontal";
+
+/**
+ * Why a body routed by {@link DECKED_AIR_ROUTE_RANGE} alone ({@link deckedAirRouted}) carries
+ * `atmosphereApproximate` with the camera in its air (plan R08, fix-r08-decked-air-opacity): its
+ * gate judges the disc and the limb from orbit alone, as player text in {@link TWILIGHT_REASON}'s
+ * form. Its words await the owner's UX sign-off.
+ */
+export const DECKED_AIR_REASON =
+  "multiple scattering: computed beyond its checked range, the sky seen from within the air";
 
 /**
  * The sine of the lowest sun the deck gates pass beneath a deck over a surface (R08.T15.b.2; lean,

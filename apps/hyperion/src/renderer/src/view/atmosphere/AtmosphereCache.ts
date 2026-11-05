@@ -119,7 +119,10 @@
  * over the horizontal, with `LOW_SUN_REASON` while its light stands at or above the horizontal
  * (main's ruling of 2026-11-01: the haze's gate judges no image there), and a camera beneath a
  * routed deck over a surface from a light under `DECK_LOWEST_SUN_SINE`, the lowest sun the deck
- * gates pass there (R08.T15.b.2), with the same reason. It is a reason the correction leaves, so it
+ * gates pass there (R08.T15.b.2), with the same reason. A body routed by the decked air's range
+ * alone (`thick/routing.ts`'s `deckedAirRouted`; fix-r08-decked-air-opacity), whose gate judges the
+ * views from orbit alone, takes `DECKED_AIR_REASON` at any light with the camera in its air, where
+ * neither of those stands. It is a reason the correction leaves, so it
  * stands in the correction's `atmosphereComputing`'s place; while the bake itself runs,
  * `atmosphereComputing` stands as before.
  *
@@ -247,6 +250,8 @@ import {
   bakedAsHaze,
   correctionRouted,
   DECK_LOWEST_SUN_SINE,
+  DECKED_AIR_REASON,
+  deckedAirRouted,
   deckRouted,
   discTableRouted,
   GIANT_ROUTE,
@@ -582,6 +587,12 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
    */
   readonly bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
   /**
+   * Whether a routed body in `regime` from `medium` takes its bake by the decked air's range alone
+   * (fix-r08-decked-air-opacity), whose views from within the air read `DECKED_AIR_REASON`:
+   * `thick/routing.ts`'s `deckedAirRouted` if absent; a test's choice otherwise.
+   */
+  readonly deckedAir?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
+  /**
    * Whether a body drawn from `column` takes its polarisation correction (R08.T14.f):
    * `thick/routing.ts`'s `correctionRouted` if absent, every world with air since R08.T14.d.4's
    * route (`CORRECTION_ROUTED`); a test's choice otherwise. A thick world the route does not route
@@ -792,6 +803,12 @@ interface HeldBody<T> {
    * sun {@link twilightReasonOf} reads; `false` before one is, and for a deck's.
    */
   bakedAsHaze: boolean;
+  /**
+   * Whether the drawn entry's thick bake was last asked by the decked air's range alone
+   * (fix-r08-decked-air-opacity), whose views from within the air {@link twilightReasonOf} labels;
+   * `false` before one is, and for a deck's.
+   */
+  deckedAir: boolean;
   /**
    * The split of the deck over a surface whose bake the drawn entry last asked (R08.T15.b.2), h\* in
    * m over the body's datum, beneath which {@link twilightReasonOf} reads a low sun; `null` before
@@ -1020,7 +1037,8 @@ function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledM
  * brightest light below the camera's local horizontal (`thick/routing.ts`'s `TWILIGHT_REASON`),
  * or, for a world baked as a haze, at most `LOW_SUN_SINE` over it (`LOW_SUN_REASON`), and beneath a
  * routed deck over a surface under `DECK_LOWEST_SUN_SINE` over it (R08.T15.b.2), where the
- * route's gates pass no view.
+ * route's gates pass no view; else, for a world routed by the decked air's range alone, at any
+ * light (`DECKED_AIR_REASON`; fix-r08-decked-air-opacity), whose gate judges no view from within.
  */
 function twilightReasonOf(
   held: HeldBody<unknown>,
@@ -1042,9 +1060,10 @@ function twilightReasonOf(
     held.surfaceDeckSplitM !== null &&
     observer.heightM < held.surfaceDeckSplitM &&
     observer.lightElevationSine < DECK_LOWEST_SUN_SINE;
-  return (held.bakedAsHaze && observer.lightElevationSine <= LOW_SUN_SINE) || beneathDeck
-    ? LOW_SUN_REASON
-    : null;
+  if ((held.bakedAsHaze && observer.lightElevationSine <= LOW_SUN_SINE) || beneathDeck) {
+    return LOW_SUN_REASON;
+  }
+  return held.deckedAir ? DECKED_AIR_REASON : null;
 }
 
 /**
@@ -1384,6 +1403,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   ) => boolean;
   readonly #giantRoute: GiantRoute;
   readonly #bakedAsHaze: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
+  readonly #deckedAir: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
   readonly #corrects: (column: SpectralColumn) => boolean;
   readonly #discs: (column: SpectralColumn) => boolean;
   /** Every body held, least recently wanted first. */
@@ -1410,6 +1430,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         deckRouted(regime, medium, envelope, giantDeckRouteRange(regime, giantRoute)));
     this.#bakedAsHaze =
       opts.bakedAsHaze ?? ((regime, medium): boolean => bakedAsHaze(regime, medium));
+    this.#deckedAir =
+      opts.deckedAir ?? ((regime, medium): boolean => deckedAirRouted(regime, medium));
     this.#corrects = opts.corrects ?? ((column): boolean => correctionRouted(column));
     this.#discs = opts.discs ?? ((column): boolean => discTableRouted(column));
   }
@@ -1676,6 +1698,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       drawn: null,
       drawnThickSlots: 0,
       bakedAsHaze: false,
+      deckedAir: false,
       surfaceDeckSplitM: null,
       bake: null,
       correction: null,
@@ -2003,6 +2026,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
             entry.built,
             tables,
             this.#bakedAsHaze(entry.regime, entry.built.medium),
+            this.#deckedAir(entry.regime, entry.built.medium),
           );
         }
         if (tables !== null && entry.built !== null) {
@@ -2028,7 +2052,14 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
    * `atmosphereComputing`; a kept medium with no sources to bake from, or a request that cannot be
    * formed or asked, is a failed bake, with one `console.warn` or `console.error`.
    */
-  #bake(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere, tables: T, haze: boolean): void {
+  #bake(
+    held: HeldBody<T>,
+    entry: ToDraw,
+    built: BuiltAtmosphere,
+    tables: T,
+    haze: boolean,
+    decked: boolean,
+  ): void {
     const made: Labelled = { labels: entry.labels, reasons: entry.reasons };
     if (built.sources === undefined) {
       console.warn(
@@ -2040,6 +2071,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     let ask: ThickBakeAsk | null;
     let handle: ThickBake;
     held.bakedAsHaze = haze;
+    held.deckedAir = decked;
     held.surfaceDeckSplitM = null;
     try {
       ask = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights, haze);
@@ -2130,6 +2162,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
     let handle: DeckBake;
     held.bakedAsHaze = false;
+    held.deckedAir = false;
     held.surfaceDeckSplitM = split.floor === "ground" ? split.altitudeM : null;
     try {
       const thick = thickBakeAskOf(entry.input, built, built.sources, tables, held.lights, false);

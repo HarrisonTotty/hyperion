@@ -290,8 +290,26 @@ describe("the reference twin's reads", { timeout: TWIN_TIMEOUT_MS }, () => {
       expect(drawn.total[c]).toBeCloseTo(light[c] + lit[c] * t, 12);
       expect(drawn.surface[c]).toBeCloseTo(lit[c] * t, 12);
     }
-    // The point's lobe (g 0.5) keeps its in-lobe light (fix-r08-decked-air-opacity): the second
-    // target stands above the throughput's mean, the first's alpha.
+  });
+
+  it("dims it by less than the march's mean throughput where its lobe keeps its in-lobe light (fix-r08-decked-air-opacity)", () => {
+    const twin = twinOf(POINT);
+    const geometry = geometryNamed("disc-p30");
+    const direction = axisOf(geometry);
+    const groundM = groundDistanceM(observerOf(geometry), direction, RADIUS_M);
+    if (groundM === null) {
+      throw new Error("the disc looks down at the ground");
+    }
+    const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), SPHERE, 1);
+    const { light, transmittance } = rayMarchTargetTexelsTwin(
+      twin.planet,
+      view,
+      TABLE_SIZES.high,
+      960,
+      540,
+      1 / groundM,
+    );
+    // The point's lobe, g 0.5: the second target above the throughput's mean, the first's alpha.
     expect(transmittance[1]).toBeGreaterThan(light[3]);
   });
 
