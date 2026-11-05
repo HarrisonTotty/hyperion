@@ -489,10 +489,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 ///
 /// The holds at 28:
 ///
-/// - a paired star's remnant and death from its pair's timeline in the generation,
-///   `BINARY_HOST_REMNANTS_VERSION` (P14.T1.h), at `BinaryHostRemnantsRules::Engine` through
-///   `with_binary_host_remnants`: the neutron stars second-generation planets form about, the
-///   white dwarf a debris disc reads, and the first death that ends a protoplanetary disc.
 /// - a small hot rocky body's evaporation, `EVAPORATION_VERSION` (P14.T55.b.a), at
 ///   `EvaporationRules::Evaporated` through `with_evaporation`: a planet, a moon or a belt member
 ///   below 10⁻³ M⊕ has the mass its rock's free-streaming vapour has left it, and is
@@ -508,7 +504,6 @@ pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
 /// with its holds.
 #[cfg(test)]
 pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
-    use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
     let run = move || {
         use crate::planetary::fate::evaporation::{EvaporationRules, with_evaporation};
         with_evaporation(EvaporationRules::Evaporated, run)
@@ -519,7 +514,6 @@ pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
         };
         with_zone_placement_margin(ZonePlacementMarginRules::Margin, run)
     };
-    let run = move || with_binary_host_remnants(BinaryHostRemnantsRules::Engine, run);
     with_every_27_hold(run)
 }
 

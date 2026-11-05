@@ -13,7 +13,6 @@
 //! switch.
 
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
-use crate::planetary::context::{BinaryHostRemnantsRules, with_binary_host_remnants};
 use crate::planetary::derive::atmosphere::{
     LineSwitchRules, MeltOxygenRules, with_line_switch, with_melt_oxygen,
 };
@@ -83,8 +82,6 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
-    binary_host_remnants: BinaryHostRemnantsRules =
-        BinaryHostRemnantsRules::in_force => with_binary_host_remnants,
     evaporation: EvaporationRules = EvaporationRules::in_force => with_evaporation,
     zone_placement_margin: ZonePlacementMarginRules =
         ZonePlacementMarginRules::in_force => with_zone_placement_margin,
