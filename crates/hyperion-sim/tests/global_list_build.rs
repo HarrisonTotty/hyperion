@@ -11,6 +11,7 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::global_list::{GlobalList, MassLoss, StreamOrigin};
 use hyperion_sim::galaxy::imf::MassFunctionKind;
 use hyperion_sim::galaxy::params::GalaxyParams;
+use hyperion_sim::tables::streams::ORPHAN_STREAMS_PER_GLOBULAR_27;
 use hyperion_testkit::golden::f64_digest;
 use hyperion_testkit::order::assert_order_independent;
 
@@ -86,14 +87,19 @@ fn digest(list: &GlobalList) -> (usize, u64, u64) {
     )
 }
 
-/// Plan 10's "150–1,500 tubes over seeds and about 240 at Milky Way parameters" (P10.T4).
+/// Plan 10's "150–1,500 tubes over seeds and about 240 at Milky Way parameters" (P10.T4), at 27's
+/// tubes per globular.
 ///
 /// Every list of eight Milky Way galaxies and sixteen drawn galaxies holds 150–1,500 tubes (the
-/// drawn sixteen 154–893 at v23), and "about 240" is held as the Milky Way galaxies' mean within
-/// 200–300: they measure 269.8, 1.5 tubes for each of the 179 globulars the fixture's parameters
-/// expect, where 240 is 1.5 for each of some 160. Over more seeds the floor does not hold: plan
-/// 02's globular count is at least 80, so a galaxy expects at least 120 tubes, and 228 of the
-/// 2,000 summary galaxies of P10.T3.d.a expect fewer than 150 (a finding for the owner).
+/// drawn sixteen 154–893 at v23, 210–1,230 at 27). Plan 10's "about 240" is the brainstorm's 1.5
+/// tubes for each of some 160 globulars, and to 26 it was held as the Milky Way galaxies' mean
+/// within 200–300: they measured 269.8, 1.5 for each of the 179 globulars the fixture's parameters
+/// expect. From 27 the tubes per globular are P15.T11.b's fit, 2.05
+/// ([`ORPHAN_STREAMS_PER_GLOBULAR_27`]), so the mean is held within 10% of the fit's 368 for the
+/// 179: they measure 365.0. Over more seeds the floor need not hold: plan 02's globular count is
+/// at least 80, so a galaxy expects at least 164 tubes at 27 (120 at 1.5, when 228 of the 2,000
+/// summary galaxies of P10.T3.d.a expected fewer than 150, a finding for the owner), and a draw
+/// may fall below it.
 #[test]
 #[ignore = "slow: builds the full potential, the kinematic tables and the list of 24 galaxies"]
 fn lists_hold_150_to_1500_tubes_and_about_240_at_milky_way_parameters() {
@@ -128,13 +134,23 @@ fn lists_hold_150_to_1500_tubes_and_about_240_at_milky_way_parameters() {
         );
         streams.len()
     };
-    let mut milky_way_tubes = 0;
+    let (mut milky_way_tubes, mut globulars) = (0, 0.0);
     for n in 0..8 {
-        milky_way_tubes += tubes(&milky_way(n), &format!("Milky Way {n}"));
+        let galaxy = milky_way(n);
+        // The same for every seed: the fixture's parameters set it.
+        globulars = f64::from(galaxy.params().accretion().globular_count());
+        milky_way_tubes += tubes(&galaxy, &format!("Milky Way {n}"));
     }
     let mean = f64::from(u32::try_from(milky_way_tubes).expect("a few thousand")) / 8.0;
-    eprintln!("Milky Way mean {mean:.1} tubes against plan 10's about 240");
-    assert!((200.0..=300.0).contains(&mean), "{mean} tubes");
+    let expected = ORPHAN_STREAMS_PER_GLOBULAR_27 * globulars;
+    eprintln!(
+        "Milky Way mean {mean:.1} tubes against {expected:.1}, {ORPHAN_STREAMS_PER_GLOBULAR_27:.2} \
+         for each of {globulars} globulars (plan 10's about 240 at 1.5)"
+    );
+    assert!(
+        (mean / expected - 1.0).abs() <= 0.1,
+        "{mean} tubes against {expected}"
+    );
     for n in 0..16 {
         tubes(&drawn(n), &format!("drawn {n}"));
     }
