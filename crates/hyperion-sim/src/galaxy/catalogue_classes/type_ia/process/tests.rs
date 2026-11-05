@@ -1041,12 +1041,18 @@ fn core_collapse_shells(galaxy: &Galaxy) -> u32 {
 /// epoch, with P09.T33.a's core collapses', pinned as measured at about a fifth (0.193–0.211),
 /// against the plan's and the brainstorm's "a third or more": a finding. At 23 every core collapse
 /// is the field's (φ = 0); the brainstorm's figure counts the shells in superbubbles too, so from
-/// P09.T2.c the comparison belongs with P09.T36.a's or T38's census. The Milky Way fixture and
+/// P09.T2.c the comparison belongs with P09.T36.a's or T38's census. From 27 the classes are the
+/// field's (P09.T2.c), whose core collapses are a tenth to a fifth of the galaxy's (the share 0.44
+/// on the fixture), so the census is the budget's, the galaxy under the version's rules but the
+/// field share, whose classes hold every Type Ia and core collapse. The Milky Way fixture and
 /// three drawn galaxies natively (83 s on the pod's 16 vCPU); on wasm32-wasip1, which has no
 /// threads, the fixture alone.
 #[test]
 #[ignore = "slow: the class's census of four galaxies, beside the core collapses'"]
 fn type_ia_over_seeds() {
+    use crate::galaxy::ages::FieldShareRules;
+    use crate::galaxy::imf::MassFunctionKind;
+    use crate::galaxy::rules::GalaxyRules;
     let galaxies = [
         ("the fixture", None),
         ("seed 1", Some(0x0934_0010)),
@@ -1058,11 +1064,23 @@ fn type_ia_over_seeds() {
     } else {
         &galaxies[..]
     };
+    let budget = GalaxyRules {
+        field_share: FieldShareRules::None,
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
+    };
     for &(name, drawn) in galaxies {
-        let galaxy = &drawn.map_or_else(
-            || milky_way(SEED),
-            |seed| Galaxy::new(Seed::new(seed)).with_full_potential(),
+        let (seed, params) = drawn.map_or_else(
+            || (SEED, GalaxyParams::milky_way_like()),
+            |seed| {
+                (
+                    seed,
+                    GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::default()),
+                )
+            },
         );
+        let galaxy = &Galaxy::from_params_with_rules(Seed::new(seed), params, budget)
+            .expect("the budget builds")
+            .with_full_potential();
         let census = census(galaxy);
         let process = TypeIaProcess::new(galaxy);
         let rate = process.delays().rate_per_year();

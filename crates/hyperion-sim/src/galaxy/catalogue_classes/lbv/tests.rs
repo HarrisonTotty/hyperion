@@ -1233,11 +1233,20 @@ fn the_class_test_holds_every_host_of_a_million_layer_e_stars() {
 
 /// P09.T43 over seeds: the hosts per galaxy of three drawn galaxies, each some hundreds, with the
 /// luminous blue variables at their epochs, which plan 06's P06.T31 puts near 181 at Milky Way
-/// values; every host's window overlaps the horizon, which the census's verdicts hold. On
-/// wasm32-wasip1, which has no threads, the first galaxy alone.
+/// values; every host's window overlaps the horizon, which the census's verdicts hold. From 27
+/// the class is the young field's (P09.T2.c), which keeps some tenth of the young disc's hosts (18
+/// on the first galaxy), so the census is the budget's, the galaxy under the version's rules but
+/// the field share. On wasm32-wasip1, which has no threads, the first galaxy alone.
 #[test]
 #[ignore = "slow: the class's census of three drawn galaxies"]
 fn lbv_hosts_over_seeds() {
+    use crate::galaxy::ages::FieldShareRules;
+    use crate::galaxy::imf::MassFunctionKind;
+    use crate::galaxy::rules::GalaxyRules;
+    let budget = GalaxyRules {
+        field_share: FieldShareRules::None,
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
+    };
     let seeds = [0x0943_0010, 0x0943_0011, 0x0943_0012];
     let seeds = if cfg!(target_family = "wasm") {
         &seeds[..1]
@@ -1245,7 +1254,10 @@ fn lbv_hosts_over_seeds() {
         &seeds[..]
     };
     for &seed in seeds {
-        let galaxy = Galaxy::new(Seed::new(seed)).with_full_potential();
+        let params = GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::default());
+        let galaxy = Galaxy::from_params_with_rules(Seed::new(seed), params, budget)
+            .expect("the budget builds")
+            .with_full_potential();
         let census = census(&galaxy);
         eprintln!(
             "seed {seed:#x}: {} hosts {:?} by node {:?}; {} at the epoch, {} dead by +H, {} \
