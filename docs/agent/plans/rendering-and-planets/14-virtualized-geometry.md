@@ -2677,3 +2677,12 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     of GPU time.
   - Pending: the owner's Mac (`views-check --terrain --hidden --setting high|low`, on high with
     `--geometry strides=measured,terrainBudget=triangles` and without) and RTX runs; Windows NOT RUN.
+- **The Mac batch** (lane tool-mac-profile, 2026-11-05): in `apps/hyperion`,
+  `node --no-warnings scripts/macProfile.mjs --machine <text>` runs every pending Mac run (both
+  settings at DPR 1 and 2, each lever pair at high as A B A B, shading's at DPR 1 and 2, then the
+  worker sweep) into `target/mac-profile/`, its `summary.md` the pairs' deltas; the same command
+  resumes it. T2.e, T3.c, T3.d and T6.b read their pairs there. Pending: the owner's Mac run. The
+  timing file holds no attachment loads or stores, which T2.e's Mac run asks for.
+- (lean, 2026-11-05) The batch places the ship with the clock paused (`--rate 0`) and holds each
+  setting's warm-up connection open (`src/main/holdingRelay.ts`) until its sky's final reply, so
+  that each measured launch's sky is the server's kept reply and the server is quiet beside it.
