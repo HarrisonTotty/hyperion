@@ -6,6 +6,11 @@ import { NEAR_PLANE_M, type ProjectionCamera, project, type Viewport } from "../
 import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION } from "../coords/rotation";
 import { CoverageView, fieldCellIndex } from "./coverage";
+import { DrawnGround, type DrawnInstance } from "./drawnGround";
+import { DATUM_SLOT, fadeWord, MIX_STEPS, PARENT_MIX_SLOT } from "./gpu/uniforms";
+import { type PatchKey, patchKeyString } from "./patchKey";
+import type { ResidentBake } from "./residentHeights";
+import { fnv1a64 } from "./workers/f32Digest";
 import { faceUvToDir, stToUv } from "./cube";
 import type { Face } from "./patchKey";
 import {
@@ -1029,3 +1034,105 @@ function nearestPointDir(view: SurveyEdgeView, camera: ProjectionCamera): Vec3 {
   }
   return best;
 }
+
+/** An edge bake sloped across its grid, its morph target below it. */
+function sloped(baseM: number): ResidentBake {
+  return {
+    standing: "edge",
+    ownAtM: (x, y) => baseM + 2 * x + 0.5 * y + 0.01 * x * y,
+    morphAtM: (x, y) => baseM - 30 + x - 0.25 * y,
+    surveyedAt: (x, y) => x + y < 110,
+  };
+}
+
+describe("the survey edge's mark over the ground as drawn, its reads and its segments' packing (lane perf-render-thread-ground)", () => {
+  /** The level-6 patches of level-5 cells (16, 16) to (17, 17) of face 0, and their parents. */
+  const keys: PatchKey[] = [];
+  for (let i = 32; i < 36; i += 1) {
+    for (let j = 32; j < 36; j += 1) {
+      keys.push({ face: 0, level: 6, i, j });
+    }
+  }
+  const bakes = new Map<string, ResidentBake>(
+    [
+      ...keys,
+      ...[16, 17].flatMap((i) => [16, 17].map((j): PatchKey => ({ face: 0, level: 5, i, j }))),
+    ].map((key, n) => [patchKeyString(key), sloped(40 + 7 * n)]),
+  );
+  /** Each patch's instance: plain, refining from its parent, rising from the datum, fading in turn. */
+  const instances = keys.map((key, n): DrawnInstance => {
+    const mix = Math.round(((n % 5) * MIX_STEPS) / 5);
+    const fades = [
+      0,
+      fadeWord(0, mix, PARENT_MIX_SLOT),
+      fadeWord(0, mix, DATUM_SLOT),
+      fadeWord(60, 0, 0),
+    ][n % 4];
+    return {
+      key,
+      area: key,
+      morphStartM: 800,
+      morphEndM: 12_000,
+      hasParent: true,
+      holds: 0,
+      edgeFades: n % 3 === 0 ? 0x0f : 0,
+      cornerFades: 0,
+      fades: fades ?? 0,
+    };
+  });
+
+  it("draws the segments and the range it drew with each read afresh and each segment made, bit for bit", () => {
+    const coverage = surveyed([0, 16, 16], [0, 17, 16], [0, 16, 17]);
+    const marks = [2_000, 9_000, 40_000, 250_000].flatMap((heightM) => {
+      const { view, camera, cameraM } = viewOf(coverage, heightM);
+      const drawn = new DrawnGround(
+        { bakeAt: (key) => bakes.get(patchKeyString(key)) ?? null, rimRevision: 0, revision: 0 },
+        { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M, pole: null },
+      );
+      // Two frames: the second reads the kept rim where its stamps stand.
+      return [0, 1].map(() => {
+        drawn.begin();
+        for (const instance of instances) {
+          drawn.push(instance);
+        }
+        drawn.end(cameraM, [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]);
+        return surveyEdgeMark(
+          {
+            ...view,
+            heightAtM: (d) => drawn.rimHeightAtM(d),
+            ground: {
+              heightAtM: (d) => drawn.groundHeightAtM(d),
+              ceilingM: 400,
+              rimSource: { key: drawn, revision: drawn.revision, stamps: drawn },
+            },
+          },
+          camera,
+          VIEWPORT,
+          OPTIONS,
+        );
+      });
+    });
+    const bytes = marks.flatMap((mark) => [
+      ...new Uint8Array(mark.line.buffer, mark.line.byteOffset, mark.line.byteLength),
+      ...new Uint8Array(mark.ticks.buffer, mark.ticks.byteOffset, mark.ticks.byteLength),
+      ...new Uint8Array(Float64Array.of(mark.nearestRangeM ?? -1).buffer),
+    ]);
+    // As the mark drew them at 469a0dad.
+    expect([
+      marks.map((mark) => [mark.line.length, mark.ticks.length]),
+      fnv1a64(Uint8Array.from(bytes)).toString(16),
+    ]).toEqual([
+      [
+        [24, 0],
+        [24, 0],
+        [0, 0],
+        [0, 0],
+        [660, 228],
+        [660, 228],
+        [828, 360],
+        [828, 360],
+      ],
+      "41e68d29dfa5e695",
+    ]);
+  });
+});

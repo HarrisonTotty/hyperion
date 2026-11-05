@@ -15,3 +15,13 @@ import type { Vec3 } from "../../geometry/vec3";
 export function narrow(v: Vec3): Float32Array {
   return new Float32Array([v.x, v.y, v.z]);
 }
+
+/**
+ * {@link narrow} into `out` from `at`: the same three `f32`, written in place rather than made, for
+ * a list of many points (lane perf-render-thread-ground).
+ */
+export function narrowInto(out: Float32Array, at: number, v: Vec3): void {
+  out[at] = v.x;
+  out[at + 1] = v.y;
+  out[at + 2] = v.z;
+}

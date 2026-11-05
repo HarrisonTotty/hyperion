@@ -41,7 +41,7 @@ import {
 } from "../camera/projection";
 import { rotationRows } from "../camera/quaternion";
 import { GROUND_PULL_PX } from "../depth/groundPull";
-import { narrow } from "../coords/narrow";
+import { narrowInto } from "../coords/narrow";
 import { type Rotation3, rotateToBody, rotateToBodyFixed } from "../coords/rotation";
 import { frustumOf } from "../wireframe/cull";
 import { type ScreenPx, type ScreenSegment, segmentDistancePx } from "../wireframe/symbology";
@@ -451,9 +451,30 @@ function aboveHorizon(
   return (e.x - q.x) * q.x + (e.y - q.y) * q.y + (e.z - q.z) * q.z > 0;
 }
 
-/** A segment's six `f32`, narrowed once from `f64` (R02's packing). */
-function pushSegment(out: number[], a: Vec3, b: Vec3): void {
-  out.push(...narrow(a), ...narrow(b));
+/**
+ * Segments of six `f32` each, narrowed once from `f64` (R02's packing), written into a buffer that
+ * grows as it must rather than made a segment at a time (lane perf-render-thread-ground).
+ */
+class Segments {
+  #data = new Float32Array(6 * 64);
+  #length = 0;
+
+  /** Adds the segment from `a` to `b`. */
+  push(a: Vec3, b: Vec3): void {
+    if (this.#length + 6 > this.#data.length) {
+      const grown = new Float32Array(2 * this.#data.length);
+      grown.set(this.#data);
+      this.#data = grown;
+    }
+    narrowInto(this.#data, this.#length, a);
+    narrowInto(this.#data, this.#length + 3, b);
+    this.#length += 6;
+  }
+
+  /** The segments added, a copy. */
+  taken(): Float32Array {
+    return this.#data.slice(0, this.#length);
+  }
 }
 
 /**
@@ -625,8 +646,8 @@ export function surveyEdgeMark(
     const { xPx, yPx } = projectOf(fromCameraM);
     return { xPx, yPx };
   };
-  const line: number[] = [];
-  const ticks: number[] = [];
+  const line = new Segments();
+  const ticks = new Segments();
   const remPx = options.remPx;
   const spacingPx = SURVEY_EDGE_TICK_SPACING_REM * remPx;
   const tickPx = SURVEY_EDGE_TICK_REM * remPx;
@@ -684,7 +705,7 @@ export function surveyEdgeMark(
   // A drawn segment, both ends in front: its line, its range and its ticks, the tick's side from
   // `reference`, the piece's end farther in front, on `side`.
   const draw = (pM: Vec3, qM: Vec3, side: DirectedSide, reference: EdgePoint): void => {
-    pushSegment(line, pM, qM);
+    line.push(pM, qM);
     measure(pM, qM);
     const p = screenOf(pM);
     const q = screenOf(qM);
@@ -757,7 +778,7 @@ export function surveyEdgeMark(
           toPlane > 0 && toPlane < 1 && toPlane * depthOf(atFootM) >= NEAR_PLANE_M
             ? scale(atFootM, toPlane)
             : atFootM;
-        pushSegment(ticks, footM, endM);
+        ticks.push(footM, endM);
       }
     }
     along += lengthPx;
@@ -867,8 +888,8 @@ export function surveyEdgeMark(
     }
   }
   return {
-    line: Float32Array.from(line),
-    ticks: Float32Array.from(ticks),
+    line: line.taken(),
+    ticks: ticks.taken(),
     nearestRangeM: nearestSeenM(view, cameraBodyFixedM, nearest),
   };
 }
