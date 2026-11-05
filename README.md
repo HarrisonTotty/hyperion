@@ -172,6 +172,7 @@ An option given on the command line wins over its variable.
 | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                                     | Serve `sky` requests                         |
 | `--keep-skies`          | `HYPERION_KEEP_SKIES`          | on                                                     | Answer a sky asked again from memory         |
 | `--kept-skies-disk`     | `HYPERION_KEPT_SKIES_DISK_MB`  | `256`                                                  | The kept skies on disk, in MiB               |
+| `--sky-qos`             | `HYPERION_SKY_QOS`             | `background` on macOS, `utility` elsewhere             | A sky's class after its first reply          |
 | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                                    | Stop gracefully when standard input closes   |
 
 On Apple silicon `--num-workers` defaults to no more than its performance threads with a third of
@@ -212,6 +213,11 @@ most stars a sky lists, in `skies/` under the data directory, so that a sky aske
 restart is answered from its file (R06.T11.n). The least recently used go first. A file that is
 torn, or was written by another generator or protocol version or under other sky settings, is
 never read; `0` keeps none on disk, and `--keep-skies=false` none anywhere.
+
+`--sky-qos` is the class a sky's census runs at after its first reply: `background`, the default on
+macOS, runs it at the quality-of-service class background, which Apple silicon keeps to its
+efficiency cores, and `utility` at the class the pool's bulk work runs at otherwise (R06.T11.o).
+Elsewhere either value leaves the pool's bulk work at its lowered priority, nice 10 on Linux.
 
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;

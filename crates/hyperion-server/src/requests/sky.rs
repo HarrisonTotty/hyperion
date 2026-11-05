@@ -39,6 +39,10 @@
 //! restart, is answered with its kept reply alone, with no sky job on the pool, unless the server
 //! is started with `--keep-skies=false` (or, for the files alone, `--kept-skies-disk 0`).
 //!
+//! After a sky's first reply, its jobs are lowered to the background class where `--sky-qos` asks
+//! it, the default on macOS, whose pool runs them at the quality-of-service class background, on
+//! the efficiency cores (R06.T11.o).
+//!
 //! Each sky logs at `info` that it started, its first reply and its final reply, or that it ended
 //! without one, with the request's wall time and the time its own jobs ran on the pool's workers,
 //! the CPU-s it cost and any time a worker was preempted, which leaves out the galaxy's and the
@@ -96,7 +100,6 @@ use super::global_list::tube_refused;
 use super::universe::openable_universe;
 use super::viewer::is_viewer;
 use super::{Replies, request_error};
-use crate::AppState;
 use crate::bulk::sky::{
     EncodedSky, SkyStarWire, SkyTexelWire, encode_sky_payload, encode_sky_stars, encode_sky_texels,
 };
@@ -109,6 +112,7 @@ use crate::compute::{
     Listing, Priority, SkyCaps,
 };
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
+use crate::{AppState, SkyQos};
 use kept::SkyReplyKey;
 
 /// The longest a sky holds before it is asked again, s: one Julian year (Design note 13).
@@ -492,7 +496,9 @@ struct Reply<'a> {
 
 impl Reply<'_> {
     /// The sky's band marched, then a reply after each step `censused` gives, each but the last
-    /// sent to `replies`, and the last returned (R06.T11.d).
+    /// sent to `replies`, and the last returned (R06.T11.d). Once the first reply is made, the
+    /// sky's later jobs are lowered to the background class if the server's [`SkyQos`] says so
+    /// (R06.T11.o).
     ///
     /// # Errors
     ///
@@ -515,6 +521,11 @@ impl Reply<'_> {
             let answer = self.of(step, &marches, made).await?;
             if last {
                 return Ok(answer);
+            }
+            if made == 0 && self.state.sky_qos == SkyQos::Background {
+                // The player holds the first reply; the rest of the census need not hold the
+                // performance cores (R06.T11.o).
+                self.token.lower_to_background();
             }
             replies.send(pool, self.token, answer).await?;
             made += 1;

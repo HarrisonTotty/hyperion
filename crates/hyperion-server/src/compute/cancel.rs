@@ -6,16 +6,20 @@
 //! cannot check (a range query) finishes and its result is dropped.
 //!
 //! A token also counts the time the pool's workers have spent running the jobs queued under it, so
-//! that a request that queues many, a sky, can log what it cost (rendering plan R06, R06.T11.m).
+//! that a request that queues many, a sky, can log what it cost (rendering plan R06, R06.T11.m),
+//! and can be lowered to the background class, at which the twins run its bulk jobs from then on
+//! where the platform has one per job (R06.T11.o; [`CpuPool`](super::CpuPool)).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 /// A cancellation flag shared between whoever wants a result and the job computing it, with the
-/// time spent running the jobs queued under it.
+/// time spent running the jobs queued under it, and whether they are lowered to the background
+/// class.
 ///
-/// Clones share one flag and one count. Once cancelled, a token stays cancelled.
+/// Clones share one flag, one count and one class. Once cancelled, a token stays cancelled, and
+/// once lowered, it stays lowered.
 #[derive(Debug, Clone, Default)]
 pub struct CancelToken {
     shared: Arc<Shared>,
@@ -26,6 +30,8 @@ struct Shared {
     cancelled: AtomicBool,
     /// The jobs' running time, ns.
     worked_ns: AtomicU64,
+    /// Whether the jobs taken from now on run at the background class.
+    lowered: AtomicBool,
 }
 
 impl CancelToken {
@@ -53,6 +59,20 @@ impl CancelToken {
     #[must_use]
     pub(crate) fn worked(&self) -> Duration {
         Duration::from_nanos(self.shared.worked_ns.load(Ordering::Relaxed))
+    }
+
+    /// Lowers the bulk and background jobs a worker takes under this token or a clone from now on
+    /// to the background class: macOS's quality-of-service class background, on its twin
+    /// (rendering plan R06, R06.T11.o). Elsewhere a twin runs them at its own level. It is
+    /// scheduling only, so no job's value changes.
+    pub(crate) fn lower_to_background(&self) {
+        self.shared.lowered.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether the token has been lowered to the background class.
+    #[must_use]
+    pub(crate) fn is_lowered(&self) -> bool {
+        self.shared.lowered.load(Ordering::Relaxed)
     }
 
     /// Counts `ran` more of the jobs' running time.
@@ -104,6 +124,20 @@ mod tests {
         clone.cancel();
         assert!(token.is_cancelled());
         assert!(clone.is_cancelled());
+    }
+
+    #[test]
+    fn lowering_one_clone_lowers_them_all() {
+        let token = CancelToken::new();
+        let clone = token.clone();
+        assert!(!token.is_lowered());
+        clone.lower_to_background();
+        assert!(token.is_lowered() && clone.is_lowered());
+        assert!(!token.is_cancelled(), "lowered is not cancelled");
+        assert!(
+            !CancelToken::new().is_lowered(),
+            "another token is not lowered"
+        );
     }
 
     #[test]

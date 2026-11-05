@@ -65,7 +65,7 @@ use crate::ws::ConnectionLimits;
 
 pub use config::{
     FeatureMembers, GlobalListWarmUp, KeptSkies, ServerArgs, ServerConfig, ServerConfigBuilder,
-    SkyFeatureGas, SkyService,
+    SkyFeatureGas, SkyQos, SkyService,
 };
 pub use requests::SkyFileCounters;
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
@@ -191,6 +191,8 @@ pub(crate) struct AppState {
     /// restart is answered with, unless their budget is 0 or the switch turns them off (rendering
     /// plan R06, R06.T11.n).
     pub(crate) sky_files: SkyReplyFiles,
+    /// The class a sky's census runs at after its first reply (rendering plan R06, R06.T11.o).
+    pub(crate) sky_qos: SkyQos,
     /// Each body's coarse surface field, computed once on the pool and kept in the configured byte
     /// budget (rendering plan R09, R09.T17; Design note 19).
     pub(crate) surface: SurfaceService,
@@ -312,6 +314,7 @@ impl Server {
                 sky_cells,
                 sky_replies: SkyReplyCache::new(config.kept_skies()),
                 sky_files: sky_files(&config),
+                sky_qos: config.sky_qos(),
                 surface,
                 contacts: alerts::UniverseContacts::new(),
                 alert_scans: alerts::AlertScans::new(config.alert_cache_bytes()),
@@ -507,6 +510,7 @@ fn log_start(config: &ServerConfig) {
         sky_service = ?config.sky_service(),
         kept_skies = ?config.kept_skies(),
         kept_skies_disk_mib = config.kept_skies_disk_bytes() / (1 << 20),
+        sky_qos = ?config.sky_qos(),
         extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
         sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
         alert_cache_mib = config.alert_cache_bytes() / (1 << 20),

@@ -16,6 +16,14 @@
 //! Under Linux's autogroup scheduling, a desktop's default, a thread's nice ranks it only against
 //! the threads of its own session (sched(7), "The autogroup feature"): there the twins yield to the
 //! server's interactive workers, and to a client only where it shares the server's session.
+//!
+//! On macOS a twin also follows each job's class ([`TwinLevel`], R06.T11.o): a job whose token is
+//! lowered to the background class (a sky's census after its first reply, `--sky-qos background`,
+//! the default there) runs at [`BACKGROUND`], `QOS_CLASS_BACKGROUND`, which gdt-cpus's table gives
+//! as efficiency cores only on Apple silicon, and the next job at [`LOWERED`] again. A thread sets
+//! its own class up as well as down there (`pthread_set_qos_class_self_np`, libpthread's `qos.h`),
+//! where Linux never lets an unprivileged thread lower its nice again, so Linux, and Windows, keep
+//! their twins' one level.
 
 use gdt_cpus::{AppliedPriority, ThreadPriority, set_thread_priority};
 
@@ -27,6 +35,71 @@ pub(crate) const LOWERED: ThreadPriority = if cfg!(windows) {
 } else {
     ThreadPriority::Lowest
 };
+
+/// The priority a macOS twin runs a job at whose token is lowered to the background class
+/// ([`CancelToken::lower_to_background`](super::CancelToken::lower_to_background)): gdt-cpus's
+/// `Background`, macOS's `QOS_CLASS_BACKGROUND` (gdt-cpus 0.2606.1, `ThreadPriority`'s table:
+/// `BACKGROUND`, "E-cores").
+pub(crate) const BACKGROUND: ThreadPriority = ThreadPriority::Background;
+
+/// Whether a twin follows each job's class, on macOS alone (the module docs).
+pub(crate) const FOLLOWS_EACH_JOB: bool = cfg!(target_os = "macos");
+
+/// A twin's priority job by job: [`LOWERED`], as [`lower_this_thread`] left it, or [`BACKGROUND`]
+/// for a job whose token is lowered, set only when it changes and only where
+/// [`FOLLOWS_EACH_JOB`]. A refusal is logged at `warn`, and the twin then keeps the level it has.
+#[derive(Debug)]
+pub(crate) struct TwinLevel {
+    current: ThreadPriority,
+    /// What the OS gave the last change, if any.
+    applied: Option<AppliedPriority>,
+    /// Whether it still follows the jobs: false off macOS, or once the OS has refused a change.
+    follows: bool,
+}
+
+impl TwinLevel {
+    /// A twin's level after [`lower_this_thread`].
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self {
+            current: LOWERED,
+            applied: None,
+            follows: FOLLOWS_EACH_JOB,
+        }
+    }
+
+    /// Sets the calling twin to the level of a job whose token is `lowered`, or not, if it differs
+    /// from the twin's.
+    pub(crate) fn follow(&mut self, lowered: bool) {
+        if !self.follows {
+            return;
+        }
+        let wanted = if lowered { BACKGROUND } else { LOWERED };
+        if wanted == self.current {
+            return;
+        }
+        match set_thread_priority(wanted) {
+            Ok(applied) => {
+                tracing::debug!(
+                    %applied,
+                    degraded = applied.degraded(),
+                    "a cpu worker's twin changed its priority for a job"
+                );
+                self.current = wanted;
+                self.applied = Some(applied);
+            }
+            Err(error) => {
+                let current = std::thread::current();
+                tracing::warn!(
+                    thread = current.name().unwrap_or("unnamed"),
+                    %error,
+                    "a cpu worker's twin could not change its priority for a job; it keeps its own"
+                );
+                self.follows = false;
+            }
+        }
+    }
+}
 
 /// Lowers the calling thread to [`LOWERED`] for good, and says what the OS gave it, or `None`
 /// where it refused or has no such setting.
@@ -99,6 +172,51 @@ mod tests {
             ThreadPriority::Lowest
         };
         assert_eq!(LOWERED, expected);
+    }
+
+    /// On Linux a twin keeps nice 10 whatever its jobs' class, and changes nothing.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn on_linux_a_twin_keeps_its_level_whatever_its_jobs_class() {
+        let started = nice_of_this_thread();
+        let (nices, applied) = std::thread::spawn(|| {
+            lower_this_thread();
+            let mut level = TwinLevel::new();
+            level.follow(true);
+            let lowered = nice_of_this_thread();
+            level.follow(false);
+            ([lowered, nice_of_this_thread()], level.applied)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(nices, [started.max(10); 2]);
+        assert!(applied.is_none(), "{applied:?}");
+    }
+
+    /// On macOS a twin runs a lowered job's class at `QOS_CLASS_BACKGROUND` and the next job's at
+    /// `QOS_CLASS_UTILITY` again, changing only when the class does.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn on_macos_a_twin_follows_each_jobs_class() {
+        let given = std::thread::spawn(|| {
+            lower_this_thread();
+            let mut level = TwinLevel::new();
+            level.follow(false);
+            let unchanged = level.applied.take();
+            level.follow(true);
+            let background = level.applied.take();
+            level.follow(false);
+            (unchanged, background, level.applied.take())
+        })
+        .join()
+        .unwrap();
+        let effective = |applied: Option<AppliedPriority>| {
+            applied.map(|applied| (applied.effective(), applied.degraded()))
+        };
+        assert_eq!(
+            (effective(given.0), effective(given.1), effective(given.2)),
+            (None, Some((BACKGROUND, false)), Some((LOWERED, false)))
+        );
     }
 
     /// A thread lowered on macOS or Windows is given [`LOWERED`] itself: `QOS_CLASS_UTILITY`, or

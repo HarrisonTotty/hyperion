@@ -46,7 +46,9 @@ use hyperion_protocol::{
 };
 use hyperion_server::compute::{BulkGate, SkyCaps, SkyCellCounters};
 use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
-use hyperion_server::{KeptSkies, ServerConfigBuilder, ServerStats, SkyFeatureGas, SkyService};
+use hyperion_server::{
+    KeptSkies, ServerConfigBuilder, ServerStats, SkyFeatureGas, SkyQos, SkyService,
+};
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition as SimPosition, UnitVector};
 use hyperion_sim::galaxy::Galaxy;
@@ -1348,6 +1350,49 @@ async fn a_sky_asked_again_after_a_restart_is_answered_from_its_file_byte_for_by
 
     client.close().await;
     restarted.stop().await;
+}
+
+/// A sky's jobs after its first reply are lowered to the background class where the server's
+/// `--sky-qos` says so, and none otherwise (R06.T11.o): the pool counts them on every platform,
+/// though only macOS's twins run them at quality-of-service class background.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_skys_jobs_after_its_first_reply_are_lowered_where_the_server_says() {
+    /// Two shells a layer, so that the sky arrives in two steps or more, within 15 ly.
+    const EDGES_LY: [u32; 1] = [10];
+    let caps = SkyCaps::forced(LightYears::new(15.0))
+        .expect("a small forced cap")
+        .with_shell_edges(&EDGES_LY)
+        .with_band_spec(COARSE_BAND);
+    let mut counted = Vec::new();
+    for qos in [SkyQos::Utility, SkyQos::Background] {
+        let data_dir = tempfile::tempdir().expect("a temporary directory");
+        let config = sky_config(data_dir.path(), caps, 2).sky_qos(qos).build();
+        let server = TestServer::start_with(config).await;
+        let (mut client, universe) = opened(&server).await;
+        let before = server.stats().pool();
+        let id = client.send_request(RequestBody::Sky(sky(&universe))).await;
+        let replies = replies_to(&mut client, id).await;
+        assert!(
+            replies.len() > 1,
+            "a sky of several steps: {}",
+            replies.len()
+        );
+        let after = server.stats().pool();
+        counted.push((
+            after.lowered() - before.lowered(),
+            after.completed() - before.completed(),
+        ));
+        client.close().await;
+        server.stop().await;
+    }
+    let [(utility, _), (background, ran)] = counted[..] else {
+        unreachable!("two servers")
+    };
+    assert_eq!(utility, 0, "{counted:?}");
+    assert!(
+        background > 0 && background < ran,
+        "the jobs after the first reply alone: {counted:?}"
+    );
 }
 
 /// Where the log test's subscriber writes: a buffer it shares.

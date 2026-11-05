@@ -22,9 +22,11 @@
 //! Each worker, `hyperion-cpu-N`, has a twin, `hyperion-low-N`, that runs the bulk and background
 //! jobs the worker takes, at a lower OS priority it sets once when it starts
 //! ([`lower_this_thread`]): macOS's quality-of-service class utility, Linux's nice 10 and
-//! Windows's below normal (rendering plan R06, R06.T11.k). The worker runs its interactive jobs
-//! itself, at the priority it started with, and waits while its twin runs the others, so the pool
-//! still runs one job a worker at a time, taken in the same order. It is scheduling only: no job's
+//! Windows's below normal (rendering plan R06, R06.T11.k); on macOS a job whose token is lowered
+//! to the background class runs at the class background on it, job by job ([`TwinLevel`],
+//! R06.T11.o). The worker runs its interactive jobs itself, at the priority it started with, and
+//! waits while its twin runs the others, so the pool still runs one job a worker at a time, taken
+//! in the same order. It is scheduling only: no job's
 //! value changes. A twin, rather than a worker that lowers its own priority for a bulk job and
 //! restores it for the next interactive one, because Linux lets an unprivileged thread raise its
 //! nice but never lower it again (`RLIMIT_NICE`, 0 by default; setpriority(2)), so the restore
@@ -58,7 +60,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError, oneshot};
 
-use super::thread_priority::lower_this_thread;
+use super::thread_priority::{TwinLevel, lower_this_thread};
 use super::{CancelToken, FlushProbe, probe_flush_to_zero};
 
 /// Where a job waits for a worker.
@@ -259,6 +261,7 @@ pub struct PoolCounters {
     completed: u64,
     cancelled: u64,
     panicked: u64,
+    lowered: u64,
 }
 
 impl PoolCounters {
@@ -304,6 +307,14 @@ impl PoolCounters {
     #[must_use]
     pub fn panicked(&self) -> u64 {
         self.panicked
+    }
+
+    /// Bulk and background jobs a twin took under a token lowered to the background class
+    /// (rendering plan R06, R06.T11.o): each ran at macOS's quality-of-service class background
+    /// there, and at the twin's own level elsewhere.
+    #[must_use]
+    pub fn lowered(&self) -> u64 {
+        self.lowered
     }
 }
 
@@ -1145,6 +1156,10 @@ trait Runnable: Send {
     /// answers [`Release::Withhold`], the reply is [`JobError::FloatingPointMode`] whatever the
     /// job returned.
     fn run(self: Box<Self>, admission: Admission, finish: &dyn Fn(&Outcome) -> Release);
+
+    /// Whether the job's token is lowered to the background class
+    /// ([`CancelToken::lower_to_background`]).
+    fn is_lowered(&self) -> bool;
 }
 
 struct Job<F, T> {
@@ -1186,6 +1201,10 @@ where
                 drop(result);
             }
         }
+    }
+
+    fn is_lowered(&self) -> bool {
+        self.token.is_lowered()
     }
 }
 
@@ -1278,7 +1297,8 @@ fn start_worker(index: usize, shared: &Shared, report: mpsc::SyncSender<Probed>,
 }
 
 /// A twin's life: lower its priority, probe the thread, report to the constructor, and if the
-/// probe passed run each job its worker hands it, until the worker stops.
+/// probe passed run each job its worker hands it, at its job's class on macOS, until the worker
+/// stops.
 fn start_twin(
     index: usize,
     shared: &Shared,
@@ -1299,7 +1319,13 @@ fn start_twin(
     if probe.flushes() {
         return;
     }
+    let mut level = TwinLevel::new();
     while let Ok(job) = taken.recv() {
+        let lowered = job.job.is_lowered();
+        if lowered {
+            shared.lock().counters.lowered += 1;
+        }
+        level.follow(lowered);
         run(shared, job);
         if finished.send(()).is_err() {
             // The worker has stopped, and hands it nothing more.
@@ -2376,6 +2402,47 @@ mod tests {
         }
         let lowered = started.max(10);
         assert_eq!(nices, [started, lowered, started, lowered, started]);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A bulk job under a token lowered to the background class runs on the twin and is counted,
+    /// and on Linux at nice 10 still; a job under another token, and an interactive one under the
+    /// lowered token, are not counted (R06.T11.o).
+    #[tokio::test]
+    async fn a_lowered_tokens_bulk_jobs_run_on_the_twin_and_are_counted() {
+        let pool = pool(1, 4, 4);
+        let read = |priority, token: CancelToken| {
+            let pool = &pool;
+            async move {
+                let receiver = pool
+                    .submit(priority, token, |_| {
+                        let name = thread::current().name().map(str::to_owned);
+                        #[cfg(target_os = "linux")]
+                        let nice = Some(super::super::thread_priority::nice_of_this_thread());
+                        #[cfg(not(target_os = "linux"))]
+                        let nice: Option<i32> = None;
+                        (name, nice)
+                    })
+                    .await
+                    .unwrap();
+                result(receiver).await.unwrap()
+            }
+        };
+        let lowered = CancelToken::new();
+        lowered.lower_to_background();
+        let plain = read(Priority::Bulk, CancelToken::new()).await;
+        assert_eq!(pool.counters().lowered(), 0);
+        let low = read(Priority::Bulk, lowered.clone()).await;
+        let low_background = read(Priority::Background, lowered.clone()).await;
+        assert_eq!(pool.counters().lowered(), 2);
+        let interactive = read(Priority::Interactive, lowered).await;
+        assert_eq!(pool.counters().lowered(), 2);
+        assert_eq!(low.0.as_deref(), Some("hyperion-low-0"));
+        assert_eq!(low_background.0, low.0);
+        assert_eq!(interactive.0.as_deref(), Some("hyperion-cpu-0"));
+        if cfg!(target_os = "linux") {
+            assert_eq!(low.1, plain.1, "nice 10, as the twin's other jobs");
+        }
         pool.shutdown().await.unwrap();
     }
 

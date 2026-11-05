@@ -2854,6 +2854,17 @@ the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a 
     `limits.rs`, `stats.rs`, `lib.rs`, `bulk.rs`, `tests/{sky,common/mod}.rs`, the root README.
   - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
 
+- **R06.T11.o A sky's later steps off the performance cores (new; the owner's priority,
+  2026-11-05; no output moves).** After a sky's first reply its jobs are lowered to the background
+  class, which a macOS twin runs at `QOS_CLASS_BACKGROUND`, behind `--sky-qos utility|background`
+  (background on macOS); Linux and Windows unchanged.
+  - **Tests:** a lowered token's jobs counted, on the twin, at nice 10 on Linux; a macOS twin's
+    class job by job; a sky's jobs lowered after its first reply only where the server says; the
+    switch.
+  - **Files:** `crates/hyperion-server/src/compute/{cancel,pool,thread_priority}.rs`,
+    `requests/sky.rs`, `config.rs`, `lib.rs`, `tests/sky.rs`, the root README.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just cross-clippy`, `just smart-ci`.
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -10069,3 +10080,11 @@ CensusCost)`.
   - The key's settings are `SkyCaps`, `FeatureMembers` and `SkyFeatureGas` by their `Debug` form: a
     setting that comes to change a final reply must join `SkySettings` (lean, 2026-11-05).
   - `tests/common`: `RawFrame`, `TestClient::next_raw_frame`.
+- **Deviations in T11.o, as built (2026-11-05).**
+  - `CancelToken::{lower_to_background, is_lowered}` (`pub(crate)`), `PoolCounters::lowered()`,
+    `SkyQos::{Utility, Background}` (exported), `ServerConfigBuilder::sky_qos`. A twin follows a
+    job's class only where `thread_priority::FOLLOWS_EACH_JOB` (macOS), and stops after a refusal.
+  - The token is lowered as the first reply is made; jobs queued before it and taken after it run
+    lowered.
+  - Pending: the owner's Mac run (fps and the P/E split beside a cold sky, utility against
+    background). Apple's own page on the background class was not read (no web from the pod).

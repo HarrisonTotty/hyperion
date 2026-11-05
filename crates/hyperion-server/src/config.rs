@@ -28,6 +28,7 @@
 //! | `--serve-sky`            | `HYPERION_SERVE_SKY`               | on                                                     |
 //! | `--keep-skies`           | `HYPERION_KEEP_SKIES`              | on                                                     |
 //! | `--kept-skies-disk`      | `HYPERION_KEPT_SKIES_DISK_MB`      | 256 (MiB)                                              |
+//! | `--sky-qos`              | `HYPERION_SKY_QOS`                 | `background` on macOS, `utility` elsewhere             |
 //! | `--stop-on-stdin-close`  | `HYPERION_STOP_ON_STDIN_CLOSE`     | off                                                    |
 //!
 //! On Apple silicon `--num-workers` defaults to no more than its performance threads with a third
@@ -68,6 +69,10 @@
 //! directory, so that a sky asked again after a restart is answered from its file (rendering plan
 //! R06, R06.T11.n; the owner's priority, 2026-11-05). 0 keeps none there, and `--keep-skies=false`
 //! none anywhere.
+//!
+//! `--sky-qos` is the class a sky's census runs at after its first reply ([`SkyQos`], R06.T11.o):
+//! `utility` or `background`. Only macOS's pool follows it; elsewhere either value leaves every
+//! bulk job at the pool's lowered level.
 
 use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;
@@ -79,7 +84,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use clap::builder::{BoolishValueParser, TypedValueParser};
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Parser, ValueEnum};
 
 use crate::DEFAULT_ADDR;
 use crate::compute::{BulkGate, SkyCaps};
@@ -131,6 +136,8 @@ pub const ENV_SERVE_SKY: &str = "HYPERION_SERVE_SKY";
 pub const ENV_KEEP_SKIES: &str = "HYPERION_KEEP_SKIES";
 /// The variable giving the kept skies' files' budget in MiB, for `--kept-skies-disk`.
 pub const ENV_KEPT_SKIES_DISK_MB: &str = "HYPERION_KEPT_SKIES_DISK_MB";
+/// The variable naming the class a sky's census runs at after its first reply, for `--sky-qos`.
+pub const ENV_SKY_QOS: &str = "HYPERION_SKY_QOS";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
 pub const ENV_STOP_ON_STDIN_CLOSE: &str = "HYPERION_STOP_ON_STDIN_CLOSE";
 
@@ -399,6 +406,12 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_KEPT_SKIES_DISK_MB, default_value_t = DEFAULT_KEPT_SKIES_DISK)]
     kept_skies_disk: CacheBudget,
 
+    /// The class a sky's census runs at after its first reply, on macOS: `background`, the default
+    /// there, keeps it on the efficiency cores, and `utility` leaves it at the pool's own class.
+    /// Elsewhere either leaves it at the pool's lowered level
+    #[arg(long, value_name = "CLASS", env = ENV_SKY_QOS, value_enum, default_value_t = SkyQos::default())]
+    sky_qos: SkyQos,
+
     /// Stop gracefully when standard input closes, for a server run as another program's child
     #[arg(
         long,
@@ -442,6 +455,36 @@ pub enum KeptSkies {
     /// exactly as one of them is answered from it: the default.
     #[default]
     Kept,
+}
+
+/// The class a sky's census runs at after its first reply: its switch, `--sky-qos` (rendering plan
+/// R06, R06.T11.o; the owner's priority, 2026-11-05).
+///
+/// On the owner's Mac a cold camera sky near the Sun keeps the pool's twins busy for about an hour
+/// at the quality-of-service class utility, which leans to the efficiency cores but may take the
+/// performance cores the client draws with. Background holds the census's jobs after its first
+/// reply, the one the player waits for, to the efficiency cores. Only macOS's twins follow a job's
+/// class, job by job; on Linux and Windows either value runs every bulk job at the twin's own
+/// level, as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, ValueEnum)]
+pub enum SkyQos {
+    /// Every job at the twins' own class, utility on macOS: the default elsewhere.
+    Utility,
+    /// The jobs after the sky's first reply at the class background on macOS: the default there
+    /// (lean, 2026-11-05).
+    Background,
+}
+
+impl Default for SkyQos {
+    /// [`SkyQos::Background`] on macOS, and [`SkyQos::Utility`] elsewhere, where it changes
+    /// nothing.
+    fn default() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Background
+        } else {
+            Self::Utility
+        }
+    }
 }
 
 /// Whether opening a universe starts its galaxy's global list and its streams' tube tables on the
@@ -580,6 +623,7 @@ impl From<ServerArgs> for ServerConfig {
             serve_sky,
             keep_skies,
             kept_skies_disk,
+            sky_qos,
             stop_on_stdin_close,
         } = args;
         let builder = Self::builder()
@@ -603,6 +647,7 @@ impl From<ServerArgs> for ServerConfig {
             .sky_service(serve_sky)
             .kept_skies(keep_skies)
             .kept_skies_disk_bytes(kept_skies_disk.bytes)
+            .sky_qos(sky_qos)
             .stdin_stop(stop_on_stdin_close);
         // Not given, the bound follows the workers (`ServerConfig::surface_passes`).
         match surface_passes {
@@ -685,6 +730,7 @@ pub struct ServerConfig {
     sky_service: SkyService,
     kept_skies: KeptSkies,
     kept_skies_disk_bytes: usize,
+    sky_qos: SkyQos,
     global_list_warm_up: GlobalListWarmUp,
     feature_members: FeatureMembers,
     sky_feature_gas: SkyFeatureGas,
@@ -838,6 +884,12 @@ impl ServerConfig {
         }
     }
 
+    /// The class a sky's census runs at after its first reply (rendering plan R06, R06.T11.o).
+    #[must_use]
+    pub fn sky_qos(&self) -> SkyQos {
+        self.sky_qos
+    }
+
     /// Whether an open starts its galaxy's global list and tube tables (plan 10, P10.T10.b).
     #[must_use]
     pub fn global_list_warm_up(&self) -> GlobalListWarmUp {
@@ -935,6 +987,7 @@ impl Default for ServerConfigBuilder {
                 sky_service: SkyService::default(),
                 kept_skies: KeptSkies::default(),
                 kept_skies_disk_bytes: DEFAULT_KEPT_SKIES_DISK.bytes,
+                sky_qos: SkyQos::default(),
                 global_list_warm_up: GlobalListWarmUp::default(),
                 feature_members: FeatureMembers::default(),
                 sky_feature_gas: SkyFeatureGas::default(),
@@ -1116,6 +1169,13 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn kept_skies_disk_bytes(mut self, bytes: usize) -> Self {
         self.config.kept_skies_disk_bytes = bytes;
+        self
+    }
+
+    /// The class a sky's census runs at after its first reply; [`SkyQos::default`] by default.
+    #[must_use]
+    pub fn sky_qos(mut self, qos: SkyQos) -> Self {
+        self.config.sky_qos = qos;
         self
     }
 
@@ -1353,8 +1413,8 @@ mod tests {
     /// budgets (cells, maps, systems, bodies, briefs, extinction maps, lines of sight, feature
     /// cells, feature interiors, class cells, alert scans, the sky's cells, the sky tables, the
     /// surface and the kept skies' files),
-    /// the sky's switch, the kept skies' switch, the feature members' gate and the stop on
-    /// standard input.
+    /// the sky's switch, the kept skies' switch, the feature members' gate, the stop on standard
+    /// input and the class of a sky's later steps.
     type Fields<'a> = (
         SocketAddr,
         &'a Path,
@@ -1365,6 +1425,7 @@ mod tests {
         KeptSkies,
         FeatureMembers,
         StdinStop,
+        SkyQos,
     );
 
     fn fields(config: &ServerConfig) -> Fields<'_> {
@@ -1394,6 +1455,7 @@ mod tests {
             config.kept_skies(),
             config.feature_members(),
             config.stdin_stop(),
+            config.sky_qos(),
         )
     }
 
@@ -1475,6 +1537,11 @@ mod tests {
                 KeptSkies::Kept,
                 FeatureMembers::Served,
                 StdinStop::Ignore,
+                if cfg!(target_os = "macos") {
+                    SkyQos::Background
+                } else {
+                    SkyQos::Utility
+                },
             )
         );
     }
@@ -1524,6 +1591,8 @@ mod tests {
             "--keep-skies",
             "--kept-skies-disk",
             "47",
+            "--sky-qos",
+            "background",
             "--stop-on-stdin-close",
         ]);
         assert_eq!(
@@ -1554,6 +1623,7 @@ mod tests {
                 KeptSkies::Kept,
                 FeatureMembers::Served,
                 StdinStop::Watch,
+                SkyQos::Background,
             )
         );
     }
@@ -1678,6 +1748,7 @@ mod tests {
                 (Some("serve-sky"), Some("HYPERION_SERVE_SKY")),
                 (Some("keep-skies"), Some("HYPERION_KEEP_SKIES")),
                 (Some("kept-skies-disk"), Some("HYPERION_KEPT_SKIES_DISK_MB")),
+                (Some("sky-qos"), Some("HYPERION_SKY_QOS")),
                 (
                     Some("stop-on-stdin-close"),
                     Some("HYPERION_STOP_ON_STDIN_CLOSE")
@@ -1954,6 +2025,7 @@ mod tests {
             .sky_service(SkyService::Unsupported)
             .kept_skies(KeptSkies::Off)
             .kept_skies_disk_bytes(150)
+            .sky_qos(SkyQos::Utility)
             .feature_members(FeatureMembers::Held)
             .stdin_stop(StdinStop::Watch)
             .build();
@@ -1972,7 +2044,28 @@ mod tests {
                 KeptSkies::Off,
                 FeatureMembers::Held,
                 StdinStop::Watch,
+                SkyQos::Utility,
             )
         );
+    }
+
+    /// The class of a sky's later steps is one of its two names, background on macOS and utility
+    /// elsewhere unless given (R06.T11.o).
+    #[test]
+    fn the_sky_qos_is_one_of_two_classes_background_by_default_on_macos() {
+        assert_eq!(config(&["--sky-qos", "utility"]).sky_qos(), SkyQos::Utility);
+        assert_eq!(
+            config(&["--sky-qos=background"]).sky_qos(),
+            SkyQos::Background
+        );
+        let expected = if cfg!(target_os = "macos") {
+            SkyQos::Background
+        } else {
+            SkyQos::Utility
+        };
+        assert_eq!(config(&[]).sky_qos(), expected);
+        for refused in ["--sky-qos=default", "--sky-qos=", "--sky-qos=Background"] {
+            assert_eq!(refusal(&[refused]), ErrorKind::InvalidValue, "{refused}");
+        }
     }
 }
