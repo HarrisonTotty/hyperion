@@ -1,0 +1,2 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_pinned_neutron_star_keeps_under_a_tenth.figures = [1.3924038392042366, 1.4740777437360242]

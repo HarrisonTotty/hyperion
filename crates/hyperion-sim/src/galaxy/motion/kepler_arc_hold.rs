@@ -115,23 +115,16 @@ fn member(p: PointLy, velocity: [f64; 3]) -> EpochState {
     EpochState::new(record, GalacticVelocity::new(velocity)).expect("a finite state")
 }
 
-/// The digest (`f64_digest`) of the arc's positions in the D2 test: each record's cell and offsets
-/// that the arc moves off the series, at −1,000, −100, +100 and +1,000 yr, in walk order. Blessed
-/// natively on x86-64; the wasip1 suite compares it. Re-pinned at 27's re-pin (it was
-/// `0x0921_95a6_2b91_b2fa`), with D2's counts, 3,296 records on the arc and 13,184 record-times
-/// (3,281 and 13,124 when pinned), as the train's base already measured them; it is now the
-/// version's own exact orbits' digest (`kepler_secular_hold`'s), the version's orbits taking the
-/// arc.
-const ARC_POSITIONS_DIGEST: u64 = 0x9ed7_a4e3_2ae5_44e1;
-
 /// D2 under every 27 hold: the arc from the epoch moves the fixture's Kepler-regime grid records
 /// on exact orbits off the series' positions ([`position_by_the_series`]), bit for bit their
 /// trajectories' states, and leaves every record outside the regime, every one on a Kepler orbit or
 /// a near-circular exact one, and every record at the epoch where the series puts it; and every
 /// record on an exact orbit lies within the walk's pad and its Kepler orbit's shell. Layer B within
 /// 1.5 influence radii, at ±100 and ±1,000 yr, as P09.T28.d.b's D2. Named `pinned` for the
-/// WebAssembly suite's filter: the counts and a digest of the positions are pinned, as blessed
-/// natively.
+/// WebAssembly suite's filter: the counts, records on the arc and record-times moved, and the
+/// digest (`f64_digest`) of the arc's positions are pinned, as blessed natively on x86-64 (the
+/// wasip1 suite compares them): each record's cell and offsets that the arc moves off the series,
+/// at −1,000, −100, +100 and +1,000 yr, in walk order.
 #[test]
 fn the_arc_moves_records_on_exact_orbits_and_no_others_pinned() {
     let arc = arc();
@@ -188,16 +181,13 @@ fn the_arc_moves_records_on_exact_orbits_and_no_others_pinned() {
          the series, the farthest by {farthest:.4e} ly",
         records.len()
     );
-    assert_eq!(
-        (laws.get("arc").copied(), moved),
-        (Some(3_296), 13_184),
-        "pin the counts as measured"
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/motion/kepler_arc_hold",
+        "the_arc_moves_records_on_exact_orbits_and_no_others_pinned"
     );
-    assert_eq!(
-        f64_digest(&positions),
-        ARC_POSITIONS_DIGEST,
-        "{farthest} ly"
-    );
+    let on_the_arc = laws.get("arc").copied().expect("records on the arc");
+    pins.exact("counts", (on_the_arc, moved));
+    pins.exact("digest", f64_digest(&positions));
 }
 
 /// The grid's wide orbits under every 27 hold (P09.T28.d.c's test): every Kepler-regime record of

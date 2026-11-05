@@ -1,0 +1,3 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+plan_11s_rows_bound_their_curves_over_the_samplers_ranges.dwarf_range = [0.32004899375740553, 1.38]
+the_nova_bounds_hold_over_the_fitted_samplers.dwarf_range = [0.32004899375740553, 1.38]

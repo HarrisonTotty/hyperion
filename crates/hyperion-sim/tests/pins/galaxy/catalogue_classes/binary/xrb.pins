@@ -1,0 +1,4 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+no_candidate_the_site_keeps_fails_the_test.refused_by_kind = [[0, 22, 0, 3, 0, 0, 21, 0, 0], 502]
+the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals.high_mass_share = 0.0010249306436857868
+the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals.rate_split = 0.9438280673950821

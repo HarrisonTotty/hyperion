@@ -8,6 +8,8 @@
 //! - The same pair twice gives the same timeline.
 //! - Slow: a census of 10⁷ slab records under every 27 hold.
 
+use hyperion_testkit::pins::Tolerance;
+
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
@@ -50,11 +52,6 @@ fn pinned(rules: StellarRules) -> BinaryTimeline {
     donor_onto_remnant(donor, tau, Phase::NeutronStar, star, rules, 1.2e10).0
 }
 
-/// The pinned pair's neutron star at the end of the donor's first transfer, and its compact star's
-/// mass 12 Gyr on, M☉, under every 27 hold, as measured (2026-11-02, once P11.T4's heavy-donor
-/// hold took the overfilling donor's spin at its lobe).
-const PINNED_FIGURES: (f64, f64) = (1.392_403_839_204_236_6, 1.474_077_743_736_024_2);
-
 /// Under every 27 hold the pinned pair's neutron star keeps less than [`NS_ACCRETION_EFFICIENCY`]
 /// of what the donor gives (its wind gives none on the main sequence): the donor, the heavier,
 /// transfers at its thermal rate at first (`heavy_donor`), over the star's Eddington rate, which
@@ -95,11 +92,14 @@ fn the_pinned_neutron_star_keeps_under_a_tenth() {
     );
     assert_eq!(compact.phase(), Phase::NeutronStar);
     assert!(compact.mass().value() - star < MOST_GAINED);
-    let m = (a.mass().value(), compact.mass().value());
-    assert!(
-        (m.0 - PINNED_FIGURES.0).abs() < 1e-12 && (m.1 - PINNED_FIGURES.1).abs() < 1e-12,
-        "{m:?}"
+    // The neutron star at the end of the donor's first transfer, and its compact star's mass 12 Gyr
+    // on, M☉, as measured.
+    let mut pins = hyperion_testkit::pins!(
+        "stellar/rules/ns_accretion_hold",
+        "the_pinned_neutron_star_keeps_under_a_tenth"
     );
+    let figures = (a.mass().value(), compact.mass().value());
+    pins.within("figures", figures, Tolerance::absolute(1e-12));
 }
 
 /// The same pair twice gives the same timeline.

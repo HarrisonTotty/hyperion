@@ -153,20 +153,14 @@ fn the_centre_s_binary_entries_resolve_and_are_their_classes() {
     );
 }
 
-/// The digest (`f64_digest`) of the centre's first [`PINNED_BINARIES`] kept binary entries in index
-/// order ([`the_centre_s_binary_entries_are_pinned`]): each one's ID (high, low 32 bits), class,
-/// initial mass, age, position and velocity. Blessed natively on x86-64 after P09.T37 drew the
-/// centre's list over its reach, again at generator version 26, and at 27, whose accreting white
-/// dwarfs' samplers stop under the Chandrasekhar mass and are refitted on train 27's engine
-/// (P15.T10.b); the wasip1 suite compares it.
-const CENTRE_BINARIES_DIGEST: u64 = 0x1363_9a1a_4154_d0d4;
-
 /// The centre's binary entries the pin reads.
 const PINNED_BINARIES: usize = 40;
 
 /// The centre's binary entries' bits under every 27 hold, pinned before the 27 bump: their places
 /// are drawn as the recent classes' are (`centre::recent::position`), so a change to either moves
-/// this.
+/// this. The digest (`f64_digest`) of the centre's first [`PINNED_BINARIES`] kept binary entries in
+/// index order, each one's ID (high, low 32 bits), class, initial mass, age, position and velocity,
+/// is pinned as blessed natively on x86-64; the wasip1 suite compares it.
 #[test]
 fn the_centre_s_binary_entries_are_pinned() {
     use hyperion_testkit::golden::f64_digest;
@@ -201,5 +195,9 @@ fn the_centre_s_binary_entries_are_pinned() {
     );
     let digest = f64_digest(&values);
     eprintln!("{} values, digest {digest:#018x}", values.len());
-    assert_eq!(digest, CENTRE_BINARIES_DIGEST, "{digest:#018x}");
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/features/centre/binaries",
+        "the_centre_s_binary_entries_are_pinned"
+    );
+    pins.exact("digest", digest);
 }

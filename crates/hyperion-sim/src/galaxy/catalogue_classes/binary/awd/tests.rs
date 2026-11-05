@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::order::assert_order_independent;
+use hyperion_testkit::pins::Tolerance;
 
 use super::*;
 use crate::GENERATOR_VERSION;
@@ -96,7 +97,7 @@ fn all_entries() -> impl Iterator<Item = &'static CatalogueEntry<AwdEntry>> {
 
 /// Each class and the features' lists together hold its share row's hosts, the catalogue all but
 /// the features' share (P11.T8.f): at the Milky Way fixture the fitted rows (P15.T10.b's refit at
-/// 27) give the fast class 0.47 × 10⁶ and the slow 7.6 × 10⁶ ([`PINNED_ROW_HOSTS`]), together
+/// 27) give the fast class 0.47 × 10⁶ and the slow 7.6 × 10⁶ (pinned as measured), together
 /// inside the brainstorm's 6–12 × 10⁶ (the scratch rows' 4.5 × 10⁶ each); and each class draws
 /// over all its recurrence ranks, [0, 1], from its own fitted sampler, whose recurrence lies all on
 /// its side of L (the scratch classes shared one sampler, split at L in halves).
@@ -157,18 +158,16 @@ fn each_class_holds_its_share_row_s_hosts() {
         );
     }
     println!("the rows' hosts {rows:?}");
-    for (hosts, pinned) in rows.iter().zip(PINNED_ROW_HOSTS) {
-        assert!((hosts / pinned - 1.0).abs() < 1e-9, "{rows:?}");
-    }
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/awd",
+        "each_class_holds_its_share_row_s_hosts"
+    );
+    pins.within("row_hosts", rows, Tolerance::relative(1e-9));
     assert!((6.0e6..=12.0e6).contains(&(rows[0] + rows[1])), "{rows:?}");
     for process in [&fast, &slow] {
         assert_eq!(process.recurrence_ranks(), (0.0, 1.0));
     }
 }
-
-/// The fitted rows' hosts at the Milky Way fixture, fast then slow, before the features' share, as
-/// measured at 27: 4.70 × 10⁵ and 7.58 × 10⁶, 8.05 × 10⁶ together.
-const PINNED_ROW_HOSTS: [f64; 2] = [469_811.164_015_661_7, 7_577_661.285_931_257_5];
 
 /// A cell's bound holds the class's intensity at every point tried in it, in the disc and at the
 /// centre, and the centre's cell, the fullest, leaves the index its headroom.
@@ -483,16 +482,18 @@ fn the_hosts_layers_against_the_share_rows() {
         f64::from(counts[1]) / all,
         f64::from(counts[2]) / all
     );
-    assert_eq!(counts, PINNED_LAYER_COUNTS);
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/awd",
+        "the_hosts_layers_against_the_share_rows"
+    );
+    pins.exact("layer_counts", counts);
 }
-
-/// The sample cells' hosts in layers C, D and E, as measured at 27.
-const PINNED_LAYER_COUNTS: [u32; 3] = [57, 137, 2];
 
 // 4. Pins.
 
 /// One slow host's eruptions in the source horizon, pinned to the nanosecond: the first slow host
-/// of the sample cells that erupts in it. P11.T9's nova listing inherits it.
+/// of the sample cells that erupts in it, its ID pinned too, and its eruptions as seconds and
+/// nanoseconds from the epoch. P11.T9's nova listing inherits it.
 #[test]
 fn a_slow_host_s_eruptions_are_pinned() {
     let entry = sample_entries(AwdSide::Slow)
@@ -511,17 +512,13 @@ fn a_slow_host_s_eruptions_are_pinned() {
         SystemId::from(entry.id()).raw(),
         scan.recurrence().value()
     );
-    assert_eq!(SystemId::from(entry.id()).raw(), PINNED_HOST);
-    assert_eq!(times, PINNED_ERUPTIONS);
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/awd",
+        "a_slow_host_s_eruptions_are_pinned"
+    );
+    pins.exact("host", SystemId::from(entry.id()).raw());
+    pins.exact("eruptions", times);
 }
-
-/// The pinned slow host's ID.
-const PINNED_HOST: u64 = 0xfc87_db28_0000_0000;
-
-/// Its eruptions: seconds and nanoseconds from the epoch, re-measured at 27, whose fitted slow
-/// sampler (P15.T10.b's refit on train 27's engine, then under its raised segment cap) gives the
-/// same host another recurrence, 7.9 × 10⁵ years.
-const PINNED_ERUPTIONS: [(i64, u32); 1] = [(-135_780_021_662, 346_627_560)];
 
 /// The local density of both classes' hosts at the Sun-like point, the plan's test against Pala et
 /// al. 2020, 4.8 × 10⁻⁶ pc⁻³ within 30%, and the fixture's catalogue total, pinned as the fitted
@@ -553,21 +550,14 @@ fn the_local_density_and_the_milky_way_s_total() {
         density / 4.8e-6
     );
     assert!((density / 4.8e-6 - 1.0).abs() < 0.3, "{density}");
-    assert!(
-        (total / PINNED_CATALOGUE_HOSTS - 1.0).abs() < 1e-9,
-        "{total}"
+    // The catalogue's hosts of both classes, and the local density, pc⁻³, as measured.
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/awd",
+        "the_local_density_and_the_milky_way_s_total"
     );
-    assert!(
-        (density / PINNED_LOCAL_DENSITY - 1.0).abs() < 1e-6,
-        "{density}"
-    );
+    pins.within("catalogue_hosts", total, Tolerance::relative(1e-9));
+    pins.within("local_density", density, Tolerance::relative(1e-6));
 }
-
-/// The local density as the fitted rows give it, pc⁻³, as measured at 27.
-const PINNED_LOCAL_DENSITY: f64 = 5.278_873_005e-6;
-
-/// The fixture's catalogue hosts of both classes as the fitted rows give them, as measured at 27.
-const PINNED_CATALOGUE_HOSTS: f64 = 8_025_063.778_068_277;
 
 /// The first two sample cells of each class pinned: each cell's bound, candidates and entries, and
 /// each entry's scan marks, binary and history.

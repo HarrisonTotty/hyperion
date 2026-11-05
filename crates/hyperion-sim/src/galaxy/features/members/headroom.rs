@@ -419,6 +419,7 @@ mod tests {
     use crate::galaxy::quad::gl32_log;
     use crate::units::Dex;
     use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::pins::Tolerance;
     use std::num::NonZeroU16;
 
     /// The centre's index's exclusive bound, 65,536, as a double.
@@ -584,14 +585,6 @@ mod tests {
         mass / count / params.mean_formed_mass().value()
     }
 
-    /// `got` within the relative tolerance `tolerance` of `want`.
-    fn assert_near(got: f64, want: f64, tolerance: f64, what: &str) {
-        assert!(
-            (got / want - 1.0).abs() < tolerance,
-            "{what}: {got} against {want}"
-        );
-    }
-
     /// The check at the Milky Way fixture, under either mass function, against the centre's 16-bit
     /// index: the default function's centre, 9,766.8 candidates, 27.3 victims and 599.8 of plan
     /// 09's recent classes' candidates, fits with 54,325.5 indices to spare at eight standard
@@ -610,37 +603,30 @@ mod tests {
         for (a, b) in figures(&built).into_iter().zip(figures(&fixture)) {
             assert_same_bits(a, b);
         }
-        for (kind, candidates, at_eight, at_five, want_share) in [
-            (
-                MassFunctionKind::Chabrier,
-                9_766.789,
-                54_325.53,
-                54_631.37,
-                0.703_48,
-            ),
-            (
-                MassFunctionKind::Kroupa,
-                8_835.719,
-                55_409.6,
-                55_699.7,
-                0.713_27,
-            ),
+        let mut pins = hyperion_testkit::pins!(
+            "galaxy/features/members/headroom",
+            "the_milky_way_s_centre_list_fits_under_either_mass_function"
+        );
+        for (key, kind) in [
+            ("chabrier", MassFunctionKind::Chabrier),
+            ("kroupa", MassFunctionKind::Kroupa),
         ] {
             let fixture = scattered(kind, 0.0);
             let f = centre_list_forecast(&fixture).unwrap();
             print(&format!("{kind:?} Milky Way"), &f);
             assert_eq!(f.verdict(), Ok(()), "{kind:?}");
-            let what = |figure: &str| format!("{kind:?}'s {figure}");
-            assert_near(f.candidates(), candidates, 1e-5, &what("candidates"));
-            assert_near(f.margin(8.0), at_eight, 1e-5, &what("margin at eight"));
-            assert_near(f.margin(5.0), at_five, 1e-5, &what("margin at five"));
+            let figure = |name: &str| format!("{key}.{name}");
+            let within = Tolerance::relative(1e-5);
+            pins.within(&figure("candidates"), f.candidates(), within);
+            pins.within(&figure("margin_at_eight"), f.margin(8.0), within);
+            pins.within(&figure("margin_at_five"), f.margin(5.0), within);
             let share = primaries_share(&fixture);
             eprintln!(
                 "{kind:?} without companions: primaries form {share:.5} of m_f, so the fixture's \
                  centre expects {:.1}",
                 f.candidates() * share
             );
-            assert_near(share, want_share, 1e-4, &what("primaries' share"));
+            pins.within(&figure("primaries_share"), share, Tolerance::relative(1e-4));
         }
     }
 
@@ -654,14 +640,13 @@ mod tests {
     /// bounds every drawn cluster.
     #[test]
     fn the_cap_s_centre_list_fits_under_either_mass_function() {
-        for (kind, seed, want, at_eight) in [
-            (
-                MassFunctionKind::Chabrier,
-                0x1108_e000,
-                24_997.566,
-                37_671.2,
-            ),
-            (MassFunctionKind::Kroupa, 0x1108_e001, 16_614.555, 46_913.9),
+        let mut pins = hyperion_testkit::pins!(
+            "galaxy/features/members/headroom",
+            "the_cap_s_centre_list_fits_under_either_mass_function"
+        );
+        for (key, kind, seed) in [
+            ("chabrier", MassFunctionKind::Chabrier, 0x1108_e000),
+            ("kroupa", MassFunctionKind::Kroupa, 0x1108_e001),
         ] {
             let params = scattered(kind, 1.0);
             let cap = NuclearClusterParams::mass_cap(kind);
@@ -671,8 +656,9 @@ mod tests {
             let f = galaxy_centre_forecast(&galaxy).unwrap();
             print(&format!("{kind:?} at the cap"), &f);
             assert_eq!(check_feature_list_headroom(&galaxy), Ok(()), "{kind:?}");
-            assert_near(f.candidates(), want, 1e-5, &format!("{kind:?} at the cap"));
-            assert_near(f.margin(8.0), at_eight, 1e-5, &format!("{kind:?}'s margin"));
+            let within = Tolerance::relative(1e-5);
+            pins.within(&format!("{key}.candidates"), f.candidates(), within);
+            pins.within(&format!("{key}.margin_at_eight"), f.margin(8.0), within);
             eprintln!(
                 "{kind:?} at the cap of {:.3e} M_sun without companions: {:.1} candidates",
                 cap.value(),

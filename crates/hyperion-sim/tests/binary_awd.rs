@@ -30,6 +30,7 @@ use hyperion_sim::stellar::binary::{BinaryClass, CvKind};
 use hyperion_sim::tables::binary::{AwdDonorKind, MILKY_WAY_FORMED_MASS};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::{Seed, math};
+use hyperion_testkit::pins::Tolerance;
 
 /// The seed of plan 02's sweep's galaxy n is this with n in its low bits.
 const SWEEP_SEED: u64 = 0x0200_5ee9_0000_0000;
@@ -70,7 +71,8 @@ fn the_local_density_at_the_sun_like_point() {
     let ratio = density / PALA_DENSITY;
     println!("{density:e} pc^-3 at the Sun-like point: {ratio:.4} of Pala et al.'s");
     assert!((ratio - 1.0).abs() < 0.3, "{ratio}");
-    assert!((ratio - 1.099_765).abs() < 1e-5, "{ratio}");
+    let mut pins = hyperion_testkit::pins!("binary_awd", "the_local_density_at_the_sun_like_point");
+    pins.within("ratio", ratio, Tolerance::absolute(1e-5));
 }
 
 /// The galaxy's expected hosts, both classes, over ten Milky Way seeds (research-leans-10's reading

@@ -1,0 +1,2 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_new_arm_s_cells_are_pinned.digest = 16746103332393351033

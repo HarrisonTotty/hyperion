@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::order::assert_order_independent;
+use hyperion_testkit::pins::Tolerance;
 use hyperion_testkit::stats::{ALPHA, assert_poisson_count};
 
 use super::*;
@@ -545,19 +546,20 @@ fn swallowing_black_holes_lower_the_class_s_kilonova_rate() {
         "{mergers:.3} mergers over {horizon:.0} yr: kilonovae {with:.4} a Myr with the black \
          holes' {share:.4}, {without:.4} without them, {before:.4} before the fix"
     );
-    assert!((with / KILONOVAE_PER_MYR - 1.0).abs() < 1e-3, "{with}");
-    assert!(
-        (without / PAIRS_KILONOVAE_PER_MYR - 1.0).abs() < 1e-3,
-        "{without}"
+    // The fixture's kilonovae a million years, with the black holes' and with the neutron-star
+    // pairs' alone, as measured.
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/nsm",
+        "swallowing_black_holes_lower_the_class_s_kilonova_rate"
+    );
+    pins.within("kilonovae_per_myr", with, Tolerance::relative(1e-3));
+    pins.within(
+        "pairs_kilonovae_per_myr",
+        without,
+        Tolerance::relative(1e-3),
     );
     assert!(with < before);
 }
-
-/// The fixture's kilonovae a million years, with the black holes' and with the neutron-star
-/// pairs' alone, as measured: re-measured at 27, whose features' lists hold 0.39% of the class's
-/// mergers (P11.T8.f), from 30.96 and 30.29.
-const KILONOVAE_PER_MYR: f64 = 30.84;
-const PAIRS_KILONOVAE_PER_MYR: f64 = 30.17;
 
 // 5. P11.T8.d's rider, from generator version 27.
 

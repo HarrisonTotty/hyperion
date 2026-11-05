@@ -1,0 +1,2 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_arc_comes_back_to_the_epoch_and_is_pinned.digest = 12714325515191021937

@@ -192,26 +192,21 @@ fn from_27_the_class_draws_every_kind_its_row_counts() {
     assert!(black_holes <= MAX_BLACK_HOLE_SHARE, "{black_holes}");
 }
 
-/// The ultracompact hosts the sample cells hold under the refit at 27 (P15.T10.b), as measured: 14
-/// against the 30.2 their weight gives, a finding (50 against 88.8 under the fit before train 27's
-/// engine, whose weight and low-mass hosts were others). The refit draws the engine's periods, half
-/// of them above 65 minutes, where the scan's cold white dwarf donor (0.0063 M☉ at 65 minutes
-/// against the engine's 0.012) gives a rate a quarter of the engine's, under the floor, which
-/// refuses the host (plan 11's _Findings_; for P11.T8.b).
-const PINNED_ULTRACOMPACT_ENTRIES: usize = 14;
-
-/// The ultracompact candidates the scan and the test refuse under the refit, as measured: 102 of
-/// the 154 tried (63 of 93 under the fit before train 27's engine), the finding of
-/// [`PINNED_ULTRACOMPACT_ENTRIES`].
-const PINNED_ULTRACOMPACT_REFUSED: (u32, u32) = (102, 154);
-
 /// The kinds the class draws in the sample cells are its table's: each side's entries of each kind
 /// inside the Poisson interval of its weight's share of the side's entries, at α = 10⁻³ over the
-/// nine kinds; the ultracompact hosts, which the floor thins, pinned ([`PINNED_ULTRACOMPACT_ENTRIES`])
-/// and the other kinds compared among the rest.
+/// nine kinds; the ultracompact hosts, which the floor thins, pinned and the other kinds compared
+/// among the rest. The ultracompact hosts under the refit at 27 (P15.T10.b), as measured: 14
+/// against the 30.2 their weight gives, a finding. The refit draws the engine's periods, half of
+/// them above 65 minutes, where the scan's cold white dwarf donor (0.0063 M☉ at 65 minutes against
+/// the engine's 0.012) gives a rate a quarter of the engine's, under the floor, which refuses the
+/// host (plan 11's _Findings_; for P11.T8.b).
 #[test]
 fn the_drawn_kinds_follow_their_weights() {
     let entries = entries_of(process());
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/xrb/kinds",
+        "the_drawn_kinds_follow_their_weights"
+    );
     let thinned = |kind: &XrbHostKind| *kind == XrbHostKind::Ultracompact;
     for (high_mass, kinds, pick) in [
         (false, &XrbHostKind::LOW_MASS[..], XrbPick::LowMassKind),
@@ -229,7 +224,7 @@ fn the_drawn_kinds_follow_their_weights() {
             #[expect(clippy::cast_precision_loss, reason = "a few thousand entries")]
             let unthinned = of_side.len() as f64 * weight;
             println!("Ultracompact: {ultracompact} drawn, {unthinned:.1} by its weight");
-            assert_eq!(ultracompact, PINNED_ULTRACOMPACT_ENTRIES);
+            pins.exact("ultracompact_entries", ultracompact);
         }
         let weights = XRB_SAMPLER.pick(pick).weights();
         let sum = kinds
@@ -328,10 +323,15 @@ fn the_scan_keeps_exactly_the_new_kinds_entries() {
 /// Of the candidates the site keeps, the scan and the test together refuse at most one in ten of
 /// each new kind (P11.T8's bound), as measured: a symbiotic host whose neutron star takes too
 /// little of its giant's wind. The ultracompact hosts, fed under the floor above about an hour,
-/// miss the bound and are pinned ([`PINNED_ULTRACOMPACT_REFUSED`]).
+/// miss the bound and are pinned, refused and tried (102 of 154 at 27), the finding of
+/// [`the_drawn_kinds_follow_their_weights`]'s ultracompact pin.
 #[test]
 fn at_most_one_new_kind_candidate_in_ten_is_refused() {
     let (galaxy, process) = (galaxy(), new_kinds());
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/xrb/kinds",
+        "at_most_one_new_kind_candidate_in_ten_is_refused"
+    );
     let mut tried = [0_u32; 3];
     let mut refused = [0_u32; 3];
     for key in sample_cells() {
@@ -367,7 +367,7 @@ fn at_most_one_new_kind_candidate_in_ten_is_refused() {
     for k in 0..3 {
         assert!(tried[k] >= 10, "{:?}: {}", NEW[k], tried[k]);
         if NEW[k] == XrbHostKind::Ultracompact {
-            assert_eq!((refused[k], tried[k]), PINNED_ULTRACOMPACT_REFUSED);
+            pins.exact("ultracompact_refused", (refused[k], tried[k]));
             continue;
         }
         assert!(

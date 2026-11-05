@@ -432,12 +432,12 @@ fn the_mergers_layers_against_the_share_row() {
         counts[slot] += 1;
     }
     println!("layers A–E: {counts:?}");
-    assert_eq!(counts, PINNED_LAYER_COUNTS);
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/merger",
+        "the_mergers_layers_against_the_share_row"
+    );
+    pins.exact("layer_counts", counts);
 }
-
-/// The sample cells' mergers in layers A–E, as measured: re-measured at 27, whose engine channels
-/// (P11.T8.c) and features' share (P11.T8.f) give the cells other entries.
-const PINNED_LAYER_COUNTS: [u32; 5] = [40, 76, 173, 3, 0];
 
 // 4. Pins.
 

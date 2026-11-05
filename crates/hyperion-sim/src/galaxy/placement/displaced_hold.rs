@@ -446,24 +446,14 @@ fn placement_code(class: PlacementClass) -> f64 {
     }
 }
 
-/// The digest (`f64_digest`) of the new arm's placement in plan 03's pinned cells of the fixture,
-/// with the census's counts and the face-on map at the Sun-like point: each cell's bound and its
-/// classes' rests, its candidate count, and each record's position, mass, age, component, whether
-/// it was picked for a class, and its conditional marks (P08.T12.c: placement class, mark
-/// attempt, metallicity age and metallicity), with the kick loop's kept attempt, natal kick and
-/// remnant mass for the first 40 constrained records of each cell. Blessed natively on x86-64; the wasip1 suite compares it
-/// (D5). A 26-arm figure on plan 15's provisional form table, re-pinned by name when the
-/// production table lands; re-pinned on the rebase onto P09.T2.c's field share and P09.T35's
-/// carve-out, which every 26 hold composes with the classes; re-pinned at generator versions 25
-/// and 26, and at 27 (it was `0x9f41_f812_1008_a969`), whose galaxy the fixture is, every 27
-/// hold's, and every 26 hold's with its retargets until the bump; and again with P15.T10.b's refit
-/// of the binary rows on 27's engine, whose carved shares the field's thinning reads (it was
-/// `0x8bb9_7c3f_e9db_adfc` before it), and under the engine's raised segment cap, whose
-/// refitted rows move them again (`0x10e9_90be_dd90_9b4b` before it).
-const DISPLACED_CELLS_DIGEST: u64 = 0xe866_1c41_934a_7779;
-
 /// The new arm's cells, census and map, pinned on every target (named `pinned` for the
-/// WebAssembly suite's filter).
+/// WebAssembly suite's filter): the digest (`f64_digest`) of the new arm's placement in plan 03's
+/// pinned cells of the fixture, with the census's counts and the face-on map at the Sun-like
+/// point. Each cell's bound and its classes' rests, its candidate count, and each record's
+/// position, mass, age, component, whether it was picked for a class, and its conditional marks
+/// (P08.T12.c: placement class, mark attempt, metallicity age and metallicity), with the kick
+/// loop's kept attempt, natal kick and remnant mass for the first 40 constrained records of each
+/// cell. Blessed natively on x86-64; the wasip1 suite compares it (D5).
 #[test]
 fn the_new_arm_s_cells_are_pinned() {
     let galaxy = displaced();
@@ -533,5 +523,9 @@ fn the_new_arm_s_cells_are_pinned() {
     }
     let digest = hyperion_testkit::golden::f64_digest(&values);
     println!("digest {digest:#018x} over {} values", values.len());
-    assert_eq!(digest, DISPLACED_CELLS_DIGEST, "re-pin by name");
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/placement/displaced_hold",
+        "the_new_arm_s_cells_are_pinned"
+    );
+    pins.exact("digest", digest);
 }

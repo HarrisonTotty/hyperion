@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::order::assert_order_independent;
+use hyperion_testkit::pins::Tolerance;
 
 use super::*;
 use crate::galaxy::catalogue_classes::binary::{AccretingWdFast, AwdEntry};
@@ -200,10 +201,15 @@ fn the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals() {
         "high-mass hosts: the row's {high_row:.1}, the catalogue's {high:.1}, a share of {share:.5}, \
          against Fortin et al.'s 152 catalogued"
     );
-    assert!(
-        (share / PINNED_HIGH_MASS_SHARE - 1.0).abs() < 1e-9,
-        "{share}"
+    // The high-mass side's share of the class's hosts under the refit at 27, its sampler's
+    // high-mass weights over all its weights (P15.T10.b), pinned as measured: 0.0010 at 27, 10.2
+    // hosts of the row's 10⁴, of which the catalogue holds 4.1 and the young features' lists the
+    // rest, against Fortin et al.'s (2023, A&A 671, A149; recalled) 152 catalogued, a finding.
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/xrb",
+        "the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals"
     );
+    pins.within("high_mass_share", share, Tolerance::relative(1e-9));
     // The row alone, the same in every population, would give the young disc about 25.
     let fields = galaxy.fields();
     let young_by_row: f64 = process
@@ -225,20 +231,15 @@ fn the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals() {
         assert_eq!(c.side(), XrbSide::of(population));
         assert!(c.hosts_per_system() > 0.0);
     }
+    // The rank of the instability line in the fitted low-mass rate excess's law, as measured:
+    // 0.944 at 27, the engine's low-mass members mostly transients.
     println!("the rate's ranks split at {}", process.rate_split());
-    assert!((process.rate_split() - PINNED_RATE_SPLIT).abs() < 1e-12);
+    pins.within(
+        "rate_split",
+        process.rate_split(),
+        Tolerance::absolute(1e-12),
+    );
 }
-
-/// The rank of the instability line in the fitted low-mass rate excess's law at 27, as measured:
-/// 0.944, the engine's low-mass members mostly transients (the scratch law split in halves).
-const PINNED_RATE_SPLIT: f64 = 0.943_828_067_395_082_1;
-
-/// The high-mass side's share of the class's hosts under the refit at 27, its sampler's
-/// high-mass weights over all its weights (P15.T10.b), as measured: 0.0010, 10.2 hosts of the
-/// row's 10⁴, of which the catalogue holds 4.1 and the young features' lists the rest, against
-/// Fortin et al.'s (2023, A&A 671, A149; recalled) 152 catalogued, a finding (the fit before train
-/// 27's engine gave 68, the scratch sampler 1,600).
-const PINNED_HIGH_MASS_SHARE: f64 = 0.001_024_930_643_685_786_8;
 
 /// A cell's bound holds the class's intensity at every point tried in it, in the disc and at the
 /// centre, and the centre's cell, the fullest, leaves the index its headroom.
@@ -424,7 +425,9 @@ fn the_scan_keeps_exactly_the_cells_entries() {
 /// the site's thinning keeps is refused (P11.T8), as measured: from 27 the scan refuses a pair fed
 /// under the floor (P11.T8.b's fix), which the class's test would refuse, among the transients the
 /// fitted rate's tail takes far under their line and the ultracompact hosts (the finding of
-/// `kinds_tests`' `PINNED_ULTRACOMPACT_REFUSED`), pinned by kind ([`PINNED_REFUSED_BY_KIND`]).
+/// `kinds_tests`' ultracompact pin), pinned by kind in [`XrbHostKind::ALL`]'s order with the
+/// candidates the site keeps: at 27, 46 of 502, 22 neutron-star transients, 3 black-hole
+/// transients and 21 ultracompact hosts.
 #[test]
 fn no_candidate_the_site_keeps_fails_the_test() {
     use crate::galaxy::catalogue_classes::binary::BinaryHost;
@@ -468,14 +471,12 @@ fn no_candidate_the_site_keeps_fails_the_test() {
     assert!(candidates > 300, "{candidates}");
     assert_eq!(failed, 0);
     assert!(f64::from(total) < 0.1 * f64::from(candidates));
-    assert_eq!((refused, candidates), PINNED_REFUSED_BY_KIND);
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/xrb",
+        "no_candidate_the_site_keeps_fails_the_test"
+    );
+    pins.exact("refused_by_kind", (refused, candidates));
 }
-
-/// The sample cells' candidates the scan refuses at 27, by kind in [`XrbHostKind::ALL`]'s order,
-/// and the candidates the site keeps, as measured: 46 of 502, 22 neutron-star transients, 3
-/// black-hole transients and 21 ultracompact hosts (none at 26, whose rules had no floor and drew
-/// no ultracompact host).
-const PINNED_REFUSED_BY_KIND: ([u32; 9], u32) = ([0, 22, 0, 3, 0, 0, 21, 0, 0], 502);
 
 /// The cells do not depend on the order they are generated in, nor on what was resolved between
 /// them; and the accreting white dwarfs' cells are the same whatever X-ray binary was resolved

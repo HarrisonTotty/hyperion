@@ -1657,11 +1657,6 @@ mod tests {
         (fast.0.min(slow.0), fast.1.max(slow.1))
     }
 
-    /// The fitted accreting samplers' white dwarfs, M☉, as measured (P15.T10.b's refit on train
-    /// 27's engine, the heaviest held at `ACCRETING_WHITE_DWARF_MAX_MASS`; 0.31298–1.38 M☉ under
-    /// the fix lane's refit).
-    const FITTED_DWARF_RANGE: (f64, f64) = (0.320_048_993_757_405_53, 1.38);
-
     /// The white dwarf the nova rows' duration and rise are measured at, M☉: the lightest of the
     /// fix lane's refit (lc-f998c0), 0.31298, under the lightest of the refit on train 27's
     /// engine, so that the rows bound every nova the samplers give, by a few days.
@@ -1671,11 +1666,17 @@ mod tests {
     /// [`NOVA_BAND_PEAKS`], at it for the heaviest, and last and rise no longer than
     /// `NOVA_DURATION` and `NOVA_RISE`, which [`NOVA_ROWS_DWARF`]'s nova meets to the second and
     /// the lightest fitted dwarf's under it; and the dwarf novae's sum of extremes onto 1.38 M☉ is
-    /// under 6,488 years.
+    /// under 6,488 years. The fitted accreting samplers' white dwarfs, M☉, are pinned as measured
+    /// (P15.T10.b's refit on train 27's engine, the heaviest held at
+    /// `ACCRETING_WHITE_DWARF_MAX_MASS`).
     #[test]
     fn the_nova_bounds_hold_over_the_fitted_samplers() {
         let range = dwarf_range();
-        assert_eq!(range, FITTED_DWARF_RANGE);
+        let mut pins = hyperion_testkit::pins!(
+            "alerts/registry",
+            "the_nova_bounds_hold_over_the_fitted_samplers"
+        );
+        pins.exact("dwarf_range", range);
         let nova = |m: f64| BinaryLightCurve::from(NovaCurve::of(SolarMasses::new(m)).unwrap());
         let (lightest, heaviest) = (nova(range.0), nova(range.1));
         for band in AlertBand::ALL {
@@ -1760,7 +1761,12 @@ mod tests {
         let white_dwarfs = dwarf_range();
         let neutron_stars = XRB_SAMPLER.mark(XrbMark::NeutronStarMass).limits();
         let black_holes = XRB_SAMPLER.mark(XrbMark::BlackHoleMass).limits();
-        assert_eq!(white_dwarfs, FITTED_DWARF_RANGE, "the rows' range");
+        // The rows' range, pinned as measured.
+        let mut pins = hyperion_testkit::pins!(
+            "alerts/registry",
+            "plan_11s_rows_bound_their_curves_over_the_samplers_ranges"
+        );
+        pins.exact("dwarf_range", white_dwarfs);
         // The X-ray rows keep the scratch sampler's tops, a 2.2 M☉ neutron star and a 15 M☉ black
         // hole, over the fitted ranges under them.
         let under = |(lo, hi): (f64, f64), top: f64| lo > 0.0 && hi <= top;

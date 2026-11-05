@@ -2062,13 +2062,12 @@ pub(super) mod tests {
                 digest.extend(v);
             }
         }
-        assert_eq!(f64_digest(&digest), ARC_PINNED_DIGEST);
+        let mut pins = hyperion_testkit::pins!(
+            "galaxy/motion/spherical",
+            "the_arc_comes_back_to_the_epoch_and_is_pinned"
+        );
+        pins.exact("digest", f64_digest(&digest));
     }
-
-    /// The digest of [`the_arc_comes_back_to_the_epoch_and_is_pinned`]'s states, blessed natively
-    /// on x86-64. Re-pinned at 27's re-pin (it was `0x209e_6db3_face_2cb6`), the figure the train's
-    /// base already measured, no fold of 27 moving it.
-    const ARC_PINNED_DIGEST: u64 = 0xb072_5bb1_53a5_7171;
 
     /// The arc's fixed step count converges: over a stress set of orbits bound in Ψ from 10⁻³ to
     /// 100 ly, eccentricities to 0.999 and orbits unbound about the mass inside

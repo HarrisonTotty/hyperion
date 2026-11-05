@@ -23,6 +23,8 @@
 //! here and the engine channels' chi-squares, re-pinned (their pins were stale on the tree before
 //! it too), and the neutron-star census, whose rise waits for a ruling.
 
+use hyperion_testkit::pins::Tolerance;
+
 use super::*;
 use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
@@ -120,14 +122,6 @@ fn while_heavier(timeline: &BinaryTimeline) -> (f64, f64) {
     (least, f64::INFINITY)
 }
 
-/// The pinned pair's least rate while its donor is the heavier and how long that lasts, under the
-/// version's rules and every 27 hold, as measured (2026-11-04, at generator version 26, the
-/// version's under the held rules with this arm alone, with its white dwarf's wind).
-const PINNED_FIGURES: [(f64, f64); 2] = [
-    (6.321_814_151_637_319e-8, 2_926_307.766_916_454),
-    (6.321_814_151_637_319e-8, 2_926_307.766_916_454),
-];
-
 /// The brief's pair: under the version's rules and under every 27 hold its donor transfers never
 /// below a tenth of its thermal rate while it is the heavier ([`while_heavier`]), which then lasts
 /// a few million years, its white dwarf blowing the excess off in a wind rather than swell (under
@@ -160,12 +154,13 @@ fn the_heavy_donor_transfers_at_its_thermal_rate() {
         assert!(lasts < 1.0e7, "{lasts}");
         measured.push((least, lasts));
     }
-    for (m, pinned) in measured.iter().zip(PINNED_FIGURES) {
-        assert!(
-            (m.0 / pinned.0 - 1.0).abs() < 1e-9 && (m.1 / pinned.1 - 1.0).abs() < 1e-9,
-            "{measured:?}"
-        );
-    }
+    // The pinned pair's least rate while its donor is the heavier and how long that lasts, under
+    // the version's rules and every 27 hold, as measured.
+    let mut pins = hyperion_testkit::pins!(
+        "stellar/rules/heavy_donor_hold",
+        "the_heavy_donor_transfers_at_its_thermal_rate"
+    );
+    pins.within("figures", measured, Tolerance::relative(1e-9));
 }
 
 /// How long after the onset the wind's pairs are run and checked, years.

@@ -432,18 +432,18 @@ fn a_feature_s_binary_members_hold_no_carved_pair() {
     assert!(checked > 100, "{checked}");
 }
 
-/// The globular clusters' listed X-ray binaries over the walk at 27, as measured: 366 against the
-/// 419.9 expected, a finding (303 against 419.6 under the fit before train 27's engine; re-measured
-/// on P15.T10.b's refit on it, and under the engine's raised segment cap, 367 before it). The floor refuses the ultracompact hosts the refit draws above
-/// about an hour, the scan's cold white dwarf donor being half the engine's mass there
-/// (`xrb::kinds_tests`' `PINNED_ULTRACOMPACT_ENTRIES`; for P11.T8.b).
-const PINNED_GLOBULAR_X_RAY_BINARIES: u32 = 366;
-
 /// What the lists hold over the walk's features, by process and class: expected hosts and drawn
-/// entries, printed for the record.
+/// entries, printed for the record. The globular clusters' listed X-ray binaries over the walk are
+/// pinned as measured: 366 at 27 against the 419.9 expected, a finding. The floor refuses the
+/// ultracompact hosts the refit draws above about an hour, the scan's cold white dwarf donor being
+/// half the engine's mass there (`xrb::kinds_tests`' ultracompact pin; for P11.T8.b).
 #[test]
 fn the_lists_hold_their_expected_hosts() {
     let galaxy = listed();
+    let mut pins = hyperion_testkit::pins!(
+        "galaxy/catalogue_classes/binary/feature",
+        "the_lists_hold_their_expected_hosts"
+    );
     let mut report = String::new();
     for process in PROCESSES {
         let mut expected = [0.0; 5];
@@ -470,7 +470,7 @@ fn the_lists_hold_their_expected_hosts() {
         if process == FeatureProcess::Globular {
             // Old systems keep every white dwarf their draws make, and the X-ray binaries but the
             // ultracompact hosts the floor refuses.
-            assert_eq!(drawn[2], PINNED_GLOBULAR_X_RAY_BINARIES, "{expected:?}");
+            pins.exact("globular_x_ray_binaries", drawn[2]);
             for i in 0..2 {
                 let sigma = expected[i].sqrt();
                 assert!(

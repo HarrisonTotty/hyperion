@@ -1530,7 +1530,11 @@ mod tests {
                 c.band == MassBand::E && c.component == 3 && c.kind == CentreClassKind::Living
             })
             .expect("the continuous component's living band-E class");
-        assert_eq!(class.expected.round(), 628.0, "{class:?}");
+        let mut pins = hyperion_testkit::pins!(
+            "galaxy/features/centre/members",
+            "a_centre_living_class_yields_its_expected_count_from_27"
+        );
+        pins.exact("expected", class.expected.round());
         let placement = CentrePlacement::new(model);
         // The class's members in every cell, each candidate drawn whole only where it picks the
         // class (the other classes' remnants take most of the time).
