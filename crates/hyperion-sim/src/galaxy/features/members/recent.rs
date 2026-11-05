@@ -453,18 +453,16 @@ impl FeatureStars {
         };
         let since = site.death().since_epoch().as_julian_years_f64();
         let centre = self.feature.position();
-        let gas = galaxy.gas();
-        let Some(bubble) = Superbubble::of(
+        let Some(bubble) = Superbubble::in_galaxy(
+            galaxy,
+            centre,
             marks,
             Years::new(marks.age_at_epoch().value() + since),
-            gas.mean_density(centre),
-            gas.params().neutral_height(),
-            galaxy.feature_shares().supernova_clock(),
         ) else {
             return field;
         };
         let distance = site.position().distance_to(centre).value() / METRES_PER_LIGHT_YEAR;
-        let wall = bubble.radius().value() - distance;
+        let wall = bubble.core_radius().value() - distance;
         if wall <= 0.0 {
             return field;
         }

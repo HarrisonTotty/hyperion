@@ -655,6 +655,24 @@ fn feature_gas_about_the_sun_is_pinned() {
     );
 }
 
+/// [`feature_gas_about_the_sun_is_pinned`]'s figures under 29's rules, merged and walled (P09.T5):
+/// the new arm's arithmetic, bit for bit on every target, until the 29 bump makes it the version's
+/// and deletes this test.
+#[cfg(feature = "testing")]
+#[test]
+fn feature_gas_about_the_sun_under_29_s_rules_is_pinned() {
+    let galaxy = Galaxy::from_params_at_version(
+        Seed::new(SEED),
+        GalaxyParams::milky_way_like(),
+        hyperion_sim::GeneratorVersion::new(29),
+    )
+    .expect("the Milky Way fixture builds");
+    golden!(
+        "galaxy/features/gas_merging",
+        &feature_gas_about_the_sun(&galaxy)
+    );
+}
+
 /// The golden text of the features' gas about the Sun-like point in `galaxy`.
 fn feature_gas_about_the_sun(galaxy: &Galaxy) -> String {
     let cells = KeepCells::default();
@@ -670,20 +688,16 @@ fn feature_gas_about_the_sun(galaxy: &Galaxy) -> String {
         for (when, t) in [("epoch", 0.0), ("myr", 1e6)] {
             let age = Years::new(marks.age_at_epoch().value() + t);
             let label = format!("bubble.{}.{when}", feature.id().index());
-            let gas = galaxy.gas();
-            match Superbubble::of(
-                marks,
-                age,
-                gas.mean_density(feature.position()),
-                gas.params().neutral_height(),
-                galaxy.feature_shares().supernova_clock(),
-            ) {
+            match Superbubble::in_galaxy(galaxy, feature.position(), marks, age) {
                 Some(bubble) => {
                     w.f64(&format!("{label}.radius"), bubble.radius().value());
                     w.f64(
                         &format!("{label}.interior"),
                         bubble.interior_density().value(),
                     );
+                    if let Some(wall) = bubble.wall_density() {
+                        w.f64(&format!("{label}.wall"), wall.value());
+                    }
                 }
                 None => w.line(&format!("{label} = none")),
             }
@@ -741,6 +755,85 @@ fn feature_gas_about_the_sun(galaxy: &Galaxy) -> String {
         }
     }
     w.as_str().to_owned()
+}
+
+/// Under 29's rules (P09.T5) the superbubbles' hot cores fill a fifth to a half of the plane at the
+/// solar circle, against a hot filling of 0.2–0.5 there (Ferrière 2001, Rev. Mod. Phys. 73, 1031),
+/// where grown as Weaver's they filled 0.96; and their walls keep the plane's extinction from the
+/// Sun-like point within a factor of two of 1.8 mag/kpc (Whittet 2003, *Dust in the Galactic
+/// Environment*, 2nd ed.), where it fell to 0.32. Measured: 0.216 of 8,000 midplane points within
+/// 500 ly of the solar circle in a core, and 2.14 mag/kpc over 64 directions of a kiloparsec.
+#[cfg(feature = "testing")]
+#[test]
+fn under_29_s_rules_the_bubbles_cores_fill_a_fifth_of_the_plane_and_keep_its_extinction() {
+    let galaxy = Galaxy::from_params_at_version(
+        Seed::new(SEED),
+        GalaxyParams::milky_way_like(),
+        hyperion_sim::GeneratorVersion::new(29),
+    )
+    .expect("the Milky Way fixture builds");
+    let cells = KeepCells::default();
+    let source = FeatureGas::new(&galaxy, &cells, Years::ZERO);
+    let mut lcg = Lcg::new(0x0905_f111);
+    let mut out = Vec::new();
+    let points = 8_000;
+    let mut cored = 0_u32;
+    for _ in 0..points {
+        let phi = std::f64::consts::TAU * lcg.next_f64();
+        let r = 26_000.0 + 1_000.0 * (lcg.next_f64() - 0.5);
+        let p = GalacticPosition::from_light_years([r * math::sin(phi), r * math::cos(phi), 0.0])
+            .unwrap();
+        out.clear();
+        source.modifiers_near_segment(&p, &p, &mut out);
+        cored += u32::from(out.iter().any(|m| match *m {
+            GasModifier::Hole { centre, radius, .. } => {
+                centre.distance_to(&p).value() / METRES_PER_LIGHT_YEAR < radius.value()
+            }
+            GasModifier::Cloud { .. } | GasModifier::Wall { .. } => false,
+        }));
+    }
+    let filling = f64::from(cored) / f64::from(points);
+    assert!(
+        (0.2..=0.5).contains(&filling),
+        "{filling} of the plane in a core"
+    );
+    let sun = [0.0, 26_000.0, 68.0];
+    let start = GalacticPosition::from_light_years(sun).unwrap();
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let (mut total, mut walls) = (0.0, 0);
+    let directions = 64;
+    for k in 0..directions {
+        let phi = std::f64::consts::TAU * (f64::from(k) + 0.5) / f64::from(directions);
+        let kpc = 3_261.563_777;
+        let end = GalacticPosition::from_light_years([
+            sun[0] + kpc * math::cos(phi),
+            sun[1] + kpc * math::sin(phi),
+            sun[2],
+        ])
+        .unwrap();
+        let mut mods = Vec::new();
+        source.modifiers_near_segment(&start, &end, &mut mods);
+        walls += mods
+            .iter()
+            .filter(|m| matches!(m, GasModifier::Wall { .. }))
+            .count();
+        let line = sightline(
+            galaxy.gas(),
+            &start,
+            &end,
+            NoiseMode::Realised,
+            SIGHTLINE_QUALITY,
+            &mods,
+            &mut noise,
+        );
+        total += line.a_v().value();
+    }
+    let per_kpc = total / f64::from(directions);
+    assert!(walls > 0, "the bubbles have walls");
+    assert!(
+        (0.9..=3.6).contains(&per_kpc),
+        "{per_kpc} mag/kpc in the plane"
+    );
 }
 
 // --- P09.T3.b: the index's headroom ---

@@ -6108,3 +6108,18 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Lookup (lean, 2026-11-05)._ A list is read through a ball about its feature (its reach plus its
     bulk travel, capped at `LIFETIME_REACH`), the features found at `UNBOUND_PAD_SPEED`; lists are
     built afresh each walk, not from the interior cache, whose `listed_of` builds every death.
+- **P09.T5, the superbubbles' merge and walls (lane `fix-p09-superbubble-extinction`, 2026-11-05,
+  at 27 and 3; held until `SUPERBUBBLE_MERGE_VERSION` = 29, no output moved).**
+  - _Sim._ `GasModifier::Wall` (a shell that replaces the field outside every hole; the densest
+    wins) and `PieceKind::Wall`, swept as the holes are. `Superbubble::merging`, `in_galaxy`,
+    `core_radius`, `wall_density` and `wall_inner_radius`; `GalaxyRules::superbubbles`. Every
+    bubble reader (`FeatureGas`, the recently dead, the server's feature answers) goes through
+    `in_galaxy`.
+  - _Lean: the merge (2026-11-05)._ A bubble stops at the remnants' merge speed, β c_net
+    (`snr::window::merge_speed`), at `L̄ = E(t) ÷ t`: its hot core fills 0.216 of the solar circle's
+    plane (0.96 before), and with the field's own hot phase 0.50 is hot.
+  - _Lean: the wall (2026-11-05)._ The swept-up sphere's mean gas at β² = 4 times its density, from
+    `WALL_INNER_SHARE` = ∛¾ of the radius; the hole is the core. Plane A_V over 1 kpc: 2.14 mag/kpc.
+  - _For the 29 bump._ Delete the hold, `SuperbubbleRules`, its field and the tripwire
+    `the_superbubbles_merge_only_from_29`; re-bless `galaxy/features/gas.golden`
+    (`feature_gas_about_the_sun_is_pinned`); restate T4.b's radii test, which reads `of`.

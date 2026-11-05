@@ -403,7 +403,8 @@ pub fn horizon(
 /// [`sightline`] over the same segment to rounding, not bit for bit. Clouds among `modifiers` add
 /// their Plummer column from the origin to each node; holes and walls are carved as [`sightline`]
 /// carves them, a wall's column rising linearly across its piece. A node that is not finite or not
-/// positive reads zero, and one beyond 2¹⁹ ly the column to there. `cache` changes the cost, never the values; in [`NoiseMode::Mean`] it is not read.
+/// positive reads zero, and one beyond 2¹⁹ ly the column to there. `cache` changes the cost, never
+/// the values; in [`NoiseMode::Mean`] it is not read.
 ///
 /// # Panics
 ///

@@ -544,14 +544,7 @@ fn bubble(
     marks: &NurseryMarks,
     age: Years,
 ) -> Option<Superbubble> {
-    let gas = galaxy.gas();
-    Superbubble::of(
-        marks,
-        age,
-        gas.mean_density(record.position()),
-        gas.params().neutral_height(),
-        galaxy.feature_shares().supernova_clock(),
-    )
+    Superbubble::in_galaxy(galaxy, record.position(), marks, age)
 }
 
 /// The galactic centre, as a list or a readout shows it at any time.

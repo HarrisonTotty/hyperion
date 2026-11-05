@@ -17,7 +17,9 @@
 //! - [`listed_alerts`](GalaxyRules::listed_alerts), whether the alert walks read the features' and
 //!   the centre's lists of the recently dead, from 29 (`alerts::listed::LISTED_ALERTS_VERSION`);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
-//!   galaxy hands to the stellar stage's entry points as an argument.
+//!   galaxy hands to the stellar stage's entry points as an argument;
+//! - [`superbubbles`](GalaxyRules::superbubbles), how the nurseries' superbubbles grow and whether
+//!   they keep walls ([`SuperbubbleRules`], P09.T5), held at 29.
 //!
 //! The next train's bump deletes each galaxy hold with its field, its held arm and its tripwire.
 //! The `stellar` field stays through every bump: a bump deletes only a stellar hold's own field
@@ -28,6 +30,7 @@ use crate::alerts::listed::ListedAlertsRules;
 use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
+use crate::galaxy::features::kinds::nursery::SuperbubbleRules;
 use crate::galaxy::features::members::recent::FeatureClassesRules;
 use crate::stellar::rules::StellarRules;
 
@@ -59,6 +62,12 @@ pub(crate) struct GalaxyRules {
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
+    /// How a nursery's superbubble grows, and whether it keeps its swept-up gas in a wall
+    /// (P09.T5): as Weaver's below 29, to the merge with a wall from it
+    /// ([`SUPERBUBBLE_MERGE_VERSION`](crate::galaxy::features::kinds::nursery::SUPERBUBBLE_MERGE_VERSION)).
+    /// Read where a bubble is asked for (`Superbubble::in_galaxy`), so `Galaxy::with_rules` may
+    /// change it.
+    pub(crate) superbubbles: SuperbubbleRules,
 }
 
 impl GalaxyRules {
@@ -72,7 +81,17 @@ impl GalaxyRules {
             displaced: DisplacedRules::Displaced,
             listed_alerts: ListedAlertsRules::of_version(version),
             stellar: StellarRules::of_version(version),
+            superbubbles: SuperbubbleRules::of_version(version),
         }
+    }
+
+    /// Every galaxy and stellar hold at 29 in force, for a test that asserts a 29 figure: the
+    /// version's rules from 29: the alert walks' lists (P09.T36) and the superbubbles' merge
+    /// (P09.T5). The 29 bump deletes it with them.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_29_hold() -> Self {
+        Self::of_version(GeneratorVersion::new(29))
     }
 }
 
@@ -156,6 +175,20 @@ mod tests {
                 StellarRules::of_version(GeneratorVersion::new(v))
             );
         }
+        for (v, superbubbles) in [
+            (27, SuperbubbleRules::Weaver),
+            (28, SuperbubbleRules::Weaver),
+            (29, SuperbubbleRules::Merging),
+        ] {
+            assert_eq!(
+                GalaxyRules::of_version(GeneratorVersion::new(v)).superbubbles,
+                superbubbles
+            );
+        }
+        assert_eq!(
+            GalaxyRules::every_29_hold().superbubbles,
+            SuperbubbleRules::Merging
+        );
     }
 
     /// The lists' alert walks are held below 29 and walked from it on (`LISTED_ALERTS_VERSION`).

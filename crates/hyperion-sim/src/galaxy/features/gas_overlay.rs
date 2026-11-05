@@ -3,11 +3,13 @@
 //!
 //! [`FeatureGas`] implements plan 07's [`GasModifierSource`]. For a segment it looks up the
 //! catalogue's features whose reach touches it and yields a [`GasModifier::Hole`] for each nursery's
-//! superbubble at the evaluation time ([`Superbubble`]: radius and interior density from P09.T4.b),
-//! and a [`GasModifier::Cloud`] for each cloud (its Plummer core radius, central density and the
-//! site's dust per hydrogen) and each embedded star-forming region (its gas mass in a Plummer ball
-//! whose half-mass radius is half its size). Plan 07 integrates them. The supernova shell window of
-//! phase 4 reads the smooth field only, never these.
+//! superbubble at the evaluation time ([`Superbubble::in_galaxy`]: radius and interior density from
+//! P09.T4.b) and, from generator version 29, a hole of its hot core with a [`GasModifier::Wall`] of
+//! its swept-up gas about it, with the site's dust per hydrogen on its disc gas (P09.T5); and a
+//! [`GasModifier::Cloud`] for each cloud (its Plummer core radius, central density and the site's
+//! dust per hydrogen) and each embedded star-forming region (its gas mass in a Plummer ball whose
+//! half-mass radius is half its size). Plan 07 integrates them. The supernova shell window of phase
+//! 4 reads the smooth field only, never these.
 //!
 //! What a segment gets is a pure function of the unordered pair of its ends, as the trait asks: the
 //! ends are put in a canonical order first, so that `a → b` and `b → a` look up the same features
@@ -37,7 +39,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use crate::id::FeatureCell;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{HydrogenPerCm3, LightYears, Years};
+use crate::units::{HydrogenPerCm3, KelvinPerCm3, LightYears, Years};
 
 use super::catalogue::{
     EDGE, FeatureCatalogue, FeatureCellCache, FeatureMarks, FeatureRecord, MAX_FEATURE_REACH,
@@ -147,21 +149,31 @@ impl<'a> FeatureGas<'a> {
         let centre = *feature.position();
         let age = marks.age_at_epoch() + self.time;
         let gas = self.galaxy.gas();
-        if let Some(bubble) = Bubble::of(
-            marks,
-            age,
-            centre_gas.mean_density,
-            gas.params().neutral_height(),
-            self.galaxy.feature_shares().supernova_clock(),
-        ) {
+        if let Some(bubble) =
+            Bubble::by_rules(self.galaxy, marks, age, centre_gas.mean_density, || {
+                centre_gas.pressure
+            })
+        {
             push_valid(
                 out,
                 GasModifier::Hole {
                     centre,
-                    radius: bubble.radius(),
+                    radius: bubble.core_radius(),
                     interior: bubble.interior_density(),
                 },
             );
+            if let Some(wall) = bubble.wall_density() {
+                push_valid(
+                    out,
+                    GasModifier::Wall {
+                        centre,
+                        inner: bubble.wall_inner_radius(),
+                        outer: bubble.radius(),
+                        density: wall,
+                        dust_per_hydrogen: centre_gas.swept_dust(gas.smooth().corona_density()),
+                    },
+                );
+            }
         }
         let mass = marks.gas_mass_at(age);
         if mass.value() > 0.0 {
@@ -185,6 +197,8 @@ impl<'a> FeatureGas<'a> {
 struct CentreGas {
     mean_density: HydrogenPerCm3,
     dust_per_hydrogen: f64,
+    /// The thermal pressure a bubble merges against from generator version 29 (P09.T5).
+    pressure: KelvinPerCm3,
 }
 
 impl CentreGas {
@@ -195,7 +209,21 @@ impl CentreGas {
         Self {
             mean_density: gas.mean_density(centre),
             dust_per_hydrogen: gas.dust_per_hydrogen(centre),
+            pressure: gas.pressure(centre),
         }
+    }
+
+    /// The dust per hydrogen nucleus of the gas a bubble here sweeps up into its wall, where the
+    /// dust-free corona is `corona` cm⁻³ of it: the site's ζ on its disc gas alone.
+    #[must_use]
+    fn swept_dust(&self, corona: f64) -> f64 {
+        let ambient = self.mean_density.value();
+        let disc_share = if ambient > 0.0 {
+            ((ambient - corona) / ambient).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        self.dust_per_hydrogen * disc_share
     }
 }
 

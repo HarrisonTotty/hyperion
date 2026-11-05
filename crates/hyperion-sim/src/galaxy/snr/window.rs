@@ -537,6 +537,15 @@ impl ShellWindow {
 /// branch and not at all on the hot one, so between −1 and 0 dex it moves by 12–15%.
 pub const METALLICITY_RANGE_DEX: (f64, f64) = (-1.0, 0.5);
 
+/// The shock speed at which a shell merges with gas of isothermal sound speed `c0` (m/s), m/s:
+/// `β c_net` with `c_net² = C₀² + σ²` (module documentation). A superbubble's shell stops growing
+/// at it too, from generator version 29 (plan 09, P09.T5).
+#[must_use]
+pub(crate) fn merge_speed(c0: f64) -> f64 {
+    let sigma = MetresPerSecond::from(TURBULENT_SPEED).value();
+    MERGE_FACTOR * (c0 * c0 + sigma * sigma).sqrt()
+}
+
 /// The shell window of a supernova of `energy` into the gas of `site` whose ambient metallicity
 /// is `metallicity` (`[M/H]`, dex; CMB88's `ζ` is the metallicity of the gas the shell sweeps up
 /// and cools in).
@@ -571,8 +580,7 @@ pub fn shell_window(site: &SiteGas, energy: ExplosionEnergy, metallicity: Dex) -
     };
     let zeta = math::exp10(fe_h);
     let e = energy.foes();
-    let sigma = MetresPerSecond::from(TURBULENT_SPEED).value();
-    let merge = MERGE_FACTOR * (c0 * c0 + sigma * sigma).sqrt();
+    let merge = merge_speed(c0);
     if !(n.is_finite() && n > 0.0 && merge.is_finite()) {
         return ShellWindow {
             duration: Years::ZERO,
