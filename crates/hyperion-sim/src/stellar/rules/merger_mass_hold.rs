@@ -12,9 +12,9 @@
 //!   low-mass donor fills its lobe beside a heavier gap star only once that star overfills its
 //!   own).
 //! - Slow: over the same 3,000 engine mergers the stellar merger class's sampler test draws
-//!   (`testing::brute_force_merger_members_in`), every main-sequence merger keeps the pair's mass
-//!   under the version's rules and under every 26 hold; and the class's sampler against those
-//!   mergers under every 26 hold.
+//!   (`testing::brute_force_merger_members_in`), every main-sequence merger keeps the pair's mass,
+//!   held to the tracks' 150 M☉, under the version's rules and under every 26 hold; and the
+//!   class's sampler against those mergers under every 26 hold.
 
 use std::sync::OnceLock;
 
@@ -32,7 +32,7 @@ use crate::stellar::binary::testing::{MergerMember, brute_force_merger_members_i
 use crate::stellar::binary::{BinaryInput, BinaryTimeline, CarvedClass};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
-use crate::stellar::sse::Track;
+use crate::stellar::sse::{self, Track};
 use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
 use crate::stellar::{Composition, Phase};
 use crate::time::UniverseTime;
@@ -256,13 +256,28 @@ fn contact_switch(timeline: &BinaryTimeline) -> bool {
     })
 }
 
-/// The least the merged star keeps of the pair's mass, over the main-sequence mergers of the same
-/// grid records `drawn` run again in `galaxy`, how many there were, and how many contact switches
-/// were left out ([`contact_switch`]): each record's first attempt, every pair that merges with two
-/// main-sequence stars just before.
-fn least_kept(galaxy: &Galaxy, drawn: &[MergerMember]) -> (f64, usize, usize) {
+/// What [`least_kept`] found over the mergers it read.
+#[derive(Debug, Clone, Copy)]
+struct Kept {
+    /// The least share the merged star keeps of the mass it can keep: the pair's, or the tracks'
+    /// 150 M☉ (`sse::MAX_INITIAL_MASS`) where the pair passes it.
+    least: f64,
+    /// The main-sequence mergers read.
+    n: usize,
+    /// The contact switches left out ([`contact_switch`]).
+    switched: usize,
+    /// The mergers among `n` whose pair passes the tracks' 150 M☉.
+    capped: usize,
+}
+
+/// The least the merged star keeps of the mass it can keep, over the main-sequence mergers of the
+/// same grid records `drawn` run again in `galaxy` ([`Kept`]): each record's first attempt, every
+/// pair that merges with two main-sequence stars just before. The mass it can keep is the pair's,
+/// held to the tracks' 150 M☉ (`sse::MAX_INITIAL_MASS`), where `Engine::main_sequence_star` places
+/// a heavier product, the excess lost at the merger (lean, 2026-11-05).
+fn least_kept(galaxy: &Galaxy, drawn: &[MergerMember]) -> Kept {
     let mut least = f64::INFINITY;
-    let (mut n, mut switched) = (0, 0);
+    let (mut n, mut switched, mut capped) = (0, 0, 0);
     for member in drawn {
         for pair in first_attempt(galaxy, member.record()).pairs() {
             let timeline = pair.timeline();
@@ -278,35 +293,49 @@ fn least_kept(galaxy: &Galaxy, drawn: &[MergerMember]) -> (f64, usize, usize) {
                 continue;
             }
             let total: f64 = pre.stars().iter().map(|s| s.mass().value()).sum();
+            let keepable = total.min(sse::MAX_INITIAL_MASS.value());
+            capped += usize::from(total > keepable);
             let product = timeline.state_at(t).stars()[0].mass().value();
-            least = least.min(product / total);
+            least = least.min(product / keepable);
             n += 1;
         }
     }
-    (least, n, switched)
+    Kept {
+        least,
+        n,
+        switched,
+        capped,
+    }
 }
 
 /// The most of the pair's mass a main-sequence merger may lose: 2 × 10⁻³ of it, the
 /// rule's own loss, which is none but the product's own main-sequence wind from its zero-age mass
 /// to the age the rule places it at (`Engine::main_sequence_star`; the merger's other routes, a
-/// contact that coalesces at the end of the main sequence or a collision, place it alike). As
-/// measured (2026-11-01) the least kept is 0.99893 of a 12.9 + 12.7 M☉ contact's 25.5 M☉
-/// ([`LEAST_KEPT_UNDER_THE_ARM`]). P11.T4.n's contact switches are left out
+/// contact that coalesces at the end of the main sequence or a collision, place it alike). A pair
+/// over the tracks' 150 M☉ (`sse::MAX_INITIAL_MASS`) is held to 150 M☉ first: no track exists
+/// above it, so its product is placed at 150 M☉ and the excess is lost at the merger (lean,
+/// 2026-11-05), and the share is of the 150 M☉. As measured at generator version 28 (2026-11-05)
+/// the least kept is 0.99897 of a 13.3 + 13.2 M☉ pair's 26.5 M☉ (record `0x821f_b120_0000_0002`,
+/// [`LEAST_KEPT_UNDER_THE_ARM`]), and the one pair over 150 M☉, 129.48 + 109.43 M☉ (record
+/// `0x81f7_b660_0000_0001`), keeps the whole 150 M☉. P11.T4.n's contact switches are left out
 /// ([`contact_switch`]), which coalesce through a common envelope, not by the arm's rule: at
 /// generator version 25 four of the records' pairs, three of them keeping under 0.998 of the pair
 /// (the least 0.99558) and one all of it (research's review of round 7's bound, 2026-11-01).
 const MERGER_MASS_TOLERANCE: f64 = 2e-3;
 
-/// The least share of the pair's mass a main-sequence merger keeps over the 3,000 records, under
-/// the version's rules (the arm alone, measured while it was held) and under every 26 hold, as
-/// measured, the contact switches left out.
-const LEAST_KEPT_UNDER_THE_ARM: [f64; 2] = [0.998_929_750_656_249_7, 0.998_929_750_656_249_7];
+/// The least share of the pair's mass, held to the tracks' 150 M☉, that a main-sequence merger
+/// keeps over the 3,000 records, under the version's rules and under every 26 hold, as measured
+/// at generator version 28 (2026-11-05; 0.99893 before the bound, measured while the arm was
+/// held, 2026-11-01), the contact switches left out.
+const LEAST_KEPT_UNDER_THE_ARM: [f64; 2] = [0.998_971_164_310_089_8, 0.998_971_164_310_089_8];
 
 /// Over the same 3,000 grid records whose engine mergers P11.T8.c's sampler test draws, every
-/// main-sequence merger keeps the pair's mass less the rule's loss (none but the product's own
-/// wind, [`MERGER_MASS_TOLERANCE`]), under the version's rules and under every 26 hold, each record
-/// run again, P11.T4.n's contact switches left out ([`contact_switch`]) (under the held arm 719 of
-/// 803 kept under 99%).
+/// main-sequence merger keeps the pair's mass, held to the tracks' 150 M☉
+/// (`sse::MAX_INITIAL_MASS`, where the engine places a heavier product), less the rule's loss
+/// (none but the product's own wind, [`MERGER_MASS_TOLERANCE`]), under the version's rules and
+/// under every 26 hold, each record run again, P11.T4.n's contact switches left out
+/// ([`contact_switch`]) (under the held arm 719 of 803 kept under 99%). It prints how many pairs
+/// pass 150 M☉.
 #[test]
 #[ignore = "slow: thousands of grid pairs run through the binary engine, twice"]
 fn every_main_sequence_merger_keeps_the_pair_s_mass() {
@@ -320,12 +349,18 @@ fn every_main_sequence_merger_keeps_the_pair_s_mass() {
     .iter()
     .enumerate()
     {
-        let (least, n, switched) = least_kept(galaxy, &drawn);
+        let Kept {
+            least,
+            n,
+            switched,
+            capped,
+        } = least_kept(galaxy, &drawn);
         println!(
-            "{name}: {n} main-sequence mergers, the least keeps {least:e} of the pair; \
-             {switched} contact switches left out"
+            "{name}: {n} main-sequence mergers, the least keeps {least:e} of the pair held to \
+             150 M_sun; {capped} pairs past 150 M_sun; {switched} contact switches left out"
         );
         assert!(n > 700, "{name}: {n}");
+        assert!(capped > 0, "{name}: no pair past 150 M_sun to hold");
         assert!(least >= 1.0 - MERGER_MASS_TOLERANCE, "{name}: {least}");
         measured[k] = least;
     }

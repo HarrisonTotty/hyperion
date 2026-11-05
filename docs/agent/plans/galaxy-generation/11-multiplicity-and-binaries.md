@@ -7740,3 +7740,6 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     fails it on a wind-fed star (a layer C companion at M_V 0.79 against 2.55).
   - _For the bump to 29._ Delete `LobeAndDecay`, the field, the `match`, the tallies' held column
     and the tripwire; the census tests' 29 galaxy becomes the fixture.
+- **P11.T4.d's 150 M☉ bound (2026-11-05).** A merger's product over 150 M☉ is placed at 150 M☉
+  (`track_mass`), the excess lost at the merger (lean, 2026-11-05). The slow check reads
+  min(M₁ + M₂, 150 M☉); `LEAST_KEPT_UNDER_THE_ARM` is re-pinned at 28.

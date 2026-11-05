@@ -533,8 +533,13 @@ pub(super) fn reach_margin_years(until: f64) -> f64 {
     16.0 * f64::EPSILON * until.abs().max(1.0)
 }
 
-/// The initial mass a track is built for: the star's own, held to the formulae's 150 M☉ as plan
-/// 06's `StarModel` holds it.
+/// The initial mass a track is built for: the star's own, held to the tracks' 150 M☉
+/// (`sse::MAX_INITIAL_MASS`) as plan 06's `StarModel` holds it.
+///
+/// No track exists above it: HPT's formulae end at 100 M☉ and P06.T14's very massive stars' table
+/// at 150 M☉, the observed upper limit of the initial mass function (Figer 2005, Nature 434, 192).
+/// So a merger's product over 150 M☉ is placed at 150 M☉, and the excess is lost at the merger
+/// (lean, 2026-11-05).
 #[must_use]
 pub(super) fn track_mass(m: SolarMasses) -> SolarMasses {
     if m > sse::MAX_INITIAL_MASS {

@@ -1272,6 +1272,9 @@ impl Engine {
     }
 
     /// A main-sequence star of mass `m` at fractional age `tau`, on its own track, in slot 0.
+    ///
+    /// A product over the tracks' 150 M☉ (`sse::MAX_INITIAL_MASS`), where no track exists, is
+    /// placed at 150 M☉ (`track_mass`), the excess lost at the merger (lean, 2026-11-05).
     #[must_use]
     fn main_sequence_star(&self, m: f64, tau: f64) -> Member {
         if m < sse::MIN_INITIAL_MASS.value() {
@@ -1299,6 +1302,9 @@ impl Engine {
     }
 
     /// A helium main-sequence star of mass `m` at fractional age `tau`, on its own track.
+    ///
+    /// A product over the tracks' 150 M☉ (`sse::MAX_INITIAL_MASS`), where no track exists, is
+    /// placed at 150 M☉, the excess lost at the merger (lean, 2026-11-05).
     #[must_use]
     fn helium_main_sequence(&self, m: f64, tau: f64) -> Member {
         let track = Track::helium_star_from(
