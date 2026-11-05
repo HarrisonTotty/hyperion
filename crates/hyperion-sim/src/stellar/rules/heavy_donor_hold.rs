@@ -30,7 +30,6 @@ use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
-use crate::planetary::testing::with_every_27_hold;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::testing::census::{Census, slab_census};
@@ -132,9 +131,12 @@ fn the_heavy_donor_transfers_at_its_thermal_rate() {
     let (donor, tau, _) = PINNED;
     let thermal = thermal_rate(donor, tau);
     let mut measured = Vec::new();
-    for (k, rules) in [version(), StellarRules::every_27_hold()]
-        .into_iter()
-        .enumerate()
+    for (k, rules) in [
+        version(),
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let timeline = pinned(rules);
         assert!(
@@ -186,7 +188,10 @@ const WIND_DWARFS: [f64; 5] = [0.6, 0.7, 0.8, 0.95, 1.1];
 fn a_heavy_donor_s_white_dwarf_keeps_its_size_in_a_wind() {
     for (name, rules) in [
         ("the version's rules", version()),
-        ("every 27 hold", StellarRules::every_27_hold()),
+        (
+            "every 27 hold",
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+        ),
     ] {
         for donor in WIND_DONORS {
             for dwarf in WIND_DWARFS {
@@ -270,7 +275,10 @@ fn case_bb_double_neutron_star(helium: f64, a: f64, rules: StellarRules) -> Opti
 fn a_case_bb_helium_star_beside_a_neutron_star_leaves_a_double_neutron_star() {
     for (name, rules) in [
         ("the version's rules", version()),
-        ("every 27 hold", StellarRules::every_27_hold()),
+        (
+            "every 27 hold",
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+        ),
     ] {
         for (helium, a) in CASE_BB {
             let dns = case_bb_double_neutron_star(helium, a, rules);
@@ -385,7 +393,7 @@ fn census_of_the_heavy_donors() {
         );
         (census.scanned, figures(&census))
     };
-    let (scanned, f) = with_every_27_hold(|| census(GalaxyRules::every_27_hold()));
+    let (scanned, f) = census(GalaxyRules::of_version(crate::GENERATOR_VERSION));
     println!(
         "every 27 hold: {scanned:?} records by band, {f:?}: heavier donors {:.4}, below the gap \
          {:.4}",

@@ -1849,7 +1849,7 @@ pub(super) mod tests {
         let arc = Galaxy::from_params_with_rules(
             seed,
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds under every 27 hold");
         let motion = arc.centre_motion();
@@ -2288,7 +2288,7 @@ pub(super) mod tests {
         let galaxy = Galaxy::from_params_with_rules(
             Seed::new(0x0928_b0a0_0000_0001),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds under every 27 hold")
         .with_full_potential();

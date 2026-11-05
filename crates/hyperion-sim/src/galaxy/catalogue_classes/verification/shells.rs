@@ -448,12 +448,12 @@ fn the_shells_at_milky_way_rates_under_every_27_hold() {
     };
     for &(name, drawn) in galaxies {
         let galaxy = drawn.map_or_else(
-            || milky_way(GalaxyRules::every_27_hold()),
+            || milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION)),
             |seed| {
                 Galaxy::from_params_with_rules(
                     Seed::new(seed),
                     GalaxyParams::from_seed(Seed::new(seed), MassFunctionKind::default()),
-                    GalaxyRules::every_27_hold(),
+                    GalaxyRules::of_version(crate::GENERATOR_VERSION),
                 )
                 .expect("a drawn galaxy builds")
                 .with_full_potential()

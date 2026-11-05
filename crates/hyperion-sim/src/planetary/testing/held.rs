@@ -1,9 +1,9 @@
 //! Every hold's rules as they are in force on one thread, carried to the threads of a test's own
 //! pool.
 //!
-//! A hold's switch (one hold's own, or `with_every_27_hold` and the later helpers) sets its rules on
-//! the calling thread alone, and a thread of a test's own pool starts with none set, so a share run
-//! there reads the version's rules: under every 27 hold, 24's. [`in_shares`] reads every hold's rules
+//! A hold's switch sets its rules on the calling thread alone, and a thread of a test's own pool
+//! starts with none set, so a share run there reads the version's rules. [`in_shares`] reads every
+//! hold's rules
 //! on the calling thread ([`HeldRules::on_this_thread`]) and sets them on each share's thread
 //! ([`HeldRules::install`]), so that a share reads the rules its test set on any number of threads,
 //! as on the one thread where `hyperion_testkit::threads::in_shares` runs its shares on the caller's.
@@ -103,14 +103,11 @@ pub(crate) fn in_shares<T: Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planetary::testing::{with_every_27_hold, with_every_28_hold};
 
-    /// `run`'s result under every hold of version `version`, 27 or 28.
-    fn under<R>(version: u16, run: impl FnOnce() -> R) -> R {
-        match version {
-            27 => with_every_27_hold(run),
-            _ => with_every_28_hold(run),
-        }
+    /// `run`'s result with one rule set apart from the version's on this thread: the locked
+    /// climate's oracle, a switch every version's rules leave off.
+    fn set_apart<R>(run: impl FnOnce() -> R) -> R {
+        with_locked_climate(LockedClimateRules::Held, run)
     }
 
     /// A held rule is read on a pool's threads: under each helper every share reads the holds the
@@ -127,25 +124,18 @@ mod tests {
             (here, there)
         };
         let version = HeldRules::on_this_thread();
-        for name in [27, 28] {
-            let held = under(name, HeldRules::on_this_thread);
-            // From 27 every 27 hold is on the record, so its helper moves no rule.
-            if name == 27 {
-                assert_eq!(held, version, "every {name} hold is the version's");
-            } else {
-                assert_ne!(held, version, "every {name} hold moves a rule");
-            }
-            let (here, there) = under(name, reads);
-            assert_eq!(here, held, "{name}");
-            for (_, rules) in &there {
-                assert_eq!(rules, &held, "every {name} hold on a share's thread");
-            }
-            if hyperion_testkit::threads::granted(2) > 1 {
-                assert!(
-                    there.iter().all(|(thread, ..)| *thread != caller),
-                    "the shares ran on the pool's own threads"
-                );
-            }
+        let held = set_apart(HeldRules::on_this_thread);
+        assert_ne!(held, version, "the switch moves a rule");
+        let (here, there) = set_apart(reads);
+        assert_eq!(here, held);
+        for (_, rules) in &there {
+            assert_eq!(rules, &held, "the switch's rule on a share's thread");
+        }
+        if hyperion_testkit::threads::granted(2) > 1 {
+            assert!(
+                there.iter().all(|(thread, ..)| *thread != caller),
+                "the shares ran on the pool's own threads"
+            );
         }
         let (here, there) = reads();
         assert_eq!(here, version);
@@ -158,7 +148,7 @@ mod tests {
     #[test]
     fn installed_holds_are_in_force_inside_and_set_back() {
         let version = HeldRules::on_this_thread();
-        let held = with_every_27_hold(HeldRules::on_this_thread);
+        let held = set_apart(HeldRules::on_this_thread);
         assert_eq!(held.install(HeldRules::on_this_thread), held);
         assert_eq!(HeldRules::on_this_thread(), version);
     }
@@ -175,7 +165,7 @@ mod tests {
         #[test]
         fn installed_holds_are_set_back_after_a_panic() {
             let version = HeldRules::on_this_thread();
-            let held = with_every_27_hold(HeldRules::on_this_thread);
+            let held = set_apart(HeldRules::on_this_thread);
             let caught = std::panic::catch_unwind(|| held.install(|| panic!("inside the holds")));
             let payload = caught.expect_err("the closure panics");
             assert_eq!(payload.downcast_ref::<&str>(), Some(&"inside the holds"));
@@ -187,7 +177,7 @@ mod tests {
         #[test]
         fn a_thread_of_its_own_reads_its_caller_s_holds_once_installed() {
             let version = HeldRules::on_this_thread();
-            with_every_27_hold(|| {
+            set_apart(|| {
                 let here = HeldRules::on_this_thread();
                 let (bare, installed) = std::thread::scope(|scope| {
                     scope

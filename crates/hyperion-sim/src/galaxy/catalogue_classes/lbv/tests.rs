@@ -1290,7 +1290,7 @@ fn a_displaced_host_is_the_grid_s_from_27() {
                 Some(probe.with_age_at_epoch(Years::new(3.0e7 + since + 1.0e3)))
             })
     }
-    for (rules, claimed) in [(GalaxyRules::every_27_hold(), false)] {
+    for (rules, claimed) in [(GalaxyRules::of_version(crate::GENERATOR_VERSION), false)] {
         let galaxy =
             Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
                 .expect("the Milky Way fixture builds");

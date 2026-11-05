@@ -495,11 +495,11 @@ fn print_totals(totals: &BTreeMap<Population, Counts>) {
 #[test]
 #[ignore = "slow: thirteen volumes' range queries under every 27 hold and the budget (one on wasm)"]
 fn the_field_members_and_catalogue_hold_each_population_s_budget() {
-    let on = milky_way(GalaxyRules::every_27_hold());
+    let on = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
     let budget = milky_way(GalaxyRules {
         field_share: FieldShareRules::None,
         carve_out: CarveOutRules::Unclaimed,
-        ..GalaxyRules::every_27_hold()
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
     });
     let volumes = volumes(&on);
     assert_eq!(volumes.len(), 13);

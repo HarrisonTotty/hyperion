@@ -6582,8 +6582,7 @@ fn earth_venus_and_mars_keep_their_states() {
 #[test]
 fn under_every_27_hold_mars_lists_no_sea_and_earth_does_both_temperate() {
     use crate::planetary::derive::solar::{found, solar_system};
-    use crate::planetary::testing::with_every_27_hold;
-    let at_27 = with_every_27_hold(solar_system);
+    let at_27 = solar_system();
     for (name, liquid) in [("Mars", false), ("Earth", true)] {
         let air = found(&at_27, name).atmosphere();
         assert_eq!(air.state(), SurfaceState::Temperate, "{name}");

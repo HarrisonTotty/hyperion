@@ -355,8 +355,8 @@ impl Galaxy {
     }
 
     /// [`from_params`](Self::from_params) under `rules` in place of the generator version's: the
-    /// tests' door to a later version's galaxy-side holds (decision-galaxy-25-train §1.3), such as
-    /// `GalaxyRules::of_version(crate::GENERATOR_VERSION)`.
+    /// tests' door to a later version's galaxy-side holds (decision-galaxy-25-train §1.3), and to
+    /// the tests' own rules, such as a field without plan 08's displaced classes.
     ///
     /// # Errors
     ///
@@ -1269,7 +1269,7 @@ mod tests {
         let bare = Galaxy::from_params_with_rules(
             seed,
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .unwrap();
         let full = bare.clone().with_full_potential();
@@ -1280,7 +1280,7 @@ mod tests {
         let lazy = Galaxy::from_params_with_rules(
             seed,
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .unwrap()
         .with_full_potential();

@@ -471,33 +471,6 @@ impl Error for SampleContextsError {
     }
 }
 
-/// `run`'s result under every hold at generator version 27, for a test that asserts a 27 figure:
-/// every 27 hold is on the record (train 27), so it runs `run` as it is, on the version's rules.
-/// It stays for the tests that name 27's rules and for the holds at 28 ([`with_every_28_hold`]
-/// builds on it); the 28 bump deletes it with them.
-///
-/// The galaxy's rules travel with the galaxy, not the thread: a test builds its galaxy under
-/// `GalaxyRules::every_27_hold()` and runs inside this helper for the planetary ones.
-#[cfg(test)]
-pub(crate) fn with_every_27_hold<R>(run: impl FnOnce() -> R) -> R {
-    run()
-}
-
-/// `run`'s result with every landed hold at generator version 28 in force on this thread, those
-/// at 27 among them ([`with_every_27_hold`]), for a test that asserts a 28 figure; each switch sets
-/// its rules back as it returns, a panic in `run` included.
-///
-/// The holds at 28:
-///
-///
-/// A system or a record is read under the rules in force when it is generated, so a test
-/// generates afresh inside it. A later hold at 28 adds its switch here, and 28's bump deletes it
-/// with its holds.
-#[cfg(test)]
-pub(crate) fn with_every_28_hold<R>(run: impl FnOnce() -> R) -> R {
-    with_every_27_hold(run)
-}
-
 /// A pair's history before an age, by its worst event: the classes the binary hosts' census
 /// counts (P14.T1.e), worst first.
 #[cfg(test)]

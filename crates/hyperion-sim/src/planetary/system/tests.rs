@@ -222,10 +222,9 @@ fn generate_satellites_is_each_planet_s_children_in_generate() {
 #[test]
 fn under_every_27_hold_a_regular_moon_s_record_reads_its_damped_eccentricity() {
     use crate::planetary::satellites::SatelliteMoon;
-    use crate::planetary::testing::with_every_27_hold;
     let contexts = sample_contexts(150, Seed::new(0x5a7e_1117), SampleFilter::ALL).unwrap();
     let (mut moons, mut circular) = (0_u32, 0_u32);
-    with_every_27_hold(|| {
+    {
         for ctx in &contexts {
             let system = generate(SEED, ctx);
             for planet in system.planets() {
@@ -247,7 +246,7 @@ fn under_every_27_hold_a_regular_moon_s_record_reads_its_damped_eccentricity() {
                 }
             }
         }
-    });
+    };
     eprintln!("{moons} regular moons under every 27 hold: {circular} circular");
     assert!(moons > 20, "{moons}");
 }
@@ -14332,8 +14331,7 @@ impl PublishedSurface {
 fn published_surfaces(ctx: &SystemContext) -> Vec<PublishedSurface> {
     use crate::planetary::chem::partition::CondensatePhase;
     use crate::planetary::hooks::figures::Subsurface;
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         let system = generate(SEED, ctx);
         system
             .bodies()
@@ -14371,7 +14369,7 @@ fn published_surfaces(ctx: &SystemContext) -> Vec<PublishedSurface> {
                 })
             })
             .collect()
-    })
+    }
 }
 
 /// P14.T55.j's record side, its failing-first case: a 10 Myr Sun's young moon heated to 570 W m⁻²

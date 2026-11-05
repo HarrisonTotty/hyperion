@@ -2143,7 +2143,7 @@ mod tests {
         let galaxy = Galaxy::from_params_with_rules(
             Seed::new(0x0937_0000_0000_000b),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .unwrap();
         let site = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();

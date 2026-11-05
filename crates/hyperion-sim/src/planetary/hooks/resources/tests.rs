@@ -477,8 +477,7 @@ fn assert_same_abundances(a: &ResourceAbundances, b: &ResourceAbundances) {
 /// It restates the plan's "iron group scales with 10^\[Fe/H\]" (lean, 2026-11-01).
 #[test]
 fn under_27_the_metallicity_moves_no_fraction_at_fixed_ratios() {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         for (of, side) in [
             (earth(), SnowLineSide::Inside),
             (icy(), SnowLineSide::Beyond),
@@ -502,15 +501,14 @@ fn under_27_the_metallicity_moves_no_fraction_at_fixed_ratios() {
                 }
             }
         }
-    });
+    };
 }
 
 /// [P14.T26's ratios] Under every 27 hold, an undifferentiated body's iron group is its own
 /// metal's, its iron over its solids times `METAL`'s iron-group share, at \[Fe/H\] −1 as at 0.
 #[test]
 fn under_27_a_bulk_s_iron_group_is_its_own_iron() {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         for (of, side) in [
             (earth(), SnowLineSide::Inside),
             (icy(), SnowLineSide::Beyond),
@@ -528,7 +526,7 @@ fn under_27_a_bulk_s_iron_group_is_its_own_iron() {
                 );
             }
         }
-    });
+    };
 }
 
 /// [P14.T26's ratios] Under every 27 hold, a halo twin's crust, \[Fe/H\] −1 and \[α/Fe\] +0.3,
@@ -539,8 +537,7 @@ fn under_27_a_bulk_s_iron_group_is_its_own_iron() {
 /// "a metal-poor halo planet is poorer in every metal than its disc twin" (lean, 2026-11-01).
 #[test]
 fn under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals() {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         let (halo, disc) = (bulk_of(earth(), -1.0, 0.3), bulk_of(earth(), 0.0, 0.0));
         let crust = |bulk: &BulkComposition| {
             abundances(
@@ -599,7 +596,7 @@ fn under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals() {
         }
         let lithophiles = ratio(&|a| a.fraction(Resource::LightLithophiles));
         assert!((0.96..0.97).contains(&lithophiles), "{lithophiles}");
-    });
+    };
 }
 
 /// [P14.T26's ratios] Under every 27 hold a halo twin, \[Fe/H\] −1 and \[α/Fe\] +0.3, drawn at
@@ -609,7 +606,6 @@ fn under_27_a_halo_twin_s_crust_is_poorer_only_in_its_non_alpha_metals() {
 #[test]
 fn under_27_a_halo_twin_drawn_about_its_host_keeps_iron_in_its_crust() {
     use crate::planetary::derive::rocky::{CoreShareShift, core_mass_fraction_at};
-    use crate::planetary::testing::with_every_27_hold;
     let (fe_h, alpha) = (Dex::new(-1.0), Dex::new(0.3));
     // Its core share at the median rank, its crust's iron group and that group less its V–Ni.
     let twin = || {
@@ -628,14 +624,14 @@ fn under_27_a_halo_twin_drawn_about_its_host_keeps_iron_in_its_crust() {
         let traces = BULK_SILICATE_EARTH_IRON_TRACES * math::exp10(-alpha.value());
         (core, group, group - traces)
     };
-    with_every_27_hold(|| {
+    {
         let (core, group, iron) = twin();
         assert!((0.13..0.14).contains(&core), "{core}");
         let feo = mantle_iron_oxide_mass_fraction(core, solar_magnesium_to_silicon(), alpha);
         assert!((0.075..0.09).contains(&feo), "{feo}");
         assert!(iron > 0.05 && iron < group, "{iron} of {group}");
         assert!((iron - feo / iron_oxide_per_iron()).abs() < 1e-15, "{iron}");
-    });
+    };
 }
 
 /// [P14.T26's ratios] Under every 27 hold a silicate crust's iron is its own mantle's `FeO`'s:
@@ -644,7 +640,6 @@ fn under_27_a_halo_twin_drawn_about_its_host_keeps_iron_in_its_crust() {
 /// the bulk silicate Earth's other iron-peak metals.
 #[test]
 fn under_27_a_mars_s_crust_holds_twice_an_earth_s_iron() {
-    use crate::planetary::testing::with_every_27_hold;
     let iron = |core: f64| {
         let fractions = crate::planetary::derive::MassFractions::solid(core, 1.0 - core, 0.0);
         let bulk = BulkComposition::new(fractions, earth().1, Dex::ZERO, Some(Dex::ZERO));
@@ -657,13 +652,13 @@ fn under_27_a_mars_s_crust_holds_twice_an_earth_s_iron() {
         );
         crust.fraction(Resource::IronGroup) - BULK_SILICATE_EARTH_IRON_TRACES
     };
-    with_every_27_hold(|| {
+    {
         let (mars, earth) = (iron(0.204), iron(0.325));
         assert!((0.122..0.124).contains(&mars), "{mars}");
         let bse = BULK_SILICATE_EARTH_IRON_GROUP[3];
         assert!((earth / bse - 1.0).abs() < 0.005, "{earth} against {bse}");
         assert!((1.9..2.0).contains(&(mars / earth)), "{}", mars / earth);
-    });
+    };
 }
 
 /// Under every 27 hold the light lithophiles' odds form moves them by under 2% and the fill cap
@@ -672,8 +667,7 @@ fn under_27_a_mars_s_crust_holds_twice_an_earth_s_iron() {
 /// silicate crust: the [module](super)'s "The mean".
 #[test]
 fn under_27_neither_the_odds_nor_the_cap_binds() {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         let elements = icy().1;
         let mut checked = 0_u32;
         for core in [0.0, 0.1, 0.204, 0.325, 0.5, 0.7, 0.9] {
@@ -738,5 +732,5 @@ fn under_27_neither_the_odds_nor_the_cap_binds() {
             }
         }
         assert_eq!(checked, 7 * 2 * 4 * 3 * 2);
-    });
+    };
 }

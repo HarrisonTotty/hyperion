@@ -101,7 +101,7 @@ const CENSUS_FIGURES: Figures = Figures {
 fn no_white_dwarf_passes_the_chandrasekhar_mass_under_every_27_hold() {
     let galaxy = Galaxy::from_params(Seed::new(CENSUS_SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture's gas is mostly neutral");
-    let figures = census(&galaxy, StellarRules::every_27_hold());
+    let figures = census(&galaxy, StellarRules::of_version(crate::GENERATOR_VERSION));
     println!("every 27 hold: {figures:?}");
     assert_eq!(figures.above, [0; 3], "{figures:?}");
     assert_eq!(figures, CENSUS_FIGURES);

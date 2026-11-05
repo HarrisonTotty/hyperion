@@ -35,7 +35,7 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
 /// The Milky Way under every 27 hold: the binary classes listed.
 fn listed() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
+    GALAXY.get_or_init(|| milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION)))
 }
 
 /// The processes the tests walk: the young disc's nurseries, two of the old thin disc's sub-discs'

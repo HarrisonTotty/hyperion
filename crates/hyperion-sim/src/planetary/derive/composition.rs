@@ -1014,8 +1014,7 @@ mod tests {
     /// either edge the radius is kept, and just outside it moved, as about the Sun.
     #[test]
     fn under_27_the_window_about_a_host_is_what_the_solve_about_it_keeps() {
-        use crate::planetary::testing::with_every_27_hold;
-        with_every_27_hold(|| {
+        {
             for shift in host_shifts() {
                 for m in [0.1, 1.0, 1.51, 3.0, 10.0, 40.0, 131.0] {
                     let mass = EarthMasses::new(m);
@@ -1049,7 +1048,7 @@ mod tests {
                     }
                 }
             }
-        });
+        };
     }
 
     /// Under every 27 hold the solve's Earth-like core about a host is the host's Earth, 0.325
@@ -1060,8 +1059,7 @@ mod tests {
     /// [`giant_composition`]'s.
     #[test]
     fn under_27_the_solve_s_earth_like_core_is_the_host_s() {
-        use crate::planetary::testing::with_every_27_hold;
-        with_every_27_hold(|| {
+        {
             let flux = EarthFluxes::new(1.0);
             for shift in host_shifts() {
                 let earth = shift.about_host(EARTH_CORE_MASS_FRACTION);
@@ -1135,7 +1133,7 @@ mod tests {
                     );
                 }
             }
-        });
+        };
     }
 
     /// Masses spanning the solve's range, M⊕.

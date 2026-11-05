@@ -27,7 +27,6 @@ use crate::galaxy::placement::{CellCache, CellKey, NoCache, SystemOrigin, genera
 use crate::galaxy::query::{MassFloor, RangePlan, RangeQuery, RangeResult, hit_at, range_query};
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{CatalogueSystemId, SystemId, SystemIdKind};
-use crate::planetary::testing::with_every_27_hold;
 
 /// The seed of the hold's Milky Way fixture.
 const SEED: u64 = 0x0937_0000_0000_0001;
@@ -42,7 +41,7 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
 /// The fixture under every 27 hold: the range query registers the classes.
 fn at_27() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
+    GALAXY.get_or_init(|| milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION)))
 }
 
 /// One class of the production lookup.
@@ -316,7 +315,7 @@ fn the_census_counts_each_class_s_expected_hosts_in_its_layers() {
 fn under_every_27_hold_a_host_of_each_class_is_returned_at_its_place() {
     let galaxy = at_27();
     let source = |class| CatalogueClassSource::with_lookup(Only(class));
-    with_every_27_hold(|| {
+    {
         for class in registered_classes(galaxy) {
             let hosts = first_hosts(galaxy, class, 1);
             let host = hosts
@@ -367,7 +366,7 @@ fn under_every_27_hold_a_host_of_each_class_is_returned_at_its_place() {
                 assert!(out.iter().all(|hit| hit.id() != SystemId::from(host.id)));
             }
         }
-    });
+    };
 }
 
 /// Under every 27 hold, a Type Ia's survivor, member 1 of its entry, is returned by the range query
@@ -388,7 +387,7 @@ fn under_every_27_hold_a_type_ia_s_survivor_is_returned_at_its_place() {
     let progenitor = system_of(galaxy, entry_of(survivor.id)).expect("member 0");
     assert_eq!(survivor.system.motion().at(), progenitor.motion().at());
     assert!(survivor.system.motion().at() < UniverseTime::EPOCH);
-    with_every_27_hold(|| {
+    {
         for t in [UniverseTime::EPOCH, at(-700)] {
             let place = survivor.system.position_at(t);
             assert_ne!(place, progenitor.position_at(t));
@@ -406,7 +405,7 @@ fn under_every_27_hold_a_type_ia_s_survivor_is_returned_at_its_place() {
             assert_eq!(hit.position(), &place);
             assert!(SURVIVOR_LAYERS.contains(hit.record().layer()));
         }
-    });
+    };
 }
 
 /// The layers a Type Ia's survivor is counted in.

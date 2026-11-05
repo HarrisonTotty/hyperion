@@ -12,7 +12,6 @@ use crate::planetary::context::XuvHistory;
 use crate::planetary::fate::DestructionCause;
 use crate::planetary::testing::{
     PairHistory, SampleFilter, first_paired_system, sample_records, synthetic_binary,
-    with_every_27_hold,
 };
 use crate::stellar::remnant::{CompactRemnant, RemnantKind};
 use crate::stellar::system::{PairTimeline, SystemStars};
@@ -253,7 +252,7 @@ fn binary_host_light_derives_the_planets_of_merged_pairs() {
     ];
     let mut found = [0_usize; 3];
     let records = sample_records(&galaxy, SEARCH, SampleFilter::ALL).unwrap();
-    with_every_27_hold(|| {
+    {
         for record in &records {
             if found.iter().zip(&wanted).all(|(&f, &(_, n))| f >= n) {
                 break;
@@ -290,7 +289,7 @@ fn binary_host_light_derives_the_planets_of_merged_pairs() {
             assert!(derived > 0, "{:?}: no planet derived", ctx.id());
             found[slot] += 1;
         }
-    });
+    };
     assert_eq!(
         found,
         wanted.map(|(_, n)| n),

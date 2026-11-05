@@ -1094,7 +1094,7 @@ mod tests {
         let (mut inside, mut outside) = (0, 0);
         for rules in [
             StellarRules::of_version(GENERATOR_VERSION),
-            StellarRules::every_27_hold(),
+            StellarRules::of_version(crate::GENERATOR_VERSION),
         ] {
             for fe_h in [0.0, -1.0] {
                 let composition = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);

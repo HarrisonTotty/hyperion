@@ -10,7 +10,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::rules::GalaxyRules;
-use crate::planetary::testing::{SampleFilter, sample_records, with_every_28_hold};
+use crate::planetary::testing::{SampleFilter, sample_records};
 
 /// The ordinary census's galaxy (`census_tests`' `tallies_under_every_28_hold`'s) and its first
 /// 836 systems, by rank: the census's ranks up to #835.
@@ -20,7 +20,7 @@ fn census() -> &'static (Galaxy, Vec<SystemRecord>) {
         let galaxy = Galaxy::from_params_with_rules(
             SEED,
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way's parameters build a galaxy");
         let records = sample_records(&galaxy, 836, SampleFilter::ALL)
@@ -69,7 +69,7 @@ fn member_states(snapshot: &SystemSnapshot, belt: &Belt) -> Vec<BodyState> {
 /// of their times.
 #[test]
 fn a_belt_whose_named_members_all_evaporate_ends_with_the_last_of_them() {
-    let (states, belt_state) = with_every_28_hold(|| {
+    let (states, belt_state) = {
         on_census_system(14, |ctx, system| {
             let belt = belt_holding(system, "41ffecb200000005.e101");
             let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
@@ -80,7 +80,7 @@ fn a_belt_whose_named_members_all_evaporate_ends_with_the_last_of_them() {
                 .state();
             (member_states(&snapshot, belt), belt_state)
         })
-    });
+    };
     let times: Vec<UniverseTime> = states
         .iter()
         .map(|state| match state {
@@ -146,7 +146,7 @@ fn mass_and_shine(snapshot: &SystemSnapshot, belt: &Belt) -> (f64, f64) {
 /// its members' mass gone.
 #[test]
 fn a_belt_partly_evaporated_loses_its_members_share_of_its_mass_and_shine() {
-    let ((mass, shine, share), (kept_mass, kept_shine)) = with_every_28_hold(|| {
+    let ((mass, shine, share), (kept_mass, kept_shine)) = {
         on_census_system(14, |ctx, system| {
             let belt = belt_holding(system, "41ffecb200000005.e201");
             let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
@@ -165,7 +165,7 @@ fn a_belt_partly_evaporated_loses_its_members_share_of_its_mass_and_shine() {
             );
             ((mass, shine, share), kept)
         })
-    });
+    };
     assert!((0.0..1.0).contains(&share) && share > 0.0, "{share}");
     assert!(
         (mass / (kept_mass * (1.0 - share)) - 1.0).abs() < 1e-9,
@@ -182,7 +182,7 @@ fn a_belt_partly_evaporated_loses_its_members_share_of_its_mass_and_shine() {
 /// present, with the mass its history leaves it, half the mass it formed with.
 #[test]
 fn a_member_near_the_end_of_its_life_publishes_the_mass_left() {
-    let (formed, left, history) = with_every_28_hold(|| {
+    let (formed, left, history) = {
         on_census_system(14, |ctx, system| {
             let belt = belt_holding(system, "41ffecb200000005.e101");
             let member = belt.members()[0];
@@ -224,7 +224,7 @@ fn a_member_near_the_end_of_its_life_publishes_the_mass_left() {
                 fate.at(lo).mass(),
             )
         })
-    });
+    };
     assert!(
         (left.value() / formed.value() - 0.5).abs() < 0.01,
         "{left:?} against {formed:?}"

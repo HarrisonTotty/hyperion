@@ -459,7 +459,7 @@ fn sort(hits: &mut [SystemHit]) {
 fn the_centre_s_source_finds_what_a_scan_finds_on_the_exact_orbits() {
     for rules in [
         GalaxyRules::of_version(GENERATOR_VERSION),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     ] {
         the_centre_s_source_finds_what_a_scan_finds_under(rules);
     }
@@ -549,7 +549,8 @@ fn the_exact_orbit_s_census_near_the_black_hole() {
             census_of_the_layer(&galaxy, layer);
         }
     }
-    for (label, galaxy) in census_galaxies_under(GalaxyRules::every_27_hold()) {
+    for (label, galaxy) in census_galaxies_under(GalaxyRules::of_version(crate::GENERATOR_VERSION))
+    {
         let edge = galaxy.centre_motion().influence_radius().value();
         println!("{label}, every 27 hold: edge {edge:.3} ly");
         for layer in Layer::ALL {

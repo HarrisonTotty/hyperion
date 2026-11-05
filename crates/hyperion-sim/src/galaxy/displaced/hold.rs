@@ -48,7 +48,7 @@ pub(crate) fn held() -> &'static Galaxy {
 pub(crate) const fn field_only_rules() -> GalaxyRules {
     GalaxyRules {
         displaced: DisplacedRules::FieldOnly,
-        ..GalaxyRules::every_27_hold()
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
     }
 }
 
@@ -75,7 +75,7 @@ pub(crate) fn displaced() -> &'static Galaxy {
         Galaxy::from_params_with_rules(
             Seed::new(MILKY_WAY_SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds its displaced classes")
     })
@@ -168,7 +168,10 @@ fn the_version_s_galaxy_holds_the_displaced_classes() {
     assert_eq!(held().rules().displaced, DisplacedRules::Displaced);
     assert!(held().fields().displaced().is_some());
     assert!(held().class_table().is_some());
-    assert_eq!(displaced().rules(), GalaxyRules::every_27_hold());
+    assert_eq!(
+        displaced().rules(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION)
+    );
     assert_eq!(held().params(), displaced().params());
     assert_eq!(
         held().fields().components(),
@@ -183,7 +186,7 @@ fn the_version_s_galaxy_holds_the_displaced_classes() {
 fn with_rules_refuses_another_displaced_arm() {
     let _ = field_only()
         .clone()
-        .with_rules(GalaxyRules::every_27_hold());
+        .with_rules(GalaxyRules::of_version(crate::GENERATOR_VERSION));
 }
 
 /// `with_rules` refuses other stellar rules for a galaxy that holds the classes, whose class table
@@ -208,7 +211,7 @@ fn the_same_seed_twice_gives_the_same_classes() {
     let again = Galaxy::from_params_with_rules(
         Seed::new(MILKY_WAY_SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture builds its displaced classes");
     assert_eq!(&again, displaced());
@@ -567,8 +570,12 @@ fn headroom_holds_for_seeds(seeds: std::ops::Range<u64>) {
     for i in seeds {
         let seed = Seed::new(0x0812_a000_0000_0000 + i);
         let params = GalaxyParams::from_seed(seed, crate::galaxy::imf::MassFunctionKind::default());
-        let galaxy = Galaxy::from_params_with_rules(seed, params, GalaxyRules::every_27_hold())
-            .expect("a drawn galaxy builds its displaced classes");
+        let galaxy = Galaxy::from_params_with_rules(
+            seed,
+            params,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .expect("a drawn galaxy builds its displaced classes");
         assert!(galaxy.fields().displaced().is_some());
         check_index_headroom(&galaxy).unwrap_or_else(|e| panic!("seed {i}: {e}"));
     }

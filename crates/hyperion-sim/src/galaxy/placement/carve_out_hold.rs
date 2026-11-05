@@ -54,7 +54,7 @@ const SEED: u64 = 0x0935_0000_0000_0001;
 fn unclaimed_rules() -> GalaxyRules {
     GalaxyRules {
         carve_out: CarveOutRules::Unclaimed,
-        ..GalaxyRules::every_27_hold()
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
     }
 }
 
@@ -82,7 +82,7 @@ fn unclaimed() -> &'static Galaxy {
 /// The fixture under every 26 hold: the classes claim their hosts.
 fn claimed() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
+    GALAXY.get_or_init(|| milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION)))
 }
 
 /// `count` layer-E cells along each of `galaxy`'s arm ridges, in the plane, at each radius of
@@ -176,7 +176,10 @@ fn a_galaxy_carries_the_version_s_carve_out() {
     assert_eq!(version().rules().carve_out, CarveOutRules::Claimed);
     assert!(recent_death_claim(version().rules().carve_out).is_some());
     assert!(recent_death_claim(CarveOutRules::Unclaimed).is_none());
-    assert_eq!(claimed().rules(), GalaxyRules::every_27_hold());
+    assert_eq!(
+        claimed().rules(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION)
+    );
     assert_ne!(claimed(), unclaimed());
     let fields = claimed().fields();
     for (id, component) in fields.component_ids().zip(fields.components()) {
@@ -204,7 +207,9 @@ fn a_galaxy_carries_the_version_s_carve_out() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "the carve-out is read when a galaxy is built")]
 fn with_rules_refuses_to_change_the_carve_out() {
-    let _ = unclaimed().clone().with_rules(GalaxyRules::every_27_hold());
+    let _ = unclaimed()
+        .clone()
+        .with_rules(GalaxyRules::of_version(crate::GENERATOR_VERSION));
 }
 
 /// Layer D gives up its ancient Type Ia: every population's factor but the young disc's falls
@@ -326,7 +331,7 @@ fn the_classes_claim_their_hosts_from_the_grid_pinned() {
 /// D4: the same seed twice under every 26 hold claims the same records.
 #[test]
 fn the_same_seed_twice_claims_the_same_records() {
-    let again = milky_way(GalaxyRules::every_27_hold());
+    let again = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
     assert_eq!(&again, claimed());
     let keys = ridge_cells(claimed(), &[24_000.0], 64);
     for key in keys {
@@ -657,7 +662,7 @@ fn class_entries<P: ClassProcess + Sync>(galaxy: &Galaxy, process: &P, class: Cl
 #[ignore = "slow: the fixture's whole layer E under either arm, and two classes' cells"]
 fn census_of_the_carve_out() {
     let off = milky_way(unclaimed_rules()).with_full_potential();
-    let on = milky_way(GalaxyRules::every_27_hold()).with_full_potential();
+    let on = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION)).with_full_potential();
     let carved = carved_galaxy(&off, &on);
     let mut by_class: BTreeMap<Class, Vec<u64>> = BTreeMap::new();
     for (record, class) in &carved {
@@ -884,7 +889,7 @@ const MOVING_CLAIMED_DIGEST: u64 = 0x7cb2_2fec_b1a6_222e;
 #[test]
 fn the_moving_galaxy_s_claims_are_pinned() {
     let off = milky_way(unclaimed_rules()).with_full_potential();
-    let on = milky_way(GalaxyRules::every_27_hold()).with_full_potential();
+    let on = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION)).with_full_potential();
     let mut keys: Vec<CellKey> = PRE_PIN_CELLS
         .iter()
         .map(|&cell| CellKey::new(Layer::E, cell).unwrap())

@@ -13,7 +13,6 @@
 //! Every point's flag was `FASTCHEM_SUCCESS`.
 
 use super::*;
-use crate::planetary::testing::with_every_27_hold;
 
 /// P14.T52.e's carriers, rows 115 on.
 const CARRIERS: [&str; 12] = [
@@ -24,7 +23,7 @@ const CARRIERS: [&str; 12] = [
 /// (each holds only H, C, N, O, S, P and Cl), over the same 300–6,000 K, its last species.
 #[test]
 fn under_27_the_network_carries_the_carriers() {
-    with_every_27_hold(|| {
+    {
         let network = network();
         assert!((network.floor().value() - 300.0).abs() < 1e-9);
         assert!((network.ceiling().value() - 6_000.0).abs() < 1e-9);
@@ -43,7 +42,7 @@ fn under_27_the_network_carries_the_carriers() {
             assert_eq!(network.species[place].trace, None, "{key}");
         }
         assert!(network.major_cations);
-    });
+    };
 }
 
 /// Under 27 P and Cl are solved elements, each with its unknown and its basis, PH₃ and HCl, and no
@@ -52,7 +51,7 @@ fn under_27_the_network_carries_the_carriers() {
 /// 27's.
 #[test]
 fn under_27_phosphorus_and_chlorine_are_solved() {
-    with_every_27_hold(|| {
+    {
         let network = network();
         assert_eq!(network.solved, SOLVED);
         for (k, key) in [
@@ -82,14 +81,14 @@ fn under_27_phosphorus_and_chlorine_are_solved() {
             species_of(0, &rows, &basis, SOLVED, &carried),
             Err(BuildNetworkError::TwoTraceAtoms { .. })
         ));
-    });
+    };
 }
 
 /// A gas row holding two atoms of a trace element is refused until the element is solved: 27's
 /// rows, P₂ among them, with 26's solved elements are refused at P₂, and with 27's they build.
 #[test]
 fn under_27_diphosphorus_is_refused_until_phosphorus_is_solved() {
-    with_every_27_hold(|| {
+    {
         let rows: Vec<SubstanceId> = crate::substance::ids()
             .filter(|&id| crate::substance::formation_range(id).is_some())
             .collect();
@@ -100,7 +99,7 @@ fn under_27_diphosphorus_is_refused_until_phosphorus_is_solved() {
             })
         );
         assert!(Network::of_rows(&rows, SOLVED).is_ok());
-    });
+    };
 }
 
 /// SH holds the sulphur in its field between Visscher, Lodders and Fegley's (2006, §3.1) eq. 7,
@@ -113,7 +112,7 @@ fn under_27_diphosphorus_is_refused_until_phosphorus_is_solved() {
 /// same.
 #[test]
 fn under_27_sh_holds_its_field_between_vlf2006_s_eqs_4_and_7() {
-    with_every_27_hold(|| {
+    {
         let network = network();
         let g = gas(1.0, None, None);
         for (t, bar, matched, full) in [
@@ -140,7 +139,7 @@ fn under_27_sh_holds_its_field_between_vlf2006_s_eqs_4_and_7() {
             );
             assert!((mercapto / full - 1.0).abs() < 0.05, "{t} K: SH {mercapto}");
         }
-    });
+    };
 }
 
 /// OH's share of the oxygen at 3,000 K and 10 mbar: 0.1269 here, against FastChem's 0.1207
@@ -150,7 +149,7 @@ fn under_27_sh_holds_its_field_between_vlf2006_s_eqs_4_and_7() {
 /// −2.1% and H₂O −0.4% beside it. Nothing condenses there.
 #[test]
 fn under_27_oh_holds_its_share_at_3000_k_and_10_mbar() {
-    with_every_27_hold(|| {
+    {
         let got = solve_at(&network(), &gas(1.0, None, None), 3_000.0, 0.01);
         let hydroxyl = share(&got, row("OH"), Element::O);
         for want in [0.120_710_3, 0.120_653_7] {
@@ -160,7 +159,7 @@ fn under_27_oh_holds_its_share_at_3000_k_and_10_mbar() {
             );
         }
         assert!(hydroxyl > share(&got, row("H2O"), Element::O));
-    });
+    };
 }
 
 /// The electrons at 6,000 K and 10 mbar, where H⁺ gives most of them: 6.329 × 10⁻⁴ here, against
@@ -171,7 +170,7 @@ fn under_27_oh_holds_its_share_at_3000_k_and_10_mbar() {
 fn under_27_the_electrons_at_6000_k_and_10_mbar_are_the_run_s() {
     let g = gas(1.0, None, None);
     let electron = row("e-");
-    with_every_27_hold(|| {
+    {
         let got = solve_at(&network(), &g, 6_000.0, 0.01);
         let electrons = got.mole_fraction(electron).unwrap();
         for want in [6.315_879e-4, 6.326_151e-4] {
@@ -181,7 +180,7 @@ fn under_27_the_electrons_at_6000_k_and_10_mbar_are_the_run_s() {
             );
         }
         assert!(got.mole_fraction(row("H+")).unwrap() > 0.75 * electrons);
-    });
+    };
 }
 
 /// The asserted cases rerun with condensation (decision-p14-t52a-rows), under 27's network: each
@@ -198,7 +197,7 @@ fn under_27_the_electrons_at_6000_k_and_10_mbar_are_the_run_s() {
 /// more than 0.8%.
 #[test]
 fn under_27_every_asserted_case_is_within_its_tolerance() {
-    with_every_27_hold(|| every_case_is_within_its_tolerance(&CASES_27));
+    every_case_is_within_its_tolerance(&CASES_27);
 }
 
 /// The asserted cases.
@@ -445,7 +444,7 @@ const CASES_27: [Case; 11] = [
 /// of 3.
 #[test]
 fn under_27_phosphorus_at_a_hot_jupiter_photosphere_is_the_run_s() {
-    with_every_27_hold(|| {
+    {
         let network = network();
         let g = gas(1.0, None, None);
         let photosphere = solve_at(&network, &g, 1_500.0, 0.01);
@@ -491,14 +490,14 @@ fn under_27_phosphorus_at_a_hot_jupiter_photosphere_is_the_run_s() {
                 "PH2 at {ratio} of the run's"
             );
         }
-    });
+    };
 }
 
 /// Hydrogen alone keeps H⁺ and its electrons under 27's network, and H⁻ with them; every other
 /// species is zero.
 #[test]
 fn under_27_an_absent_element_leaves_its_species_at_zero() {
-    with_every_27_hold(|| {
+    {
         let got = solve_at(&network(), &[(Element::H, 1.0)], 3_000.0, 0.01);
         for (id, x) in got.mole_fractions() {
             let key = id.substance().key();
@@ -508,7 +507,7 @@ fn under_27_an_absent_element_leaves_its_species_at_zero() {
             }
         }
         assert!(got.charge_imbalance().abs() < 1e-12);
-    });
+    };
 }
 
 /// Under 27's network the start's ln p of H₂, CH₄, NH₃, H₂O and H₂S and of the hydrogen nuclei
@@ -520,7 +519,7 @@ fn under_27_an_absent_element_leaves_its_species_at_zero() {
 /// within 2.5, where 26's network's start misses them by 1.3–6.1 at the same levels.
 #[test]
 fn under_27_the_start_takes_the_major_elements_atoms() {
-    with_every_27_hold(|| {
+    {
         let network = network();
         let mut per_hydrogen = [0.0; Element::ALL.len()];
         for (e, x) in gas(1.0, None, None) {
@@ -567,5 +566,5 @@ fn under_27_the_start_takes_the_major_elements_atoms() {
                 );
             }
         }
-    });
+    };
 }

@@ -46,7 +46,7 @@ fn fitted() -> &'static Galaxy {
         Galaxy::from_params_with_rules(
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds")
         .with_full_potential()
@@ -77,7 +77,7 @@ const MOST_FE_H: f64 = 0.176;
 /// or captures electrons, the two are the same, bit for bit. The fates compared there, and the
 /// number of the others the mark moved.
 fn stripped_mark_agrees(metallicities: &[f64], etas: &[f64], n: u32) -> (u32, u32) {
-    let rules = GalaxyRules::every_27_hold().stellar;
+    let rules = GalaxyRules::of_version(crate::GENERATOR_VERSION).stellar;
     let options = TrackOptions::default().with_rules(rules);
     let (mut compared, mut moved) = (0, 0);
     for &fe_h in metallicities {

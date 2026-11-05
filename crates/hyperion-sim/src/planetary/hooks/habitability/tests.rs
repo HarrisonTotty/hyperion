@@ -109,7 +109,7 @@ fn table_assessments() -> [(&'static str, HabitabilityInputs, HabitabilityAssess
 }
 
 /// The table's Earth, Mars and Venus under the rules at generator version 25 and under every 26
-/// hold (`with_every_27_hold`), each printed with its surface pressure: Earth `Temperate` with no
+/// hold (the version's rules from 27), each printed with its surface pressure: Earth `Temperate` with no
 /// limit, Mars a frozen `Marginal` desert, below water's triple point exactly where its pressure
 /// is, and Venus a dry `Hostile` runaway.
 #[test]
@@ -1009,11 +1009,10 @@ fn every_body_short_of_temperate_names_a_limit() {
 #[ignore = "slow: every body of the FGK hosts among 6,800 systems, labelled and held"]
 fn the_desert_label_moves_no_habitability_over_the_fgk_hosts() {
     use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
-    use crate::planetary::testing::with_every_27_hold;
     let (mut surfaces, mut deserts) = (0_usize, 0_usize);
     let (mut earth, mut cold) = (None, None);
     let mut hottest: Option<(crate::id::BodyId, f64, f64)> = None;
-    with_every_27_hold(|| {
+    {
         for_each_fgk_host(|ctx, labelled| {
             for body in labelled.bodies() {
                 let index = body.index();
@@ -1052,7 +1051,7 @@ fn the_desert_label_moves_no_habitability_over_the_fgk_hosts() {
                 first(&mut cold, desert && t < 273.0 && p < 1e3);
             }
         });
-    });
+    };
     eprintln!(
         "{surfaces} surfaces of the FGK hosts' bodies, {deserts} published Desert; the first \
          Earth-like {earth:?}, cold thin {cold:?} (name, published, K, Pa); the hottest desert \

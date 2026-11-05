@@ -1215,7 +1215,7 @@ fn the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
 /// stable root, and the moons whose core is porous are counted.
 #[test]
 fn under_every_27_hold_the_branch_takes_its_largest_stable_root_over_ten_thousand_moons() {
-    with_every_27_hold(|| largest_root_census("under every 27 hold"));
+    largest_root_census("under every 27 hold");
 }
 
 /// The largest-root census of 10⁴ random moons under the rules in force, labelled `label`
@@ -1337,8 +1337,6 @@ fn the_measured_moons_tides_on_their_shell_are_pinned() {
 
 // P14.T56.e: the porous core (the lane's science draft, decision-p14-t56d-membrane §2.4).
 
-use crate::planetary::testing::with_every_27_hold;
-
 impl Measured {
     /// The rock under its water, as its ocean branch's column spreads it.
     fn core(&self) -> OceanCore {
@@ -1366,13 +1364,13 @@ fn under_every_27_hold_enceladus_s_porous_core_keeps_its_ocean() {
     assert_eq!(core.compaction(), CoreCompaction::Porous, "{pressure} Pa");
     assert!((15e6..30e6).contains(&pressure), "{pressure} Pa");
     for ammonia in [None, Some(false), Some(true)] {
-        let (tides, ocean) = with_every_27_hold(|| match ammonia {
+        let (tides, ocean) = match ammonia {
             None => (enceladus.tides(), None),
             Some(ammonia) => {
                 let (tides, ocean) = enceladus.solved(ammonia);
                 (tides, Some(ocean))
             }
-        });
+        };
         let watts = tides.heat_flow().value() * enceladus.area();
         let shell = match ocean {
             Some(Subsurface::Ocean(ocean)) => Some(ocean.shell_thickness().value()),
@@ -1427,8 +1425,7 @@ fn under_every_27_hold_the_compacted_cores_leave_the_large_moons_tides_unchanged
         let inputs = moon.inputs();
         let (density, gravity) = MoonTides::bulk(&inputs);
         for solutes in [OceanSolutes::FRESH, moon.solutes(ammonia)] {
-            let branch =
-                with_every_27_hold(|| ShellBranch::of(&inputs, &solutes, density, gravity));
+            let branch = ShellBranch::of(&inputs, &solutes, density, gravity);
             assert!(
                 branch.is_none_or(|branch| branch.core.is_none()),
                 "{}",
@@ -1447,7 +1444,7 @@ fn under_every_27_hold_dione_s_and_mimas_s_porous_cores_are_recorded() {
     for name in ["Dione", "Mimas", "Rhea", "Iapetus"] {
         let body = moon(name);
         let core = body.core();
-        let (tides, ocean) = with_every_27_hold(|| body.solved(true));
+        let (tides, ocean) = body.solved(true);
         let shell = match ocean {
             Subsurface::Ocean(ocean) => Some(ocean.shell_thickness().value() / 1e3),
             _ => None,
@@ -1522,7 +1519,7 @@ fn under_every_27_hold_an_enceladus_in_a_pair_with_dione_keeps_an_ocean_at_its_b
     let budget = resonance_budget(saturn.1, response, &orbits);
     assert!((10e9..20e9).contains(&budget.value()), "{budget:?}");
     for ammonia in [false, true] {
-        let (scale, heat, tides, shell) = with_every_27_hold(|| {
+        let (scale, heat, tides, shell) = {
             let pair = |s: f64| {
                 enceladus.heat_at(s * enceladus.e, ammonia).0
                     + dione.heat_at(s * dione.e, ammonia).0
@@ -1538,7 +1535,7 @@ fn under_every_27_hold_an_enceladus_in_a_pair_with_dione_keeps_an_ocean_at_its_b
                 _ => None,
             };
             (scale, pair(scale), tides, shell)
-        });
+        };
         eprintln!(
             "Enceladus–Dione ({ammonia}) under every 27 hold: budget {:.2} GW at k2/Q \
              {response:.3e}; scale {scale:.4}, e {:.5} and {:.5}, the pair at {:.2} GW; Enceladus {:?} under \
@@ -1569,7 +1566,7 @@ fn under_every_27_hold_the_measured_moons_damping_times_are_recorded() {
     let saturn = Kilograms::new(SATURN_GM * 1e9 / GRAVITATIONAL_CONSTANT);
     for name in ["Mimas", "Enceladus", "Dione"] {
         let body = moon(name);
-        let (heat, tides) = with_every_27_hold(|| body.heat_at(body.e, true));
+        let (heat, tides) = body.heat_at(body.e, true);
         let tau = damping_time(
             saturn,
             body.mass(),
@@ -1721,11 +1718,11 @@ fn the_core_term_has_kelvin_s_limit_and_vanishes_for_a_rigid_core() {
 fn under_every_27_hold_io_s_air_starts_from_its_tides_surface() {
     let io = moon("Io");
     let t_eq = Kelvin::new(io.surface);
-    let (tides, _, surface) = with_every_27_hold(|| {
+    let (tides, _, surface) = {
         with_radiating_surface(&io.inputs(), |inputs| {
             MoonTides::with_ocean(inputs, &io.solutes(false))
         })
-    });
+    };
     assert_eq!(tides.branch(), TidalBranch::Heated);
     let f = tides.heat_flow();
     let lit = radiating_surface_temperature(t_eq, f);
@@ -1761,11 +1758,11 @@ fn under_every_27_hold_a_moon_on_each_branch_radiates_its_surface_heat() {
     ] {
         let body = moon(name);
         let ammonia = name == "Enceladus";
-        let (tides, _, surface) = with_every_27_hold(|| {
+        let (tides, _, surface) = {
             with_radiating_surface(&body.inputs(), |inputs| {
                 MoonTides::with_ocean(inputs, &body.solutes(ammonia))
             })
-        });
+        };
         let f = tides.heat_flow().value();
         let radiated =
             STEFAN_BOLTZMANN * (math::powi(surface.value(), 4) - math::powi(body.surface, 4));
@@ -1821,7 +1818,7 @@ fn a_faint_heat_flow_raises_a_surface_by_its_linear_rise() {
 #[test]
 fn a_sweep_s_tides_are_its_moon_s_at_every_forcing_and_surface() {
     let (ocean, warmer) = sweep_census();
-    let (porous_ocean, porous_warmer) = with_every_27_hold(sweep_census);
+    let (porous_ocean, porous_warmer) = sweep_census();
     eprintln!(
         "sweeps on the ocean branch: {ocean} solves, {warmer} under a warmer surface; under every \
          27 hold {porous_ocean} and {porous_warmer}"

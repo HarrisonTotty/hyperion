@@ -164,7 +164,7 @@ mod tests {
         let mut worst: f64 = 0.0;
         for rules in [
             StellarRules::of_version(crate::GENERATOR_VERSION),
-            StellarRules::every_27_hold(),
+            StellarRules::of_version(crate::GENERATOR_VERSION),
         ] {
             let envelope = LifetimeEnvelope::new(rules);
             for k in 0..n {

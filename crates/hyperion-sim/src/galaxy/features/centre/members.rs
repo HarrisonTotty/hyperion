@@ -1638,7 +1638,7 @@ mod tests {
         let on = Galaxy::from_params_with_rules(
             held.seed(),
             GalaxyParams::milky_way_like(),
-            crate::galaxy::rules::GalaxyRules::every_27_hold(),
+            crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the fixture builds");
         let model = milky_way_centre();

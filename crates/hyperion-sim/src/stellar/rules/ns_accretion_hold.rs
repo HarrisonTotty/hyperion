@@ -15,7 +15,6 @@ use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
-use crate::planetary::testing::with_every_27_hold;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::ns_accretion::NS_ACCRETION_EFFICIENCY;
@@ -61,7 +60,7 @@ fn pinned(rules: StellarRules) -> BinaryTimeline {
 #[test]
 fn the_pinned_neutron_star_keeps_under_a_tenth() {
     let (donor, _, star) = PINNED;
-    let timeline = pinned(StellarRules::every_27_hold());
+    let timeline = pinned(StellarRules::of_version(crate::GENERATOR_VERSION));
     let first = timeline
         .segments()
         .iter()
@@ -224,7 +223,7 @@ fn census_of_the_neutron_star_accretion() {
         let census = slab_census(&galaxy, CENSUS_RECORDS, &[CarvedClass::XrayBinary]);
         (census.scanned, figures(&census))
     };
-    let (scanned, f) = with_every_27_hold(|| census(GalaxyRules::every_27_hold()));
+    let (scanned, f) = census(GalaxyRules::of_version(crate::GENERATOR_VERSION));
     println!("every 27 hold: {scanned:?} records by band, {f:?}");
     assert!(f.most_gained <= MOST_GAINED, "{f:?}");
     let pinned = CENSUS_FIGURES;

@@ -329,11 +329,10 @@ fn assert_jupiter_follows_the_probe(grey: GreyProfile) {
 /// table's Jupiter on the adopted parameters follows the probe.
 #[test]
 fn under_every_27_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo() {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         assert_kappa_is_its_fit(THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG);
         assert_jupiter_follows_the_probe(GreyProfile::ADOPTED);
-    });
+    };
 }
 
 /// From 27 (P14.T24.h.b part 8) κ₁ falls below an effective temperature of 120 K as (`T_eff` ÷

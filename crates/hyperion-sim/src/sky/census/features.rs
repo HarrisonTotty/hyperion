@@ -763,7 +763,7 @@ mod tests {
     fn phi_rules() -> GalaxyRules {
         GalaxyRules {
             field_share: FieldShareRules::Phi,
-            ..GalaxyRules::every_27_hold()
+            ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
         }
     }
 
@@ -1199,7 +1199,7 @@ mod tests {
     /// (P10.T10.b), so the census takes the streams', the dwarf cores' and the centre's members.
     fn list_galaxy() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-        GALAXY.get_or_init(|| fixture(GalaxyRules::every_27_hold()))
+        GALAXY.get_or_init(|| fixture(GalaxyRules::of_version(crate::GENERATOR_VERSION)))
     }
 
     /// A lookup of `galaxy`'s global list that builds each stream's tube table on first use and

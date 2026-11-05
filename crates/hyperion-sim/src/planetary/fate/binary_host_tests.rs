@@ -7,7 +7,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::orbit::{Eccentricity, Orientation};
 use crate::planetary::hosts::young::FormationDraws;
-use crate::planetary::testing::{PairHistory, first_paired_system, with_every_27_hold};
+use crate::planetary::testing::{PairHistory, first_paired_system};
 use crate::stellar::system::SystemStars;
 use crate::units::{AstronomicalUnits, Megayears, Radians};
 
@@ -793,7 +793,7 @@ fn a_census_edge_planet_placed_inside_its_margin_stays_present_to_its_pair_s_fir
 #[test]
 fn a_circumbinary_planet_that_survives_a_common_envelope_stays_present_after_it() {
     let galaxy = census_galaxy();
-    with_every_27_hold(|| {
+    {
         let (ctx, system) = census_system(&galaxy, 0x41ff_aca5_ffc0_0008);
         let k = ctx
             .pairs()
@@ -843,7 +843,7 @@ fn a_circumbinary_planet_that_survives_a_common_envelope_stays_present_after_it(
             "{:?}: {circular} near-circular planets through a loss from {before} to {after} M_sun",
             ctx.id()
         );
-    });
+    };
 }
 
 /// A pair bounds its own zone from inside only while it has an orbit (research-leans-35 §4, W2):
@@ -888,7 +888,7 @@ fn a_merged_pair_s_own_zone_has_no_inner_limit() {
     assert_eq!(limit(merged), (None, None), "{:?}", ctx.id());
     let at = clock_time(&ctx.stars()[0], Years::new(merged)).unwrap();
     let system = crate::planetary::system::generate_planets(SEED, &ctx);
-    with_every_27_hold(|| {
+    {
         assert_eq!(FateHost::evolved(&ctx, &zone).limits_at(&zone, at).0, None);
         let now = system
             .zones_at(&ctx, at)
@@ -896,5 +896,5 @@ fn a_merged_pair_s_own_zone_has_no_inner_limit() {
             .find(|now| now.host() == zone.host())
             .expect("the pair's zone after the merger");
         assert_eq!(now.inner(), None, "{:?}", ctx.id());
-    });
+    };
 }

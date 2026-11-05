@@ -67,7 +67,7 @@ fn every_26() -> Galaxy {
     Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture's gas is mostly neutral")
 }
@@ -181,7 +181,10 @@ fn gap_pair(rules: StellarRules) -> (BinaryInput, Years) {
 #[test]
 fn the_gap_accretor_takes_the_whole_donor() {
     let total = GAP_PAIR[0] + GAP_PAIR[1];
-    for rules in [version(), StellarRules::every_27_hold()] {
+    for rules in [
+        version(),
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    ] {
         let (input, age) = gap_pair(rules);
         let until = Years::new(age.value() + 1.0e3);
         let product = secondary_dynamical_merger(&input, age, until);

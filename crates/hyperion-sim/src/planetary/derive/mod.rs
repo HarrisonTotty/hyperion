@@ -4668,8 +4668,7 @@ mod tests {
     /// the top's rank, and every rocky outcome is held to the floor.
     #[test]
     fn under_27_beyond_the_snow_line_the_rocky_part_starts_at_the_host_s_earth() {
-        use crate::planetary::testing::with_every_27_hold;
-        with_every_27_hold(|| {
+        {
             let flux = EarthFluxes::new(0.05);
             let solar = solar_magnesium_to_silicon();
             for (alpha, floor) in [(0.3, 0.194), (-0.05, 0.351)] {
@@ -4702,7 +4701,7 @@ mod tests {
                     }
                 }
             }
-        });
+        };
     }
 
     /// Under every 27 hold no formation outcome about a host off the Sun's ratios keeps Earth's
@@ -4713,8 +4712,7 @@ mod tests {
     #[test]
     fn under_27_no_formation_outcome_about_a_host_keeps_earth_s_own_core() {
         use crate::planetary::hooks::crust::mantle_iron_oxide_mass_fraction;
-        use crate::planetary::testing::with_every_27_hold;
-        with_every_27_hold(|| {
+        {
             let solar = solar_magnesium_to_silicon();
             let (mut watery, mut enveloped) = (0_u32, 0_u32);
             for alpha in [0.3, -0.05] {
@@ -4773,7 +4771,7 @@ mod tests {
                     "{earths} M⊕: {core}"
                 );
             }
-        });
+        };
     }
 
     /// Under every 27 hold a body's hosts carry their rock into its formation: about a host of
@@ -4781,8 +4779,7 @@ mod tests {
     /// takes the shifted draw at its rank, and about the Sun's ratios the population's, to the bit.
     #[test]
     fn under_27_a_body_s_hosts_carry_their_rock_into_its_draw() {
-        use crate::planetary::testing::with_every_27_hold;
-        with_every_27_hold(|| {
+        {
             let (solar, alpha) = (solar_magnesium_to_silicon(), Dex::new(0.3));
             let shift = rocky::CoreShareShift::of_host(solar, alpha);
             for (disc, a_au) in [(solar_disc(), 1.0), (disc_of(0.3), 0.03)] {
@@ -4840,7 +4837,7 @@ mod tests {
                 ..rogue
             };
             assert!(alone(&rogue) > alone(&solar_rogue));
-        });
+        };
     }
 
     /// Ruling 58: beyond the snow line only the ranks below the Earth-like curve are rocky

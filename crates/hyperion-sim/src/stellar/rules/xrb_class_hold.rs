@@ -350,7 +350,7 @@ fn no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind() {
     let arm = Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture builds");
     let sites = [
@@ -593,7 +593,7 @@ fn the_catalogue_draws_the_census_s_kinds() {
     let arm = Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture builds");
     let slab = census(

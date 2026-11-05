@@ -23,11 +23,11 @@ fn milky_way(rules: GalaxyRules) -> Galaxy {
     Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules).unwrap()
 }
 
-/// The Milky Way under every 26 hold with its retargets
-/// (`GalaxyRules::every_27_hold`): the classes listed and the cells' claim.
+/// The Milky Way under every 26 hold with its retargets (the version's rules from 27): the
+/// classes listed and the cells' claim.
 fn listed() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
-    GALAXY.get_or_init(|| milky_way(GalaxyRules::every_27_hold()))
+    GALAXY.get_or_init(|| milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION)))
 }
 
 /// The same galaxy with features that list no class: the reference without the lists.
@@ -36,7 +36,7 @@ fn held() -> &'static Galaxy {
     GALAXY.get_or_init(|| {
         milky_way(GalaxyRules {
             feature_classes: FeatureClassesRules::Unlisted,
-            ..GalaxyRules::every_27_hold()
+            ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
         })
     })
 }
@@ -232,10 +232,10 @@ fn the_centre_s_cells_and_its_list_are_complementary() {
 #[test]
 #[ignore = "slow: 10⁴ of the centre's young mark sets under either arm, every 27 hold"]
 fn the_centre_s_cells_and_its_list_are_complementary_under_every_27_hold() {
-    let on = milky_way(GalaxyRules::every_27_hold());
+    let on = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
     let off = milky_way(GalaxyRules {
         feature_classes: FeatureClassesRules::Unlisted,
-        ..GalaxyRules::every_27_hold()
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
     });
     complementary_at_the_centre(&off, &on);
 }

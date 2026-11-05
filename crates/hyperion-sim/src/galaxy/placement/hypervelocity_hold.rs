@@ -64,7 +64,7 @@ fn weighted() -> &'static Galaxy {
         Galaxy::from_params_with_rules(
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds")
         .with_full_potential()
@@ -484,7 +484,7 @@ fn the_same_seed_gives_the_same_survivors_twice() {
         Galaxy::from_params_with_rules(
             Seed::new(seed),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds")
     };

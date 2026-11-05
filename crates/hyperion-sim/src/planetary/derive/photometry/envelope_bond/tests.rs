@@ -299,8 +299,7 @@ const AVOGADRO_PER_MOL: f64 = MOLAR_GAS_CONSTANT / BOLTZMANN_CONSTANT;
 #[test]
 fn the_giants_own_albedos_are_pinned_against_their_measurements() {
     use crate::planetary::derive::solar::{found, solar_system};
-    use crate::planetary::testing::with_every_27_hold;
-    let own = with_every_27_hold(solar_system);
+    let own = solar_system();
     for (name, (measured, error), pinned) in GIANTS {
         let body = found(&own, name);
         let albedo = body.albedo().value();
@@ -326,8 +325,7 @@ fn the_giants_own_albedos_are_pinned_against_their_measurements() {
     }
     let uranus = found(&own, "Uranus").equilibrium_temperature().value();
     assert!((56.0..=62.0).contains(&uranus), "{uranus} K");
-    let hot = with_every_27_hold(|| column::snapshot_bond(&hot_jupiter_inputs(), &sun()))
-        .expect("the fixture's column");
+    let hot = column::snapshot_bond(&hot_jupiter_inputs(), &sun()).expect("the fixture's column");
     eprintln!("the hot fixture: own Bond albedo {hot:.4}");
     assert!((hot - HOT_JUPITER).abs() < 0.003, "{hot}");
     assert!((0.05..0.2).contains(&hot), "{hot}");
@@ -341,24 +339,23 @@ fn the_giants_own_albedos_are_pinned_against_their_measurements() {
 fn the_closed_form_follows_the_record_s_own_envelope() {
     use crate::planetary::derive::solar::{found, solar_system};
     use crate::planetary::system::envelope::tests::{fixture_hot_jupiter, table_envelope};
-    use crate::planetary::testing::{envelope_by_hand, with_every_27_hold};
-    let table = with_every_27_hold(solar_system);
+    use crate::planetary::testing::envelope_by_hand;
+    let table = solar_system();
     let mut cases = Vec::new();
     for (name, ..) in GIANTS {
         let inputs = giant_inputs(found(&table, name));
-        let (of, envelope) = with_every_27_hold(|| table_envelope(name));
+        let (of, envelope) = table_envelope(name);
         let record = record_column(envelope.atmosphere(), of.gravity.value());
         cases.push((name, inputs, record));
     }
-    let hot = with_every_27_hold(|| envelope_by_hand(&fixture_hot_jupiter()).expect("an envelope"));
+    let hot = envelope_by_hand(&fixture_hot_jupiter()).expect("an envelope");
     cases.push((
         "the hot fixture",
         hot_jupiter_inputs(),
         record_column(hot.atmosphere(), 9.193_210_521_502_017),
     ));
     for (name, inputs, record) in cases {
-        let closed =
-            with_every_27_hold(|| column::snapshot_bond(&inputs, &sun())).expect("a closed form");
+        let closed = (column::snapshot_bond(&inputs, &sun())).expect("a closed form");
         let read = column_bond(&record, &sun());
         eprintln!("{name}: closed form {closed:.4}, the record's decks {read:.4}");
         assert!(
@@ -371,14 +368,13 @@ fn the_closed_form_follows_the_record_s_own_envelope() {
 /// The same inputs give the same bits, twice.
 #[test]
 fn the_same_inputs_give_the_same_bits() {
-    use crate::planetary::testing::with_every_27_hold;
     let inputs = hot_jupiter_inputs();
-    let (a, b) = with_every_27_hold(|| {
+    let (a, b) = {
         (
             column::snapshot_bond(&inputs, &sun()),
             column::snapshot_bond(&inputs, &sun()),
         )
-    });
+    };
     assert_same_bits(a.expect("a"), b.expect("b"));
 }
 
@@ -389,11 +385,10 @@ fn the_same_inputs_give_the_same_bits() {
 #[ignore = "slow: timing"]
 fn the_snapshot_path_s_cost_a_pass_is_stated() {
     use crate::planetary::derive::solar::{found, solar_system};
-    use crate::planetary::testing::with_every_27_hold;
     let table = solar_system();
     for (name, ..) in GIANTS {
         let inputs = giant_inputs(found(&table, name));
-        with_every_27_hold(|| {
+        {
             let column = column::snapshot_column(&inputs).expect("a column");
             let n = 300;
             let start = std::time::Instant::now();
@@ -410,6 +405,6 @@ fn the_snapshot_path_s_cost_a_pass_is_stated() {
                 "cost {name}: column {built:?}, light {light:?}, {} layers",
                 column.layers.len()
             );
-        });
+        };
     }
 }

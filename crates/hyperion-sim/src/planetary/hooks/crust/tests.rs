@@ -388,8 +388,7 @@ fn an_earth_s_mass_balance_gives_basalt_and_a_mars_s_iron_rich_basalt() {
 /// below the edge.
 #[test]
 fn under_27_an_earth_s_and_a_mars_s_mantles_lie_inside_their_measures() {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         let solar = solar_magnesium_to_silicon();
         let feo = |core: f64| mantle_iron_oxide_mass_fraction(core, solar, Dex::new(0.0));
         let bulk = bulk_iron_mass_fraction(solar, Dex::new(0.0));
@@ -410,7 +409,7 @@ fn under_27_an_earth_s_and_a_mars_s_mantles_lie_inside_their_measures() {
         let surface = table_conditions("Venus");
         let crust = CrustComposition::derive(&venus(&surface)).unwrap();
         assert_eq!(key(crust.secondary()), "basalt");
-    });
+    };
 }
 
 /// The core's factor's two constants are its two anchors' (P14.T51.k's lean): an Earth (core
@@ -419,9 +418,7 @@ fn under_27_an_earth_s_and_a_mars_s_mantles_lie_inside_their_measures() {
 /// [`BULK_IRON_CORE_PIVOT`] within 10⁻³.
 #[test]
 fn the_core_s_factor_is_fixed_by_an_earth_and_a_mars() {
-    use crate::planetary::testing::with_every_27_hold;
-    let host =
-        with_every_27_hold(|| bulk_iron_mass_fraction(solar_magnesium_to_silicon(), Dex::new(0.0)));
+    let host = bulk_iron_mass_fraction(solar_magnesium_to_silicon(), Dex::new(0.0));
     // The bulk iron a core share and a mantle `FeO` need: w = f × 0.85 + FeO (1 − f) ÷ 1.2865.
     let needs = |core: f64, feo: f64| {
         core * CORE_IRON_FRACTION + feo * (1.0 - core) / iron_oxide_per_iron()
@@ -446,8 +443,7 @@ fn the_core_s_factor_is_fixed_by_an_earth_and_a_mars() {
 /// core share, over cores of 0 to 0.95, host Mg/Si of 0.7 to 1.5 and \[α/Fe\] of −0.2 to +0.5.
 #[test]
 fn under_27_the_mantle_s_feo_is_bounded_and_falls_with_the_core() {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         for ratio in [0.7, 0.9, 1.1, 1.3, 1.5] {
             for alpha in [-0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5] {
                 let mut previous = f64::INFINITY;
@@ -467,7 +463,7 @@ fn under_27_the_mantle_s_feo_is_bounded_and_falls_with_the_core() {
                 }
             }
         }
-    });
+    };
 }
 
 /// The Solar System table's generated Mars (its derived core, 0.216 of its solids) holds a mantle
@@ -475,9 +471,8 @@ fn under_27_the_mantle_s_feo_is_bounded_and_falls_with_the_core() {
 #[test]
 fn under_27_the_generated_mars_keeps_its_iron_rich_basalt() {
     use crate::planetary::derive::solar::historic;
-    use crate::planetary::testing::with_every_27_hold;
-    // Generated afresh under the rules in force, as `with_every_27_hold` asks.
-    with_every_27_hold(|| {
+    // Generated afresh under the rules in force, as a hold's switch asks.
+    {
         let fractions = historic("Mars").fractions();
         let core = core_share(&fractions);
         assert!((0.21..0.222).contains(&core), "{core}");
@@ -493,7 +488,7 @@ fn under_27_the_generated_mars_keeps_its_iron_rich_basalt() {
         assert_eq!(crust.lid(), LidCrust::Secondary);
         assert_eq!(key(crust.secondary()), "basalt_fe");
         assert_eq!(key(Some(crust.provinces())), "basalt_fe");
-    });
+    };
 }
 
 /// The Solar System table's generated Venus (its derived core, 0.288 of its solids, below
@@ -502,10 +497,9 @@ fn under_27_the_generated_mars_keeps_its_iron_rich_basalt() {
 #[test]
 fn the_generated_venus_takes_basalt_under_27() {
     use crate::planetary::derive::solar::historic;
-    use crate::planetary::testing::with_every_27_hold;
     let solar = solar_magnesium_to_silicon();
-    // Generated afresh under the rules in force, as `with_every_27_hold` asks.
-    with_every_27_hold(|| {
+    // Generated afresh under the rules in force, as a hold's switch asks.
+    {
         let fractions = historic("Venus").fractions();
         let core = core_share(&fractions);
         assert!((0.285..0.292).contains(&core), "{core}");
@@ -521,7 +515,7 @@ fn the_generated_venus_takes_basalt_under_27() {
             keys(&crust),
             ["ultramafic", "basalt", "none", "none", "basalt"]
         );
-    });
+    };
 }
 
 /// The share of a thousand rocky draws inside the snow line, at ranks 0.0005–0.9995 of the
@@ -546,13 +540,12 @@ fn clamped_share(alpha: f64) -> f64 {
 /// 0.42 at +0.12 and 0.58 at +0.3.
 #[test]
 fn under_27_the_same_share_of_rocky_draws_clamps_about_every_host() {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         for alpha in [0.0, 0.12, 0.2, 0.3] {
             let share = clamped_share(alpha);
             assert!((0.26..=0.34).contains(&share), "[α/Fe] {alpha}: {share}");
         }
-    });
+    };
 }
 
 /// Under every 27 hold an Earth-rank body about a host of \[α/Fe\] +0.3 (its core 0.194, Earth's
@@ -562,8 +555,7 @@ fn under_27_the_same_share_of_rocky_draws_clamps_about_every_host() {
 #[test]
 fn under_27_an_earth_rank_body_about_an_alpha_rich_host_keeps_its_feo() {
     use crate::planetary::derive::rocky::{core_mass_fraction_at, core_mass_fraction_rank};
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         let (solar, alpha) = (solar_magnesium_to_silicon(), Dex::new(0.3));
         let earth_rank = core_mass_fraction_rank(0.325, CoreShareShift::NONE);
         let shift = CoreShareShift::of_host(solar, alpha);
@@ -572,7 +564,7 @@ fn under_27_an_earth_rank_body_about_an_alpha_rich_host_keeps_its_feo() {
         let feo = mantle_iron_oxide_mass_fraction(core, solar, alpha);
         assert!((0.03..0.05).contains(&feo), "{feo}");
         assert!(feo < mantle_iron_oxide_mass_fraction(0.325, solar, Dex::ZERO));
-    });
+    };
 }
 
 /// Under every 27 hold a host at the Sun's ratios moves no core share, so it keeps every figure
@@ -581,9 +573,8 @@ fn under_27_an_earth_rank_body_about_an_alpha_rich_host_keeps_its_feo() {
 #[test]
 fn under_27_the_sun_s_ratios_keep_every_feo_and_core_to_the_bit() {
     use crate::planetary::derive::solar::historic;
-    use crate::planetary::testing::with_every_27_hold;
     let solar = solar_magnesium_to_silicon();
-    with_every_27_hold(|| {
+    {
         assert_eq!(
             CoreShareShift::of_host(solar, Dex::ZERO),
             CoreShareShift::NONE
@@ -595,7 +586,7 @@ fn under_27_the_sun_s_ratios_keep_every_feo_and_core_to_the_bit() {
         let core = core_share(&historic("Venus").fractions());
         let venus = mantle_iron_oxide_mass_fraction(core, solar, Dex::ZERO);
         assert!((venus - 0.106_9).abs() < 5e-5, "{venus}");
-    });
+    };
 }
 
 /// The secondary crust shifts with Mg/Si at fixed everything else (the Mg-rich side): an Earth's

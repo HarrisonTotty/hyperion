@@ -1851,15 +1851,14 @@ fn under_every_26_hold_the_formation_draws_census() {
 
 /// `seed`'s system `ctx`'s records at the epoch under every 27 hold, by body index.
 fn records_at_27(seed: Seed, ctx: &SystemContext) -> Vec<(u32, BodyRecord)> {
-    use crate::planetary::testing::with_every_27_hold;
-    with_every_27_hold(|| {
+    {
         let system = generate(seed, ctx);
         let mut records = Vec::new();
         walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
             records.push((u32::from(visit.body.index.get()), visit.record));
         });
         records
-    })
+    }
 }
 
 /// P14.T24.h.b part 5: a soot-shrouded warm sub-Neptune, the sample's 42002cb200000000 body 0300
@@ -1897,7 +1896,6 @@ fn under_every_27_hold_a_soot_shrouded_envelope_keeps_the_class_table_s_albedo()
 fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
     use crate::planetary::chem::photochem::CHROMOPHORE_DISC_COLUMN;
     use crate::planetary::hooks::EnvelopeAtmosphere;
-    use crate::planetary::testing::with_every_27_hold;
     use crate::units::KilogramsPerSquareMetre;
     let ammonia = by_key("NH3").expect("a row");
     let chromophore = by_key("chromophore").expect("a row");
@@ -1908,7 +1906,7 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
             .collect()
     };
     for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
-        let (_, own) = with_every_27_hold(|| table_envelope(name));
+        let (_, own) = table_envelope(name);
         let own = own.atmosphere();
         let column = |atmosphere: &EnvelopeAtmosphere| {
             atmosphere
@@ -1967,11 +1965,10 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
 #[test]
 fn under_every_27_hold_an_ice_giant_s_methane_deck_is_its_methane_layer() {
     use crate::planetary::hooks::aerosols::ParticleSize;
-    use crate::planetary::testing::with_every_27_hold;
     let methane = by_key("CH4").expect("a row");
     let haze = by_key("ice_giant_haze").expect("a row");
     for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
-        let (_, own) = with_every_27_hold(|| table_envelope(name));
+        let (_, own) = table_envelope(name);
         let of_deck = |atmosphere: &crate::planetary::hooks::EnvelopeAtmosphere| {
             atmosphere
                 .modes()
@@ -2018,7 +2015,6 @@ fn under_every_27_hold_an_ice_giant_s_methane_deck_is_its_methane_layer() {
 /// Jupiter keeps the Galileo probe's 166.1 K; the ice giants' CH₄ decks then form below 1 bar.
 #[test]
 fn under_every_27_hold_the_cold_giants_meet_their_one_bar_temperatures() {
-    use crate::planetary::testing::with_every_27_hold;
     let methane = by_key("CH4").expect("a row");
     for (name, measured, error) in [
         ("Jupiter", 166.1, 0.25),
@@ -2033,7 +2029,7 @@ fn under_every_27_hold_the_cold_giants_meet_their_one_bar_temperatures() {
                 .temperature_at(Pascals::new(1e5))
                 .value()
         };
-        let (_, own) = with_every_27_hold(|| table_envelope(name));
+        let (_, own) = table_envelope(name);
         let after = one_bar(&own);
         let deck = own
             .atmosphere()

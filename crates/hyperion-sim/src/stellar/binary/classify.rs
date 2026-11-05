@@ -1410,7 +1410,9 @@ mod tests {
         let t = evolve(
             &pair(6.0, 1.3, 630.0, 0.0, 0.02)
                 .with_params(BinaryParams::GENERATOR.with_alpha_ce(1.0))
-                .with_rules(crate::stellar::rules::StellarRules::every_27_hold()),
+                .with_rules(crate::stellar::rules::StellarRules::of_version(
+                    crate::GENERATOR_VERSION,
+                )),
             Years::new(1.5e10),
         );
         let cv = segment(&t, |k, s| {

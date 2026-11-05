@@ -792,9 +792,12 @@ mod tests {
         ];
         let mut records = 0_usize;
         for (seed, params) in galaxies {
-            let after =
-                Galaxy::from_params_with_rules(seed, params.clone(), GalaxyRules::every_27_hold())
-                    .expect("a drawn galaxy builds");
+            let after = Galaxy::from_params_with_rules(
+                seed,
+                params.clone(),
+                GalaxyRules::of_version(crate::GENERATOR_VERSION),
+            )
+            .expect("a drawn galaxy builds");
             let tables = PotentialTables::in_plane(&MassModel::new(&params));
             let phi = discrete_share(seed, &params, &tables);
             assert!(

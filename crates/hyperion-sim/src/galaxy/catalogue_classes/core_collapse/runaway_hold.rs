@@ -58,7 +58,7 @@ fn galaxy() -> &'static Galaxy {
         Galaxy::from_params_with_rules(
             Seed::new(SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture's gas is mostly neutral")
         .with_full_potential()
@@ -1191,7 +1191,7 @@ fn the_ejected_share_is_the_closed_form_galaxy_wide() {
         GalaxyParams::milky_way_like(),
         GalaxyRules {
             field_share: crate::galaxy::ages::FieldShareRules::None,
-            ..GalaxyRules::every_27_hold()
+            ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
         },
     )
     .expect("the Milky Way fixture's gas is mostly neutral")

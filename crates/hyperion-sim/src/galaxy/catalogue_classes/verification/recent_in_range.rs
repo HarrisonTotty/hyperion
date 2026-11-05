@@ -59,7 +59,6 @@ use crate::galaxy::query::{
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, MemberSlot, SystemId, SystemIdKind};
 use crate::observe::{Drift, Trajectory};
-use crate::planetary::testing::with_every_27_hold;
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::system::SystemStars;
@@ -735,8 +734,8 @@ fn assert_no_faults(what: &str, inside: usize, faults: &[String]) {
 #[test]
 #[ignore = "slow: range queries about four features' lists at three times under every 26 hold"]
 fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
-    with_every_27_hold(|| {
-        let galaxy = milky_way(GalaxyRules::every_27_hold());
+    {
+        let galaxy = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
         let asked = features_asked(&galaxy, Kind::Recent);
         with_served(&galaxy, |sources, reads| {
             assert_eq!(sources.len(), 1, "at 26 the features' members alone");
@@ -756,7 +755,7 @@ fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
                 );
             }
         }
-    });
+    };
 }
 
 /// Every 27 hold: the features' recent entries and the centre's, through every source the server
@@ -766,8 +765,8 @@ fn every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold() {
 #[ignore = "slow: range queries about four features' lists and the centre's at three times under \
             every 27 hold"]
 fn every_recent_entry_in_a_sphere_is_returned_once_under_every_27_hold() {
-    with_every_27_hold(|| {
-        let galaxy = milky_way(GalaxyRules::every_27_hold());
+    {
+        let galaxy = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
         with_served(&galaxy, |sources, reads| {
             assert_eq!(
                 sources.len(),
@@ -788,7 +787,7 @@ fn every_recent_entry_in_a_sphere_is_returned_once_under_every_27_hold() {
             assert_no_faults("the features under every 27 hold", features.0, &features.1);
             assert_no_faults("the centre under every 27 hold", centre.0, &centre.1);
         });
-    });
+    };
 }
 
 /// Every 27 hold: plan 11's binary classes on the features' and the centre's lists (P11.T8.f),
@@ -799,8 +798,8 @@ fn every_recent_entry_in_a_sphere_is_returned_once_under_every_27_hold() {
 #[ignore = "slow: range queries about the binary entries of four features' lists, a globular's and \
             the centre's at three times under every 27 hold"]
 fn every_listed_binary_in_a_sphere_is_returned_once_under_every_27_hold() {
-    with_every_27_hold(|| {
-        let galaxy = milky_way(GalaxyRules::every_27_hold());
+    {
+        let galaxy = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
         with_served(&galaxy, |sources, reads| {
             let features = features_in_range(
                 (&galaxy, reads),
@@ -824,7 +823,7 @@ fn every_listed_binary_in_a_sphere_is_returned_once_under_every_27_hold() {
                 &centre.1,
             );
         });
-    });
+    };
 }
 
 /// A listed core collapse's place at `t` from its death on, as the class's entries move
@@ -978,8 +977,8 @@ fn kicked_entries(
 #[ignore = "slow: four features' and the centre's listed core collapses, queried where their kicks \
             take them, under every 27 hold"]
 fn a_listed_core_collapse_moves_on_its_remnant_s_kick_under_every_27_hold() {
-    with_every_27_hold(|| {
-        let galaxy = milky_way(GalaxyRules::every_27_hold());
+    {
+        let galaxy = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
         let kicked = kicked_entries(&galaxy, &features_asked(&galaxy, Kind::Recent));
         eprintln!("{} kicked places", kicked.len());
         assert!(kicked.len() > 4, "listed core collapses with kicks");
@@ -1016,5 +1015,5 @@ fn a_listed_core_collapse_moves_on_its_remnant_s_kick_under_every_27_hold() {
                 &faults,
             );
         });
-    });
+    };
 }

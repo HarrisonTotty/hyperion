@@ -199,7 +199,6 @@ mod tests {
     use super::*;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::rules::GalaxyRules;
-    use crate::planetary::testing::with_every_27_hold;
     use crate::rng::Seed;
     use crate::stellar::binary::SegmentKind;
     use crate::stellar::remnant::KickMode;
@@ -253,10 +252,10 @@ mod tests {
         let galaxy = Galaxy::from_params_with_rules(
             Seed::new(0x0b17_15a0_0000_0001),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture's gas is mostly neutral");
-        let (_, ends) = with_every_27_hold(|| {
+        let (_, ends) = {
             slab_pairs(&galaxy, 10_000_000, |record, timeline, initial| {
                 if initial[1].value() >= 1.5 {
                     return None;
@@ -295,7 +294,7 @@ mod tests {
                 };
                 Some((complete, end))
             })
-        });
+        };
         let mut counts: BTreeMap<(bool, End), usize> = BTreeMap::new();
         for key in ends {
             *counts.entry(key).or_default() += 1;

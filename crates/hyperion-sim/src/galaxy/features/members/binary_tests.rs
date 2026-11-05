@@ -32,7 +32,7 @@ fn milky_way() -> &'static Galaxy {
         Galaxy::from_params_with_rules(
             Seed::new(0x1108_f000_0000_0002),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .unwrap()
     })

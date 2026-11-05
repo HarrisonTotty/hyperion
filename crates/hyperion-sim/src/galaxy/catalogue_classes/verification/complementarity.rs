@@ -839,7 +839,10 @@ fn run(rules: GalaxyRules, name: &str) -> (Tally, (u64, u64)) {
 #[test]
 #[ignore = "slow: 10⁵ mark sets and the ridges' cells under every 27 hold (10⁴ on wasm)"]
 fn the_grid_and_the_catalogue_are_complementary_under_every_27_hold() {
-    let (tally, (claimed, kept)) = run(GalaxyRules::every_27_hold(), "every 27 hold");
+    let (tally, (claimed, kept)) = run(
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        "every 27 hold",
+    );
     assert!(claimed > 0 && kept > floor(10_000), "{claimed} {kept}");
     assert_eq!(tally.holders.values().sum::<u64>(), MARK_SETS);
     for holder in [
@@ -883,7 +886,7 @@ fn the_grid_and_the_catalogue_are_complementary_under_every_27_hold() {
 #[ignore = "slow: 10⁵ mark sets and the ridges' cells under every 26 hold (10⁴ on wasm)"]
 fn the_grid_and_the_catalogue_are_complementary_under_every_26_hold() {
     let (tally, (claimed, _)) = run(
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
         "every 26 hold with its retargets",
     );
     assert!(claimed > 0, "{claimed}");

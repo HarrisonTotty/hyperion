@@ -318,8 +318,7 @@ mod tests {
     /// and the draw, its rank, its floor and their inverses are the population's.
     #[test]
     fn under_27_the_sun_s_ratios_move_no_share() {
-        use crate::planetary::testing::with_every_27_hold;
-        with_every_27_hold(|| {
+        {
             let sun = CoreShareShift::of_host(solar_magnesium_to_silicon(), Dex::ZERO);
             assert_same_bits(sun.value(), 0.0);
             for i in 0..=1_000_u32 {
@@ -339,7 +338,7 @@ mod tests {
                 assert_same_bits(sun.about_host(rank), rank);
                 assert_same_bits(sun.solar_equivalent(rank), rank);
             }
-        });
+        };
     }
 
     /// Under every 27 hold an α-rich host's iron moves an Earth's core share from 0.325 to 0.325 ρ:
@@ -349,8 +348,7 @@ mod tests {
     /// solids hold a little more iron: its shift is small and positive.
     #[test]
     fn under_27_an_alpha_rich_host_s_earth_holds_less_iron() {
-        use crate::planetary::testing::with_every_27_hold;
-        with_every_27_hold(|| {
+        {
             let solar = solar_magnesium_to_silicon();
             for (alpha, rho) in [(0.12, 0.822), (0.2, 0.715), (0.3, 0.596)] {
                 let shift = CoreShareShift::of_host(solar, Dex::new(alpha));
@@ -376,7 +374,7 @@ mod tests {
                     && (0.0..0.05).contains(&magnesium_rich.value()),
                 "{silicon_rich:?} {magnesium_rich:?}"
             );
-        });
+        };
     }
 
     /// Under every 27 hold the draw is finite, inside (0, 1) and rises with the rank, and its
@@ -384,8 +382,7 @@ mod tests {
     /// −0.05 to +0.4.
     #[test]
     fn under_27_the_draw_rises_with_its_rank_about_every_host() {
-        use crate::planetary::testing::with_every_27_hold;
-        with_every_27_hold(|| {
+        {
             for ratio in [0.7, 0.9, 1.1, 1.3, 1.5] {
                 for alpha in [-0.05, 0.0, 0.1, 0.2, 0.3, 0.4] {
                     let shift = CoreShareShift::of_host(ratio, Dex::new(alpha));
@@ -407,6 +404,6 @@ mod tests {
                     }
                 }
             }
-        });
+        };
     }
 }

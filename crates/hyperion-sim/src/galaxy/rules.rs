@@ -66,16 +66,6 @@ impl GalaxyRules {
             stellar: StellarRules::of_version(version),
         }
     }
-
-    /// Every galaxy and stellar hold at 27 in force, for a test that asserts a 27 figure: the
-    /// version's rules from 27, every galaxy and stellar hold at 27 being on the record (train 27).
-    /// It stays for the tests that name 27's rules and for the holds at 28, whose planetary helper
-    /// builds on `planetary::testing::with_every_27_hold`; the 28 bump deletes it with them.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_27_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(27))
-    }
 }
 
 #[cfg(test)]
@@ -88,7 +78,7 @@ mod tests {
     use crate::rng::Seed;
 
     /// D3: a galaxy built the usual way carries the version's rules, and equals one built under
-    /// them explicitly; from 27 one built under every 27 hold is the same galaxy.
+    /// them explicitly.
     #[test]
     fn a_galaxy_carries_the_version_s_rules() {
         let seed = Seed::new(0x0928_bb00_0000_0001);
@@ -103,18 +93,13 @@ mod tests {
         .expect("the Milky Way fixture builds");
         assert_eq!(built, explicit);
         assert_eq!(format!("{built:?}"), format!("{explicit:?}"));
-        let at_27 = Galaxy::from_params_with_rules(
-            seed,
-            GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
-        )
-        .expect("the Milky Way fixture builds");
-        assert_eq!(built, at_27);
-        assert_eq!(at_27.rules(), GalaxyRules::every_27_hold());
         // The rules ride the builders that return the same galaxy with something added or
         // changed; `with_full_potential`'s is held by the exact orbit's D4 test, which builds one.
-        let substellar = at_27.with_substellar_params(SubstellarParams::generator_default());
-        assert_eq!(substellar.rules(), GalaxyRules::every_27_hold());
+        let substellar = built.with_substellar_params(SubstellarParams::generator_default());
+        assert_eq!(
+            substellar.rules(),
+            GalaxyRules::of_version(GENERATOR_VERSION)
+        );
     }
 
     /// `Galaxy::with_rules` keeps the centre's model while the stellar rules stay as they were, and
@@ -157,37 +142,11 @@ mod tests {
             GalaxyRules::of_version(GENERATOR_VERSION).stellar,
             StellarRules::of_version(GENERATOR_VERSION)
         );
-        assert_eq!(
-            GalaxyRules::of_version(crate::GENERATOR_VERSION).stellar,
-            StellarRules::of_version(crate::GENERATOR_VERSION)
-        );
-        for v in [23, 24, 25, 26] {
+        for v in [23, 24, 25, 26, 27] {
             assert_eq!(
                 GalaxyRules::of_version(GeneratorVersion::new(v)).stellar,
                 StellarRules::of_version(GeneratorVersion::new(v))
             );
         }
-    }
-
-    /// Each hold retargeted from 26 to 27 (train 26) is held below 27 and new from it on, in every
-    /// 27 hold.
-    #[test]
-    fn each_retargeted_hold_turns_on_at_27() {}
-
-    /// Every 27 hold is every 26 hold with its retargets and the stellar rules' holds at 27: the
-    /// galaxy holds none of its own at 27.
-    #[test]
-    fn each_27_hold_turns_on_at_27() {
-        assert_eq!(
-            GalaxyRules::every_27_hold(),
-            GalaxyRules {
-                stellar: StellarRules::of_version(GeneratorVersion::new(27)),
-                ..GalaxyRules::every_27_hold()
-            }
-        );
-        assert_eq!(
-            GalaxyRules::every_27_hold().stellar,
-            StellarRules::every_27_hold()
-        );
     }
 }

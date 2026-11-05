@@ -57,9 +57,13 @@ fn galaxy_26() -> &'static Galaxy {
     GALAXY.get_or_init(|| {
         use crate::galaxy::rules::GalaxyRules;
         let params = GalaxyParams::milky_way_like();
-        Galaxy::from_params_with_rules(Seed::new(SEED), params, GalaxyRules::every_27_hold())
-            .expect("the Milky Way fixture's gas is mostly neutral")
-            .with_full_potential()
+        Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            params,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral")
+        .with_full_potential()
     })
 }
 

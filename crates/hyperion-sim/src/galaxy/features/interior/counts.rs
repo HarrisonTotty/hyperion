@@ -856,7 +856,7 @@ mod tests {
         let galaxy = Galaxy::from_params_with_rules(
             Seed::new(0x0909_f000_0000_0027),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .unwrap();
         let table = ejecting_table(&galaxy).expect("every 27 hold follows the runaways");

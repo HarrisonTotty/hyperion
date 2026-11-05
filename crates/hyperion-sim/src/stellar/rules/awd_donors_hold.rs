@@ -278,7 +278,7 @@ fn the_helium_fed_hosts_leave_the_fast_class_in_a_census() {
     let galaxy = Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture builds");
     let members = census(&galaxy, CENSUS_RECORDS);

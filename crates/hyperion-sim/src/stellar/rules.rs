@@ -61,15 +61,6 @@ impl StellarRules {
         }
     }
 
-    /// Every stellar hold at 27 in force, for a test that asserts a 27 figure without a galaxy:
-    /// none is left, the 27 folds having put each on the record, so these are the version's rules
-    /// from 27. The stellar part of `GalaxyRules::every_27_hold()`; the 28 bump deletes it with it.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_27_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(27))
-    }
-
     /// The test-only second table in place of the committed one
     /// ([`KickRankRules::Probe`]), which no version takes, under the version's other rules: the
     /// tests' door to every reader's choke point.

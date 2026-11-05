@@ -37,7 +37,7 @@ const SEED: u64 = 0x0935_0000_0000_0001;
 
 /// Every 26 hold with its retargets.
 fn rules_26() -> GalaxyRules {
-    GalaxyRules::every_27_hold()
+    GalaxyRules::of_version(crate::GENERATOR_VERSION)
 }
 
 /// The Milky Way at [`SEED`] under `rules`, with its kinematic tables, which a list needs.
@@ -446,10 +446,10 @@ fn the_cells_and_the_list_are_complementary_over_ten_thousand_members() {
 #[test]
 #[ignore = "slow: 10⁴ band-E members of the nurseries' cells under either arm, every 27 hold"]
 fn the_cells_and_the_list_are_complementary_under_every_27_hold() {
-    let on = milky_way(GalaxyRules::every_27_hold());
+    let on = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
     let off = milky_way(GalaxyRules {
         feature_classes: FeatureClassesRules::Unlisted,
-        ..GalaxyRules::every_27_hold()
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
     });
     complementary_over_ten_thousand_members(&off, &on);
 }
@@ -764,7 +764,7 @@ fn the_features_hold_most_core_collapses_and_some_of_the_shells() {
 #[test]
 #[ignore = "slow: every catalogue feature's list and the core collapses' cells of the Milky Way"]
 fn the_features_share_of_core_collapses_under_every_27_hold_measured() {
-    let galaxy = milky_way(GalaxyRules::every_27_hold());
+    let galaxy = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION));
     let [core, _] = feature_tallies(&galaxy);
     let field_core = class_tally(
         &galaxy,

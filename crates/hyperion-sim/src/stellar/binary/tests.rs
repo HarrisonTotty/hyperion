@@ -394,7 +394,7 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence_under_every_27_hold()
     let timeline = evolve(
         &pair(6.0, 1.3, 630.0, 0.0, 0.02)
             .with_params(BinaryParams::GENERATOR.with_alpha_ce(1.0))
-            .with_rules(StellarRules::every_27_hold()),
+            .with_rules(StellarRules::of_version(crate::GENERATOR_VERSION)),
         Years::new(1.5e10),
     );
     let (stages, second) = papers_cataclysmic_variable_to_its_dwarf(&timeline);
@@ -6567,7 +6567,7 @@ fn an_unplaced_helium_core_is_its_helium_star() {
 
     let until = 1.2e10;
     let version = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
-    let every_27 = crate::stellar::rules::StellarRules::every_27_hold();
+    let every_27 = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
     let run =
         |input: &BinaryInput, rules| evolve(&input.clone().with_rules(rules), Years::new(until));
     for (name, input, core, rules) in [

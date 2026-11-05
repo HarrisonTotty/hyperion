@@ -30,7 +30,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
 use crate::planetary::placement::zones::{PairBound, ZONE_EDGE_TOLERANCE};
-use crate::planetary::testing::{PairHistory, SampleFilter, sample_records, with_every_28_hold};
+use crate::planetary::testing::{PairHistory, SampleFilter, sample_records};
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::{PairTimeline, SystemState, pair_of};
 
@@ -480,7 +480,7 @@ fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
         )
         .expect("the Milky Way fixture's gas is mostly neutral");
         let records = sample_records(&galaxy, SYSTEMS, SampleFilter::ALL).unwrap();
-        with_every_28_hold(|| census_of(&galaxy, &records, &mut margin));
+        census_of(&galaxy, &records, &mut margin);
     }
     eprintln!("{}", margin.table("every 28 hold"));
     {

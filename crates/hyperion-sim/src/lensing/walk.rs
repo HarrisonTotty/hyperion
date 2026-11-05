@@ -2302,7 +2302,7 @@ mod tests {
         let weighted = Galaxy::from_params_with_rules(
             Seed::new(0x0934_b0e0_0000_0001),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds")
         .with_full_potential();

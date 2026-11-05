@@ -56,7 +56,7 @@ use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{Modelled, RecordSection, SectionState};
 use crate::planetary::testing::in_shares;
-use crate::planetary::testing::{SampleFilter, sample_records, with_every_27_hold};
+use crate::planetary::testing::{SampleFilter, sample_records};
 use crate::substance::{self, CondensedOptics, SubstanceId, by_key};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
@@ -1550,9 +1550,8 @@ fn composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold() {
 /// walked ([`audit_walk_system`]) into its share's tally with its system's rank and context, the
 /// tallies in sample order.
 ///
-/// The galaxy is built under `GalaxyRules::every_27_hold`, its own and the stellar holds, and each
-/// share's systems are generated under [`with_every_27_hold`] on its own thread, since the
-/// planetary holds' switches are each thread's.
+/// The galaxy is built under the version's rules, its own and the stellar holds, and each share's
+/// systems are generated on its own thread under the version's planetary rules.
 fn tallies_under_every_27_hold<T: Default + Send>(
     systems: usize,
     visit: impl Fn(&mut T, usize, &SystemContext, &AuditCase<'_>) + Sync,
@@ -1560,7 +1559,7 @@ fn tallies_under_every_27_hold<T: Default + Send>(
     let galaxy = Galaxy::from_params_with_rules(
         SEED,
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way's parameters build a galaxy");
     let records = sample_records(&galaxy, systems, SampleFilter::ALL)
@@ -1570,7 +1569,7 @@ fn tallies_under_every_27_hold<T: Default + Send>(
         let first = k * SYSTEMS_PER_SHARE;
         let end = records.len().min(first + SYSTEMS_PER_SHARE);
         let mut tally = T::default();
-        with_every_27_hold(|| {
+        {
             for (rank, record) in (first..).zip(&records[first..end]) {
                 let ctx = SystemContext::from_record(&galaxy, record);
                 let system = generate(SEED, &ctx);
@@ -1578,7 +1577,7 @@ fn tallies_under_every_27_hold<T: Default + Send>(
                     visit(&mut tally, rank, &ctx, case);
                 });
             }
-        });
+        };
         tally
     })
 }
@@ -1965,9 +1964,8 @@ fn composition_census_under_every_27_hold_publishes_seven_hot_small_bodies_past_
     assert_eq!(count.old_at_their_warmest(), survivors, "{report}");
 }
 
-/// [`tallies_under_every_27_hold`]'s shares under every hold of version 28 instead
-/// ([`with_every_28_hold`](crate::planetary::testing::with_every_28_hold)), each system visited
-/// whole: the galaxy's rules are 27's, since no hold of the galaxy's is at 28.
+/// [`tallies_under_every_27_hold`]'s shares, each system visited whole: the version's rules, every
+/// hold of version 28 on the record (train 28).
 fn tallies_under_every_28_hold<T: Default + Send>(
     systems: usize,
     visit: impl Fn(&mut T, usize, &SystemContext, &PlanetarySystem) + Sync,
@@ -1975,7 +1973,7 @@ fn tallies_under_every_28_hold<T: Default + Send>(
     let galaxy = Galaxy::from_params_with_rules(
         SEED,
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way's parameters build a galaxy");
     let records = sample_records(&galaxy, systems, SampleFilter::ALL)
@@ -1985,13 +1983,13 @@ fn tallies_under_every_28_hold<T: Default + Send>(
         let first = k * SYSTEMS_PER_SHARE;
         let end = records.len().min(first + SYSTEMS_PER_SHARE);
         let mut tally = T::default();
-        crate::planetary::testing::with_every_28_hold(|| {
+        {
             for (rank, record) in (first..).zip(&records[first..end]) {
                 let ctx = SystemContext::from_record(&galaxy, record);
                 let system = generate(SEED, &ctx);
                 visit(&mut tally, rank, &ctx, &system);
             }
-        });
+        };
         tally
     })
 }

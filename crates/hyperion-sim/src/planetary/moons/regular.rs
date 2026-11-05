@@ -4309,7 +4309,6 @@ mod tests {
     fn under_every_26_hold_the_icy_moons_take_their_rock_s_lag() {
         use crate::planetary::derive::atmosphere::{Gas, SurfaceState, jeans_parameter};
         use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
-        use crate::planetary::testing::with_every_27_hold;
         let jupiter = table_giant("Jupiter", 5, None);
         let saturn = table_giant("Saturn", 6, None);
         let neptune = table_giant("Neptune", 8, None);
@@ -4331,9 +4330,8 @@ mod tests {
             };
             for rank in every_rank(keep) {
                 let derive = || own_moon((kg, rank), &orbit, giant, &volatiles, bulk);
-                let (at_24, at_26) = (derive(), with_every_27_hold(derive));
-                let held =
-                    with_every_27_hold(|| with_icy_regolith(IcyRegolithRules::Frost, derive));
+                let (at_24, at_26) = (derive(), derive());
+                let held = with_icy_regolith(IcyRegolithRules::Frost, derive);
                 let (bond_24, bond_26) = (at_24.albedo().value(), at_26.albedo().value());
                 let lambda = |moon: &DerivedMoon| {
                     jeans_parameter(
@@ -4357,7 +4355,7 @@ mod tests {
                 );
                 assert_eq!(
                     format!("{at_26:?}"),
-                    format!("{:?}", with_every_27_hold(derive)),
+                    format!("{:?}", derive()),
                     "{name}: twice under the rule"
                 );
                 assert_same_bits(
@@ -4413,7 +4411,6 @@ mod tests {
             HazeLayerRules, sediment_share, snapshot_haze_optical_depth, with_haze_layer,
             with_scattering_held,
         };
-        use crate::planetary::testing::with_every_27_hold;
         let saturn = table_giant("Saturn", 6, None);
         let ((kg, keep), orbit) = table_moon(TITAN, &saturn);
         for rank in every_rank(keep) {
@@ -4426,24 +4423,24 @@ mod tests {
                     MoonBulk::Derived,
                 )
             };
-            let at_26 = with_every_27_hold(derive);
+            let at_26 = derive();
             assert_eq!(
                 format!("{at_26:?}"),
-                format!("{:?}", with_every_27_hold(derive)),
+                format!("{:?}", derive()),
                 "Titan at {rank:?}: twice under every 26 hold"
             );
-            let held = with_every_27_hold(|| with_scattering_held(derive));
-            let clear = with_every_27_hold(|| with_haze_layer(HazeLayerRules::Clear, derive));
+            let held = with_scattering_held(derive);
+            let clear = with_haze_layer(HazeLayerRules::Clear, derive);
             let air = at_26.atmosphere();
             let (cloud, bond) = (air.cloud_fraction(), at_26.albedo().value());
-            let (haze, sediment) = with_every_27_hold(|| {
+            let (haze, sediment) = {
                 let haze = snapshot_haze_optical_depth(
                     air.partial_pressures(),
                     at_26.body().surface_gravity(),
                     crate::units::Kelvin::new(5_772.0),
                 );
                 (haze, sediment_share(haze))
-            });
+            };
             eprintln!(
                 "Titan at {rank:?}: cloud {cloud:.4} ({:.4} held), haze {haze:.3}, sediment \
                  {sediment:.3}, Bond {bond:.4} ({:.4} held), T_eq {:.1} K, T_s {:.1} K ({:.1} K \
@@ -5446,9 +5443,8 @@ mod tests {
     #[test]
     fn under_every_27_hold_the_generated_moons_a_porous_core_moves_are_recorded() {
         use crate::planetary::moons::tides::TidalBranch;
-        use crate::planetary::testing::with_every_27_hold;
         const MOONS: usize = 5_000;
-        let porous = with_every_27_hold(|| {
+        let porous = {
             let mut moons = Vec::with_capacity(MOONS);
             'giants: for i in 0..1_000 {
                 for giant in &table_giants() {
@@ -5466,7 +5462,7 @@ mod tests {
                 }
             }
             moons
-        });
+        };
         assert_eq!(porous.len(), MOONS);
         let index = |branch: TidalBranch| match branch {
             TidalBranch::Cold => 0,
@@ -5666,10 +5662,9 @@ mod tests {
         count: usize,
         kept: bool,
     ) -> (Vec<CensusMoon>, Vec<CensusPair>, Vec<u32>) {
-        use crate::planetary::testing::with_every_27_hold;
         let (mut moons, mut pairs) = (Vec::with_capacity(count + 6), Vec::new());
         let mut found = vec![0_u32; giants.len()];
-        with_every_27_hold(|| {
+        {
             'giants: for i in 0..2_000 {
                 for (g, giant) in giants.iter().enumerate() {
                     let slot = giant.parent.id().body_index().to_be_bytes()[0];
@@ -5732,7 +5727,7 @@ mod tests {
                     }
                 }
             }
-        });
+        };
         (moons, pairs, found)
     }
 
@@ -5883,12 +5878,10 @@ mod tests {
     #[test]
     fn under_every_27_hold_the_generated_moons_take_their_eccentricities_at_their_age() {
         use crate::planetary::moons::tides::TidalBranch;
-        use crate::planetary::testing::with_every_27_hold;
         let giants = census_giants();
         let census = damping_census(&giants, SOLAR_AGE, 5_000, true);
         // The models are read under the rules that damped them.
-        let (lines, fresh_ratio, fresh_tau, _) =
-            with_every_27_hold(|| census_checks(&giants, SOLAR_AGE, &census));
+        let (lines, fresh_ratio, fresh_tau, _) = census_checks(&giants, SOLAR_AGE, &census);
         let moons = &census.0;
         let damped = moons
             .iter()
@@ -5904,7 +5897,7 @@ mod tests {
                     .is_some_and(|(t, _)| t.branch() == TidalBranch::Ocean)
             })
             .count();
-        let flipped = with_every_27_hold(|| {
+        let flipped = {
             moons
                 .iter()
                 .filter(|m| {
@@ -5913,7 +5906,7 @@ mod tests {
                         .is_some_and(|model| model.tides_branch(e) != m.own.branch())
                 })
                 .count()
-        });
+        };
         eprintln!(
             "{lines}  {damped} damped; {kept_ocean} on the ocean branch at the e as kept. Derived \
              afresh on the damped orbits: {flipped} moons on another branch than their model's, a \
@@ -5937,10 +5930,7 @@ mod tests {
         for years in [1e7, 1e8, 1e9, 1e10] {
             let age = Years::new(years);
             let census = damping_census(&giants, age, 5_000, false);
-            let (lines, fresh_ratio, fresh_tau, tail) =
-                crate::planetary::testing::with_every_27_hold(|| {
-                    census_checks(&giants, age, &census)
-                });
+            let (lines, fresh_ratio, fresh_tau, tail) = { census_checks(&giants, age, &census) };
             eprintln!(
                 "{lines}  derived afresh: a pair's heat at most {fresh_ratio:.6} of its budget, a \
                  free moon's damping time at least {fresh_tau:.6} of the age; {tail} at 10 W m⁻² \
@@ -5959,7 +5949,6 @@ mod tests {
     /// balance as a share of F, and the moons on a jump.
     fn surface_heat_census(age: Years) {
         use crate::planetary::moons::tides::{SURFACE_HEAT_TOLERANCE, TidalBranch};
-        use crate::planetary::testing::with_every_27_hold;
         use crate::units::consts::STEFAN_BOLTZMANN;
         let giants = census_giants();
         let index = |branch: TidalBranch| match branch {
@@ -5973,7 +5962,7 @@ mod tests {
             branches[index(moon.own.branch())] += 1;
         }
         // Each moon's balance on its model, read under the rules that damped the moons.
-        let (rise, past, solves, residual, jumps) = with_every_27_hold(|| {
+        let (rise, past, solves, residual, jumps) = {
             let mut jumps = Vec::new();
             let (mut rise, mut past) = (None::<(f64, f64, f64, TidalBranch)>, [0_u32; 2]);
             let (mut solves, mut residual) = ([0_u32, 0, 0], 0.0_f64);
@@ -6006,7 +5995,7 @@ mod tests {
                 }
             }
             (rise, past, solves, residual, jumps)
-        });
+        };
         eprintln!(
             "{} moons at {:.3e} yr, their surfaces radiated, by branch afresh (cold, ocean, \
              heated): {branches:?}; the largest rise {rise:?} (K, T_eq K, W m⁻², branch); {} at 1 K \
@@ -6499,10 +6488,9 @@ mod tests {
     /// sweep gives its model's heat and damping time at eccentricities out of order and repeated.
     #[test]
     fn the_damping_s_memo_and_sweeps_are_its_fresh_solves_to_the_bit() {
-        use crate::planetary::testing::with_every_27_hold;
         let giants = census_giants();
         let (mut systems, mut pairs, mut swept) = (0_u32, 0_u32, 0_u32);
-        with_every_27_hold(|| {
+        {
             for age in [Years::new(1e8), SOLAR_AGE] {
                 for i in 0..12 {
                     for giant in &giants {
@@ -6548,7 +6536,7 @@ mod tests {
                     }
                 }
             }
-        });
+        };
         eprintln!("{systems} systems of regular moons, {pairs} pairs that hold, {swept} sweeps");
         assert!(pairs > 0 && swept > 100, "{pairs} pairs, {swept} sweeps");
     }

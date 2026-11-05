@@ -43,7 +43,7 @@ fn arc() -> &'static Galaxy {
         Galaxy::from_params_with_rules(
             Seed::new(MILKY_WAY_SEED),
             GalaxyParams::milky_way_like(),
-            GalaxyRules::every_27_hold(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
         )
         .expect("the Milky Way fixture builds under every 27 hold")
         .with_full_potential()
@@ -279,7 +279,7 @@ fn the_arc_gives_the_same_seed_the_same_answers_twice_and_in_any_order() {
     let again = Galaxy::from_params_with_rules(
         Seed::new(MILKY_WAY_SEED),
         GalaxyParams::milky_way_like(),
-        GalaxyRules::every_27_hold(),
+        GalaxyRules::of_version(crate::GENERATOR_VERSION),
     )
     .expect("the Milky Way fixture builds under every 27 hold")
     .with_full_potential();
