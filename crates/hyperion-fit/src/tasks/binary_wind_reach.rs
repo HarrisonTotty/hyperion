@@ -1,4 +1,4 @@
-//! `run binary_wind_reach`: plan 11's wind reach table (P11.T12's fix, held at 29), what bounds the
+//! `run binary_wind_reach`: plan 11's wind reach table (P11.T12's fix, from 29), what bounds the
 //! wind a star of any mass and metallicity interval can lose by an age as a wide pair's walk reads
 //! it, which the census's pair bound (`stellar::binary::pair_light_bound`) reads for its `Detached`
 //! from generator version 29.
@@ -298,7 +298,7 @@ fn finite_or_zero(v: f64) -> f64 {
     if v.is_finite() { v } else { 0.0 }
 }
 
-/// The task (P11.T12's fix, held at 29).
+/// The task (P11.T12's fix).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct BinaryWindReachTask;
 
@@ -390,7 +390,7 @@ impl FitTask for BinaryWindReachTask {
                  {:.4e} R☉² M☉⁻¹; {} cells lose no wind by 10^10.2 years; {} cells reach the \
                  asymptotic giant branch, the most AGB loss {:.3} M☉ and the largest dust radius \
                  {:.1} R☉, margins included; the sim's `light::tests` tallies hold no `Detached` \
-                 pair wind-fed under the 29 arm",
+                 pair wind-fed",
                 CELLS,
                 AGE_BINS,
                 f.samples,
