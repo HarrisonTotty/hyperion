@@ -263,6 +263,19 @@ pub trait OneShotClass: ClassProcess {
             .collect()
     }
 
+    /// Whether the class's events go off away from where its cells place their candidates: false,
+    /// the default, for a class whose event's site lies in its candidate's cell, as a supernova's
+    /// does; true for a class whose hosts are placed in their cells at the epoch and move to their
+    /// events, as plan 11's mergers are, within [`LIFETIME_REACH`] of their cells (the catalogue's
+    /// rule 5). A cell's one-shot cut ([`one_shot_scan_cell`]) widens its light times by that
+    /// reach for such a class, as the magnetars' cut does (perf-alert-walks-cpu).
+    ///
+    /// [`LIFETIME_REACH`]: crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH
+    #[must_use]
+    fn events_drift(&self) -> bool {
+        false
+    }
+
     /// The events of the class's cell `key` whose time `wanted` may accept, in index order.
     ///
     /// They are [`cell_events`](Self::cell_events)' own, less any of a candidate whose time, read
@@ -346,6 +359,11 @@ impl OneShotClass for StellarMergers {
         stellar_merger_event(galaxy, entry)
     }
 
+    /// True: a merger's host is placed in its cell at the epoch and moves to its merger.
+    fn events_drift(&self) -> bool {
+        true
+    }
+
     /// The cell's events from its scan marks, which are its entries' exactly (the marks of all its
     /// candidates, [`scan_merger_cell`]'s), without the contact pairs and merged stars the
     /// entries build.
@@ -355,8 +373,10 @@ impl OneShotClass for StellarMergers {
         self.cell_events_when_in(galaxy, key, 0..u32::MAX, |_| true)
     }
 
-    /// Every event of the candidates `indices` of the cell, from their scan marks (those of
-    /// [`scan_merger_cell`] of the indices): a merger's candidates read no time first.
+    /// The events of the candidates `indices` of the cell whose merger time `wanted` accepts, from
+    /// their scan marks (those of [`scan_merger_cell`] of the indices): a merger's time is read
+    /// first, and is its event's onset, so a refused candidate is drawn no further
+    /// (perf-alert-walks-cpu).
     ///
     /// [`scan_merger_cell`]: crate::stellar::binary::scan::scan_merger_cell
     fn cell_events_when_in(
@@ -364,10 +384,10 @@ impl OneShotClass for StellarMergers {
         galaxy: &Galaxy,
         key: CatalogueCellKey,
         indices: Range<u32>,
-        _wanted: impl Fn(UniverseTime) -> bool,
+        wanted: impl Fn(UniverseTime) -> bool,
     ) -> Vec<OneShotEvent> {
         let mut marks = Vec::new();
-        scan_merger_cell_in(galaxy, self, key, indices, &mut marks);
+        scan_merger_cell_in(galaxy, self, key, indices, wanted, &mut marks);
         let mut listed = Vec::with_capacity(1);
         marks
             .iter()
@@ -389,6 +409,11 @@ impl OneShotClass for NeutronStarMergers {
         neutron_star_merger_event(galaxy, entry)
     }
 
+    /// True: a merger's host is placed in its cell at the epoch and moves to its merger.
+    fn events_drift(&self) -> bool {
+        true
+    }
+
     /// The cell's events from its scan marks, which are its entries' exactly (the marks of all its
     /// candidates, [`scan_nsm_cell`]'s), without the inspirals and remnants the entries build.
     ///
@@ -397,8 +422,10 @@ impl OneShotClass for NeutronStarMergers {
         self.cell_events_when_in(galaxy, key, 0..u32::MAX, |_| true)
     }
 
-    /// Every event of the candidates `indices` of the cell, from their scan marks (those of
-    /// [`scan_nsm_cell`] of the indices): a merger's candidates read no time first.
+    /// The events of the candidates `indices` of the cell whose merger time `wanted` accepts, from
+    /// their scan marks (those of [`scan_nsm_cell`] of the indices): a merger's time is read
+    /// first, and is its event's onset, so a refused candidate is drawn no further
+    /// (perf-alert-walks-cpu).
     ///
     /// [`scan_nsm_cell`]: crate::stellar::binary::scan::scan_nsm_cell
     fn cell_events_when_in(
@@ -406,10 +433,10 @@ impl OneShotClass for NeutronStarMergers {
         galaxy: &Galaxy,
         key: CatalogueCellKey,
         indices: Range<u32>,
-        _wanted: impl Fn(UniverseTime) -> bool,
+        wanted: impl Fn(UniverseTime) -> bool,
     ) -> Vec<OneShotEvent> {
         let mut marks = Vec::new();
-        scan_nsm_cell_in(galaxy, self, key, indices, &mut marks);
+        scan_nsm_cell_in(galaxy, self, key, indices, wanted, &mut marks);
         let mut listed = Vec::with_capacity(1);
         marks
             .iter()
@@ -797,8 +824,12 @@ pub fn one_shot_scan_cell_in<P: OneShotClass>(
     }
     let kind = process.kind();
     let observer = *query.observer_position();
-    let candidates: Vec<Candidate> = process
-        .cell_events_when_in(galaxy, cell, indices, cut::one_shot(query, &cell))
+    let events = if process.events_drift() {
+        process.cell_events_when_in(galaxy, cell, indices, cut::one_shot_drifting(query, &cell))
+    } else {
+        process.cell_events_when_in(galaxy, cell, indices, cut::one_shot(query, &cell))
+    };
+    let candidates: Vec<Candidate> = events
         .iter()
         .filter_map(|event| candidate(event, &observer, query))
         .collect();

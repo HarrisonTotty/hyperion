@@ -41,7 +41,9 @@ use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::catalogue_classes::binary::{NeutronStarMergers, StellarMergers};
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
-use hyperion_sim::galaxy::catalogue_classes::supernova::{SupernovaEntry, SupernovaKind};
+use hyperion_sim::galaxy::catalogue_classes::supernova::{
+    LIFETIME_REACH, SupernovaEntry, SupernovaKind,
+};
 use hyperion_sim::galaxy::catalogue_classes::type_ia::{IaChannel, TypeIaProcess};
 use hyperion_sim::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMember, CatalogueMotion, CatalogueSystem,
@@ -471,6 +473,170 @@ fn one_shot_alerts_of_a_cell_in_parts_are_the_whole_cells() {
         cells >= 5 && most >= 2,
         "{seen} in {cells} cells, at most {most}"
     );
+}
+
+/// A toy class like the mergers (perf-alert-walks-cpu): [`ToyTypeIa`]'s candidates, whose sites
+/// lie up to [`TOY_SCATTER_LY`] beyond their cells' boxes as a merger's host moves from its cell,
+/// their events read through a cut on their own times, and its walk's cut widened for that drift
+/// or not (`OneShotClass::events_drift`).
+struct DriftingToy {
+    toy: ToyTypeIa,
+    drifts: bool,
+}
+
+impl ClassProcess for DriftingToy {
+    type Candidate = <ToyTypeIa as ClassProcess>::Candidate;
+    type Entry = <ToyTypeIa as ClassProcess>::Entry;
+
+    fn class(&self) -> ClassId {
+        self.toy.class()
+    }
+
+    fn bound(&self, galaxy: &Galaxy, cell: &CatalogueCellKey) -> PerCubicLightYear {
+        self.toy.bound(galaxy, cell)
+    }
+
+    fn candidate(
+        &self,
+        galaxy: &Galaxy,
+        cell: &CatalogueCellKey,
+        id: CatalogueSystemId,
+        bound: PerCubicLightYear,
+    ) -> Option<Self::Candidate> {
+        self.toy.candidate(galaxy, cell, id, bound)
+    }
+
+    fn test(&self, galaxy: &Galaxy, candidate: Self::Candidate) -> Option<Self::Entry> {
+        self.toy.test(galaxy, candidate)
+    }
+
+    fn members(&self, entry: &Self::Entry) -> u8 {
+        self.toy.members(entry)
+    }
+
+    fn system(&self, galaxy: &Galaxy, member: &CatalogueMember<Self::Entry>) -> CatalogueSystem {
+        self.toy.system(galaxy, member)
+    }
+}
+
+impl OneShotClass for DriftingToy {
+    fn kind(&self) -> TransientKind {
+        TransientKind::TypeIa
+    }
+
+    fn event(&self, galaxy: &Galaxy, entry: &Self::Entry) -> Option<OneShotEvent> {
+        self.toy.event(galaxy, entry)
+    }
+
+    fn events_drift(&self) -> bool {
+        self.drifts
+    }
+
+    /// The part's events whose own times `wanted` takes, as a merger's scan cuts its candidates on
+    /// their merger times.
+    fn cell_events_when_in(
+        &self,
+        galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        indices: std::ops::Range<u32>,
+        wanted: impl Fn(UniverseTime) -> bool,
+    ) -> Vec<OneShotEvent> {
+        self.toy
+            .cell_events_when_in(galaxy, key, indices, |_| true)
+            .into_iter()
+            .filter(|event| wanted(event.emitted()))
+            .collect()
+    }
+}
+
+/// The detections of `process`'s cells that `query` walks, each cell walked whole through its cut
+/// ([`one_shot_scan_cell`]), as the oracle sees them, by arrival and then by event.
+fn cut_walk<P: OneShotClass>(galaxy: &Galaxy, process: &P, query: &AlertQuery) -> Vec<Seen> {
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut out = Vec::new();
+    for cell in one_shot_scan_plan(process, query) {
+        let mut context = AlertContext::new(&mut noise, &NoModifiers);
+        one_shot_scan_cell(galaxy, &mut context, query, process, cell, &mut out);
+    }
+    let mut seen: Vec<_> = out.iter().map(Seen::of).collect();
+    seen.sort();
+    seen
+}
+
+/// A class whose events go off beyond its cells' boxes, cut on its events' own times, walks its
+/// whole cells' detections only with its cut widened by its drift (perf-alert-walks-cpu): seen
+/// from 1 ly beside each of three of the toy's events in the clock window whose sites lie over
+/// 10 ly beyond their cells' boxes, over a year about its arrival, the widened walk is the whole cells', and the box's
+/// own cut misses the event.
+#[test]
+fn one_shot_alerts_of_a_drifting_class_are_its_whole_cells_with_the_cut_widened() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0b00));
+    let toy = |drifts| DriftingToy {
+        toy: ToyTypeIa::new(),
+        drifts,
+    };
+    let (drifting, boxed) = (toy(true), toy(false));
+    let sensor = sensor(&[(AlertBand::Photometric(Band::V), 1.25e-4)]);
+    let target = TARGETS[0];
+    let around = AlertQuery::builder(
+        observer_at(target.position),
+        window(target.years, -0.5, 1.0),
+        sensor.clone(),
+    )
+    .build()
+    .unwrap();
+    let beyond = |key: &CatalogueCellKey, event: &OneShotEvent| {
+        let (origin, edge) = (key.origin_ly(), f64::from(key.edge_ly()));
+        let site = ly(&event.site());
+        let gap = (0..3).fold(0.0_f64, |sum, axis| {
+            let low = f64::from(origin[axis]);
+            let gap = (low - site[axis]).max(site[axis] - low - edge).max(0.0);
+            sum + gap * gap
+        });
+        gap.sqrt() > 10.0
+    };
+    let mut far: Vec<OneShotEvent> = Vec::new();
+    for (cell, _) in occupied_cells(&galaxy, &drifting, one_shot_scan_plan(&drifting, &around)) {
+        far.extend(
+            drifting
+                .cell_events(&galaxy, cell)
+                .into_iter()
+                .filter(|event| beyond(&cell, event))
+                // Seen from beside it within the clock window.
+                .filter(|event| {
+                    (-990.0..990.0).contains(&event.emitted().since_epoch().as_julian_years_f64())
+                }),
+        );
+        if far.len() >= 3 {
+            break;
+        }
+    }
+    assert!(
+        far.len() >= 3,
+        "three events beyond their cells: {}",
+        far.len()
+    );
+    far.truncate(3);
+    for event in &far {
+        let at = placed(event, [1.0, 0.0, 0.0], 1.0);
+        let arrival = arrival_years(event, &at);
+        let query = AlertQuery::builder(at, window(arrival, -0.5, 1.0), sensor.clone())
+            .build()
+            .unwrap();
+        let mut noise = NoiseCache::with_capacity(4_096);
+        let mut cells = KeepCells::default();
+        let whole = walked(&galaxy, &mut noise, &mut cells, &drifting, &query);
+        assert!(
+            whole.iter().any(|seen| seen.event == event.event()),
+            "the event is seen: {whole:?}"
+        );
+        assert_eq!(cut_walk(&galaxy, &drifting, &query), whole, "{event:?}");
+        let boxed_walk = cut_walk(&galaxy, &boxed, &query);
+        assert!(
+            !boxed_walk.iter().any(|seen| seen.event == event.event()),
+            "the box's cut misses it: {boxed_walk:?}"
+        );
+    }
 }
 
 /// Each detection's light (P12.T8.b.1) is its template's in its band through its line of sight:
@@ -955,10 +1121,46 @@ fn events_in_parts<P: OneShotClass>(
         .collect()
 }
 
+/// `process`'s merger times read first, against its `events` of cell `key`, the whole cell's
+/// (perf-alert-walks-cpu): the events read with a cut on that time are the whole cell's whose
+/// onsets the cut takes, in order; and each goes off within [`LIFETIME_REACH`] of the cell's box
+/// (the catalogue's rule 5), by which the mergers' one-shot cut widens its light times.
+fn check_times_read_first<P: OneShotClass>(
+    galaxy: &Galaxy,
+    process: &P,
+    key: CatalogueCellKey,
+    events: &[OneShotEvent],
+) {
+    let years = |years: i64| Span::from_seconds(years * 31_557_600);
+    let (from, to) = (
+        UniverseTime::EPOCH.checked_sub(years(120_000)).unwrap(),
+        UniverseTime::EPOCH.checked_sub(years(20_000)).unwrap(),
+    );
+    let wanted = move |t: UniverseTime| from <= t && t < to;
+    let cut = process.cell_events_when_in(galaxy, key, 0..u32::MAX, wanted);
+    let taken: Vec<_> = events
+        .iter()
+        .filter(|event| wanted(event.emitted()))
+        .copied()
+        .collect();
+    assert_eq!(cut, taken, "{key:?}");
+    let (origin, edge) = (key.origin_ly(), f64::from(key.edge_ly()));
+    for event in events {
+        let site = event.site().to_light_years_f64();
+        let gap = (0..3).fold(0.0_f64, |sum, axis| {
+            let low = f64::from(origin[axis]);
+            let gap = (low - site[axis]).max(site[axis] - low - edge).max(0.0);
+            sum + gap * gap
+        });
+        assert!(gap.sqrt() <= LIFETIME_REACH.value(), "{key:?}: {event:?}");
+    }
+}
+
 /// The merger classes' walk reads each cell's events from its scan marks, and they are its
-/// entries' own events, event for event, and its events read in parts of its candidates are its
-/// own in order: the stellar mergers of a stretch of the solar circle and every neutron-star
-/// merger cell of the galaxy, where a black hole's merger that ejects nothing lists none.
+/// entries' own events, event for event; its events read in parts of its candidates are its own in
+/// order; and its merger times read first are its events' onsets, which a cut takes as the whole
+/// cell's: the stellar mergers of a stretch of the solar circle and every neutron-star merger cell
+/// of the galaxy, where a black hole's merger that ejects nothing lists none.
 #[test]
 fn the_merger_classes_scan_marks_give_their_entries_events() {
     let galaxy = Galaxy::new(Seed::new(9));
@@ -973,6 +1175,7 @@ fn the_merger_classes_scan_marks_give_their_entries_events() {
             events,
             "{key:?}"
         );
+        check_times_read_first(&galaxy, &mergers, key, &events);
         assert!(events.iter().all(|event| matches!(
             event.light(),
             OneShotLight::Binary(BinaryLightCurve::LuminousRedNova(_))
@@ -1000,6 +1203,7 @@ fn the_merger_classes_scan_marks_give_their_entries_events() {
                         listed,
                         "{key:?}"
                     );
+                    check_times_read_first(&galaxy, &neutron_stars, key, &listed);
                 }
                 events += listed.len();
                 entries += CatalogueClassCell::generate(&galaxy, &neutron_stars, key)

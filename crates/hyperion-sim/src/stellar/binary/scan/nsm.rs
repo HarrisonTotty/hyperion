@@ -42,7 +42,7 @@ use crate::galaxy::catalogue_classes::{CatalogueCellKey, ClassProcess};
 use crate::galaxy::fields::ComponentId;
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
 use crate::math;
-use crate::rng::{Stream, tags};
+use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::RemnantRecipe;
@@ -473,8 +473,7 @@ pub(crate) fn nsm_marks_at(galaxy: &Galaxy, host: BinaryHost) -> Option<NsmScanM
     let key = host.key();
     let sampler = ClassSampler::new(&NSM_SAMPLER);
     // 2. T and the age.
-    let mut stream = Stream::open(seed, tags::CLASS_NSM_TIME, key);
-    let merger_time = horizon_time(stream.uniform());
+    let (merger_time, mut stream) = nsm_time_stream(seed, system);
     let rank = sampler.draw(NsmMark::AgeRank, 0.0, &mut stream);
     let age_at_epoch = host.age_at_rank(galaxy, rank);
     let merger_age = age_at_epoch.value() + merger_time.since_epoch().as_julian_years_f64();
@@ -555,12 +554,32 @@ pub fn scan_nsm_cell(
     key: CatalogueCellKey,
     out: &mut Vec<NsmScanMarks>,
 ) {
-    scan_nsm_cell_in(galaxy, process, key, 0..u32::MAX, out);
+    scan_nsm_cell_in(galaxy, process, key, 0..u32::MAX, |_| true, out);
+}
+
+/// The merger time T of the neutron-star merger whose system is `system`, in the universe of `seed`,
+/// and its time stream after the draw that gives it: the first of its draws, which
+/// [`nsm_marks_at`] makes before any other, and [`nsm_time_of`] alone (perf-alert-walks-cpu).
+#[must_use]
+fn nsm_time_stream(seed: Seed, system: SystemId) -> (UniverseTime, Stream) {
+    let mut stream = Stream::open(seed, tags::CLASS_NSM_TIME, ObjectKey::from(system));
+    (horizon_time(stream.uniform()), stream)
+}
+
+/// The merger time T of the neutron-star merger candidate whose system is `system`, in the universe of
+/// `seed`, read with nothing else of the candidate: its marks' T exactly ([`nsm_time_stream`]). A
+/// candidate's system is its catalogue ID's.
+#[must_use]
+pub(crate) fn nsm_time_of(seed: Seed, system: SystemId) -> UniverseTime {
+    nsm_time_stream(seed, system).0
 }
 
 /// Appends to `out` the scan marks of the entries of the neutron-star merger class cell `key` whose
-/// candidates' indices lie in `indices`, held to the cell's count, in index order.
+/// candidates' indices lie in `indices`, held to the cell's count, and whose merger time `wanted`
+/// accepts, in index order.
 ///
+/// A candidate's merger time is read first ([`nsm_time_of`]), and one that `wanted` refuses is not
+/// drawn further: not its site's thinning, nor its marks (perf-alert-walks-cpu).
 /// It is a part of [`scan_nsm_cell`]'s marks, which a background walk splits a dense cell into
 /// (plan 12). Over the parts of any partition of `0..u32::MAX`, or of `0..` the count, in order,
 /// they are `scan_nsm_cell`'s marks exactly: every part evaluates the cell's one bound
@@ -574,6 +593,7 @@ pub(crate) fn scan_nsm_cell_in(
     process: &NeutronStarMergers,
     key: CatalogueCellKey,
     indices: Range<u32>,
+    wanted: impl Fn(UniverseTime) -> bool,
     out: &mut Vec<NsmScanMarks>,
 ) {
     let bound = ClassProcess::bound(process, galaxy, &key);
@@ -584,7 +604,40 @@ pub(crate) fn scan_nsm_cell_in(
             let id = key
                 .candidate_id(index, 0)
                 .expect("a count held under 2^24 numbers every candidate");
+            if !wanted(nsm_time_of(galaxy.seed(), SystemId::from(id))) {
+                return None;
+            }
             nsm_scan_marks(galaxy, process, &key, id, bound)
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::galaxy::catalogue_classes::ClassId;
+
+    /// A neutron-star merger's time read first is its scan marks' T exactly: every one of seed 9's
+    /// cells about the centre (perf-alert-walks-cpu).
+    #[test]
+    fn a_neutron_star_mergers_time_read_first_is_its_marks_t() {
+        let galaxy = Galaxy::new(Seed::new(9));
+        let process = NeutronStarMergers::new(&galaxy);
+        let mut seen = 0;
+        for x in -4..4 {
+            for y in -4..4 {
+                for z in -2..2 {
+                    let key =
+                        CatalogueCellKey::new(ClassId::NEUTRON_STAR_MERGER, [x, y, z]).unwrap();
+                    let mut marks = Vec::new();
+                    scan_nsm_cell(&galaxy, &process, key, &mut marks);
+                    for scan in &marks {
+                        assert_eq!(nsm_time_of(galaxy.seed(), scan.id()), scan.merger_time());
+                    }
+                    seen += marks.len();
+                }
+            }
+        }
+        assert!(seen > 0, "neutron-star mergers about the centre");
+    }
 }

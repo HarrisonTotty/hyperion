@@ -3121,3 +3121,13 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Leans (2026-11-05)._ Only the merger classes' cells split (parts of at least 512 candidates,
     at most 64 a cell); a walk job hands its worker back after `JOB_BUDGET` = 1 s; as many at once
     as the pool has workers; `ScanResult::of_pieces` merges a split cell's parts by arrival, event.
+- **P12 perf, the alert walks' CPU (lane `perf-mergers-walk-balance`, part 2, 2026-11-05, at 28;
+  no output moves).**
+  - _Names (sim)._ `ToldEntries` and the provided `ListedHostsCache::told_entries`: a feature's
+    told deaths' entries, every one built once a walk's cut takes one, which the server keeps as
+    entries of their own (`ListedKey::Told`), charged as built. `OneShotClass::events_drift` (true
+    for the mergers) picks `cut::one_shot_drifting`; the merger scans' range forms take a `wanted`
+    on the merger time read first (`merger_time_of`, `nsm_time_of`), before the site's thinning.
+  - _Leans (2026-11-05)._ The mergers implement no `ClassProcess::event_time`: rule 10 asks its
+    classes to keep their events in their cells' boxes, and a merger's host moves within
+    `LIFETIME_REACH` of its cell (rule 5), so the merger scans read and cut the time themselves.

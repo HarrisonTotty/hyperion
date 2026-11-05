@@ -467,7 +467,8 @@ fn red_nova() -> OneShotEvent {
         .expect("the cell's merger makes its red nova")
 }
 
-/// A merger class, whose candidates read no time first, walked in pieces gives its interactive
+/// A merger class, whose hosts move from their cells to their mergers and whose merger times are
+/// read first and cut on that drift (perf-alert-walks-cpu), walked in pieces gives its interactive
 /// walk's tracks, and its cells split by candidate index among one-piece jobs give the whole
 /// cells' tracks in their order, each to the bit (plan 12, the mergers' balance): the stellar
 /// mergers 1 ly from the pinned red nova, through a V sensor through which red novae reach some
@@ -703,45 +704,62 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
-/// Times the stellar mergers' background walk of the whole galaxy through the service, the walk
-/// that one x-slab's job held at 119.7 s (plan 12, the mergers' balance): V 10⁻¹² W m⁻² over the
-/// first 1,000 years from the Sun-like point, in the Milky Way-like galaxy of seed `0x0926_0000`,
-/// on `HYPERION_WALK_WORKERS` workers (16 if unset). It prints the wall and CPU seconds, the
-/// tracks, the candidates drawn and the tracks' digest, which two trees' walks share to the bit.
+/// Times a class's background walk of the whole galaxy through the service, cold and then warm:
+/// V 10⁻¹² W m⁻² over the first 1,000 years from the Sun-like point, in the Milky Way-like galaxy
+/// of seed `0x0926_0000`, on `HYPERION_WALK_WORKERS` workers (16 if unset), of the class
+/// `HYPERION_WALK_CLASS` names (`STELLAR_MERGER` if unset, or `CORE_COLLAPSE`, ...) at generator
+/// version `HYPERION_WALK_VERSION` (the tree's if unset; 29 reads the features' lists). The cold
+/// walk is a fresh server's; the warm one another service's on the same server, its feature cells
+/// and lists kept. Each prints its wall and CPU seconds, the tracks, the candidates drawn and the
+/// tracks' digest, which two trees' walks share to the bit.
 ///
-/// Measured (pod, 48 vCPU, release, 2026-11-05), whole x-slab jobs before and pieces after: on 16
-/// workers 120.4 s and 442 CPU-s before, 27.2 s and 433 after; on 31, 120.5 s and 444 before,
-/// 16.3 s and 498 after (31 threads on 24 cores). 69 tracks of 97,706,200 candidates either way,
-/// digest `c0e74d1a42e93c81`.
+/// Measured (release, 2026-11-05):
+///
+/// - The stellar mergers at 28, cold, whole x-slab jobs before and pieces after (the mergers'
+///   balance; pod, 48 vCPU): on 16 workers 120.4 s and 442 CPU-s before, 27.2 s and 433 after;
+///   on 31, 120.5 s and 444 before, 16.3 s and 498 after (31 threads on 24 cores). 69 tracks of
+///   97,706,200 candidates, digest `c0e74d1a42e93c81`.
+/// - Then their merger times read first (perf-alert-walks-cpu; pod, 32 vCPU, 16 workers): at 28
+///   27.8 s and 443 CPU-s cold before, 3.0 s and 44 after, warm alike; at 29 (10 tracks, digest
+///   `75210f0c25cf4d75`) 29.6 s and 471 cold, 28.6 s and 453 warm before, 6.2 s and 79, 3.8 s
+///   and 57 after.
+/// - The core collapses at 29 (4 tracks, digest `5cbd71df19256327`), the told deaths' entries
+///   kept: 11.3 s and 149 CPU-s cold, 7.2 s and 108 warm before; 11.3 s and 150, 7.3 s and 106
+///   after. At 28 (7 tracks, digest `487c894e15784ba3`) some 5.8 s and 80 CPU-s either way.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "measurement, run by hand: HYPERION_WALK_WORKERS=16 cargo test --release -p hyperion-server --lib alerts::scan::tests::stellar_mergers_whole_galaxy_walk_wall_and_cpu -- --ignored --nocapture"]
-async fn stellar_mergers_whole_galaxy_walk_wall_and_cpu() {
+#[ignore = "measurement, run by hand: HYPERION_WALK_WORKERS=16 HYPERION_WALK_CLASS=STELLAR_MERGER cargo test --release -p hyperion-server --lib alerts::scan::tests::whole_galaxy_background_walk_wall_and_cpu -- --ignored --nocapture"]
+async fn whole_galaxy_background_walk_wall_and_cpu() {
     let workers = std::env::var("HYPERION_WALK_WORKERS").map_or(16, |n| n.parse().unwrap());
+    let class = std::env::var("HYPERION_WALK_CLASS").map_or(ClassId::STELLAR_MERGER, |name| {
+        ClassSet::ALL
+            .iter()
+            .find(|class| class.name() == name)
+            .unwrap_or_else(|| panic!("no class {name}"))
+    });
+    let version = std::env::var("HYPERION_WALK_VERSION")
+        .map_or(hyperion_sim::GENERATOR_VERSION, |version| {
+            hyperion_sim::GeneratorVersion::new(version.parse().unwrap())
+        });
     let (server, _data_dir) =
         server(|config| config.workers(std::num::NonZeroUsize::new(workers).unwrap())).await;
     let state = server.state();
     let seed = 0x0926_0000;
     let galaxy = Arc::new(
-        Galaxy::from_params(
+        Galaxy::from_params_at_version(
             hyperion_sim::Seed::new(seed),
             hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+            version,
         )
         .unwrap()
         .with_full_potential(),
     );
-    let class = ClassId::STELLAR_MERGER;
     let (subscription, first) = Subscription::new(
         Observer::new(sun(), UniverseTime::EPOCH).unwrap(),
         v_sensor(1e-12, 1e-10),
         ClassSet::of(class),
         hyperion_sim::alerts::DEFAULT_HOST_LIMIT,
     );
-    let mut spec = ScanSpec::new(
-        GalaxyKey::new(seed, hyperion_sim::GENERATOR_VERSION),
-        &subscription,
-        &first,
-    )
-    .unwrap();
+    let mut spec = ScanSpec::new(GalaxyKey::new(seed, version), &subscription, &first).unwrap();
     let millennium = hyperion_sim::events::TimeWindow::new(
         UniverseTime::EPOCH,
         UniverseTime::from_julian_years(1_000).unwrap(),
@@ -751,20 +769,26 @@ async fn stellar_mergers_whole_galaxy_walk_wall_and_cpu() {
         .classes(ClassSet::of(class))
         .build()
         .unwrap();
-    let scans = crate::alerts::service::AlertScans::new(1 << 30);
-    let (cpu, wall) = (cpu_seconds(), std::time::Instant::now());
-    let walked = scans
-        .background(state, &galaxy, &spec, class)
-        .await
-        .unwrap();
-    let wall = wall.elapsed().as_secs_f64();
-    let cpu = cpu.zip(cpu_seconds()).map(|(before, after)| after - before);
-    eprintln!(
-        "{class} on {workers} workers: {wall:.2} s wall, {cpu:.1?} CPU-s, {} tracks of {:?} \
-         candidates, digest {:016x}",
-        walked.tracks().len(),
-        walked.drawn(),
-        fnv1a(format!("{:?}", walked.tracks()).as_bytes())
-    );
+    let mut walks = Vec::new();
+    for walk in ["cold", "warm"] {
+        let scans = crate::alerts::service::AlertScans::new(1 << 30);
+        let (cpu, wall) = (cpu_seconds(), std::time::Instant::now());
+        let walked = scans
+            .background(state, &galaxy, &spec, class)
+            .await
+            .unwrap();
+        let wall = wall.elapsed().as_secs_f64();
+        let cpu = cpu.zip(cpu_seconds()).map(|(before, after)| after - before);
+        eprintln!(
+            "{class} at {version}, {walk}, on {workers} workers: {wall:.2} s wall, {cpu:.1?} \
+             CPU-s, {} tracks of {:?} candidates, digest {:016x}",
+            walked.tracks().len(),
+            walked.drawn(),
+            fnv1a(format!("{:?}", walked.tracks()).as_bytes())
+        );
+        eprintln!("  the lists kept: {:?}", state.listed_hosts.counters());
+        walks.push(walked);
+    }
+    assert_eq!(walks[0], walks[1], "the warm walk is the cold one's");
     server.shutdown().await.unwrap();
 }

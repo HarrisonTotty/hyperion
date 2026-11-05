@@ -89,11 +89,13 @@ pub(crate) const JOB_BUDGET: Duration = Duration::from_secs(1);
 
 /// How a background walk splits each occupied cell of a merger class among its jobs, by candidate
 /// index (plan 12, the mergers' balance): into parts of at least `fewest` candidates, and into at
-/// most `most`. A merger's candidates read no time first, so its walk builds every candidate's scan
+/// most `most`. Before the mergers read their times first, their walk built every candidate's scan
 /// marks: the eight 4,096 ly cells that meet at the galactic centre each draw some 12.15 million
 /// candidates on the nuclear components' bound, at some 2 µs each, 23–25 s a cell; and the inner
 /// disc's cells some 10,000, nearly all kept, at about 0.45 ms each, up to 5.7 s a cell (the
-/// Milky Way-like seed `0x0926_0000`; pod, 48 vCPU, release, 2026-11-05).
+/// Milky Way-like seed `0x0926_0000`; pod, 48 vCPU, release, 2026-11-05). With their times read
+/// first a whole-cube millennium builds a few in a hundred of them (perf-alert-walks-cpu), and the
+/// parts still split the reading of the central cells' times.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CellParts {
     fewest: u32,

@@ -11,8 +11,11 @@
 //! it as the whole cell does, so a walk of the cut cell finds what a walk of the whole cell finds.
 //!
 //! - One-shot: L is [`SUPERNOVA_LIGHT_YEARS`], 228 years, after which no supernova template gives
-//!   light. The mergers' candidates read no time first, so their walks read every candidate
-//!   (`OneShotClass::cell_events_when`) and are not cut.
+//!   light, and no merger's red nova or kilonova, which is over some 280 days on. The mergers read
+//!   their merger time first too, their event's onset; their hosts are placed in their cells at
+//!   the epoch and move to their mergers within [`LIFETIME_REACH`] of them (the catalogue's rule
+//!   5), so their light times are `near` and `far` widened by that (`OneShotClass::events_drift`,
+//!   [`one_shot_drifting`]; perf-alert-walks-cpu).
 //! - Magnetars: L is [`MAGNETAR_ACTIVE_SPAN`] and twice the longest burst, the emission interval's
 //!   reach before its root; the remnant stays within [`LIFETIME_REACH`] of its cell, so its light
 //!   times are `near` and `far` widened by that, and the bounds by a day more, as the emission
@@ -73,6 +76,24 @@ impl BoxLight {
         }
     }
 
+    /// These light times widened by `reach`: the nearest less it, held at zero, and the farthest
+    /// plus it, for sites within `reach` of the box or ball (a merger's, [`one_shot_drifting`]).
+    #[must_use]
+    fn widened(self, reach: Span) -> Self {
+        let near = if self.near > reach {
+            self.near
+                .checked_sub(reach)
+                .expect("a light time less a shorter one is a span")
+        } else {
+            Span::ZERO
+        };
+        let far = self
+            .far
+            .checked_add(reach)
+            .expect("a light time across the cube and its reach are a span");
+        Self { near, far }
+    }
+
     /// The light times from the closed ball of `radius` about `centre` to `observer`.
     #[must_use]
     fn of_ball(observer: &GalacticPosition, centre: &GalacticPosition, radius: LightYears) -> Self {
@@ -113,6 +134,21 @@ pub(crate) fn one_shot(
     key: &CatalogueCellKey,
 ) -> impl Fn(UniverseTime) -> bool {
     one_shot_from(query, BoxLight::of(query.observer_position(), key))
+}
+
+/// The one-shot cut of `key` for `query` of events that go off within [`LIFETIME_REACH`] of the
+/// cell's box, a merger's, whose host is placed in the cell at the epoch and moves to its merger
+/// (module documentation): [`one_shot`]'s with the box's light times widened by that reach.
+///
+/// # Panics
+///
+/// Never, as [`one_shot`].
+pub(crate) fn one_shot_drifting(
+    query: &AlertQuery,
+    key: &CatalogueCellKey,
+) -> impl Fn(UniverseTime) -> bool {
+    let light = BoxLight::of(query.observer_position(), key);
+    one_shot_from(query, light.widened(years(LIFETIME_REACH.value())))
 }
 
 /// The one-shot cut for `query` of the deaths whose sites lie in the ball of `radius` about
@@ -227,6 +263,30 @@ mod tests {
         assert!(close(beside.near, 512.0), "{beside:?}");
         let corner = (1_024.0_f64 * 1_024.0 + 2.0 * 256.0 * 256.0).sqrt();
         assert!(close(beside.far, corner), "{beside:?}");
+    }
+
+    /// A merger cell's light times widened by [`LIFETIME_REACH`] are its box's, the nearest less
+    /// the reach and the farthest plus it, for an observer 10,000 ly off; and for one 1,000 ly off,
+    /// within the reach, the nearest held at zero.
+    #[test]
+    fn a_drifting_cells_light_times_are_widened_by_the_lifetime_reach() {
+        let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [0, 6, 0]).unwrap();
+        let at = |ly: [f64; 3]| GalacticPosition::from_light_years(ly).unwrap();
+        let reach = years(LIFETIME_REACH.value());
+        let close = |span: Span, ly: f64| (span.as_julian_years_f64() - ly).abs() < 1e-6;
+        let far_off = at([14_096.0, 26_000.0, 2_048.0]);
+        let (light, widened) = (
+            BoxLight::of(&far_off, &key),
+            BoxLight::of(&far_off, &key).widened(reach),
+        );
+        assert!(close(light.near, 10_000.0), "{light:?}");
+        assert!(close(widened.near, 10_000.0 - 4_096.0), "{widened:?}");
+        assert!(
+            close(widened.far, light.far.as_julian_years_f64() + 4_096.0),
+            "{widened:?}"
+        );
+        let near_by = BoxLight::of(&at([5_096.0, 26_000.0, 2_048.0]), &key).widened(reach);
+        assert_eq!(near_by.near, Span::ZERO, "{near_by:?}");
     }
 
     /// A ball's light times are its nearest and farthest points' distances: zero for an observer

@@ -55,7 +55,7 @@ use crate::galaxy::imf::MassBand;
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
-use crate::rng::{Stream, tags};
+use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::binary::BinaryInput;
 use crate::stellar::binary::class_merger::{
     donor_onset_merger, donor_onset_merges, unstable_companion_ratio,
@@ -327,8 +327,7 @@ pub(crate) fn merger_marks_at(galaxy: &Galaxy, host: BinaryHost) -> Option<Merge
     let key = host.key();
     let sampler = ClassSampler::new(&MERGER_SAMPLER);
     // 2. T and the age.
-    let mut stream = Stream::open(seed, tags::CLASS_MERGER_TIME, key);
-    let merger_time = horizon_time(stream.uniform());
+    let (merger_time, mut stream) = merger_time_stream(seed, system);
     let rank = sampler.draw(MergerMark::AgeRank, 0.0, &mut stream);
     let age_at_epoch = host.age_at_rank(galaxy, rank);
     let merger_age =
@@ -768,12 +767,32 @@ pub fn scan_merger_cell(
     key: CatalogueCellKey,
     out: &mut Vec<MergerScanMarks>,
 ) {
-    scan_merger_cell_in(galaxy, process, key, 0..u32::MAX, out);
+    scan_merger_cell_in(galaxy, process, key, 0..u32::MAX, |_| true, out);
+}
+
+/// The merger time T of the stellar merger whose system is `system`, in the universe of `seed`,
+/// and its time stream after the draw that gives it: the first of its draws, which
+/// [`merger_marks_at`] makes before any other, and [`merger_time_of`] alone (perf-alert-walks-cpu).
+#[must_use]
+fn merger_time_stream(seed: Seed, system: SystemId) -> (UniverseTime, Stream) {
+    let mut stream = Stream::open(seed, tags::CLASS_MERGER_TIME, ObjectKey::from(system));
+    (horizon_time(stream.uniform()), stream)
+}
+
+/// The merger time T of the stellar merger candidate whose system is `system`, in the universe of
+/// `seed`, read with nothing else of the candidate: its marks' T exactly ([`merger_time_stream`]). A
+/// candidate's system is its catalogue ID's.
+#[must_use]
+pub(crate) fn merger_time_of(seed: Seed, system: SystemId) -> UniverseTime {
+    merger_time_stream(seed, system).0
 }
 
 /// Appends to `out` the scan marks of the entries of the stellar merger class cell `key` whose
-/// candidates' indices lie in `indices`, held to the cell's count, in index order.
+/// candidates' indices lie in `indices`, held to the cell's count, and whose merger time `wanted`
+/// accepts, in index order.
 ///
+/// A candidate's merger time is read first ([`merger_time_of`]), and one that `wanted` refuses is not
+/// drawn further: not its site's thinning, nor its marks (perf-alert-walks-cpu).
 /// It is a part of [`scan_merger_cell`]'s marks, which a background walk splits a dense cell
 /// into (plan 12). Over the parts of any partition of `0..u32::MAX`, or of `0..` the count, in
 /// order, they are `scan_merger_cell`'s marks exactly: every part evaluates the cell's one bound
@@ -787,6 +806,7 @@ pub(crate) fn scan_merger_cell_in(
     process: &StellarMergers,
     key: CatalogueCellKey,
     indices: Range<u32>,
+    wanted: impl Fn(UniverseTime) -> bool,
     out: &mut Vec<MergerScanMarks>,
 ) {
     let bound = ClassProcess::bound(process, galaxy, &key);
@@ -797,6 +817,9 @@ pub(crate) fn scan_merger_cell_in(
             let id = key
                 .candidate_id(index, 0)
                 .expect("a count held under 2^24 numbers every candidate");
+            if !wanted(merger_time_of(galaxy.seed(), SystemId::from(id))) {
+                return None;
+            }
             merger_scan_marks(galaxy, process, &key, id, bound)
         }),
     );
@@ -805,6 +828,21 @@ pub(crate) fn scan_merger_cell_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stellar merger's time read first is its scan marks' T exactly: every one of a cell of
+    /// seed 9's solar circle (perf-alert-walks-cpu).
+    #[test]
+    fn a_stellar_mergers_time_read_first_is_its_marks_t() {
+        use crate::galaxy::catalogue_classes::ClassId;
+        let galaxy = Galaxy::new(Seed::new(9));
+        let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [0, 6, 0]).unwrap();
+        let mut marks = Vec::new();
+        scan_merger_cell(&galaxy, &StellarMergers::new(&galaxy), key, &mut marks);
+        assert!(marks.len() > 10, "{} mergers", marks.len());
+        for scan in &marks {
+            assert_eq!(merger_time_of(galaxy.seed(), scan.id()), scan.merger_time());
+        }
+    }
 
     /// From 27 a gap donor's companion takes the gap's mark, a helium-burning donor's its own, an
     /// asymptotic-giant-branch donor's the AGB's and a giant branch's the evolved mark.
