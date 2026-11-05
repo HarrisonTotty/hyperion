@@ -15,6 +15,7 @@ import {
   type SpectralReferenceCase,
 } from "../view/atmosphere/reference/spectralCases";
 import {
+  ABSORPTION_ROUNDING_SHARE,
   absorberCurveJson,
   caseJson,
   densityJson,
@@ -74,6 +75,18 @@ describe("the case writer's densities", () => {
       altitudesM: [0, 1000],
       relative: [1, 0.5],
     });
+  });
+});
+
+describe("the case writer's absorption", () => {
+  it("writes a negative absorption within its rounding of the scattering as 0, any other as it is", () => {
+    const term: MediumTerm = {
+      ...OZONE,
+      scattering: [4e-4, 4e-4, 0],
+      absorption: [-1e-19, -1e-3, -1e-19],
+    };
+    expect(termJson(term, OZONE_CURVE, undefined).absorption).toEqual([0, -1e-3, -1e-19]);
+    expect(ABSORPTION_ROUNDING_SHARE).toBe(1e-12);
   });
 });
 

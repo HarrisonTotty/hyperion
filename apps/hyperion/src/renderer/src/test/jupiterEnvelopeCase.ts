@@ -8,22 +8,21 @@
  * - **The medium** is the hand Jupiter's as the envelope assembles it, from
  *   {@link JUPITER_ENVELOPE_BASE_DEPTH} below its top down (`thick/deckRead.ts`'s `upperMediumOf`),
  *   over a black ground there: `giant-deck`'s shape, a deck read to its column's base over black
- *   beneath an envelope's floor at τ 10 (`thick/deck.ts`'s `DeckFloor`), here its H₂O, NH₄SH and NH₃
- *   decks and its chromophore haze above the floor and its gas beneath. Its terms are the drawn
+ *   beneath an envelope's floor at τ 10 (`thick/deck.ts`'s `DeckFloor`), here its NH₄SH and NH₃
+ *   decks, its NH₃ haze and its chromophore above the floor (its H₂O deck lies wholly below it) and
+ *   its gas beneath. Its terms are the drawn
  *   medium's, their sources and their densities on the drawn column's scale, its absorbers' curves
  *   under the reference Sun (`earth.ts`'s `R06_SOLAR_BAKE_SPECTRUM`), and its tabulated phases'
- *   mean cosines their modes' own. The column's levels at its floor and its decks' bases stand
- *   0.16–0.74 mm apart, which the case's 9 figures would merge at a millimetre; each is held
- *   {@link JUPITER_ENVELOPE_LEAST_LEVEL_SPACING_M} above the one below it, in the medium the gate's
- *   twin draws as in the file: the H₂O sheet, some 5 m deep, loses 0.08% of its column (τ 0.0014),
- *   the other terms under 0.015%.
+ *   mean cosines their modes' own. Levels under a millimetre apart, which the case's 9 figures
+ *   would merge, are each held {@link JUPITER_ENVELOPE_LEAST_LEVEL_SPACING_M} above the one below
+ *   it, in the medium the gate's twin draws as in the file.
  * - **The figure** is a sphere through the cut, the drawn tables' ground radius
  *   (`assemble.ts`'s `bottomRadiusM`) raised by it, as `giant-deck` stands on Saturn's.
  * - **The geometries** are Design note 10's disc and limb from orbit, the views the gate takes of an
  *   envelope, which has no view from below; no ground, aerial or flux aggregate is traced. The limb
- *   keeps the tangents below the case's top: the medium's scale height at its ground is 151 km
- *   (`medium.ts`'s `localScaleHeightM`, its decks' τ over its gas's extinction), so that 10 H
- *   stands past the top and the orbit.
+ *   keeps the tangents below the case's top: the medium's scale height at its ground is 189.4 km
+ *   (`medium.ts`'s `localScaleHeightM`, its decks' τ over its gas's extinction), so that 3 H and
+ *   10 H stand past the top at 498.1 km and the limb keeps 0.1–1 H.
  *
  * Its Mie runs for a few seconds; the case is built once a module and held.
  */
@@ -35,6 +34,7 @@ import {
   extinction,
   localScaleHeightM,
   type MediumTerm,
+  type PhaseTable,
 } from "../view/atmosphere/medium";
 import { assembleMedium } from "../view/atmosphere/assemble";
 import { absorberCurve } from "../view/atmosphere/absorbers";
@@ -57,6 +57,7 @@ import { upperMediumOf } from "../view/atmosphere/thick/deckRead";
 import { ENVELOPE_FLOOR_CHANNEL } from "../view/atmosphere/thick/regime";
 import type { Rgb } from "../view/photometry/toneCurve";
 import { type DetailAnswer, detailOf, recordInput } from "./atmosphereRecords";
+import { linearInUMoments } from "./mieMatrices";
 import { handJupiterDetail } from "./giantFixtures";
 
 /** The case's name: its files are `jupiter-envelope.case.json` and `.reference.json`. */
@@ -139,6 +140,26 @@ function termHeldApart(term: MediumTerm, topHeightM: number): MediumTerm {
   return { ...term, density: heldApart(term.density, topHeightM) };
 }
 
+/**
+ * How far a mode's g may lie from its table's mean cosine as read before the case takes the
+ * table's: 10⁻⁴, the tracer's check (`optics.rs`' `PHASE_CHECK_TOLERANCE`).
+ */
+export const PHASE_ASYMMETRY_TOLERANCE = 1e-4;
+
+/**
+ * Each channel's asymmetry the case gives a tabulated term: the mode's g, `own`, where it lies
+ * within {@link PHASE_ASYMMETRY_TOLERANCE} of `table`'s mean cosine as read, and the table's
+ * elsewhere (lean, 2026-11-05): the NH₃ haze's 1 µm crystals of variance 0.05 read 2.5 × 10⁻⁴ over
+ * their g in red, a channel whose table carries no forward peak to size, which the tracer refuses.
+ */
+export function asReadWhereApart(own: Rgb, table: PhaseTable): Rgb {
+  const channel = (c: 0 | 1 | 2): number => {
+    const read = linearInUMoments(table.u, table.values[c]).meanCosine;
+    return Math.abs(read - own[c]) <= PHASE_ASYMMETRY_TOLERANCE ? own[c] : read;
+  };
+  return [channel(0), channel(1), channel(2)];
+}
+
 /** The case once built, for the module's life. */
 let built: EnvelopeCase | undefined;
 
@@ -187,7 +208,13 @@ export function handEnvelopeCase(name: string, detail: DetailAnswer): EnvelopeCa
         return [];
       }
       const [red, green, blue] = aerosolTermOptics(source.particles).channels;
-      return [[term.name, [red.asymmetry, green.asymmetry, blue.asymmetry]]];
+      const own: Rgb = [red.asymmetry, green.asymmetry, blue.asymmetry];
+      return [
+        [
+          term.name,
+          term.phase.kind === "tabulated" ? asReadWhereApart(own, term.phase.table) : own,
+        ],
+      ];
     }),
   );
   const radiusM = drawn.bottomRadiusM + baseM;

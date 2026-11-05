@@ -291,9 +291,11 @@ describe("an optics worker's gas envelopes (R08.T16.a.2)", () => {
   // Which of the NH₃ deck, the NH₄SH deck, the H₂O deck and the NH₃ deck's haze each draws. The
   // generated Jupiter, generator version 27's record, carries its NH₃ deck's haze, τ 10 of its own
   // (P14.T24.h.b part 6), which puts its floor at 0.566 bar inside it, above its NH₄SH and H₂O
-  // decks, which the cut drops; 26's record drew all three decks and had no haze.
+  // decks, which the cut drops; 26's record drew all three decks and had no haze. The hand Jupiter
+  // carries the haze at 30's τ 7 (`giantFixtures.ts`'s `coldGiantHazes`) over its own decks, its
+  // floor at 2.12 bar, above its H₂O deck.
   it.each([
-    ["the hand Jupiter", handJupiterDetail, [true, true, true, false]],
+    ["the hand Jupiter", handJupiterDetail, [true, true, false, true]],
     ["the protocol fixture's generated Jupiter", jupiterDetail, [true, false, false, true]],
   ] as const)(
     "assembles %s's envelope, split at its floor, its volatile decks above it drawn, APPROXIMATE with the thick reason",

@@ -373,9 +373,9 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
     180_000,
   );
 
-  // Its chromophore is the fixture's, at the disc's column from generator version 27 (P14.T24.h.b
-  // part 6): τ(550) 0.117, 0.307 before. Measured 2026-11-04: τ (1 − ω̄) 0.025, 0.064 and 0.187 in
-  // red, green and blue above its floor (26's: 0.065–0.49), each over the range's 0.
+  // Its NH₃ haze and chromophore are 30's (`test/giantFixtures.ts`'s `coldGiantHazes`: τ(550) 7 and
+  // 1.53 × 10⁻⁴ kg m⁻²). Measured 2026-11-05: τ (1 − ω̄) 0.016, 0.041 and 0.119 in red, green and
+  // blue above its floor (27's: 0.025–0.187; 26's: 0.065–0.49), each over the range's 0.
   it("leaves the hand Jupiter out of the envelope's range: its chromophore absorbs", () => {
     const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
       envelopes: true,
@@ -394,7 +394,7 @@ describe("the envelope's gate (R08.T16.a.2)", () => {
       regimeChannels(upper).map(
         (c) => Math.round(c.opticalDepth * (1 - c.singleScatteringAlbedo) * 1000) / 1000,
       ),
-    ]).toEqual(["cloudDeck", false, [0.025, 0.064, 0.187]]);
+    ]).toEqual(["cloudDeck", false, [0.016, 0.041, 0.119]]);
     expect(ENVELOPE_ROUTE_RANGE.mostAbsorbedDepth).toBe(0);
   }, 180_000);
 });
@@ -555,11 +555,11 @@ describe("the absorbing envelope's gate (R08.T16.a.2)", () => {
       ],
     ],
     [
-      "the hand Saturn, by its depth and its chromophore",
+      "the hand Saturn, by its blue τ and its chromophore",
       handSaturnDetail,
       [
         [true, false, true],
-        [false, false, true],
+        [true, false, true],
         [false, false, true],
       ],
     ],

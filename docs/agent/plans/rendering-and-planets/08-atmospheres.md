@@ -25164,3 +25164,13 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   scene depths once; `rayMarchTexelFrom`, `rayMarchedFrom` and `behindAtMarch(…, candidates)` take
   them, `behindAtMarch` reading its own only where its corner is not theirs (the first row and
   column). Bit for bit.
+- **The hand giants' NH₃ haze and chromophore under 30's rules** (R08.T16.a.2, 2026-11-05; lane
+  `fix-p14-giant-chromophore`; P14.T24.h.b's follow-up, held at 30 in the sim). Client fixtures.
+  - `test/giantFixtures.ts`'s `coldGiantHazes`: the hand Jupiter and Saturn take the fixture's NH₃
+    haze (their NH₃ deck's second mode) at τ 7 and its chromophore at 7 × 10⁻⁸ of the haze's gas,
+    at most 6.3 × 10⁻⁴ kg m⁻², on their own decks (lean: no haze below its deck). Floors: 2.12
+    bar (Jupiter; its H₂O deck now below it) and TEST JUPITER's figure 71,470.4 × 66,835.3 km.
+  - Cases re-blessed: `limb-3H` past both tops; counts kept from the earlier pilots (lean).
+  - `atmosphereCases.ts`: an absorption under 0 within `ABSORPTION_ROUNDING_SHARE` (10⁻¹²) of
+    its scattering is written 0; `jupiterEnvelopeCase.ts`'s `asReadWhereApart` gives a channel the
+    table's mean cosine where the mode's g lies past 10⁻⁴ of it (the haze's red, 2.5 × 10⁻⁴).

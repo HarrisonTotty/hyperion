@@ -28,7 +28,7 @@ function largestMultiScattering(
 }
 
 describe("a gas envelope's tables (R08.T16.a.2)", () => {
-  it("draw each of the hand Jupiter's decks above its floor at its own column, though its levels alias their sheets, and its chromophore within the resampling's tolerance", () => {
+  it("draw each of the hand Jupiter's decks above its floor at its own column, though its NH₃ deck's levels alias its sheet, and its haze and chromophore within the resampling's tolerance", () => {
     const assembled = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
       envelopes: true,
     });
@@ -38,12 +38,11 @@ describe("a gas envelope's tables (R08.T16.a.2)", () => {
     const upper = upperMediumOf(assembled.medium, assembled.regime.deckAltitudeM);
     const top = upper.topHeightM;
     const drawn = kernelMedium(upper);
-    // By its levels' densities the kernels kept 1.7% of its H₂O and NH₄SH decks' columns and 51% of
-    // its NH₃ deck's (2026-11-02), so each is projected, its column kept. Its chromophore, the
-    // fixture's, is a smooth layer, which from generator version 27 its levels keep to 0.64%
-    // (measured 2026-11-04; 97.4% at 26, projected): within the tolerance, it keeps its levels'
-    // densities. Its τ(550), 0.117 at the disc's column (P14.T24.h.b part 6) where 26's was 0.307,
-    // lowers the floor 3.7 km, which moves the levels about the layer.
+    // By its levels' densities the kernels kept 51% of its NH₃ deck's column (2026-11-02), so it is
+    // projected, its column kept. Under 30's NH₃ haze (`giantFixtures.ts`'s `coldGiantHazes`) the
+    // floor rises to 2.12 bar: its water deck lies below it, and its NH₄SH deck, cut there, keeps
+    // 100.28% by its levels (measured 2026-11-05), the haze 100.03% and the chromophore 100.00%,
+    // each within the tolerance and kept on its levels' densities.
     const kept = new Map(
       upper.terms.flatMap((term, i) => {
         const resampled = drawn.terms[i];
@@ -53,19 +52,23 @@ describe("a gas envelope's tables (R08.T16.a.2)", () => {
       }),
     );
     expect([...kept.keys()]).toEqual([
-      "aerosol:H2O",
       "aerosol:NH4SH",
       "aerosol:NH3",
+      "aerosol:NH3:2",
       "aerosol:chromophore",
     ]);
-    for (const deck of ["aerosol:H2O", "aerosol:NH4SH", "aerosol:NH3"]) {
-      expect(kept.get(deck)).toBeCloseTo(1, 9);
-    }
-    const chromophore = kept.get("aerosol:chromophore") ?? Number.NaN;
-    expect([
-      Math.abs(chromophore - 1) <= RESAMPLED_COLUMN_TOLERANCE,
-      Math.round(chromophore * 1e4) / 1e4,
-    ]).toEqual([true, 0.9936]);
+    expect(kept.get("aerosol:NH3")).toBeCloseTo(1, 9);
+    expect(
+      [...kept.values()].map((share) => [
+        Math.abs(share - 1) <= RESAMPLED_COLUMN_TOLERANCE,
+        Math.round(share * 1e4) / 1e4,
+      ]),
+    ).toEqual([
+      [true, 1.0028],
+      [true, 1],
+      [true, 1.0003],
+      [true, 1],
+    ]);
   }, 180_000);
 
   it("hold the hand Jupiter's multiple scattering within rgba16float above its floor, where its whole column's diverges", () => {
@@ -83,13 +86,12 @@ describe("a gas envelope's tables (R08.T16.a.2)", () => {
       radiusM + floorM,
       curves,
     );
-    // Measured 2026-11-04: at most 1.216 above the floor, its chromophore at generator version 27's
-    // disc column (τ(550) 0.117, P14.T24.h.b part 6) absorbing less than 26's (0.307), under which
-    // it stayed under 1.
+    // Measured 2026-11-05: at most 0.265 above the floor, which 30's NH₃ haze lifts to 2.12 bar
+    // (1.216 at 27's chromophore with no haze, under 1 at 26's).
     expect([
       largestMultiScattering(assembled.medium, radiusM, curves) > HALF_FLOAT_MAX,
       above > 0 && above < HALF_FLOAT_MAX,
       Math.round(above * 1000) / 1000,
-    ]).toEqual([true, true, 1.216]);
+    ]).toEqual([true, true, 0.265]);
   }, 180_000);
 });

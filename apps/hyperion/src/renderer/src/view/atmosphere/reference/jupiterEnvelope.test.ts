@@ -2,7 +2,7 @@
  * R08.T16.a.2's absorbing envelope case (plan R08): the committed `jupiter-envelope.case.json` is
  * the case `test/jupiterEnvelopeCase.ts` writes now from the hand Jupiter's medium, through
  * `bless.ts`; it stands under the disc and the limb from orbit, above its split at the hand
- * Jupiter's envelope floor, whose medium above absorbs in every channel.
+ * Jupiter's envelope floor, whose medium above absorbs most in blue.
  *
  * @remarks
  * Rewritten by `HYPERION_BLESS=1 pnpm --filter hyperion exec vitest run
@@ -19,7 +19,12 @@ import {
   traceCommand,
 } from "../../../test/atmosphereCases";
 import { expectCommittedTable } from "../../../test/bless";
-import { JUPITER_ENVELOPE_CASE, jupiterEnvelopeCase } from "../../../test/jupiterEnvelopeCase";
+import { linearInUMoments } from "../../../test/mieMatrices";
+import {
+  JUPITER_ENVELOPE_CASE,
+  jupiterEnvelopeCase,
+  PHASE_ASYMMETRY_TOLERANCE,
+} from "../../../test/jupiterEnvelopeCase";
 import { upperMediumOf } from "../thick/deckRead";
 import { regimeChannels } from "../thick/regime";
 import committed from "./jupiter-envelope.case.json" with { type: "json" };
@@ -70,23 +75,41 @@ describe("the absorbing envelope's case", { timeout: BUILD_MS }, () => {
       geometries.every((g) => g.observer.heightM > Math.max(split.altitudeM, medium.topHeightM)),
       referenceCase.aggregates,
     ]).toEqual([
-      ["disc-p0", "disc-p30", "disc-p60", "disc-p75", "disc-p85", ...Array<string>(4).fill("limb")],
+      ["disc-p0", "disc-p30", "disc-p60", "disc-p75", "disc-p85", ...Array<string>(3).fill("limb")],
       true,
       [],
     ]);
     expect(nearest).toBeGreaterThan(LEAST_SUN_DISTANCE_DEG - 1e-9);
   });
 
-  // At 27's chromophore (its disc column, τ(550) 0.117 from 0.307 at 26) the medium above absorbs
-  // in green and blue alone, red's τ (1 − ω̄) 0.025 (0.065 at 26); the reference was traced at 26's.
-  it("splits at the hand Jupiter's envelope floor, its medium above absorbing in green and blue at 27", () => {
+  // Under 30's rules (`giantFixtures.ts`'s `coldGiantHazes`: the NH₃ haze at τ(550) 7 and the
+  // chromophore by its gas, 1.53 × 10⁻⁴ kg m⁻²) the medium above absorbs in blue alone: τ (1 − ω̄)
+  // 0.016, 0.041 and 0.119 (0.025, 0.064 and 0.187 at 27, 0.065–0.49 at 26).
+  it("splits at the hand Jupiter's envelope floor, its medium above absorbing in blue under 30's chromophore", () => {
     const { referenceCase, split } = jupiterEnvelopeCase();
     const above = regimeChannels(upperMediumOf(referenceCase.medium, split.altitudeM));
     expect([
       split.floor,
       referenceCase.medium.groundAlbedo,
       above.map((c) => c.opticalDepth * (1 - c.singleScatteringAlbedo) > 0.05),
-    ]).toEqual(["envelope", [0, 0, 0], [false, true, true]]);
+    ]).toEqual(["envelope", [0, 0, 0], [false, false, true]]);
+  });
+
+  it("writes each tabulated term's asymmetry within the tracer's 10⁻⁴ of its table as read", () => {
+    const { referenceCase } = jupiterEnvelopeCase();
+    const apart = caseJson(referenceCase, COUNTS[JUPITER_ENVELOPE_CASE]).terms.flatMap((term) => {
+      const { phase } = term;
+      if (phase.kind !== "tabulated") {
+        return [];
+      }
+      return phase.a1.flatMap((row, c) =>
+        Math.abs(linearInUMoments(phase.u, row).meanCosine - (phase.asymmetry[c] ?? Number.NaN)) <=
+        PHASE_ASYMMETRY_TOLERANCE
+          ? []
+          : [`${term.name}[${c}]`],
+      );
+    });
+    expect(apart).toEqual([]);
   });
 
   it("names one of its geometries by each of its counts", () => {

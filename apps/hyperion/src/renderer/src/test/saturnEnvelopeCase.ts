@@ -7,18 +7,15 @@
  *
  * @remarks
  * - **The medium** is the hand Saturn's as its envelope assembles it, cut at green τ 20 from its
- *   top over a black ground, its H₂O, NH₄SH and NH₃ decks at 1 µm and the fixture's chromophore
- *   haze above its floor, 126,066 m above the cut. Above the floor it reads, at generator version
- *   27, τ 6.35/10.35/23.01, ω̄ 0.996/0.994/0.992 and ḡ 0.282/0.162/0.070 (`thick/regime.ts`'s
- *   `regimeChannels`): deeper in blue than `jupiter-envelope`'s 16.67, past `thick/routing.ts`'s
- *   `ENVELOPE_ROUTE_RANGE`, its chromophore's τ (1 − ω̄) 0.025–0.187. Its levels at its floor and
- *   its decks' bases stand 0.30–0.83 mm apart, each held 1 cm above the one below it: the H₂O
- *   sheet loses 0.38% of its column (τ 0.0024), NH₄SH's 0.062% and NH₃'s 0.036%, the other terms
- *   under 10⁻⁶.
+ *   top over a black ground, its NH₄SH and NH₃ decks at 1 µm, its NH₃ haze and its chromophore
+ *   (`giantFixtures.ts`'s `coldGiantHazes`, 30's rules) above its floor, 257,671 m above the cut.
+ *   Above the floor it reads τ 9.16/10.08/12.33, ω̄ 0.993/0.983/0.960 and ḡ 0.723/0.656/0.526
+ *   (`thick/regime.ts`'s `regimeChannels`), its chromophore's τ (1 − ω̄) 0.065–0.490. Levels under
+ *   a millimetre apart are each held 1 cm above the one below it.
  * - **The figure** is a sphere through the cut, the drawn tables' ground radius raised by it.
  * - **The geometries** are `jupiter-envelope`'s: the disc and the limb from orbit. The medium's
- *   scale height at its ground is 202.1 km (`medium.ts`'s `localScaleHeightM`), so that 10 H
- *   stands past its top at 911.8 km and the limb keeps 0.1–3 H.
+ *   scale height at its ground is 281.7 km (`medium.ts`'s `localScaleHeightM`), so that 3 H and
+ *   10 H stand past its top at 833.8 km and the limb keeps 0.1–1 H.
  *
  * Its Mie runs for a few seconds; the case is built once a module and held.
  */

@@ -226,9 +226,12 @@ describe("the hand Jupiter's medium", () => {
     expect(Math.abs(depth / CLOUD_DECK_SPLIT_OPTICAL_DEPTH - 1)).toBeLessThan(1e-4);
   });
 
-  it("puts its floor below its water deck's base", () => {
+  // Under 30's NH₃ haze (`giantFixtures.ts`'s `coldGiantHazes`, τ(550) 7 above the NH₃ deck) the
+  // floor rises above the water deck's base, to 2.12 bar.
+  it("puts its floor between its NH₃ deck's base and its water deck's", () => {
     const { floorPa } = drawnOf("handJupiter").drawn.envelope;
-    expect(floorPa).toBeGreaterThan(modeOf("handJupiter", "H2O").basePa);
+    expect(floorPa).toBeGreaterThan(modeOf("handJupiter", "NH3").basePa);
+    expect(floorPa).toBeLessThan(modeOf("handJupiter", "H2O").basePa);
   });
 
   it("tops its column above every mode it reads", () => {
@@ -240,16 +243,18 @@ describe("the hand Jupiter's medium", () => {
     }
   });
 
-  it("lays its NH₃ deck at 0.5–1 bar, a level at each end of each deck", () => {
+  it("lays its NH₃ deck at 0.5–1 bar, a level at each end of each deck above its floor", () => {
     const { medium, drawn } = drawnOf("handJupiter");
     const nh3 = modeOf("handJupiter", "NH3");
     expect(nh3.basePa).toBeGreaterThan(0.5e5);
     expect(nh3.basePa).toBeLessThan(1e5);
-    // Inside its ends lies all of each deck's τ but the ramps aerosolTerm lays past them.
-    const outside = ["H2O", "NH4SH", "NH3"].map((material) => {
+    // Inside its ends lies all of each deck's τ but the ramps aerosolTerm lays past them, a deck
+    // that straddles the floor cut there; the water deck, below the floor, takes no term.
+    const { floorPa } = drawn.envelope;
+    const outside = ["NH4SH", "NH3"].map((material) => {
       const mode = modeOf("handJupiter", material);
       const term = termOf(medium, `aerosol:${material}`);
-      const base = levelHeightM(drawn, mode.basePa);
+      const base = levelHeightM(drawn, Math.min(mode.basePa, floorPa));
       const top = levelHeightM(drawn, mode.topPa);
       const inside = shareAboveHeight(medium, term, base) - shareAboveHeight(medium, term, top);
       return (1 - inside) / (MODE_EDGE_LN_P * (mode.fSed + 1));

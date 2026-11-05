@@ -20,6 +20,8 @@ import {
   traceCommand,
 } from "../../../test/atmosphereCases";
 import { expectCommittedTable } from "../../../test/bless";
+import { PHASE_ASYMMETRY_TOLERANCE } from "../../../test/jupiterEnvelopeCase";
+import { linearInUMoments } from "../../../test/mieMatrices";
 import { SATURN_ENVELOPE_CASE, saturnEnvelopeCase } from "../../../test/saturnEnvelopeCase";
 import { upperMediumOf } from "../thick/deckRead";
 import { regimeChannels } from "../thick/regime";
@@ -71,23 +73,41 @@ describe("the hand Saturn's absorbing envelope case", { timeout: BUILD_MS }, () 
       geometries.every((g) => g.observer.heightM > Math.max(split.altitudeM, medium.topHeightM)),
       referenceCase.aggregates,
     ]).toEqual([
-      ["disc-p0", "disc-p30", "disc-p60", "disc-p75", "disc-p85", ...Array<string>(4).fill("limb")],
+      ["disc-p0", "disc-p30", "disc-p60", "disc-p75", "disc-p85", ...Array<string>(3).fill("limb")],
       true,
       [],
     ]);
     expect(nearest).toBeGreaterThan(LEAST_SUN_DISTANCE_DEG - 1e-9);
   });
 
-  // At 27's chromophore the medium above absorbs in green and blue alone, red's τ (1 − ω̄) 0.025, as
-  // `jupiter-envelope`'s at 27.
-  it("splits at the hand Saturn's envelope floor, its medium above absorbing in green and blue", () => {
+  // Under 30's rules (`giantFixtures.ts`'s `coldGiantHazes`: the NH₃ haze at τ(550) 7 and the
+  // chromophore at its bound, 6.3 × 10⁻⁴ kg m⁻²) the medium above absorbs in every channel: τ
+  // (1 − ω̄) 0.065, 0.167 and 0.490 (0.025, 0.064 and 0.187 at 27).
+  it("splits at the hand Saturn's envelope floor, its medium above absorbing in every channel", () => {
     const { referenceCase, split } = saturnEnvelopeCase();
     const above = regimeChannels(upperMediumOf(referenceCase.medium, split.altitudeM));
     expect([
       split.floor,
       referenceCase.medium.groundAlbedo,
       above.map((c) => c.opticalDepth * (1 - c.singleScatteringAlbedo) > 0.05),
-    ]).toEqual(["envelope", [0, 0, 0], [false, true, true]]);
+    ]).toEqual(["envelope", [0, 0, 0], [true, true, true]]);
+  });
+
+  it("writes each tabulated term's asymmetry within the tracer's 10⁻⁴ of its table as read", () => {
+    const { referenceCase } = saturnEnvelopeCase();
+    const apart = caseJson(referenceCase, COUNTS[SATURN_ENVELOPE_CASE]).terms.flatMap((term) => {
+      const { phase } = term;
+      if (phase.kind !== "tabulated") {
+        return [];
+      }
+      return phase.a1.flatMap((row, c) =>
+        Math.abs(linearInUMoments(phase.u, row).meanCosine - (phase.asymmetry[c] ?? Number.NaN)) <=
+        PHASE_ASYMMETRY_TOLERANCE
+          ? []
+          : [`${term.name}[${c}]`],
+      );
+    });
+    expect(apart).toEqual([]);
   });
 
   it("names one of its geometries by each of its counts", () => {

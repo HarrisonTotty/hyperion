@@ -6,15 +6,21 @@
  * @remarks
  * - **The hand Jupiter** carries Jupiter's 1-bar figure and rotation, so that Design note 17's
  *   slicing runs on it, and a hand cloud stack after the fixture's own: its NH₃, NH₄SH and H₂O
- *   decks at the fixture's bases, tops, optical depths and f_sed, and its chromophore haze, each
- *   deck's sizes a narrow gamma distribution the client's optics take (the fixture's σ_g 2
- *   log-normals reach past them).
+ *   decks at the fixture's bases, tops, optical depths and f_sed, each deck's sizes a narrow gamma
+ *   distribution the client's optics take (the fixture's σ_g 2 log-normals reach past them).
+ * - **The cold giants' haze and chromophore** (fix-p14-giant-chromophore): the hand Jupiter and
+ *   Saturn carry the generator's NH₃-ice haze, their NH₃ deck's second mode, and its chromophore,
+ *   each the fixture's Jupiter's mode under the rules the sim holds for generator version 30
+ *   (`photochem::CHROMOPHORE_MIXING_VERSION`) on the hand giant's own NH₃ deck: the haze from the
+ *   deck's base to 0.1 bar at τ(550) {@link AMMONIA_HAZE_TAU_550}, and the chromophore
+ *   {@link CHROMOPHORE_MIXING_RATIO} of the gas the haze spans, at most
+ *   {@link CHROMOPHORE_MOST_KG_M2} ({@link coldGiantHazes}).
  * - **The hand ice giant** is Uranus-like: a CH₄ deck of τ 13.5, the largest an ice giant's CH₄
  *   deck holds over set A at generator version 24 (B3 k-1's 01ffeb2d5fff0001.0700), over an H₂S
  *   deck, at hand bases near the observed ones.
  * - **The hand Saturn** is the sim's own Saturn as `planetary/envelope_atmosphere`'s golden draws it
- *   at generator version 24: its composition, μ, H₂O, NH₄SH and NH₃ decks and chromophore haze, the
- *   decks at the hand Jupiter's 1 µm (the golden's are 28–100 µm, past the optics' budget).
+ *   at generator version 24: its composition, μ, H₂O, NH₄SH and NH₃ decks, the decks at the hand
+ *   Jupiter's 1 µm (the golden's are 28–100 µm, past the optics' budget).
  *
  * The fields a record carries that the medium does not read are the fixture's, and say nothing of
  * the body.
@@ -134,7 +140,10 @@ function deckOf(mode: AerosolModeDto): CondensateDeckDto {
   };
 }
 
-/** A hand envelope: a golden profile, a composition and its μ, and decks' modes beside hazes. */
+/**
+ * A hand envelope: a golden profile, a composition and its μ, and decks' modes beside hazes, one
+ * condensate deck for each deck the modes name (its first mode's).
+ */
 function handEnvelope(
   golden: GoldenEnvelope,
   composition: ReadonlyArray<GasShareDto>,
@@ -151,7 +160,9 @@ function handEnvelope(
     decks: [...decks],
     hazes: [...hazes],
     haze_tau_550: hazes.reduce((sum, mode) => sum + (mode.tau_550 ?? 0), 0),
-    condensate_decks: decks.map(deckOf),
+    condensate_decks: decks
+      .filter((mode, i) => decks.findIndex((m) => m.deck === mode.deck) === i)
+      .map(deckOf),
     absorbers: [],
     not_formed: [],
   };
@@ -180,6 +191,80 @@ function fixtureEnvelope(): BodyEnvelopeDto {
     throw new Error("the fixture's Jupiter has its envelope");
   }
   return envelope.value;
+}
+
+/**
+ * The top of the cold giants' NH₃-ice haze, Pa: the sim's `photochem::AMMONIA_HAZE_TOP`, 0.1 bar.
+ */
+const AMMONIA_HAZE_TOP_PA = 1e4;
+
+/**
+ * The NH₃-ice haze's τ(550) under 30's rules, its layer spanning an e-fold of pressure or more: the
+ * sim's `photochem::AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`, 7, fitted with the chromophore's mixing on
+ * Jupiter's measured Bond albedo.
+ */
+export const AMMONIA_HAZE_TAU_550 = 7;
+
+/**
+ * The chromophore's mass mixing ratio in the gas its haze spans under 30's rules, kg per kg: the
+ * sim's `photochem::CHROMOPHORE_MIXING_RATIO`, 7 × 10⁻⁸.
+ */
+export const CHROMOPHORE_MIXING_RATIO = 7e-8;
+
+/**
+ * The most chromophore a cold giant takes, kg m⁻²: the sim's `photochem::CHROMOPHORE_COLUMN`,
+ * 6.3 × 10⁻⁴, Braude et al.'s (2020, Icarus 338, 113589, Table 4) Great Red Spot.
+ */
+export const CHROMOPHORE_MOST_KG_M2 = 6.3e-4;
+
+/**
+ * A cold giant's NH₃-ice haze and chromophore under 30's rules (the module's remarks) on its NH₃
+ * deck's mode `ammonia` under gravity `gravityMS2`: the fixture's Jupiter's two modes, the haze
+ * from the deck's base and at its temperature to {@link AMMONIA_HAZE_TOP_PA} at τ(550)
+ * {@link AMMONIA_HAZE_TAU_550}, and the chromophore of {@link CHROMOPHORE_MIXING_RATIO} times
+ * (`p_base` − 0.1 bar) ÷ g, at most {@link CHROMOPHORE_MOST_KG_M2}, its τ(550) its column's at the
+ * fixture's mass extinction; its peak and width the fixture's. The layer spans more than an e-fold
+ * on both hand giants, so the haze takes its whole τ.
+ *
+ * @throws Error if the fixture's Jupiter lacks either mode, or the deck spans under an e-fold or has
+ *   no temperature.
+ */
+export function coldGiantHazes(
+  ammonia: AerosolModeDto,
+  gravityMS2: number,
+): { readonly haze: AerosolModeDto; readonly chromophore: AerosolModeDto } {
+  const fixture = fixtureEnvelope();
+  const haze = fixture.decks.find(
+    (mode) => mode.deck === "NH3" && mode.top_pa === AMMONIA_HAZE_TOP_PA,
+  );
+  const chromophore = fixture.hazes.find((mode) => mode.material === "chromophore");
+  if (haze === undefined || chromophore === undefined) {
+    throw new Error("the fixture's Jupiter carries its NH₃ haze and its chromophore");
+  }
+  if (!(Math.log(ammonia.base_pa / AMMONIA_HAZE_TOP_PA) >= 1)) {
+    throw new Error("the hand giant's NH₃ deck spans an e-fold of pressure to the haze's top");
+  }
+  const hazeTau = haze.tau_550 ?? Number.NaN;
+  const temperatureK = ammonia.temperature_k;
+  if (temperatureK === undefined) {
+    throw new Error("the hand giant's NH₃ deck has its base temperature");
+  }
+  const column = Math.min(
+    (CHROMOPHORE_MIXING_RATIO * (ammonia.base_pa - AMMONIA_HAZE_TOP_PA)) / gravityMS2,
+    CHROMOPHORE_MOST_KG_M2,
+  );
+  const extinction =
+    (chromophore.tau_550 ?? Number.NaN) / (chromophore.column_mass_kg_m2 ?? Number.NaN);
+  return {
+    haze: {
+      ...haze,
+      column_mass_kg_m2: ((haze.column_mass_kg_m2 ?? Number.NaN) * AMMONIA_HAZE_TAU_550) / hazeTau,
+      tau_550: AMMONIA_HAZE_TAU_550,
+      base_pa: ammonia.base_pa,
+      temperature_k: temperatureK,
+    },
+    chromophore: { ...chromophore, column_mass_kg_m2: column, tau_550: column * extinction },
+  };
 }
 
 /**
@@ -225,11 +310,21 @@ export function handJupiterDecks(nh3FSed = 367.863_608_190_027_3): ReadonlyArray
   ];
 }
 
+/** The NH₃ deck's mode among `decks`. */
+function ammoniaOf(decks: ReadonlyArray<AerosolModeDto>): AerosolModeDto {
+  const ammonia = decks.find((mode) => mode.deck === "NH3");
+  if (ammonia === undefined) {
+    throw new Error("a hand cold giant has its NH₃ deck");
+  }
+  return ammonia;
+}
+
 /**
  * The hand Jupiter (the module's remarks): the protocol fixture's Jupiter on Jupiter's 1-bar figure
  * and spin (its axes and its lock the fixture's Earth's, which the medium does not read), its
- * envelope the golden's Jupiter profile at the golden's gravity under the fixture's
- * composition, μ and chromophore haze, with {@link handJupiterDecks}' decks.
+ * envelope the golden's Jupiter profile at the golden's gravity under the fixture's composition
+ * and μ, with {@link handJupiterDecks}' decks and its NH₃ haze and chromophore under 30's rules
+ * ({@link coldGiantHazes}): the haze from 0.6415 bar, the chromophore 1.53 × 10⁻⁴ kg m⁻².
  *
  * @param nh3FSed - The NH₃ deck's exponent: the fixture's sheet by default.
  */
@@ -240,12 +335,14 @@ export function handJupiterDetail(nh3FSed?: number): DetailAnswer {
   if (earthRotation?.state !== "ok" || earthFigure?.state !== "ok") {
     throw new Error("the fixture's Earth has its rotation and figure");
   }
+  const decks = handJupiterDecks(nh3FSed);
+  const { haze, chromophore } = coldGiantHazes(ammoniaOf(decks), golden.profile.gravityMS2);
   const envelope = handEnvelope(
     golden,
     fixture.composition,
     fixture.mean_molar_mass_g_per_mol,
-    handJupiterDecks(nh3FSed),
-    fixture.hazes,
+    [...decks, haze],
+    [chromophore],
   );
   return withRecord(jupiterDetail(), (record) => ({
     ...withEnvelope(record, envelope, golden.profile.gravityMS2),
@@ -303,53 +400,61 @@ const SATURN_COMPOSITION: ReadonlyArray<GasShareDto> = [
 /** The sim's Saturn's mean molar mass, g mol⁻¹: 2.2568, the golden's. */
 const SATURN_MEAN_MOLAR_MASS_G_PER_MOL = 2.256_821_101_118_976_3;
 
+/** The hand Saturn's decks (its remarks), each at 1 µm. */
+function handSaturnDecks(): ReadonlyArray<AerosolModeDto> {
+  return [
+    deckMode(
+      "H2O",
+      "liquid",
+      "sphere",
+      1e-6,
+      0.628_268_955_982_142_5,
+      [1_095_594.921_249_072, 505_375.818_629_654_5],
+      96_363.329_669_900_98,
+      311.927_238_470_180_9,
+    ),
+    deckMode(
+      "NH4SH",
+      "solid",
+      "crystal",
+      1e-6,
+      0.597_289_752_979_824_1,
+      [414_508.394_118_045_5, 251_188.643_150_957_53],
+      11_615.199_485_369_712,
+      233.869_571_660_028_9,
+    ),
+    deckMode(
+      "NH3",
+      "solid",
+      "crystal",
+      1e-6,
+      0.962_560_241_342_463,
+      [127_164.230_628_933_7, 50_818.763_805_015_63],
+      4_584.518_181_497_106,
+      161.856_562_601_728_06,
+    ),
+  ];
+}
+
 /**
  * The hand Saturn (the module's remarks): the fixture's Jupiter's record with the golden's Saturn
  * profile at its gravity, the sim's Saturn's gases and μ ({@link SATURN_COMPOSITION}), its decks
  * at the golden's bases, tops, base temperatures, optical depths and f_sed (liquid H₂O at
  * 10.96–5.054 bar, τ 0.628; NH₄SH at 4.145–2.512 bar, τ 0.597; NH₃ ice at 1.272–0.5082 bar,
- * τ 0.963), each at 1 µm, and the fixture's chromophore haze, the golden Saturn's in every field
- * the golden prints (0.2568–0.1558 bar, τ 0.307); Saturn's 1-bar radius.
+ * τ 0.963), each at 1 µm, and its NH₃ haze and chromophore under 30's rules ({@link coldGiantHazes}):
+ * the haze from 1.272 bar, the chromophore at its bound, 6.3 × 10⁻⁴ kg m⁻² (0.2568–0.1558 bar,
+ * τ 0.307); Saturn's 1-bar radius.
  */
 export function handSaturnDetail(): DetailAnswer {
   const golden = goldenEnvelope("saturn");
+  const decks = handSaturnDecks();
+  const { haze, chromophore } = coldGiantHazes(ammoniaOf(decks), golden.profile.gravityMS2);
   const envelope = handEnvelope(
     golden,
     SATURN_COMPOSITION,
     SATURN_MEAN_MOLAR_MASS_G_PER_MOL,
-    [
-      deckMode(
-        "H2O",
-        "liquid",
-        "sphere",
-        1e-6,
-        0.628_268_955_982_142_5,
-        [1_095_594.921_249_072, 505_375.818_629_654_5],
-        96_363.329_669_900_98,
-        311.927_238_470_180_9,
-      ),
-      deckMode(
-        "NH4SH",
-        "solid",
-        "crystal",
-        1e-6,
-        0.597_289_752_979_824_1,
-        [414_508.394_118_045_5, 251_188.643_150_957_53],
-        11_615.199_485_369_712,
-        233.869_571_660_028_9,
-      ),
-      deckMode(
-        "NH3",
-        "solid",
-        "crystal",
-        1e-6,
-        0.962_560_241_342_463,
-        [127_164.230_628_933_7, 50_818.763_805_015_63],
-        4_584.518_181_497_106,
-        161.856_562_601_728_06,
-      ),
-    ],
-    fixtureEnvelope().hazes,
+    [...decks, haze],
+    [chromophore],
   );
   return withRecord(jupiterDetail(), (record) => {
     const giant = withEnvelope(record, envelope, golden.profile.gravityMS2);

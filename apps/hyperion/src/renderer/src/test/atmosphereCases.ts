@@ -170,6 +170,25 @@ function rgbArray(value: Rgb): number[] {
   return [value[0], value[1], value[2]];
 }
 
+/**
+ * The share of a channel's scattering under which a negative absorption is its rounding, written 0:
+ * 10⁻¹², some thousands of `f64` steps, where an ω̄ that rounds a hair above 1 (a non-absorbing ice's
+ * Mie or crystal optics) leaves the extinction less its scattering at −10⁻¹⁹ m⁻¹ (the NH₃ haze of
+ * `giantFixtures.ts`'s `coldGiantHazes`), which the tracer refuses.
+ */
+export const ABSORPTION_ROUNDING_SHARE = 1e-12;
+
+/**
+ * A term's absorption per channel in the format: a negative value within
+ * {@link ABSORPTION_ROUNDING_SHARE} of the channel's scattering written 0, any other as it is (and
+ * refused by the tracer).
+ */
+function absorptionArray(absorption: Rgb, scattering: Rgb): number[] {
+  return rgbArray(absorption).map((a, k) =>
+    a < 0 && -a <= ABSORPTION_ROUNDING_SHARE * (scattering[k] ?? 0) ? 0 : a,
+  );
+}
+
 /** A profile in the format: `edgesM` dropped (the module's remarks). */
 export function densityJson(profile: DensityProfile): DensityJson {
   let json: DensityJson;
@@ -254,7 +273,7 @@ export function termJson(
     name: term.name,
     density: densityJson(term.density),
     scattering: rgbArray(term.scattering),
-    absorption: rgbArray(term.absorption),
+    absorption: absorptionArray(term.absorption, term.scattering),
   };
   const absorber = term.absorber;
   let absorberJson: TermJson["absorber"];

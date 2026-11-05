@@ -913,10 +913,11 @@ describe("the routes' rows' frames (R08.T11's (R) to (U))", () => {
       "deck",
       "envelope",
     ]);
-    // The floor 1,049 km over the medium's datum (research-rm4-rm5-close-out §1.3); the datum
-    // spheroid through it stands a little higher at the equator.
-    expect(lowerM).toBeGreaterThan(1.049e6);
-    expect(lowerM).toBeLessThan(1.2e6);
+    // The floor 1,049 km over the medium's datum before the NH₃ haze (research-rm4-rm5-close-out
+    // §1.3); 30's haze (`test/giantFixtures.ts`'s `coldGiantHazes`) lifts it to 2.12 bar, 1,286 km
+    // over it at the equator, where the datum spheroid through it stands a little higher.
+    expect(lowerM).toBeGreaterThan(1.2e6);
+    expect(lowerM).toBeLessThan(1.35e6);
     expect(routed.medium.groundAlbedo).toEqual([0, 0, 0]);
   });
 
@@ -934,7 +935,7 @@ describe("the routes' rows' frames (R08.T11's (R) to (U))", () => {
       kept.filter((name) => name.startsWith("aerosol:")),
       oneSheetOf(routed).table,
     ]).toEqual([
-      ["aerosol:H2O", "aerosol:NH4SH", "aerosol:chromophore"],
+      ["aerosol:NH4SH", "aerosol:NH3:2", "aerosol:chromophore"],
       ["aerosol:NH3"],
       routed.table,
     ]);
