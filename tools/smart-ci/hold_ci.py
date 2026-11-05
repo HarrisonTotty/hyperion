@@ -14,6 +14,8 @@ Three sets, found from the code's graph (`rust_graph.py`) and run in this order:
    names one of version N's gates, the constants that are N (`const X: GeneratorVersion =
    GeneratorVersion::new(N)`, each `*_VERSION` and `*_FROM`), or the version itself: a gate no
    union switches, such as the surface crate's `REFINED_CORNERS_FROM`, and each gate's tripwire.
+   And every test whose own name has N as a word (`from_29_…`, `under_29_s_rules_…`), for a test
+   that builds its rules by hand (a struct update setting one hold's arm), which names neither.
 2. censuses: every slow test (`#[ignore = "slow: ..."]`) whose name says `census` and whose code
    reaches any version's union or switch, less those of 1.
 3. touched: with `--since REV`, the ordinary tests (not ignored) of the crates that `REV..HEAD`
@@ -141,11 +143,16 @@ def reaching(graph: rust_graph.Graph, reverse: Dict[str, Set[str]], starts: Set[
     return seen
 
 
-def version_gates(root: Path, graph: rust_graph.Graph, version: int) -> Tuple[Set[str], Set[str]]:
+def version_gates(root: Path, graph: rust_graph.Graph, version: Optional[int],
+                  unions: Set[str]) -> Tuple[Set[str], Set[str]]:
     """Version `version`'s gates (the constants that are it) with the test code whose own tokens name
-    the version itself; and the nodes of test code, through which alone a gate is reached."""
-    literal = ["GeneratorVersion", "::", "new", "(", str(version), ")"]
-    quick = re.compile(rf"GeneratorVersion\s*::\s*new\s*\(\s*{version}\s*\)")
+    the version itself or one of `unions`' names; and the nodes of test code, through which alone a
+    gate is reached. A union that is an inherent method (`GalaxyRules::every_N_hold`) is reached so,
+    by name: the graph's edges leave out a member's callers, which its selection finds by name."""
+    literal = ["GeneratorVersion", "::", "new", "(", str(version), ")"] if version is not None else []
+    names = {re.search(r"(\w+)$", node).group(1) for node in unions}
+    quick = re.compile("|".join([rf"GeneratorVersion\s*::\s*new\s*\(\s*{version}\s*\)"] * bool(literal)
+                                + [rf"\b{re.escape(n)}\b" for n in sorted(names)]) or "(?!)")
     test_files = set().union(*(unit.test_files for unit in graph.units.values()))
     tests: Set[str] = set()
     starts: Set[str] = set()
@@ -158,10 +165,13 @@ def version_gates(root: Path, graph: rust_graph.Graph, version: int) -> Tuple[Se
             continue
         for ident, tokens in rust_graph.item_tokens(text).items():
             values = [v for _, v in tokens]
-            if not any(values[i:i + len(literal)] == literal for i in range(len(values) - len(literal) + 1)):
-                continue
             kind, test = kinds.get(ident, ("", False))
-            if kind in ("const", "static") or test or in_test:
+            if test or in_test:
+                if names.intersection(values):
+                    starts.add(rust_graph.item_node(path, ident))
+            elif kind not in ("const", "static"):
+                continue
+            if literal and any(values[i:i + len(literal)] == literal for i in range(len(values) - len(literal) + 1)):
                 starts.add(rust_graph.item_node(path, ident))
     return starts, tests
 
@@ -212,14 +222,16 @@ def choose(root: Path, graph: rust_graph.Graph, version: Optional[int]
     mine = unions[version] | switches[version]
     names = Names(root)
     held_nodes = reaching(graph, reverse, mine, every - mine, names)
-    held_nodes |= reaching_in_tests(reverse, *version_gates(root, graph, version))
+    held_nodes |= reaching_in_tests(reverse, *version_gates(root, graph, version, unions[version]))
     any_nodes = reaching(graph, reverse, every, set(), names)
+    any_nodes |= reaching_in_tests(reverse, *version_gates(root, graph, None, set().union(*unions.values())))
     held: List[Tuple[str, str]] = []
     censuses: List[Tuple[str, str]] = []
     texts: Dict[str, str] = {}
+    named = re.compile(rf"(?:^|_){version}(?:_|$)")
     for unit in sorted(graph.tests):
         for test in sorted(graph.tests[unit], key=lambda t: t.name):
-            if test.node in held_nodes:
+            if test.node in held_nodes or named.search(test.name.rsplit("::", 1)[-1]):
                 held.append((unit, test.name))
             elif test.ignored and test.node in any_nodes and "census" in test.name \
                     and ignore_reason(root, test.node, texts).startswith("slow"):
