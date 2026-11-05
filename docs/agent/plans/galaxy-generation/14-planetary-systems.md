@@ -34427,3 +34427,17 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Leans (2026-11-05):_ an S-type host, whose planets the merger engulfs, steps only at the entry
     too; the residual is pinned, with neither `zones_at` nor the fate changed.
   - _For 30's bump:_ delete what `the_merged_steps_are_held_only_until_the_30_bump` lists.
+- **P14.T24.h.b part 6's follow-up, the chromophore by its haze's gas (lane
+  `fix-p14-giant-chromophore`, 2026-11-05).** Held at 30 (`photochem::CHROMOPHORE_MIXING_VERSION`;
+  `ChromophoreRules::{DiscColumn, HazeMixing}`, `with_chromophore_mixing`, a line in `HeldRules`
+  and in the new planetary `testing::with_every_30_hold`; 30, train 29 having frozen); nothing
+  moves at 28 or 29.
+  - _Changed:_ `photochem::chromophore(ammonia_layer, gravity)` returns `Result<Option<Haze>, _>`
+    (`None` where the haze is none, from 30). Column `CHROMOPHORE_MIXING_RATIO` (7 × 10⁻⁸) ×
+    (`p_NH₃` − 0.1 bar) ÷ g; haze τ `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED` (7).
+  - _Leans (2026-11-05):_ the column is bounded by `CHROMOPHORE_COLUMN` (6.3 × 10⁻⁴, the GRS).
+    Unbounded, some of the census's deep-deck, low-gravity giants took a chromophore τ above 10; Saturn
+    takes the bound. q and τ were picked inside Jupiter's 10% colour band so that the hand cases
+    also pass and κ₁'s fit keeps its third figure.
+  - _Movers:_ the slow `under_every_30_hold_the_chromophore_census_moves_only_cold_giants_and_their_moons`.
+  - _For 30's bump:_ delete what `the_chromophore_mixing_is_held_only_until_the_30_bump` lists.

@@ -8,6 +8,7 @@ use crate::planetary::derive::atmosphere::AtmosphereInputs;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::hooks::EnvelopeAtmosphere;
 use crate::planetary::hooks::aerosols::AerosolDeck;
+use crate::planetary::testing::with_every_30_hold;
 use crate::substance::aloft::law_aloft;
 use crate::substance::by_key;
 use crate::units::{Kelvin, Pascals};
@@ -337,6 +338,19 @@ fn the_giants_own_albedos_are_pinned_against_their_measurements() {
 /// ([`record_column`]); their differences are the closed form's departures, stated.
 #[test]
 fn the_closed_form_follows_the_record_s_own_envelope() {
+    closed_form_follows_the_record("at 28");
+}
+
+/// [`the_closed_form_follows_the_record_s_own_envelope`] under every 30 hold, the cold giants'
+/// chromophore mixed in their haze's gas (`photochem::CHROMOPHORE_MIXING_VERSION`).
+#[test]
+fn under_every_30_hold_the_closed_form_follows_the_record_s_own_envelope() {
+    with_every_30_hold(|| closed_form_follows_the_record("under every 30 hold"));
+}
+
+/// The closed form within 0.04 of the record's own envelope read alike, on the table's four giants
+/// and the hot fixture, under the rules in force (`label` names them).
+fn closed_form_follows_the_record(label: &str) {
     use crate::planetary::derive::solar::{found, solar_system};
     use crate::planetary::system::envelope::tests::{fixture_hot_jupiter, table_envelope};
     use crate::planetary::testing::envelope_by_hand;
@@ -357,10 +371,73 @@ fn the_closed_form_follows_the_record_s_own_envelope() {
     for (name, inputs, record) in cases {
         let closed = (column::snapshot_bond(&inputs, &sun())).expect("a closed form");
         let read = column_bond(&record, &sun());
-        eprintln!("{name}: closed form {closed:.4}, the record's decks {read:.4}");
+        eprintln!("{name} {label}: closed form {closed:.4}, the record's decks {read:.4}");
         assert!(
             (closed - read).abs() < 0.04,
-            "{name}: {closed} against {read}"
+            "{name} {label}: {closed} against {read}"
+        );
+    }
+}
+
+/// Mallama, Krobusek and Pavlov's (2017, Icarus 282, 19) Table 7 geometric albedos of Jupiter and
+/// Saturn in B, V and R (`photometry.rs`'s templates): `p_B` ÷ `p_V` and `p_R` ÷ `p_V`, the
+/// colours the cold giants' own bins are held to under every 30 hold.
+const TABLE_7_COLOURS: [(&str, f64, f64); 2] = [
+    ("Jupiter", 0.443 / 0.538, 0.495 / 0.538),
+    ("Saturn", 0.339 / 0.499, 0.568 / 0.499),
+];
+
+/// Under every 30 hold (the cold giants' chromophore mixed in their haze's gas,
+/// `photochem::CHROMOPHORE_MIXING_RATIO`, its haze at `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`) the
+/// table's Jupiter, the fit, takes its own Bond albedo within its measured 0.503 ± 0.012 (Li et
+/// al. 2018) and its 390–495 nm bin over its 495–595 nm bin within 10% of Table 7's `p_B` ÷
+/// `p_V`; Saturn, the check, its two bins over the 495–595 nm one within 15% of Table 7's `p_B` ÷
+/// `p_V` and `p_R` ÷ `p_V`, and its Bond albedo is stated against Wang et al.'s (2024) 0.41 ± 0.02
+/// (a miss, the lane's finding). Each figure is pinned; Uranus and Neptune, a CH₄ deck above any
+/// NH₃, do not move.
+#[test]
+fn under_every_30_hold_the_cold_giants_colours_are_their_measured_ones() {
+    use crate::planetary::derive::solar::{found, solar_system};
+    // The pinned figures: name, Bond albedo, bin 1 ÷ bin 2 and bin 3 ÷ bin 2.
+    const PINNED: [(&str, f64, f64, f64); 2] = [
+        ("Jupiter", 0.5013, 0.8794, 1.0384),
+        ("Saturn", 0.3077, 0.7006, 1.0648),
+    ];
+    let version = solar_system();
+    let held = with_every_30_hold(solar_system);
+    for (name, bond, blue, red) in PINNED {
+        let body = found(&held, name);
+        let bins = with_every_30_hold(|| {
+            bin_albedos(&column::snapshot_column(&giant_inputs(body)).expect("a column"))
+        });
+        let (b, r) = (bins[1] / bins[2], bins[3] / bins[2]);
+        let own = body.albedo().value();
+        let &(_, want_b, want_r) = TABLE_7_COLOURS
+            .iter()
+            .find(|(n, ..)| *n == name)
+            .expect("a measured colour");
+        eprintln!(
+            "{name} under every 30 hold: own Bond albedo {own:.4} (at 28 {:.4}), bins B/V \
+             {b:.4} against {want_b:.4} and R/V {r:.4} against {want_r:.4}, T_eq {:.2} K",
+            found(&version, name).albedo().value(),
+            body.equilibrium_temperature().value()
+        );
+        assert!((own - bond).abs() < 0.003, "{name}: {own} against {bond}");
+        assert!((b - blue).abs() < 0.003, "{name}: B/V {b} against {blue}");
+        assert!((r - red).abs() < 0.003, "{name}: R/V {r} against {red}");
+        if name == "Jupiter" {
+            assert!((own - 0.503).abs() <= 0.012, "{own}");
+            assert!((b / want_b - 1.0).abs() <= 0.10, "{b}");
+        } else {
+            assert!((b / want_b - 1.0).abs() <= 0.15, "{b}");
+            assert!((r / want_r - 1.0).abs() <= 0.15, "{r}");
+        }
+    }
+    for name in ["Uranus", "Neptune"] {
+        assert_eq!(
+            format!("{:?}", found(&held, name)),
+            format!("{:?}", found(&version, name)),
+            "{name} moves"
         );
     }
 }

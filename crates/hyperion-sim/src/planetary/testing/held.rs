@@ -13,6 +13,7 @@
 //! switch.
 
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
+use crate::planetary::chem::photochem::{ChromophoreRules, with_chromophore_mixing};
 use crate::planetary::derive::atmosphere::{
     LineSwitchRules, MeltOxygenRules, with_line_switch, with_melt_oxygen,
 };
@@ -80,6 +81,7 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
+    chromophore_mixing: ChromophoreRules = ChromophoreRules::in_force => with_chromophore_mixing,
 }
 
 /// `share(0)` to `share(shares − 1)` on at most `hyperion_testkit::threads::granted(reserved)`

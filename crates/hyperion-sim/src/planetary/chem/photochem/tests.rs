@@ -29,6 +29,9 @@ fn dioxide(t_eq: f64, metallicity: f64, sulphur: f64, water: f64) -> f64 {
         .map_or(0.0, |layer| layer.mole_fraction())
 }
 
+/// Jupiter's gravity at 1 bar, m s⁻², as the tests give a chromophore: the table's 24.79.
+const JUPITER_GRAVITY: MetresPerSecondSquared = MetresPerSecondSquared::new(24.79);
+
 /// A haze's column mass, or zero.
 fn column(haze: Option<Haze>) -> f64 {
     match haze.map(|h| h.amount()) {
@@ -247,7 +250,9 @@ fn the_ice_giant_haze_lies_above_the_methane_layer() {
 fn the_chromophore_lies_no_deeper_than_0_2_bar() {
     for bar in [0.05, 0.15, 0.2, 0.5, 0.7, 2.0] {
         let layer = Pascals::new(bar * PASCALS_PER_BAR);
-        let haze = chromophore(layer).expect("a haze");
+        let haze = chromophore(layer, JUPITER_GRAVITY)
+            .expect("a haze")
+            .expect("a column");
         assert_eq!(haze.material(), by_key("chromophore").expect("a row"));
         match haze.profile() {
             HazeProfile::Gaussian { peak, width } => {
@@ -269,7 +274,9 @@ fn the_chromophore_lies_no_deeper_than_0_2_bar() {
 #[test]
 fn from_27_the_chromophore_takes_the_disc_s_column() {
     let layer = Pascals::new(0.7 * PASCALS_PER_BAR);
-    let own = chromophore(layer).expect("a haze");
+    let own = chromophore(layer, JUPITER_GRAVITY)
+        .expect("a haze")
+        .expect("a column");
     assert_eq!(
         own.amount(),
         HazeAmount::ColumnMass(CHROMOPHORE_DISC_COLUMN)
@@ -317,6 +324,109 @@ fn the_ammonia_haze_lies_above_the_ammonia_cloud() {
     }
     assert_eq!(ammonia_haze(Pascals::new(1.0e4)), Ok(None));
     assert_eq!(ammonia_haze(Pascals::new(5.0e3)), Ok(None));
+}
+
+/// The chromophore's mixing is held until the 29 → 30 bump: the rules in force are version 28's
+/// and 29's, and 30's mix the chromophore in its haze's gas.
+#[test]
+fn the_chromophore_mixing_is_held_only_until_the_30_bump() {
+    use crate::GENERATOR_VERSION;
+    assert!(
+        GENERATOR_VERSION < CHROMOPHORE_MIXING_VERSION,
+        "the 29 → 30 bump puts the chromophore's mixing on the record (fix-p14-giant-chromophore): \
+         delete `ChromophoreRules` with its `DiscColumn` arm, `CHROMOPHORE_DISC_COLUMN`, \
+         `with_chromophore_mixing` and its lines in `held_rules!` and `with_every_30_hold`, and \
+         this test; `AMMONIA_HAZE_OPTICAL_DEPTH` takes `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`'s value"
+    );
+    assert_eq!(CHROMOPHORE_MIXING_VERSION, crate::GeneratorVersion::new(30));
+    assert_eq!(ChromophoreRules::in_force(), ChromophoreRules::DiscColumn);
+    assert_eq!(
+        with_chromophore_mixing(ChromophoreRules::HazeMixing, ChromophoreRules::in_force),
+        ChromophoreRules::HazeMixing
+    );
+    assert_eq!(ChromophoreRules::in_force(), ChromophoreRules::DiscColumn);
+}
+
+/// Under the 30 hold the chromophore is [`CHROMOPHORE_MIXING_RATIO`] of the gas its ammonia haze
+/// spans, (`p_NH₃` − 0.1 bar) ÷ g: its column in proportion to that gas up to the Great Red Spot's
+/// [`CHROMOPHORE_COLUMN`], none where the haze is none, its peak and width as before, and gravity
+/// checked; the haze's τ(550) the refitted
+/// [`AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`], tapered as before.
+#[test]
+fn under_the_30_hold_the_chromophore_is_mixed_in_its_haze_s_gas() {
+    with_chromophore_mixing(ChromophoreRules::HazeMixing, || {
+        for (bar, g) in [(0.7285, 24.79), (1.218, 11.17), (0.28, 24.79), (3.0, 9.0)] {
+            let layer = Pascals::new(bar * PASCALS_PER_BAR);
+            let gravity = MetresPerSecondSquared::new(g);
+            let haze = chromophore(layer, gravity)
+                .expect("a haze")
+                .expect("a column");
+            let gas = layer.value() - AMMONIA_HAZE_TOP.value();
+            assert_eq!(
+                haze.amount(),
+                HazeAmount::ColumnMass(KilogramsPerSquareMetre::new(
+                    (CHROMOPHORE_MIXING_RATIO * gas / g).min(CHROMOPHORE_COLUMN.value())
+                ))
+            );
+            let disc = with_chromophore_mixing(ChromophoreRules::DiscColumn, || {
+                chromophore(layer, gravity)
+            });
+            let disc = disc.expect("a haze").expect("a column");
+            assert_eq!(haze.profile(), disc.profile());
+            assert_eq!(haze.size(), disc.size());
+            let mixed = ammonia_haze(layer).expect("in range").expect("a haze");
+            assert_eq!(
+                mixed.amount(),
+                HazeAmount::OpticalDepth {
+                    optical_depth: AMMONIA_HAZE_OPTICAL_DEPTH_MIXED,
+                    wavelength: Micrometres::new(0.55)
+                }
+            );
+        }
+        // A thin layer's haze is tapered as before, in ln p.
+        let taper = ammonia_haze(Pascals::new(2.0e4))
+            .expect("in range")
+            .expect("a haze");
+        match taper.amount() {
+            HazeAmount::OpticalDepth { optical_depth, .. } => {
+                let want = AMMONIA_HAZE_OPTICAL_DEPTH_MIXED * math::ln(2.0);
+                assert!((optical_depth - want).abs() < 1e-12, "{optical_depth}");
+            }
+            HazeAmount::ColumnMass(_) => panic!("an optical depth"),
+        }
+        // A deep deck under low gravity takes the bound.
+        let deep = chromophore(Pascals::new(1.0e6), MetresPerSecondSquared::new(5.0))
+            .expect("a haze")
+            .expect("a column");
+        assert_eq!(deep.amount(), HazeAmount::ColumnMass(CHROMOPHORE_COLUMN));
+        // A thin layer's column and its haze's τ fall to none together at the haze's top.
+        let near = Pascals::new(AMMONIA_HAZE_TOP.value() * 1.001);
+        let thin = chromophore(near, JUPITER_GRAVITY)
+            .expect("a haze")
+            .expect("a column");
+        match thin.amount() {
+            HazeAmount::ColumnMass(m) => assert!(m.value() < 1e-7, "{}", m.value()),
+            HazeAmount::OpticalDepth { .. } => panic!("a column mass"),
+        }
+        for p in [AMMONIA_HAZE_TOP.value(), 5.0e3] {
+            assert_eq!(chromophore(Pascals::new(p), JUPITER_GRAVITY), Ok(None));
+            assert_eq!(ammonia_haze(Pascals::new(p)), Ok(None));
+        }
+        let bad = MetresPerSecondSquared::new(0.0);
+        assert_eq!(
+            chromophore(Pascals::new(7e4), bad),
+            Err(EvaluateRuleError::Gravity(bad))
+        );
+        assert_eq!(
+            chromophore(Pascals::new(-1.0), JUPITER_GRAVITY),
+            Err(EvaluateRuleError::Pressure(Pascals::new(-1.0)))
+        );
+    });
+    // The version's rules read no gravity.
+    assert!(matches!(
+        chromophore(Pascals::new(7e4), MetresPerSecondSquared::new(f64::NAN)),
+        Ok(Some(_))
+    ));
 }
 
 /// A value as printed, and half a unit of its last printed digit: "2.8e-3" is 2.8 × 10⁻³ ± 5 ×
@@ -447,6 +557,10 @@ fn the_network_dissociates_as_parmentier_s_fit_does() {
 /// temperature, of 0.001 in log₁₀ of the metallicity and of 0.001 dex in pressure, no rule's output
 /// moves by more than 1% of its largest value over the scan.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one scan per rule and input, each in turn"
+)]
 fn each_rule_is_continuous_in_its_inputs() {
     let scan = |name: &str, f: &dyn Fn(f64) -> f64, from: f64, to: f64, step: f64| {
         let mut values = Vec::new();
@@ -508,8 +622,9 @@ fn each_rule_is_continuous_in_its_inputs() {
         1_000.0,
         0.1,
     );
-    let peak = |dex: f64| match chromophore(Pascals::new(math::exp10(dex)))
+    let peak = |dex: f64| match chromophore(Pascals::new(math::exp10(dex)), JUPITER_GRAVITY)
         .expect("a haze")
+        .expect("a column")
         .profile()
     {
         HazeProfile::Gaussian { peak, .. } => peak.value(),
@@ -605,7 +720,7 @@ fn each_refusal_names_its_cause() {
         Err(EvaluateRuleError::MoleFraction(1.5))
     );
     assert_eq!(
-        chromophore(Pascals::new(0.0)),
+        chromophore(Pascals::new(0.0), JUPITER_GRAVITY),
         Err(EvaluateRuleError::Pressure(Pascals::new(0.0)))
     );
     assert_eq!(

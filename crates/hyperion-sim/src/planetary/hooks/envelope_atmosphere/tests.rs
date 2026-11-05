@@ -335,6 +335,18 @@ fn under_every_27_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo() {
     };
 }
 
+/// Under every 30 hold (the cold giants' chromophore mixed in their haze's gas,
+/// `photochem::CHROMOPHORE_MIXING_VERSION`) the Galileo calibration still holds at Jupiter's own
+/// albedo, the refitted haze's: κ₁'s fit is [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`] to three
+/// figures, and the table's Jupiter follows the probe.
+#[test]
+fn under_every_30_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo() {
+    crate::planetary::testing::with_every_30_hold(|| {
+        assert_kappa_is_its_fit(THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG);
+        assert_jupiter_follows_the_probe(GreyProfile::ADOPTED);
+    });
+}
+
 /// From 27 (P14.T24.h.b part 8) κ₁ falls below an effective temperature of 120 K as (`T_eff` ÷
 /// 120 K)^2.4, read from the `T_eff` its caller holds: at or above 120 K the parameters are the
 /// adopted ones (one-sided); an envelope at `T_eff` 60 K takes 0.5^2.4 of κ₁; and the law is

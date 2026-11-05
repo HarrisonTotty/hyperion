@@ -51,6 +51,17 @@ mod held;
 #[cfg(test)]
 pub(crate) use held::{HeldRules, in_shares};
 
+/// `run`'s result with every planetary hold of version 30 in force on this thread (train 30): the
+/// cold giants' chromophore mixed in its haze's gas
+/// ([`CHROMOPHORE_MIXING_VERSION`](super::chem::photochem::CHROMOPHORE_MIXING_VERSION)); train 29
+/// holds no planetary rule. A test that needs the galaxy's holds as well builds its galaxy inside it
+/// with `GalaxyRules::every_29_hold()`, whose holds ride the galaxy (none is at 30).
+#[cfg(test)]
+pub(crate) fn with_every_30_hold<R>(run: impl FnOnce() -> R) -> R {
+    use super::chem::photochem::{ChromophoreRules, with_chromophore_mixing};
+    with_chromophore_mixing(ChromophoreRules::HazeMixing, run)
+}
+
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,
 /// unvalidated, as the crate's own tests state one: for other crates' tests of what a derivation
 /// reads of an air, as the server's conversion of P14.T51.j's oxidised surface does (a caller's
