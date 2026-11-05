@@ -25015,3 +25015,17 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     The case is re-blessed at 27 and its channels re-pinned; its reference, the twin's values and
     the tallies stand as traced at 26. Pending: a retrace at 27 (`traceCommand`, about 140
     thread-h, checkpointed), then the gate's tallies again.
+- **The closed giant's disc colour, checked** (R08.T16.a.2 and R08.T17, 2026-11-05; lane
+  `check-giant-disc-colour`; the captures, the colour table and a fix brief in the lane's outbox).
+  Nothing changed.
+  - `TEST JUPITER`, closed, is warm at its four ranges and at 1.05 × 10⁹ m on both settings (the
+    software views check): its disc centre's red over blue in linear sRGB is 1.57–1.76, and 1.73
+    (high) and 1.76 (low) at 1.5 × 10⁸ m, against `jupiter-envelope`'s reference disc's 1.97
+    (disc-p0). The teal of 2026-11-03 (0.80) predates dafe81aa.
+  - A served cool giant (the Dev Fixture's `41ffecb1ffc00013.0400`: 0.57 Jupiter masses, 107 K,
+    CH₄ 0.53%) is sage: red over blue 1.10, green the highest (green over red 1.17). A model limit,
+    not a dropped term. On `jupiter-envelope`'s own medium the closed path's twin (Ψ_ms) reads red
+    +3%, green +14% and blue +35% against the reference at disc-p0 (+17%, +41% and +73% at
+    disc-p60). The served envelope's thin decks, green τ 3.7 above its floor against the hand
+    Jupiter's 5.7, leave a CH₄ path whose lines take 59% of the centre's red (the hand Jupiter's
+    28%). The route and the gates are unchanged; main rules on the brief.
