@@ -58,6 +58,8 @@ import {
   PATCH_INDICES,
   packSurveyMask,
   patchMeshData,
+  RESOLVE_CONTACTS_TEXEL,
+  RESOLVE_FRAME_TEXELS,
   type SlotUpload,
   SKIRT_VERTICES,
   SURVEY_FIN_LINES,
@@ -142,6 +144,11 @@ function maturityLayers(): TerrainLayers {
   photometry.set([0.1, 0.12, 0.14, 1, 1], 0);
   photometry.set([0.8, 0.82, 0.84, 2, 0.72], 10);
   return { ...mappedLayers(), photometry };
+}
+
+/** A write's bytes as the `f32`s they hold. */
+function floats(data: Uint8Array): number[] {
+  return Array.from(new Float32Array(data.slice().buffer));
 }
 
 describe("the shared patch mesh", () => {
@@ -1400,6 +1407,95 @@ describe("the terrain's resources", () => {
     for (const each of [lit, wire, plain]) {
       each.dispose();
     }
+    expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
+  });
+
+  it("make a view's resolve frame at its first ask on a lit layout, its lights' rows and contacts written into it (R14.T2.d)", async () => {
+    const engine = await countingRenderEngine();
+    const lit = new TerrainResources(engine, LOW, WGS84, "lit", true);
+    const frame = lit.resolveFrame("view");
+    const made = engine.textureSpecs.findLast(
+      (spec) => spec.name === "terrain resolve frame (view)",
+    );
+    lit.setLighting(
+      {
+        lights: [],
+        occluders: [],
+        secondaries: [],
+        elsewhere: lawFor([0.2, 0.2, 0.2], [0.6, 0.6, 0.6], "moon"),
+        exposureScale: 1,
+      },
+      "view",
+    );
+    const contacts = new ContactRecords();
+    contacts.pushXyz(1, 2, 3, 4, 5);
+    contacts.pushXyz(6, 7, 8, 9, 10);
+    lit.writeFrame(new InstanceRecords(1), contacts, "view");
+    const writes = engine.textureWritten.filter(
+      (w) => w.texture === "terrain resolve frame (view)",
+    );
+    const lights = engine.writes.findLast((w) => w.buffer === "terrain lights (view)");
+    expect([
+      frame?.name,
+      made?.format,
+      made?.size,
+      writes.map((w) => [w.origin, w.size]),
+      floats(writes[1]?.data ?? new Uint8Array()),
+      floats(writes[2]?.data ?? new Uint8Array()).slice(0, 4),
+      floats(writes[3]?.data ?? new Uint8Array()),
+    ]).toEqual([
+      "terrain resolve frame (view)",
+      "rgba32float",
+      { width: RESOLVE_FRAME_TEXELS, height: 1 },
+      [
+        [
+          { x: 0, y: 0 },
+          { width: RESOLVE_FRAME_TEXELS, height: 1 },
+        ],
+        [
+          { x: 0, y: 0 },
+          { width: (lights?.bytes ?? 0) / 16, height: 1 },
+        ],
+        [
+          { x: RESOLVE_CONTACTS_TEXEL, y: 0 },
+          { width: 1, height: 1 },
+        ],
+        [
+          { x: RESOLVE_CONTACTS_TEXEL + 1, y: 0 },
+          { width: 4, height: 1 },
+        ],
+      ],
+      floats(lights?.data ?? new Uint8Array()),
+      [2, 0, 0, 0],
+      [1, 2, 3, 4, 5, 0, 0, 0, 6, 7, 8, 9, 10, 0, 0, 0],
+    ]);
+    expect(lit.resolveFrame("view")).toBe(frame);
+    lit.releaseView("view");
+    lit.dispose();
+    expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
+  });
+
+  it("make no resolve frame on a wireframe layout (R14.T2.d)", async () => {
+    const engine = await countingRenderEngine();
+    const wire = new TerrainResources(engine, LOW, WGS84, "wire", true);
+    expect(wire.resolveFrame("view")).toBeNull();
+    wire.dispose();
+  });
+
+  it("make a view's resolve frame again at its first ask after a restore, and release it at a forward frame (R14.T2.d)", async () => {
+    const engine = await countingRenderEngine();
+    const lit = new TerrainResources(engine, LOW, WGS84, "lit", true);
+    const frame = lit.resolveFrame("view");
+    engine.restore();
+    const again = lit.resolveFrame("view");
+    lit.releaseResolveFrame("view");
+    const remade = lit.resolveFrame("view");
+    expect([again === frame, again?.name, remade === again]).toEqual([
+      false,
+      "terrain resolve frame (view)",
+      false,
+    ]);
+    lit.dispose();
     expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
   });
 

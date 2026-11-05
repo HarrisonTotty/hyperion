@@ -1,4 +1,6 @@
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { VISIBILITY_IDS_TEXTURE } from "../clusters/resolve";
+import { VISIBILITY_RASTER_LABEL, VISIBILITY_RESOLVE_LABEL } from "../clusters/visibility";
 import {
   DEPTH_PYRAMID_KERNEL,
   DEPTH_PYRAMID_LABEL,
@@ -45,7 +47,13 @@ import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
 import { rotation3FromRows } from "../coords/rotation";
 import { TIMING_FRAMES_IN_FLIGHT } from "../engine/webgpu/timing";
-import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../engine/types";
+import type {
+  DrawItem,
+  FrameSubmission,
+  RenderView,
+  TextureHandle,
+  ViewSize,
+} from "../engine/types";
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL, histogramParams, histogramWorkgroups } from "../post/histogram";
@@ -348,6 +356,7 @@ describe("the photorealistic renderer", () => {
       sceneDepth: () => false,
       lateDraws: () => [],
       visibility: () => null,
+      opaqueDraws: () => [],
     };
     const bodiesPass = (from: number): ReadonlyArray<string> | undefined =>
       engine.targetFrames
@@ -374,6 +383,200 @@ describe("the photorealistic renderer", () => {
     renderer.dispose();
   });
 
+  /** A frame of `frameWith`'s planet handed over to a terrain, and its renderer, prepared. */
+  async function handedOver(): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly renderer: PhotorealRenderer;
+    readonly frame: PhotorealFrame;
+  }> {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const frame = frameWith([]);
+    // The planet's relief subtends 4 px at its limb, 10⁸ m off: handed over.
+    const bodies = frame.bodies.map((body) => ({
+      ...body,
+      handoverReliefM:
+        4 * limbDistanceM(1e8, body.figure.equatorialRadiusM) * pixelAngleRad(camera, VIEWPORT),
+    }));
+    const bare = renderer.render(new RecordingView(), { ...frame, bodies });
+    return {
+      engine,
+      renderer,
+      frame: { ...frame, bodies, previousRegimes: bare?.regimes ?? new Map() },
+    };
+  }
+
+  it("draws the bodies pass opaque first: the terrain that never discards, the figures, then the rest of the terrain (R14.T2.e)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const [opaque, rest] = [drawOfName("opaque terrain"), drawOfName("fins")];
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [opaque, rest],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [opaque],
+    };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), { ...frame, terrain });
+    expect(
+      engine.targetFrames
+        .slice(from)
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
+        ?.draws.map((draw) => draw.material.name),
+    ).toEqual(["opaque terrain", "bodies:smoothMeshCluster", "bodies:smoothMeshCluster", "fins"]);
+    renderer.dispose();
+  });
+
+  it("draws the terrain by the visibility buffer: its ID raster into the view's IDs with the scene's depth, then the resolve over them, the figures and the rest (R14.T2.c–e)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const raster = drawOfName("id raster");
+    const resolve = drawOfName("resolve");
+    const fins = drawOfName("fins");
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("forward")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => ({ raster: [raster], resolve: [resolve], forward: [fins] }),
+      opaqueDraws: () => [],
+    };
+    const byIds = { ...SETTINGS.high.geometry, shading: "visibility" as const };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), { ...frame, geometry: byIds, terrain });
+    const frames = engine.targetFrames.slice(from);
+    const at = (label: string): number => frames.findIndex((f) => f.label === label);
+    const resolvePass = frames[at(VISIBILITY_RESOLVE_LABEL)];
+    const idTarget = engine.textureSpecs.find((spec) => spec.name === "test view:ids colour");
+    expect([
+      at(PHOTOREAL_PASS_LABELS.bodies),
+      at(VISIBILITY_RASTER_LABEL) >= 0 &&
+        at(VISIBILITY_RASTER_LABEL) < at(VISIBILITY_RESOLVE_LABEL),
+      frames[at(VISIBILITY_RASTER_LABEL)]?.draws,
+      resolvePass?.colourLoad,
+      resolvePass?.draws.map((draw) => draw.material.name),
+      Object.keys(resolvePass?.draws[0]?.textures ?? {}),
+      idTarget?.format,
+    ]).toEqual([
+      -1,
+      true,
+      [raster],
+      "load",
+      ["resolve", "bodies:smoothMeshCluster", "bodies:smoothMeshCluster", "fins"],
+      [VISIBILITY_IDS_TEXTURE],
+      "r32uint",
+    ]);
+    renderer.dispose();
+  });
+
+  /** A terrain by IDs of one raster, resolve and forward draw each, for `handedOver`'s frame. */
+  function byIdsTerrain(): FrameTerrain {
+    const by = { raster: [drawOfName("id raster")], resolve: [drawOfName("resolve")], forward: [] };
+    return {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("forward")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => by,
+      opaqueDraws: () => [],
+    };
+  }
+
+  /** The high setting's geometry shading by the visibility buffer. */
+  const BY_IDS = { ...SETTINGS.high.geometry, shading: "visibility" as const };
+
+  it("keeps a resolve's draw with the view's IDs bound from frame to frame (R14.T2.d)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const terrain = byIdsTerrain();
+    const resolved = (): DrawItem | undefined => {
+      renderer.render(new RecordingView(), { ...frame, geometry: BY_IDS, terrain });
+      return engine.targetFrames.findLast((f) => f.label === VISIBILITY_RESOLVE_LABEL)?.draws[0];
+    };
+    const first = resolved();
+    expect(resolved()).toBe(first);
+    renderer.dispose();
+  });
+
+  it("resizes the view's IDs with its scene target, the resolve bound to the resized IDs (R14.T2.c)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const terrain = byIdsTerrain();
+    const idsBound = (viewport: ViewSize): TextureHandle | undefined => {
+      renderer.render(new RecordingView(), {
+        ...frame,
+        viewport,
+        presentedPx: viewport,
+        geometry: BY_IDS,
+        terrain,
+      });
+      return engine.targetFrames.findLast((f) => f.label === VISIBILITY_RESOLVE_LABEL)?.draws[0]
+        ?.textures[VISIBILITY_IDS_TEXTURE];
+    };
+    const before = idsBound(VIEWPORT);
+    const kept = idsBound(VIEWPORT);
+    // The counting engine remakes a target's textures at a resize, as the adapter does.
+    const resized = idsBound({ widthPx: VIEWPORT.widthPx / 2, heightPx: VIEWPORT.heightPx / 2 });
+    expect([kept === before, resized === before, resized?.name]).toEqual([
+      true,
+      false,
+      "test view:ids colour",
+    ]);
+    renderer.dispose();
+  });
+
+  it("draws forward a frame whose terrain gives none by IDs (R14.T2.c)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const terrain = { ...byIdsTerrain(), visibility: () => null };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), { ...frame, geometry: BY_IDS, terrain });
+    const frames = engine.targetFrames.slice(from);
+    expect([
+      frames.some((f) => f.label === VISIBILITY_RASTER_LABEL),
+      frames
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
+        ?.draws.map((draw) => draw.material.name)
+        .at(-1),
+    ]).toEqual([false, "forward"]);
+    renderer.dispose();
+  });
+
+  it("lets the view's IDs go at a frame whose setting shades forward, and makes them again after (R14.T2.c)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    let ids = true;
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("forward")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () =>
+        ids ? { raster: [drawOfName("id raster")], resolve: [], forward: [] } : null,
+      opaqueDraws: () => [],
+    };
+    const made = (): number =>
+      engine.textureSpecs.filter((spec) => spec.name === "test view:ids colour").length;
+    const byIds = {
+      ...frame,
+      geometry: { ...SETTINGS.high.geometry, shading: "visibility" as const },
+    };
+    renderer.render(new RecordingView(), { ...byIds, terrain });
+    ids = false;
+    renderer.render(new RecordingView(), { ...frame, terrain });
+    // Let go at the forward frame, the view's IDs are made again at the next frame by them.
+    ids = true;
+    renderer.render(new RecordingView(), { ...byIds, terrain });
+    expect(made()).toBe(2);
+    renderer.dispose();
+  });
+
   it("splits the bodies pass around the view's depth pyramid with the two-pass occlusion, and draws it whole without (R14.T3.d)", async () => {
     const engine = await countingRenderEngine();
     const renderer = new PhotorealRenderer(engine, "test view");
@@ -391,6 +594,7 @@ describe("the photorealistic renderer", () => {
       sceneDepth: () => false,
       lateDraws: () => [drawOfName("late")],
       visibility: () => null,
+      opaqueDraws: () => [],
     };
     const occluded = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
     const passes = (): Array<readonly [string, string]> => {
@@ -468,6 +672,7 @@ describe("the photorealistic renderer", () => {
       sceneDepth: () => false,
       lateDraws: () => [],
       visibility: () => null,
+      opaqueDraws: () => [],
     };
     const geometry = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
     // Drawn at an internal scale of 1.5, its presented size kept, then again after a restore at it.
@@ -944,6 +1149,7 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
       sceneDepth: () => false,
       lateDraws: () => [],
       visibility: () => null,
+      opaqueDraws: () => [],
     };
     const air = { ...frameWith([]), bodies: [planet], atmospheres: [airOf(planet, tables)] };
     const first = renderer.render(view, air);
@@ -1630,6 +1836,7 @@ describe("the photorealistic renderer's overlay", () => {
       sceneDepth: () => false,
       lateDraws: () => [],
       visibility: () => null,
+      opaqueDraws: () => [],
     };
     renderer.render(view, { ...frameWith([]), overlay, terrain });
     expect(
@@ -1657,6 +1864,7 @@ describe("the photorealistic renderer's overlay", () => {
       sceneDepth: () => asks,
       lateDraws: () => [],
       visibility: () => null,
+      opaqueDraws: () => [],
     });
     const symbology = (frame: PhotorealFrame): ReadonlyArray<string> | undefined => {
       view.frames.length = 0;
@@ -2301,6 +2509,7 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
       sceneDepth: () => false,
       lateDraws: () => [drawOfName("late")],
       visibility: () => null,
+      opaqueDraws: () => [],
     };
     const geometry = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
     const overlay = (): FrameSubmission => SYMBOLOGY;

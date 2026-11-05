@@ -405,6 +405,7 @@ function fakeSource(
     readonly draws?: ReadonlyArray<DrawItem>;
     readonly overlayDepth?: TerrainViewFrame["overlayDepth"];
     readonly visibility?: TerrainViewFrame["visibility"];
+    readonly opaqueDraws?: number;
     readonly decorated?: boolean;
     readonly overlayMode?: FrameTerrainPass["geometry"]["overlayDepth"];
     readonly strides?: FrameTerrainPass["geometry"]["strides"];
@@ -434,6 +435,7 @@ function fakeSource(
   };
   const frame: TerrainViewFrame = {
     draws: options.draws ?? [DRAW],
+    opaqueDraws: options.opaqueDraws ?? 0,
     patches: { interior: 0, edge: 1, fins: 0 },
     conditions: { streaming: false, detailLimited: false },
     annunciation: options.annunciation ?? null,
@@ -854,32 +856,67 @@ describe("a view's frame terrain by the visibility buffer (plan R14, R14.T2.c)",
     return { terrain, order: () => drawn };
   }
 
-  it("gives each body's ID raster's draws, then each body's forward draws, in the frame's order", () => {
-    const near = { raster: [part("near raster")], forward: [part("near forward")] };
-    const other = { raster: [part("other raster")], forward: [part("other forward")] };
-    const { terrain, order } = twoBodies(near, other);
-    const of = (body: string): typeof near => (body === OTHER_BODY ? other : near);
+  it("gives the one body's ID raster's draws, its resolve and its forward draws (R14.T2.d)", () => {
+    const { plan, body } = handed();
+    const near = {
+      raster: [part("near raster")],
+      resolve: [part("near resolve")],
+      forward: [part("near forward")],
+    };
+    const terrain = frameTerrain(fakeSource({ visibility: near }).source);
+    terrain.draws(plan, [body]);
+    expect(terrain.visibility()).toEqual(near);
+  });
+
+  it("gives none where two bodies draw terrain, each numbering its IDs from 0 (a lean)", () => {
+    const near = {
+      raster: [part("near raster")],
+      resolve: [part("near resolve")],
+      forward: [part("near forward")],
+    };
+    const { terrain, order } = twoBodies(near, { ...near, raster: [part("other raster")] });
     expect([order().toSorted(), terrain.visibility()]).toEqual([
       [BODY, OTHER_BODY].toSorted(),
-      {
-        raster: order().flatMap((body) => of(body).raster),
-        forward: order().flatMap((body) => of(body).forward),
-      },
+      null,
     ]);
   });
 
   it("gives none where any body it drew draws forward", () => {
-    const near = { raster: [part("near raster")], forward: [part("near forward")] };
+    const near = { raster: [part("near raster")], resolve: [], forward: [part("near forward")] };
     expect([
       twoBodies(near, null).terrain.visibility(),
       twoBodies(null, near).terrain.visibility(),
     ]).toEqual([null, null]);
   });
 
+  it("gives each body's draws that never discard, in the frame's order (R14.T2.e)", () => {
+    const [opaque, fin] = [part("opaque"), part("fin")];
+    const { source } = fakeSource({ draws: [opaque, fin], opaqueDraws: 1 });
+    const nearBody = bodyAt(3 * A);
+    const otherBody = bodyAt(5 * A, { id: OTHER_BODY, centreM: vec3(2.5 * A, 0, -5 * A) });
+    const plan = planLitBodies(
+      [nearBody, otherBody],
+      [{ disc: sunLikeHostDisc(), centreM: add(nearBody.centreM, scale(SUN, AU_M)) }],
+      OPTIONS,
+      new Map(),
+    );
+    const both: ViewTerrainSource = {
+      ...source,
+      pass: () => source.pass(BODY),
+      drawTerrain: (view, _body, input) => source.drawTerrain(view, BODY, input),
+    };
+    const terrain = frameTerrain(both);
+    const draws = terrain.draws(plan, [nearBody, otherBody]);
+    expect([draws, terrain.opaqueDraws()]).toEqual([
+      [opaque, fin, opaque, fin],
+      [opaque, opaque],
+    ]);
+  });
+
   it("gives none where it drew nothing, and none before its draws", () => {
     const { plan, body } = handed();
     const empty = frameTerrain(
-      fakeSource({ draws: [], visibility: { raster: [], forward: [] } }).source,
+      fakeSource({ draws: [], visibility: { raster: [], resolve: [], forward: [] } }).source,
     );
     const before = empty.visibility();
     empty.draws(plan, [body]);
@@ -1364,6 +1401,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
           ? null
           : {
               draws: [WIRE_DRAW],
+              opaqueDraws: 0,
               patches: { interior: 0, edge: 1, fins: 0 },
               conditions: { streaming: false, detailLimited: false },
               annunciation: null,

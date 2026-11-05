@@ -362,6 +362,7 @@ export class LiveFrameTerrain implements FrameTerrain {
   #depth: DrawItem[] = [];
   #sceneDepth = false;
   #visibility: FrameVisibility | null = null;
+  #opaque: DrawItem[] = [];
   /** The bodies the last {@link LiveFrameTerrain.draws} drew with the two-pass occlusion. */
   #occluded: BodyIdHex[] = [];
 
@@ -437,10 +438,14 @@ export class LiveFrameTerrain implements FrameTerrain {
       this.#input;
     const byId = new Map(bodies.map((body) => [body.id, body]));
     const draws: DrawItem[] = [];
+    // The bodies whose terrain draws.
+    let drew = 0;
+    const opaque: DrawItem[] = [];
     const depth: DrawItem[] = [];
     // Every body's terrain by the visibility buffer, while each body drawn gives its own (R14.T2.c).
-    let visibility: { raster: DrawItem[]; forward: DrawItem[] } | null = {
+    let visibility: { raster: DrawItem[]; resolve: DrawItem[]; forward: DrawItem[] } | null = {
       raster: [],
+      resolve: [],
       forward: [],
     };
     // Whether every body drawn lets the symbology take the scene's depth (plan R14, R14.T1.e).
@@ -502,9 +507,12 @@ export class LiveFrameTerrain implements FrameTerrain {
         continue;
       }
       decorated ||= frame.decorated;
+      drew += 1;
       draws.push(...frame.draws);
+      opaque.push(...frame.draws.slice(0, frame.opaqueDraws));
       if (visibility !== null && frame.visibility !== null) {
         visibility.raster.push(...frame.visibility.raster);
+        visibility.resolve.push(...frame.visibility.resolve);
         visibility.forward.push(...frame.visibility.forward);
       } else {
         visibility = null;
@@ -537,14 +545,27 @@ export class LiveFrameTerrain implements FrameTerrain {
     this.#occluded = occluded;
     this.#depth = depth;
     this.#sceneDepth = sceneDepth && depth.length > 0;
-    this.#visibility = visibility !== null && draws.length > 0 ? visibility : null;
+    // One body's terrain alone by IDs (a lean, 2026-11-05): each body's pass numbers its IDs from
+    // 0 in one view's ID target, so that a second body's resolve would shade the first's pixels
+    // until each body takes a range of the index space of its own.
+    this.#visibility = visibility !== null && drew === 1 ? visibility : null;
+    this.#opaque = opaque;
     return draws;
   }
 
   /**
+   * Of the last {@link LiveFrameTerrain.draws}, each body's draws that never discard
+   * (`TerrainViewFrame.opaqueDraws`), in its order (plan R14, R14.T2.e).
+   */
+  opaqueDraws(): ReadonlyArray<DrawItem> {
+    return this.#opaque;
+  }
+
+  /**
    * The terrain the last {@link LiveFrameTerrain.draws} drew, by the visibility buffer (plan R14,
-   * R14.T2.c): each body's ID raster's draws, then each body's forward draws, where every body it
-   * drew gives them (`TerrainViewFrame.visibility`); `null` otherwise, and where it drew none.
+   * R14.T2.c): the one body's ID raster's draws, resolve (T2.d) and forward draws, where one body's
+   * terrain drew and gives them (`TerrainViewFrame.visibility`); `null` otherwise: where it drew
+   * none, or more than one body (see `draws`).
    */
   visibility(): FrameVisibility | null {
     return this.#visibility;

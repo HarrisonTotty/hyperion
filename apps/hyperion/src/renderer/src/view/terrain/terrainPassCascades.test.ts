@@ -15,6 +15,8 @@ import { instrumentViewId, PRIMARY_VIEW_ID } from "../../displays/view/viewNames
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3 } from "../../geometry/vec3";
 import { CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
 import { FakeAdapter, SWIFTSHADER_INFO } from "../../test/fakeGpu";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { lawFor } from "../appearance/phase";
 import {
@@ -1678,8 +1680,7 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
 
   it("draws their may-discard buckets forward after the visibility buffer's resolve, by the fin form, and rasterises none (R14.T2.c)", async () => {
     const made = await edgePass();
-    // At stride 1, as its buckets are counted: high's strides are on since the strides lane.
-    made.pass.setGeometry({ ...SETTINGS.high.geometry, shading: "visibility", strides: "off" });
+    made.pass.setGeometry({ ...HIGH_AT_STRIDE_1, shading: "visibility" });
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     await settle();
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
@@ -2376,6 +2377,43 @@ function bucketOf(draw: DrawItem): unknown[] {
   ];
 }
 
+describe("the bodies pass's opaque draws first (plan R14, R14.T2.e)", () => {
+  it("leads the lit pass's draws with its opaque buckets on the cluster path, at stride 1 and with strides", async () => {
+    const made = await clusteredPass("low");
+    const counts = (geometry: GeometrySettings): unknown => {
+      made.pass.setGeometry(geometry);
+      const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+      const lead = frame.draws.slice(0, frame.opaqueDraws).map((draw) => draw.material.name);
+      return [
+        frame.opaqueDraws,
+        lead.every((name) => name.startsWith("terrain-lit-cluster-")),
+        frame.draws.slice(frame.opaqueDraws).every((draw) => !lead.includes(draw.material.name)),
+      ];
+    };
+    expect([
+      counts({ ...SETTINGS.low.geometry, strides: "off" }),
+      counts({ ...SETTINGS.low.geometry, strides: "measured" }),
+    ]).toEqual([
+      [2, true, true],
+      [8, true, true],
+    ]);
+  });
+
+  it("leads them with the interior patches' draw where they draw by the interior mesh, and with none by the way back", async () => {
+    const made = await clusteredPass("low");
+    made.pass.setGeometry({ ...SETTINGS.low.geometry, litClusters: false });
+    const split = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+    made.pass.setGeometry(GEOMETRY_BEFORE_R14);
+    const back = made.pass.drawFor(PRIMARY, frameOf(NEAR, false));
+    expect([
+      split.opaqueDraws,
+      split.draws[0]?.mesh.name,
+      back.opaqueDraws,
+      back.draws.length > 0,
+    ]).toEqual([1, "terrain lit interior patch", 0, true]);
+  });
+});
+
 describe("the lit pass by the visibility buffer's ID raster (plan R14, R14.T2.c)", () => {
   const VISIBILITY: GeometrySettings = { ...SETTINGS.high.geometry, shading: "visibility" };
 
@@ -2430,7 +2468,8 @@ describe("the lit pass by the visibility buffer's ID raster (plan R14, R14.T2.c)
     ]);
   });
 
-  it("takes the primitive_index form over the terrain cluster mesh on a device with primitive-index", async () => {
+  /** A clustered pass on a device with `primitive-index`, its ID forms refused where `refused`. */
+  async function primitivePass(refused: (name: string) => boolean = () => false): Promise<Made> {
     const limits = {
       maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
       maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
@@ -2440,11 +2479,59 @@ describe("the lit pass by the visibility buffer's ID raster (plan R14, R14.T2.c)
       features: ["primitive-index"],
       ...limits,
     }).requestDevice({ requiredFeatures: ["primitive-index"], requiredLimits: { ...limits } });
-    const made = await litPass("high", new CountingRenderEngine(device));
+    const engine = new CountingRenderEngine(device);
+    engine.failMaterials(refused);
+    const made = await litPass("high", engine);
     made.pass.setReducedMotion(true);
     made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
     stream(made, [passView(PRIMARY, NEAR)], 24);
-    await byIds(made);
+    return byIds(made);
+  }
+
+  it("draws de-indexed where the primitive_index form is refused, stating no refusal of the path (Design note 6)", async () => {
+    const made = await primitivePass((name) => name.startsWith("terrain-id-cluster-primitive"));
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const path = made.pass.layout.vertexPath;
+    expect([
+      (frame.visibility?.raster ?? []).map((draw) => [draw.mesh.name, draw.material.name]),
+      made.pass.clusterRefusal,
+    ]).toEqual([
+      frame.draws.map(() => ["terrain cluster ids", `terrain-id-cluster-${path}-still`]),
+      null,
+    ]);
+  });
+
+  it("resolves the raster's pixels by one full-screen draw over the lit draw's bindings, the lists' layout and the view's resolve frame (R14.T2.d)", async () => {
+    const made = await byIds(await clusteredPass());
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    const path = made.pass.layout.vertexPath;
+    const [resolve, ...others] = frame.visibility?.resolve ?? [];
+    const lit = frame.draws[0];
+    const entries = PASS_ENTRIES(made);
+    expect([
+      others,
+      resolve?.mesh.name,
+      resolve?.material.name,
+      resolve?.indirect,
+      [...(resolve?.uniforms["resolveLists"] ?? [])],
+      resolve?.uniforms["cascadeViewAxis"] === lit?.uniforms["cascadeViewAxis"],
+      resolve?.textures["resolveFrame"]?.name,
+      resolve?.storageBuffers?.["clusterLists"]?.name,
+    ]).toEqual([
+      [],
+      "resolve screen",
+      `terrain-resolve-${path}-still`,
+      undefined,
+      // SwiftShader's sub-pixel grid, 16 cells a pixel.
+      [entries, 0, made.pass.layout.slots.slotCount > 0 ? 7 * entries : 0, 16],
+      true,
+      `terrain resolve frame (${PRIMARY})`,
+      `terrain clusters (${PRIMARY}) lists`,
+    ]);
+  });
+
+  it("takes the primitive_index form over the terrain cluster mesh on a device with primitive-index", async () => {
+    const made = await primitivePass();
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const path = made.pass.layout.vertexPath;
     expect([
@@ -2469,6 +2556,11 @@ describe("the lit pass by the visibility buffer's ID raster (plan R14, R14.T2.c)
   it("asks its ID form again after a restore, its first frame by IDs a fresh pass's (Design note 16)", async () => {
     const shapeOf = (frame: TerrainViewFrame): unknown => ({
       raster: frame.visibility?.raster.map(drawShape) ?? null,
+      resolve:
+        frame.visibility?.resolve.map((draw) => [
+          drawShape(draw),
+          Object.entries(draw.textures).map(([name, texture]) => [name, texture.name]),
+        ]) ?? null,
       forward: frame.visibility?.forward.map(drawShape) ?? null,
     });
     const made = await byIds(await clusteredPass());
@@ -2486,6 +2578,38 @@ describe("the lit pass by the visibility buffer's ID raster (plan R14, R14.T2.c)
     const freshFrame = fresh.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     expect([asking, restored.visibility !== null]).toEqual([null, true]);
     expect(shapeOf(restored)).toEqual(shapeOf(freshFrame));
+  });
+
+  it("draws forward where its resolve is refused, and states the refusal (R14.T2.d)", async () => {
+    const made = await clusteredPass();
+    made.engine.failMaterials((name) => name.startsWith("terrain-resolve"));
+    await byIds(made);
+    const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
+    expect([frame.visibility, made.pass.clusterRefusal?.startsWith("the resolve form")]).toEqual([
+      null,
+      true,
+    ]);
+  });
+
+  it("resolves a frame whose lighting carries its ground's emission by the resolve's emissive form, once made (R14.T2.d)", async () => {
+    const made = await byIds(await clusteredPass());
+    const emitting: TerrainViewFrameInput = {
+      ...frameOf(NEAR, true),
+      lighting: {
+        ...STARLIT,
+        emission: {
+          field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+          star: { x: 0, y: 0, z: 1 },
+          meltClasses: [],
+        },
+      },
+    };
+    made.pass.drawFor(PRIMARY, emitting);
+    await settle();
+    const frame = made.pass.drawFor(PRIMARY, emitting);
+    expect(frame.visibility?.resolve.map((draw) => draw.material.name)).toEqual([
+      `terrain-resolve-emissive-${made.pass.layout.vertexPath}-still`,
+    ]);
   });
 
   it("draws forward where its ID form is refused, and states the refusal", async () => {

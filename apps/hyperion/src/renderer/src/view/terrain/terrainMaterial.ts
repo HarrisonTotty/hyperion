@@ -108,6 +108,8 @@ import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
 import terrainClusterWgsl from "./shaders/terrainCluster.wgsl?raw";
+import { type ResolveMaterial, VISIBILITY_IDS_TEXTURE } from "../clusters/resolve";
+import resolveTerrainWgsl from "../clusters/resolveTerrain.wgsl?raw";
 import terrainClusterIdWgsl from "./shaders/terrainClusterId.wgsl?raw";
 import terrainClusterIdDeindexedWgsl from "./shaders/terrainClusterIdDeindexed.wgsl?raw";
 import terrainClusterIdPrimitiveWgsl from "./shaders/terrainClusterIdPrimitive.wgsl?raw";
@@ -833,27 +835,25 @@ export function terrainFinDepthMaterialSpec(path: TerrainVertexPath): WgslMateri
 const CLUSTER_VERTEX_HEAD =
   "@vertex\nfn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) -> LitVertexOut {";
 
-/** {@link CLUSTER_VERTEX_HEAD} as a function, no longer an entry point. */
-const CLUSTER_VERTEX_FUNCTION =
-  "fn cluster_lit_vertex(local : vec3f, entry : u32) -> LitVertexOut {";
-
 /**
  * A lit terrain source with entry points of its own over the cluster path's decode (plan R14,
- * R14.T2.c): its lit vertex stage made the function `lit_vertex` and `terrainCluster.wgsl`
- * appended with its entry point made a function, so that the source's own entry points read a
- * bucket's lists and decode its clusters as the cluster forms do.
+ * R14.T2.c): its lit vertex stage made the function `lit_vertex` and `terrainCluster.wgsl`'s decode
+ * appended without its entry point, the file's last function, which reads a `Draw`'s `clusterBase`
+ * that a form of its own may not declare (the resolve's, T2.d), so that the source's own entry
+ * points read a bucket's lists and decode its clusters as the cluster forms do.
  *
- * @throws Error unless the lit vertex stage's head occurs exactly once in `source`.
+ * @throws Error unless the lit vertex stage's head occurs exactly once in `source`, and
+ *   `terrainCluster.wgsl`'s entry point once, after its decode.
  */
 export function withClusterLibrary(source: string): string {
   const parts = source.split(LIT_VERTEX_HEAD);
-  const cluster = terrainClusterWgsl.split(CLUSTER_VERTEX_HEAD);
-  if (parts.length !== 2 || cluster.length !== 2) {
+  const [decode, entry, ...rest] = terrainClusterWgsl.split(CLUSTER_VERTEX_HEAD);
+  if (parts.length !== 2 || decode === undefined || entry === undefined || rest.length > 0) {
     throw new Error(
-      `a form over the cluster decode needs terrainLit.wgsl's vertex stage once, found ${String(parts.length - 1)}, and terrainCluster.wgsl's once, found ${String(cluster.length - 1)}`,
+      `a form over the cluster decode needs terrainLit.wgsl's vertex stage once, found ${String(parts.length - 1)}, and terrainCluster.wgsl's entry point once`,
     );
   }
-  return `${parts.join(LIT_VERTEX_FUNCTION)}\n${cluster.join(CLUSTER_VERTEX_FUNCTION)}`;
+  return `${parts.join(LIT_VERTEX_FUNCTION)}\n${decode}`;
 }
 
 /** The directive a `primitive_index` source begins with (plan R14, R14.T2.c). */
@@ -912,6 +912,161 @@ export function terrainClusterIdMaterialSpec(
       { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: vertex },
     ],
   };
+}
+
+/**
+ * The `DrawItem.textures` name under which the resolve binds the view's resolve frame (plan R14,
+ * R14.T2.d; `gpu/resources.ts`' `resolveFrame`): its lights and contacts as `rgba32float` texels.
+ */
+export const RESOLVE_FRAME_TEXTURE = "resolveFrame";
+
+/** The resolve's bindings beside the lit material's (plan R14, R14.T2.d; `resolveTerrain.wgsl`). */
+const RESOLVE_BINDINGS = { visibilityIds: 25, resolveFrame: 26 } as const;
+
+/**
+ * Replaces each of `parts`' `from` in `source` with its `to`, each found exactly `count` times.
+ *
+ * @throws Error naming the form and the text where one is found another number of times.
+ */
+function rewritten(
+  form: string,
+  source: string,
+  parts: ReadonlyArray<readonly [from: string, to: string, count: number]>,
+): string {
+  let out = source;
+  for (const [from, to, count] of parts) {
+    const found = out.split(from).length - 1;
+    if (found !== count) {
+      throw new Error(
+        `${form} needs ${JSON.stringify(from)} ${String(count)} times, found ${String(found)}`,
+      );
+    }
+    out = out.replaceAll(from, to);
+  }
+  return out;
+}
+
+/** The lit fragment stage's head, which the resolve calls as `lit_fragment` over a face's edges. */
+const LIT_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {";
+
+/** The resolve's console names, a vertex path's and its emissive form's (plan R14, R14.T2.d). */
+const RESOLVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "RESOLVE OFFSETS",
+  "face-differences": "TERRAIN RESOLVE",
+};
+
+const RESOLVE_EMISSIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "EMISSIVE RESOLVE OFFSETS",
+  "face-differences": "EMISSIVE TERRAIN RESOLVE",
+};
+
+/**
+ * The visibility buffer's resolve of terrain for a vertex path, or its emissive form (plan R14,
+ * R14.T2.d; `clusters/resolveTerrain.wgsl`; Design note 9): a full-screen draw into the scene target
+ * that shades each pixel holding a terrain ID once, by the interior form's fragment stage over the
+ * triangle's vertices refetched by its vertex function, writing no depth.
+ *
+ * @remarks
+ * Made from the interior form's source ({@link terrainLitInteriorMaterialSpec}, its emissive form's
+ * where `emissive`): its lit vertex stage the function `lit_vertex` and terrainCluster.wgsl's decode
+ * beside it ({@link withClusterLibrary}); its fragment stage the function `lit_fragment`, its
+ * geometric normal from the face's edges in place of its place's screen derivatives; its `Draw` with
+ * the resolve's fields after the cascades' (`clusters/resolve.ts`' `resolveUniforms`). Every storage
+ * buffer is read by the fragment stage: R05's but the contacts (four on `face-differences`), the
+ * survey mask, the lists, the class layers and the horizon map, eight at most against WebGPU's
+ * eight (Design note 6), the lights and the contacts, the lit forms' other two, read from the
+ * view's resolve frame as {@link RESOLVE_FRAME_TEXTURE}, an `rgba32float` row by `textureLoad` (a
+ * lean, 2026-11-04: the engine's `Draw` holds no array). Its textures are the lit material's, then
+ * the view's IDs as {@link VISIBILITY_IDS_TEXTURE} and the resolve frame: 15 against WebGPU's 16 a
+ * stage. R11's planned additions to terrain's shading (the cloud layer's shadow, the rings' shadow on
+ * the planet, the decoration's albedo) are textures or uniforms, none a storage buffer: the 8 hold.
+ */
+export function terrainResolveMaterialSpec(
+  path: TerrainVertexPath,
+  emissive: boolean,
+): WgslMaterialSpec {
+  const interior = emissive
+    ? terrainLitEmissiveInteriorMaterialSpec(path)
+    : terrainLitInteriorMaterialSpec(path);
+  const form = `the ${emissive ? "emissive " : ""}resolve`;
+  const shaded = rewritten(form, interior.fragmentWgsl, [
+    [
+      LIT_DRAW_END,
+      "  cascadeViewAxis : vec4f,\n  // The resolve's lists and templates (`clusters/resolve.ts`' `resolveUniforms`).\n  resolveLists : vec4f,\n  resolveTemplates0 : vec4f,\n  resolveTemplates1 : vec4f,\n}",
+      1,
+    ],
+    [
+      LIT_FRAGMENT_HEAD,
+      "fn lit_fragment(in : LitVertexOut, face_dx : vec3f, face_dy : vec3f) -> vec4f {",
+      1,
+    ],
+    ["dpdxFine(in.fromCameraBf), dpdyFine(in.fromCameraBf)", "face_dx, face_dy", 1],
+    [
+      "@group(2) @binding(8) var<storage, read> terrain_lights : array<vec4f>;",
+      "// The lights are the resolve frame's rows (`resolveTerrain.wgsl`).",
+      1,
+    ],
+    ["  return terrain_lights[i];", "  return textureLoad(resolve_frame, vec2u(i, 0u), 0);", 1],
+    [
+      "@group(2) @binding(3) var<storage, read> contacts : Contacts;",
+      "// The contacts are the resolve frame's texels (`resolveTerrain.wgsl`).",
+      1,
+    ],
+    ["contacts.count", "resolve_contact_count()", 2],
+    ["contacts.items[i]", "resolve_contact(i)", 2],
+  ]);
+  const source = `${withClusterLibrary(shaded)}\n${resolveTerrainWgsl}`;
+  const fragment = ["fragment"] as const;
+  const b = TERRAIN_LIT_BINDINGS;
+  return {
+    name: `terrain-resolve-${emissive ? "emissive-" : ""}${path}`,
+    displayName: (emissive ? RESOLVE_EMISSIVE_DISPLAY_NAMES : RESOLVE_DISPLAY_NAMES)[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [
+      ...interior.uniforms,
+      { name: "resolveLists", type: "vec4f" },
+      { name: "resolveTemplates0", type: "vec4f" },
+      { name: "resolveTemplates1", type: "vec4f" },
+    ],
+    samplers: interior.samplers,
+    textures: [
+      ...(interior.textures ?? []),
+      { name: VISIBILITY_IDS_TEXTURE, binding: RESOLVE_BINDINGS.visibilityIds, sampleType: "uint" },
+      {
+        name: RESOLVE_FRAME_TEXTURE,
+        binding: RESOLVE_BINDINGS.resolveFrame,
+        sampleType: "unfilterable-float",
+      },
+    ],
+    cullMode: "none",
+    depthWrite: false,
+    colourWrites: true,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path).flatMap((buffer): StorageBufferSpec[] =>
+        buffer.name === "contacts"
+          ? []
+          : [{ name: buffer.name, binding: buffer.binding, stages: fragment }],
+      ),
+      { name: "surveyMask", binding: b.surveyMask, stages: fragment },
+      { name: "clusterLists", binding: b.clusterLists, stages: fragment },
+      { name: "classLayers", binding: b.classLayers, stages: fragment },
+      { name: "horizonMap", binding: b.horizonMap, stages: fragment },
+    ],
+  };
+}
+
+/**
+ * Terrain's {@link ResolveMaterial} (plan R14, R14.T2.d; `clusters/resolve.ts`): its consumer class
+ * and its resolve of a vertex path ({@link terrainResolveMaterialSpec}), or the resolve's emissive
+ * form.
+ */
+export function terrainResolveMaterial(
+  path: TerrainVertexPath,
+  emissive: boolean,
+): ResolveMaterial {
+  return { consumer: "terrain", spec: terrainResolveMaterialSpec(path, emissive) };
 }
 
 /** Both paths' lit materials, for the catalogue. */
@@ -987,6 +1142,17 @@ export const TERRAIN_CLUSTER_ID_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
 export const TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainClusterIdMaterialSpec("baked-offsets", true),
   terrainClusterIdMaterialSpec("face-differences", true),
+];
+
+/**
+ * Both paths' resolves and their emissive forms (plan R14, R14.T2.d), for the catalogue, compiled for
+ * the scene's `rgba16float`.
+ */
+export const TERRAIN_RESOLVE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainResolveMaterialSpec("baked-offsets", false),
+  terrainResolveMaterialSpec("face-differences", false),
+  terrainResolveMaterialSpec("baked-offsets", true),
+  terrainResolveMaterialSpec("face-differences", true),
 ];
 
 /** Both paths' cluster depths (plan R14, R14.T1.e), for the catalogue, compiled for the canvas. */

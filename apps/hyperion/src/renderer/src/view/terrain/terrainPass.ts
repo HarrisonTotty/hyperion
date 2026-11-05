@@ -119,6 +119,7 @@ import {
   type StrideErrorsM,
   type StrideScale,
 } from "../clusters/strides";
+import { resolveUniforms } from "../clusters/resolve";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
 import { TERRAIN_PAGE_CLUSTERS, TERRAIN_SUB_PATCH_MASK } from "../clusters/terrain";
 import { type Stride, TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
@@ -267,6 +268,7 @@ import {
 import { CascadeReuse, TerrainShadows } from "./shadows/terrainShadows";
 import {
   DISC_NORMALS_TEXTURE,
+  RESOLVE_FRAME_TEXTURE,
   SHADOW_CASCADES_TEXTURE,
   type TerrainLighting,
 } from "./terrainMaterial";
@@ -673,6 +675,12 @@ export interface TerrainViewFrame {
    */
   readonly draws: ReadonlyArray<DrawItem>;
   /**
+   * How many of {@link TerrainViewFrame.draws}, from the first, never discard (plan R14, R14.T2.e):
+   * the interior patches' draw or their opaque buckets', which the bodies pass draws before the mesh
+   * bodies' figures, which may discard, and the rest after them.
+   */
+  readonly opaqueDraws: number;
+  /**
    * How many patches its draws draw (plan R14, R14.T1.a): the interior patches, by their own mesh,
    * and the others, by the shading's; none where it draws nothing.
    */
@@ -744,6 +752,11 @@ export interface TerrainOverlayDepth {
  */
 export interface TerrainVisibility {
   readonly raster: ReadonlyArray<DrawItem>;
+  /**
+   * The resolve's draws (plan R14, R14.T2.d), the full-screen pass that shades the raster's pixels
+   * once, but the view's IDs, which its renderer binds (`clusters/resolve.ts`' `withVisibilityIds`).
+   */
+  readonly resolve: ReadonlyArray<DrawItem>;
   readonly forward: ReadonlyArray<DrawItem>;
 }
 
@@ -1136,14 +1149,22 @@ interface Device {
   wireClusterMaterial: MaterialHandle | null;
   /**
    * The visibility buffer's ID raster of the interior patches on the cluster path (plan R14,
-   * R14.T2.c), by `primitive_index` where `idClusterPrimitive` (the device's `primitive-index` when
-   * it was asked), else de-indexed; asked at the first frame whose geometry shades by the visibility
-   * buffer (`visibilityAsked`); `null` before, for the other shadings, and where it cannot be made,
-   * when the lit pass draws forward.
+   * R14.T2.c) and whether it is the `primitive_index` form, the device's where it has
+   * `primitive-index`, else the de-indexed one; asked at the first frame whose geometry shades by
+   * the visibility buffer (`visibilityAsked`); `null` before, for the other shadings, and where
+   * neither can be made, when the lit pass draws forward.
    */
-  idClusterMaterial: MaterialHandle | null;
-  idClusterPrimitive: boolean;
+  idRaster: { readonly material: MaterialHandle; readonly primitive: boolean } | null;
   visibilityAsked: boolean;
+  /**
+   * The visibility buffer's resolve of the lit pass's pixels (plan R14, R14.T2.d) and its emissive
+   * form, asked with the ID raster and, the emissive one, at the first frame that shades by IDs
+   * with the ground's emission (`emissiveVisibilityAsked`); `null` before and where one cannot be
+   * made, when the lit pass draws forward.
+   */
+  resolveMaterial: MaterialHandle | null;
+  emissiveResolveMaterial: MaterialHandle | null;
+  emissiveVisibilityAsked: boolean;
   /**
    * The still forms of its materials (plan R10, R10.T16.i; `stillMaterialSpec`), by the material:
    * a frame none of whose instances mixes its heights draws each draw's still form where it is made.
@@ -1385,6 +1406,12 @@ interface ViewClusters {
   finDepthBase: BucketDrawBase | null;
   /** The visibility buffer's ID raster's (plan R14, R14.T2.c): the lit base with the ID form. */
   idBase: BucketDrawBase | null;
+  /**
+   * The visibility buffer's resolve's draw (plan R14, R14.T2.d) and the lit base it was made from;
+   * `null` before.
+   */
+  resolveDraw: DrawItem | null;
+  resolveBeside: BucketDrawBase | null;
   device: Device | null;
   stats: ClusterStats | null;
 }
@@ -1435,6 +1462,12 @@ interface ClusterPath {
    * the path and the ID form is made (plan R14, R14.T2.c); `null` otherwise.
    */
   readonly idBase: BucketDrawBase | null;
+  /**
+   * The visibility buffer's resolve's draw where the lit pass draws through the path and the
+   * resolve is made (plan R14, R14.T2.d), but the view's IDs, which its renderer binds; `null`
+   * otherwise.
+   */
+  readonly resolveDraw: DrawItem | null;
 }
 
 /** The overlay's pass of the cull (plan R14, R14.T1.e), after the four cascades', and its bit. */
@@ -1569,10 +1602,12 @@ interface LitForms {
   readonly cluster: MaterialHandle | null;
   /** The edge patches' may-discard clusters' form on it (plan R14, R14.T1.g), or `null`. */
   readonly fin: MaterialHandle | null;
+  /** The visibility buffer's resolve of the interior patches (plan R14, R14.T2.d), or `null`. */
+  readonly resolve: MaterialHandle | null;
 }
 
 /** No lit forms: the other shadings' frames. */
-const NO_FORMS: LitForms = { edge: null, interior: null, cluster: null, fin: null };
+const NO_FORMS: LitForms = { edge: null, interior: null, cluster: null, fin: null, resolve: null };
 
 /** The cascades' indices, nearest first. */
 const CASCADES: readonly [CascadeIndex, CascadeIndex, CascadeIndex, CascadeIndex] = [0, 1, 2, 3];
@@ -2410,7 +2445,9 @@ export class TerrainPass {
       | FinKind
       | "wire-cluster"
       | "id-cluster"
-      | "id-cluster-primitive",
+      | "id-cluster-primitive"
+      | "resolve"
+      | "resolve-emissive",
     device: Device,
     path: TerrainLayout["vertexPath"],
     still = false,
@@ -2703,29 +2740,82 @@ export class TerrainPass {
   }
 
   /**
-   * Compiles, or takes, `device`'s visibility buffer's ID raster (plan R14, R14.T2.c), by
-   * `primitive_index` where the device has `primitive-index`, else de-indexed; never rejects. One
-   * that cannot be made is reported and its refusal stated ({@link TerrainPass.clusterRefusal}), and
-   * the lit pass draws forward.
+   * Compiles, or takes, `device`'s visibility buffer's forms (plan R14, R14.T2.c and T2.d): its ID
+   * raster ({@link TerrainPass}'s `#readyRaster`) and its resolve; never rejects. One that cannot be
+   * made is reported and its refusal stated ({@link TerrainPass.clusterRefusal}), and the lit pass
+   * draws forward.
    */
   async #readyVisibility(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
-    const primitive = this.#engine.capabilities.primitiveIndex;
-    const kind = primitive ? "id-cluster-primitive" : "id-cluster";
+    const resolve = this.#readyResolve(device, "resolve", path);
+    await this.#readyRaster(device, path);
+    await resolve;
+  }
+
+  /**
+   * Compiles, or takes, `device`'s resolve of `kind` (plan R14, R14.T2.d), the plain form or its
+   * emissive one; never rejects. One that cannot be made is reported and its refusal stated
+   * ({@link TerrainPass.clusterRefusal}), and the lit pass draws forward.
+   */
+  async #readyResolve(
+    device: Device,
+    kind: "resolve" | "resolve-emissive",
+    path: TerrainLayout["vertexPath"],
+  ): Promise<void> {
+    const plain = kind === "resolve";
     try {
       const made = await this.#materialOf(kind, device, path);
-      if (device === this.#device && !this.#disposed && device.idClusterMaterial === null) {
-        device.idClusterMaterial = made;
-        device.idClusterPrimitive = primitive;
+      const held = plain ? device.resolveMaterial : device.emissiveResolveMaterial;
+      if (device === this.#device && !this.#disposed && held === null) {
+        if (plain) {
+          device.resolveMaterial = made;
+        } else {
+          device.emissiveResolveMaterial = made;
+        }
       } else {
         this.#releaseOwn(made);
       }
     } catch (error: unknown) {
       if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
         this.#clusterRefusal ??= refusalOf(`the ${kind} form`, error);
+        console.error("the terrain's resolve failed: its lit pass is drawn forward", error);
+      }
+    }
+  }
+
+  /**
+   * Compiles, or takes, `device`'s ID raster (plan R14, R14.T2.c), by `primitive_index` where the
+   * device has `primitive-index` and the form is made, else de-indexed (Design note 6's fallback);
+   * never rejects.
+   */
+  async #readyRaster(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
+    const forms = this.#engine.capabilities.primitiveIndex
+      ? ([true, false] as const)
+      : ([false] as const);
+    for (const primitive of forms) {
+      const kind = primitive ? "id-cluster-primitive" : "id-cluster";
+      try {
+        // One form at a time: the de-indexed one only where the first is refused.
+        // oxlint-disable-next-line no-await-in-loop
+        const made = await this.#materialOf(kind, device, path);
+        if (device === this.#device && !this.#disposed && device.idRaster === null) {
+          device.idRaster = { material: made, primitive };
+        } else {
+          this.#releaseOwn(made);
+        }
+        return;
+      } catch (error: unknown) {
+        if (this.#superseded(device) || error instanceof EngineUnavailable) {
+          return;
+        }
         console.error(
-          "the terrain's visibility buffer failed: its lit pass is drawn forward",
+          primitive
+            ? "the terrain's primitive_index ID raster failed: it is drawn de-indexed"
+            : "the terrain's visibility buffer failed: its lit pass is drawn forward",
           error,
         );
+        if (!primitive) {
+          this.#clusterRefusal ??= refusalOf(`the ${kind} form`, error);
+        }
       }
     }
   }
@@ -2992,6 +3082,7 @@ export class TerrainPass {
       }
       return {
         draws: NO_DRAWS,
+        opaqueDraws: 0,
         patches: NO_PATCHES,
         conditions: CLEAR,
         annunciation: null,
@@ -3020,6 +3111,7 @@ export class TerrainPass {
       overlayDepth,
       overlayPass,
       visibility,
+      opaqueDraws,
       lit,
       still,
     } = this.#writeOrNone(state, mask, selected.nearContacts, input, set);
@@ -3047,6 +3139,7 @@ export class TerrainPass {
     state.lastLit = lit;
     return {
       draws,
+      opaqueDraws,
       patches,
       conditions,
       annunciation,
@@ -3399,10 +3492,17 @@ export class TerrainPass {
       this.#releaseOwn(device.wireClusterMaterial);
       device.wireClusterMaterial = null;
     }
-    if (device.idClusterMaterial !== null) {
-      this.#releaseOwn(device.idClusterMaterial);
-      device.idClusterMaterial = null;
+    if (device.idRaster !== null) {
+      this.#releaseOwn(device.idRaster.material);
+      device.idRaster = null;
     }
+    for (const held of [device.resolveMaterial, device.emissiveResolveMaterial]) {
+      if (held !== null) {
+        this.#releaseOwn(held);
+      }
+    }
+    device.resolveMaterial = null;
+    device.emissiveResolveMaterial = null;
     for (const kind of FIN_KINDS) {
       const held = finMaterialOf(device, kind);
       if (held !== null) {
@@ -3481,9 +3581,11 @@ export class TerrainPass {
       finDepthMaterial: null,
       finShadowMaterial: null,
       wireClusterMaterial: null,
-      idClusterMaterial: null,
-      idClusterPrimitive: false,
+      idRaster: null,
       visibilityAsked: false,
+      resolveMaterial: null,
+      emissiveResolveMaterial: null,
+      emissiveVisibilityAsked: false,
       stills: new Map(),
       stillDraws: new WeakMap(),
       clusterShadowMaterial: null,
@@ -4385,6 +4487,7 @@ export class TerrainPass {
     readonly overlayDepth: TerrainOverlayDepth | null;
     readonly overlayPass: number | null;
     readonly visibility: TerrainVisibility | null;
+    readonly opaqueDraws: number;
     readonly lit: boolean;
     readonly still: boolean;
   } {
@@ -4404,6 +4507,7 @@ export class TerrainPass {
           overlayDepth: null,
           overlayPass: null,
           visibility: null,
+          opaqueDraws: 0,
           lit: false,
           still: false,
         };
@@ -4458,6 +4562,7 @@ export class TerrainPass {
     readonly overlayDepth: TerrainOverlayDepth | null;
     readonly overlayPass: number | null;
     readonly visibility: TerrainVisibility | null;
+    readonly opaqueDraws: number;
     readonly lit: boolean;
     readonly still: boolean;
   } {
@@ -4470,6 +4575,12 @@ export class TerrainPass {
     const { holds } = device.holds;
     const lit = this.#shading === "lit";
     const forms = lit ? this.#litForms(device, input) : NO_FORMS;
+    if (lit && this.#geometry.shading === "visibility") {
+      // Made before the frame's lights and contacts are written, which it holds (plan R14, R14.T2.d).
+      resources.resolveFrame(state.id);
+    } else if (lit) {
+      resources.releaseResolveFrame(state.id);
+    }
     const wireSplit = this.#wireSplits(device, state);
     const split = (this.#geometry.clusterPath && forms.interior !== null) || wireSplit;
     const fades = this.#fadesAt(device, input.nowMs);
@@ -4647,6 +4758,7 @@ export class TerrainPass {
         overlayDepth: null,
         overlayPass: null,
         visibility: null,
+        opaqueDraws: 0,
         lit: false,
         still: false,
       };
@@ -4718,21 +4830,31 @@ export class TerrainPass {
             ...edge,
           ]
         : draws;
+    // The draws that never discard lead (plan R14, R14.T2.e): the lit pass's opaque buckets on the
+    // cluster path, else the interior patches' draw.
+    const opaqueDraws =
+      clusters !== null && litBase !== null
+        ? TERRAIN_CLUSTER_MESH.templates.filter((t) => !t.mayDiscard && t.stride <= cap).length
+        : draws.filter((draw) => draw.mesh === resources.interiorMesh).length;
     // The same lit triangles by the visibility buffer (plan R14, R14.T2.c), where the geometry
     // shades by it and its form is made, and the frame has no two-pass occlusion, which this path
     // does not yet take (a lean, 2026-11-04): the ID raster of the opaque buckets, by its own mesh
     // on its path, then forward the may-discard buckets and the edge patches.
     const idBase = clusters?.idBase ?? null;
-    const idMesh = device.idClusterPrimitive ? (clusters?.mesh ?? null) : resources.clusterIdMesh;
+    const resolveDraw = clusters?.resolveDraw ?? null;
+    const idMesh =
+      device.idRaster?.primitive === true ? (clusters?.mesh ?? null) : resources.clusterIdMesh;
     const visibility: TerrainVisibility | null =
       this.#geometry.shading === "visibility" &&
       input.occlusion === undefined &&
       clusters !== null &&
       litBase !== null &&
       idBase !== null &&
+      resolveDraw !== null &&
       idMesh !== null
         ? {
             raster: clusters.buckets.drawItems(CLUSTER_LIT_PASS, idMesh, idBase, cap, null),
+            resolve: [resolveDraw],
             forward: [
               ...clusters.buckets.drawItems(CLUSTER_LIT_PASS, clusters.mesh, null, cap, finLitBase),
               ...edge,
@@ -4812,6 +4934,7 @@ export class TerrainPass {
         overlayDepth,
         overlayPass,
         visibility,
+        opaqueDraws,
         lit: litBase !== null || wireLit,
         still: false,
       };
@@ -4836,7 +4959,12 @@ export class TerrainPass {
       visibility:
         visibility === null
           ? null
-          : { raster: visibility.raster.map(still), forward: visibility.forward.map(still) },
+          : {
+              raster: visibility.raster.map(still),
+              resolve: visibility.resolve.map(still),
+              forward: visibility.forward.map(still),
+            },
+      opaqueDraws,
       lit: litBase !== null || wireLit,
       still: true,
     };
@@ -4908,6 +5036,8 @@ export class TerrainPass {
       finCasterBase: null,
       finDepthBase: null,
       idBase: null,
+      resolveDraw: null,
+      resolveBeside: null,
       device: null,
       stats: null,
     });
@@ -4963,6 +5093,7 @@ export class TerrainPass {
       finCasterBase: null,
       finDepthBase: null,
       idBase: null,
+      resolveDraw: null,
     };
   }
 
@@ -4974,7 +5105,9 @@ export class TerrainPass {
    * emission asks for both emissive forms.
    */
   #litForms(device: Device, input: TerrainViewFrameInput): LitForms {
-    if (this.#geometry.shading === "visibility" && !device.visibilityAsked) {
+    const emission = input.lighting?.emission !== undefined;
+    const byIds = this.#geometry.shading === "visibility";
+    if (byIds && !device.visibilityAsked) {
       // The visibility buffer's forms at the first frame that shades by it (plan R14, R14.T2.c).
       device.visibilityAsked = true;
       void this.#readyVisibility(device, device.resources.layout.vertexPath).catch(
@@ -4983,7 +5116,15 @@ export class TerrainPass {
         },
       );
     }
-    const emission = input.lighting?.emission !== undefined;
+    if (byIds && emission && !device.emissiveVisibilityAsked) {
+      // Its resolve's emissive form at the first such frame that carries the emission (R14.T2.d).
+      device.emissiveVisibilityAsked = true;
+      void this.#readyResolve(device, "resolve-emissive", device.resources.layout.vertexPath).catch(
+        (error: unknown) => {
+          console.error("the terrain's emissive resolve could not be taken:", error);
+        },
+      );
+    }
     if (emission && !device.emissiveAsked) {
       device.emissiveAsked = true;
       const path = device.resources.layout.vertexPath;
@@ -5006,12 +5147,14 @@ export class TerrainPass {
           interior: device.emissiveInteriorMaterial,
           cluster: device.emissiveLitClusterMaterial,
           fin: device.emissiveLitFinMaterial,
+          resolve: device.emissiveResolveMaterial,
         }
       : {
           edge: device.material,
           interior: device.interiorMaterial,
           cluster: device.litClusterMaterial,
           fin: device.litFinMaterial,
+          resolve: device.resolveMaterial,
         };
   }
 
@@ -5535,6 +5678,8 @@ export class TerrainPass {
       finCasterBase: null,
       finDepthBase: null,
       idBase: null,
+      resolveDraw: null,
+      resolveBeside: null,
       device: null,
       stats: null,
     });
@@ -5547,6 +5692,8 @@ export class TerrainPass {
       clusters.finCasterBase = null;
       clusters.finDepthBase = null;
       clusters.idBase = null;
+      clusters.resolveDraw = null;
+      clusters.resolveBeside = null;
       clusters.device = device;
     }
     const offsets = resources.field("offsets");
@@ -5617,7 +5764,7 @@ export class TerrainPass {
     }
     // The visibility buffer's ID raster draws the lit pass's opaque buckets by the lit base with
     // its own form (plan R14, R14.T2.c).
-    const idForm = device.idClusterMaterial;
+    const idForm = device.idRaster?.material ?? null;
     if (
       litBase !== null &&
       idForm !== null &&
@@ -5625,6 +5772,32 @@ export class TerrainPass {
         clusters.idBase.storageBuffers !== litBase.storageBuffers)
     ) {
       clusters.idBase = { ...litBase, material: idForm };
+    }
+    // Its resolve of the lit pass's pixels (plan R14, R14.T2.d): the lit base's uniforms and
+    // textures with the resolve's own beside them, over the full-screen triangle.
+    const resolveForm = forms.resolve;
+    const screen = resources.screenMesh;
+    const frameTexture = resolveForm === null ? null : resources.resolveFrame(state.id);
+    if (
+      litBase !== null &&
+      resolveForm !== null &&
+      screen !== null &&
+      frameTexture !== null &&
+      (clusters.resolveDraw?.material !== resolveForm ||
+        clusters.resolveBeside !== litBase ||
+        clusters.resolveDraw.textures[RESOLVE_FRAME_TEXTURE] !== frameTexture)
+    ) {
+      clusters.resolveDraw = {
+        ...litBase,
+        mesh: screen,
+        material: resolveForm,
+        uniforms: {
+          ...litBase.uniforms,
+          ...resolveUniforms(buffers.buckets, this.#engine.capabilities.subpixelBits),
+        },
+        textures: { ...litBase.textures, [RESOLVE_FRAME_TEXTURE]: frameTexture },
+      };
+      clusters.resolveBeside = litBase;
     }
     const radiusM = this.#planet.figure.equatorialRadiusM;
     const drawSet = this.#selected?.drawSet;
@@ -5669,7 +5842,8 @@ export class TerrainPass {
       finLitBase: lit && fins ? clusters.finLitBase : null,
       finCasterBase: fins ? clusters.finCasterBase : null,
       finDepthBase: fins ? clusters.finDepthBase : null,
-      idBase: lit && device.idClusterMaterial !== null ? clusters.idBase : null,
+      idBase: lit && device.idRaster !== null ? clusters.idBase : null,
+      resolveDraw: lit && forms.resolve !== null ? clusters.resolveDraw : null,
     };
   }
 

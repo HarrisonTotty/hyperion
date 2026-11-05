@@ -112,6 +112,7 @@ import {
   TERRAIN_LIT_FIN_MATERIALS,
   TERRAIN_LIT_INTERIOR_MATERIALS,
   TERRAIN_LIT_MATERIALS,
+  TERRAIN_RESOLVE_MATERIALS,
   TERRAIN_SHADOW_MATERIALS,
 } from "../terrain/terrainMaterial";
 import { TERRAIN_WIRE_CLUSTER_MATERIALS, TERRAIN_WIRE_MATERIALS } from "../terrain/terrainWire";
@@ -308,7 +309,7 @@ export const ATMOSPHERE_DECK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
  * path, and plan R14's cluster casters (R14.T1.b), for the cascades' `depth-only` layers, and the
  * cluster path's cull and counters; the edge patches' fin forms of the lit terrain, its depth
  * and its caster on the cluster path (plan R14, R14.T1.g); and the visibility buffer's ID raster
- * (plan R14, R14.T2.c).
+ * and resolve (plan R14, R14.T2.c and T2.d).
  */
 const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...[
@@ -340,6 +341,8 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     spec,
     targets: ["r32uint"],
   })),
+  // Its resolve and the resolve's emissive form (plan R14, R14.T2.d), into the scene target.
+  ...TERRAIN_RESOLVE_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
   // Plan R14's cluster path (R14.T1.b): its cull, the copy of its counters and its stable
   // compaction (R14.T2.a); the cull with the two-pass occlusion and the depth pyramid (R14.T3.d).
   { kind: "compute", spec: CLUSTER_CULL_KERNEL },

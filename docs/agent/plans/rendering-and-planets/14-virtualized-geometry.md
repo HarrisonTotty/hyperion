@@ -1375,6 +1375,7 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
     frames T1.d adds to `--captures` the image within 1/3 stop of T2.a's, the rest listed; no change
     in the reference surface's pixels at the survey edge; the hand-over check
     (`--terrain --handover`) passes as before.
+  - _Built_ (r14-t2-visibility-buffer): records at the end of Risks.
 - **R14.T2.e The Mac's order, and the switch.** Size S.
   - `shading: "visibility"` on high once the owner's Mac and RTX runs are recorded; low stays
     `forward` until the owner's UHD 620 run of `just views-check --terrain --hidden --setting low`,
@@ -1386,6 +1387,8 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
     may-discard.
   - _Acceptance (pending: the owner's runs):_ the Mac's fps on high at 1920 × 1080 at least T2.a's,
     the RTX's p95 not above T2.a's on both settings, GPU per pass recorded.
+  - _Pod half built_ (r14-t2-visibility-buffer): the order and its test; the switch waits on the
+    owner's runs. Records at the end of Risks.
 
 ### R14.T3 Measured-error LOD and occlusion
 
@@ -2549,8 +2552,71 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     may-discard buckets alone, and keeps four sets of draws a pass.
   - (lean, 2026-11-04) A frame with the two-pass occlusion draws forward: the visibility path does
     not take the late raster yet. A refused ID form draws the lit pass forward, its refusal stated.
-  - The device check (part 15) composes the frame itself, the bodies pass's figures, the raster,
-    then the forward draws loading colour and depth (`drawnByIds`), at `LOW_AT_STRIDE_1`: the
-    renderer's passes are T2.d's, and a strided template's IDs are not drawn on the pod. Counts are
-    unchanged, `forward` on both settings; `TERRAIN_CLUSTER_ID_MESH` is made with every clustered
-    lit layout.
+  - The device check (part 15 at T2.c, part 18 from T2.d) composes the frame itself, the bodies
+    pass's figures, the raster, then the forward draws loading colour and depth (`drawnByIds`), at
+    `LOW_AT_STRIDE_1`: the renderer's passes are T2.d's, and at T2.c a strided template's IDs are
+    not drawn on the pod. Counts are unchanged, `forward` on both settings;
+    `TERRAIN_CLUSTER_ID_MESH` is made with every clustered lit layout.
+- **R14.T2.d** (`r14-t2-visibility-buffer`):
+  - `clusters/resolve.ts`: `ResolveMaterial` (`consumer`, `spec`),
+    `resolveUniforms(buckets, subpixelBits)` (`resolveLists`, `resolveTemplates0`,
+    `resolveTemplates1`), the twins `visibleTemplate`, `templateTriangle`, `snappedClip` and
+    `clipBarycentrics`, `VISIBILITY_IDS_TEXTURE`, `withVisibilityIds` and `RESOLVE_SCREEN_MESH`;
+    `clusters/resolveTerrain.wgsl`.
+  - `terrainResolveMaterialSpec(path, emissive)` (`resolve`, `resolve-emissive`): the interior
+    form's source, its vertex stage the function `lit_vertex` and its fragment stage
+    `lit_fragment(in, face_dx, face_dy)`, the face's edges in place of `dpdxFine`; a full-screen
+    draw at reversed depth's near end that writes no depth, over `TerrainResources.screenMesh`.
+  - (lean, 2026-11-04) The lights and the contacts move to a per-view `rgba32float` row
+    (`TerrainResources.resolveFrame`, `RESOLVE_FRAME_TEXTURE`; `RESOLVE_FRAME_TEXELS`, the contacts
+    from `RESOLVE_CONTACTS_TEXEL`), written with each `setLighting` and `writeFrame`, not into
+    uniforms: the engine's `Draw` holds no array. The resolve's fragment stage binds 8 storage
+    buffers on `baked-offsets` (heights, slots, instances, offsets, survey mask, lists, class
+    layers, horizon map), 7 on `face-differences`, and 15 sampled textures of WebGPU's 16 a stage.
+    R11's planned additions (the cloud layer's shadow, the rings' shadow, the decoration's albedo)
+    need no storage buffer, but as three textures they would pass the 16: packed as layers of one
+    array, or as uniforms (pending the owner's ruling). The resolve frame is 2,077 texels,
+    33,232 B a lit view by IDs, category `other`, outside Design note 15's rows.
+  - `TerrainVisibility.resolve` and `FrameVisibility.resolve`. The renderer owns a
+    `VisibilityBuffer` a view (made at the first frame by IDs, let go at a forward one) and draws
+    `terrain id raster`, then `terrain resolve`: the resolve, the mesh bodies' figures, then the
+    forward draws, in the bodies pass's place (`photorealisticPasses`, `TERRAIN_PASS_LABELS`). One
+    resolve pass, terrain's; T5.e adds a pass by its range.
+  - A refused `primitive_index` form draws de-indexed (Design note 6); the pass's `Device.idRaster`
+    holds the form and whether it is that one. Terrain's `ResolveMaterial` is
+    `terrainResolveMaterial(path, emissive)`, `{ consumer, spec }`, not Provides' WGSL and storage:
+    a class resolves in a pass of its own with a whole material.
+  - (lean, 2026-11-05) One body's terrain alone draws by IDs: each body's pass numbers its IDs
+    from 0 in the view's one ID target, so `LiveFrameTerrain.visibility()` is `null`, and the frame
+    forward, where two bodies draw terrain, until each takes a range of the index space.
+  - Timed passes: a frame by IDs draws `terrain id raster` and `terrain resolve` in the bodies
+    pass's place, one render more a lit view-frame; at most 17 resolves a view-frame still
+    (`TIMING_FRAMES_IN_FLIGHT` 153), since the occlusion's frames draw forward. Counts unchanged:
+    `forward` on both settings.
+  - The device checks are part 18's (`checkVisibilityFrame`; `smoke/resolveProbe.ts`'s place
+    probe, in units in the last place of the place's distance) and part 19's, the high setting's
+    cascades' frame by IDs at stride 1, as the other cascades' checks (`checkVisibilityCascades`;
+    `HIGH_AT_STRIDE_1`): parts 15 and 7 stood at 317 s and 293 s of
+    their 360 s on a pod. Each check's pass is its own. Its frames' pixels beyond ⅓ stop are
+    listed in the check's line (`leverCaptures.ts`' `beyondThirdStop`).
+  - (lean, 2026-11-05) The resolve snaps its triangle's corners to the device's sub-pixel grid
+    before it forms the barycentrics, as the rasteriser snaps them before it interpolates
+    (`GpuCapabilities.subpixelBits` by `subpixelBitsOf`: 4 bits on SwiftShader, 8 elsewhere, the
+    grid's cells in `resolveLists.w`; `snappedClip`), and clamps them to the triangle. WebGPU
+    reports no grid: 8 bits is Direct3D's 16.8 fixed point and desktop Vulkan's (recalled),
+    Metal's is unmeasured. A device on another grid keeps the place within a cell of it.
+  - Pending (NOT RUN in a pod): TERRAIN TEST's captures by IDs against forward on the RTX
+    (`just views-check --terrain --hidden --setting high --geometry shading=visibility`, then
+    `shading=forward`, compared by `scripts/compareCaptures.mjs`); the `primitive_index` form on
+    hardware with `primitive-index`; Windows.
+- **R14.T2.e, the pod half** (`r14-t2-visibility-buffer`):
+  - `TerrainViewFrame.opaqueDraws` and `FrameTerrain.opaqueDraws()`: the bodies pass draws the
+    terrain that never discards, then the mesh bodies' figures, then the rest of the terrain; by
+    the visibility buffer the raster is that opaque pass, the figures drawn after the resolve.
+  - `shading` stays `forward` on both settings, and the way back (`clusterPath` off) gives no
+    opaque draw, so its order is as before. Pending: the owner's Mac and RTX runs, one build each
+    way, `just views-check --terrain --whole --hidden --setting high --hyperion-gpu-timing`
+    with `--geometry shading=visibility` and with `--geometry shading=forward` (fps, p95 and GPU
+    per pass; on the Mac each split pass's attachment loads and stores), and the UHD 620's for low
+    (`just views-check --terrain --hidden --setting low --geometry shading=visibility`); Windows
+    NOT RUN.

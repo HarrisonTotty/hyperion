@@ -101,8 +101,10 @@ import {
   terrainLitInteriorMaterialSpec,
   TERRAIN_CLUSTER_ID_MATERIALS,
   TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS,
+  TERRAIN_RESOLVE_MATERIALS,
   terrainClusterIdMaterialSpec,
   terrainLitClusterMaterialSpec,
+  terrainResolveMaterialSpec,
   withoutSurveyDiscard,
   withTerrainEmission,
 } from "./terrainMaterial";
@@ -1943,5 +1945,92 @@ describe("the visibility buffer's ID raster (plan R14, R14.T2.c)", () => {
         .map((u) => u.name),
       "clusterBase",
     ]);
+  });
+});
+
+describe("the visibility buffer's resolve of terrain (plan R14, R14.T2.d)", () => {
+  it("registers both vertex paths' resolves and their emissive forms in the catalogue", () => {
+    for (const spec of TERRAIN_RESOLVE_MATERIALS) {
+      expect(WGSL_CATALOGUE.some((entry) => entry.kind === "material" && entry.spec === spec)).toBe(
+        true,
+      );
+    }
+    expect(TERRAIN_RESOLVE_MATERIALS.map((spec) => spec.displayName)).toEqual([
+      "RESOLVE OFFSETS",
+      "TERRAIN RESOLVE",
+      "EMISSIVE RESOLVE OFFSETS",
+      "EMISSIVE TERRAIN RESOLVE",
+    ]);
+  });
+
+  it("reads every storage buffer in its fragment stage, eight at most, the lights and contacts from its resolve frame", () => {
+    for (const path of ["baked-offsets", "face-differences"] as const) {
+      const spec = terrainResolveMaterialSpec(path, false);
+      const read = bindingStages(spec.vertexWgsl);
+      const storage = (spec.storageBuffers ?? []).map((buffer) => [
+        buffer.name,
+        [...(buffer.stages ?? [])].join(" "),
+        [...(read.get(buffer.binding) ?? [])].toSorted().join(" "),
+      ]);
+      expect(storage).toEqual(
+        [
+          "heights",
+          "slots",
+          "instances",
+          ...(path === "baked-offsets" ? ["offsets"] : []),
+          "surveyMask",
+          "clusterLists",
+          "classLayers",
+          "horizonMap",
+        ].map((name) => [name, "fragment", "fragment"]),
+      );
+      const declared = new Set([
+        ...(spec.storageBuffers ?? []).map((buffer) => buffer.binding),
+        ...(spec.textures ?? []).map((texture) => texture.binding),
+        ...spec.samplers.map((sampler) => sampler.binding),
+      ]);
+      expect([...read.keys()].filter((binding) => !declared.has(binding))).toEqual([]);
+      expect(spec.vertexWgsl).not.toContain("var<storage, read> terrain_lights");
+      expect(spec.vertexWgsl).not.toContain("var<storage, read> contacts");
+    }
+  });
+
+  it("binds the lit material's textures, then the view's IDs and its resolve frame: 15 of WebGPU's 16", () => {
+    const spec = terrainResolveMaterialSpec("baked-offsets", true);
+    expect([
+      spec.textures?.length,
+      spec.textures?.slice(-2).map((texture) => [texture.name, texture.sampleType]),
+      [spec.depthWrite, spec.colourWrites, spec.cullMode, spec.blend],
+    ]).toEqual([
+      15,
+      [
+        ["visibilityIds", "uint"],
+        ["resolveFrame", "unfilterable-float"],
+      ],
+      [false, true, "none", "none"],
+    ]);
+  });
+
+  it("takes the lit material's draw fields, then the lists' and templates' it decodes an ID by", () => {
+    expect(
+      terrainResolveMaterialSpec("face-differences", false).uniforms.map((u) => u.name),
+    ).toEqual([
+      ...terrainLitMaterialSpec("face-differences").uniforms.map((u) => u.name),
+      "resolveLists",
+      "resolveTemplates0",
+      "resolveTemplates1",
+    ]);
+  });
+
+  it("shades each pixel once by the lit fragment, its geometric normal the face's from its edges", () => {
+    const source = terrainResolveMaterialSpec("face-differences", false).fragmentWgsl;
+    const lit = wgslFunction(source, "lit_fragment");
+    expect([
+      lit.includes("dpdxFine"),
+      lit.includes("cascade_geometric_normal( face_dx, face_dy, datum )"),
+      source.split("lit_fragment(").length - 1,
+      source.split("lit_vertex(").length - 1,
+      wgslFunction(source, "terrain_row"),
+    ]).toEqual([false, true, 2, 2, "{ return textureLoad(resolve_frame, vec2u(i, 0u), 0); }"]);
   });
 });

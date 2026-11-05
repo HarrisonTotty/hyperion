@@ -80,6 +80,7 @@ import {
   terrainLitFinMaterialSpec,
   terrainLitInteriorMaterialSpec,
   terrainLitMaterialSpec,
+  terrainResolveMaterial,
   terrainShadowMaterialSpec,
 } from "./terrainMaterial";
 import {
@@ -102,7 +103,8 @@ import {
  * its emissive form, depth and caster on it (`lit-fin`, `lit-emissive-fin`, `depth-fin`,
  * `shadow-fin`, plan R14, R14.T1.g), and the visibility buffer's ID raster of the interior patches
  * on it, de-indexed or by `primitive_index` (`id-cluster`, `id-cluster-primitive`, plan R14,
- * R14.T2.c).
+ * R14.T2.c), and its resolve and the resolve's emissive form (`resolve`, `resolve-emissive`, plan
+ * R14, R14.T2.d).
  */
 export type TerrainMaterialKind =
   | "lit"
@@ -122,7 +124,9 @@ export type TerrainMaterialKind =
   | "shadow-cluster"
   | "shadow-fin"
   | "id-cluster"
-  | "id-cluster-primitive";
+  | "id-cluster-primitive"
+  | "resolve"
+  | "resolve-emissive";
 
 /** A material of the terrain and a vertex path it is compiled on. */
 export interface TerrainMaterialKey {
@@ -150,7 +154,8 @@ export interface TerrainMaterialMaking {
  * and the wireframe's into the canvas, the symbology's pass and the wireframe's frame; the caster
  * into the shadow cascades' layers (`depth-only`), drawing the lit mesh, with `unclippedDepth`
  * where the device offers `depth-clip-control` (decision-r10-t9b-design D1); the ID raster into
- * the visibility buffer's `r32uint` (plan R14, R14.T2.c).
+ * the visibility buffer's `r32uint` (plan R14, R14.T2.c); and the resolve into the scene target, a
+ * full-screen draw whose mesh's layout is the lit mesh's (plan R14, R14.T2.d).
  *
  * @param capabilities - The device's, read at each making, so that a caster made again after a
  *   restore onto another adapter takes that adapter's `depth-clip-control`.
@@ -244,6 +249,14 @@ export function terrainMaterialOf(
       made = {
         spec: terrainClusterIdMaterialSpec(path, kind === "id-cluster-primitive"),
         targets: ["r32uint"],
+        shading: "lit",
+      };
+      break;
+    case "resolve":
+    case "resolve-emissive":
+      made = {
+        spec: terrainResolveMaterial(path, kind === "resolve-emissive").spec,
+        targets: ["rgba16float"],
         shading: "lit",
       };
       break;

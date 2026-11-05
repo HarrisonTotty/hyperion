@@ -38,6 +38,12 @@ export interface GpuCapabilities {
    * its triangle from it, and draws de-indexed without it.
    */
   readonly primitiveIndex: boolean;
+  /**
+   * Bits of the rasteriser's sub-pixel grid, to which it snaps a triangle's corners before it covers
+   * and interpolates (plan R14, R14.T2.d): the visibility buffer's resolve snaps its corners alike,
+   * so that its barycentrics are the rasteriser's. WebGPU reports none ({@link subpixelBitsOf}).
+   */
+  readonly subpixelBits: number;
   /** Pixels on a side. */
   readonly maxTextureDimension2D: number;
   /** Invocations in the smallest subgroup, or `null` without the `subgroups` feature. */
@@ -118,6 +124,24 @@ export interface CapabilityOverrides {
   readonly defaultLimits?: boolean;
 }
 
+/**
+ * SwiftShader's sub-pixel bits: snapped to its grid, R14.T2.d's place probe met its interpolants to
+ * 2 ulps at the 99th percentile and 5 at the most, and unsnapped to a median of 1,200 (test-render
+ * part 18, 2026-11-05).
+ */
+const SWIFTSHADER_SUBPIXEL_BITS = 4;
+
+/**
+ * Every other adapter's: Direct3D's 16.8 fixed point, which desktop Vulkan parts' 8
+ * `subPixelPrecisionBits` match (recalled; Metal's are taken alike, unmeasured).
+ */
+const SUBPIXEL_BITS = 8;
+
+/** The sub-pixel bits of the adapter `info` names ({@link GpuCapabilities}' `subpixelBits`). */
+export function subpixelBitsOf(info: Pick<GPUAdapterInfo, "architecture">): number {
+  return info.architecture === "swiftshader" ? SWIFTSHADER_SUBPIXEL_BITS : SUBPIXEL_BITS;
+}
+
 /** The adapter's identity and capabilities. */
 export function summariseAdapter(adapter: GPUAdapter): {
   readonly summary: AdapterSummary;
@@ -141,6 +165,7 @@ export function summariseAdapter(adapter: GPUAdapter): {
       rg11b10Renderable: features.has("rg11b10ufloat-renderable"),
       depthClipControl: features.has("depth-clip-control"),
       primitiveIndex: features.has("primitive-index"),
+      subpixelBits: subpixelBitsOf(info),
       maxTextureDimension2D: limits.maxTextureDimension2D,
       subgroupMinSize: subgroups ? info.subgroupMinSize : null,
       maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
@@ -168,6 +193,7 @@ export function deviceCapabilities(device: GPUDevice): GpuCapabilities {
     rg11b10Renderable: features.has("rg11b10ufloat-renderable"),
     depthClipControl: features.has("depth-clip-control"),
     primitiveIndex: features.has("primitive-index"),
+    subpixelBits: subpixelBitsOf(adapterInfo),
     maxTextureDimension2D: limits.maxTextureDimension2D,
     subgroupMinSize: subgroups ? adapterInfo.subgroupMinSize : null,
     maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,

@@ -48,6 +48,35 @@ export interface StopsApart {
   readonly largestStops: number;
 }
 
+/** `before`'s brightest luminance. */
+function brightestOf(before: Float32Array): number {
+  let brightest = 0;
+  for (let p = 0; p < Math.floor(before.length / 4); p += 1) {
+    brightest = Math.max(brightest, luminanceAt(before, p));
+  }
+  return brightest;
+}
+
+/**
+ * Texel `p`'s luminances in `before` and `after`, each taken at least at `floor`, and the stops
+ * between them: {@link stopsApart}'s and {@link beyondThirdStop}'s one judgement.
+ */
+function stopsAt(
+  before: Float32Array,
+  after: Float32Array,
+  p: number,
+  floor: number,
+): { readonly a: number; readonly b: number; readonly stops: number } {
+  const a = Math.max(luminanceAt(before, p), floor);
+  const b = Math.max(luminanceAt(after, p), floor);
+  return { a, b, stops: Math.abs(Math.log2(b / a)) };
+}
+
+/** The luminance a darker texel is taken at: 10⁻⁶ of the brightest. */
+function luminanceFloor(brightest: number): number {
+  return Math.max(1e-6 * brightest, Number.MIN_VALUE);
+}
+
 /**
  * `after`'s terrain texels against `before`'s by luminance, the exposure the same, the terrain
  * `mask`'s bodies' texels (`before`'s by default). A luminance under 10⁻⁶ of `before`'s brightest is
@@ -59,11 +88,7 @@ export function stopsApart(
   mask: Float32Array = before,
 ): StopsApart {
   const texels = Math.floor(before.length / 4);
-  let brightest = 0;
-  for (let p = 0; p < texels; p += 1) {
-    brightest = Math.max(brightest, luminanceAt(before, p));
-  }
-  const floor = Math.max(1e-6 * brightest, Number.MIN_VALUE);
+  const floor = luminanceFloor(brightestOf(before));
   let terrain = 0;
   let differing = 0;
   let within = 0;
@@ -73,14 +98,53 @@ export function stopsApart(
       continue;
     }
     terrain += 1;
-    const a = Math.max(luminanceAt(before, p), floor);
-    const b = Math.max(luminanceAt(after, p), floor);
-    const stops = Math.abs(Math.log2(b / a));
+    const { stops } = stopsAt(before, after, p, floor);
     differing += stops > 0 ? 1 : 0;
     within += stops <= THIRD_STOP ? 1 : 0;
     largestStops = Math.max(largestStops, stops);
   }
   return { terrain, differing, within, largestStops };
+}
+
+/**
+ * `after`'s terrain texels beyond {@link THIRD_STOP} of `before`'s, as {@link stopsApart} judges
+ * them, listed for a check's detail: the first `most` in reading order, each at its place in a frame
+ * `widthPx` wide, rows from the top, with both luminances as shares of `before`'s brightest, then
+ * how many more; "none" where there are none.
+ */
+export function beyondThirdStop(
+  before: Float32Array,
+  after: Float32Array,
+  widthPx: number,
+  mask: Float32Array = before,
+  most = 12,
+): string {
+  const brightest = brightestOf(before);
+  const floor = luminanceFloor(brightest);
+  const share = Math.max(brightest, Number.MIN_VALUE);
+  const listed: string[] = [];
+  let beyond = 0;
+  for (let p = 0; p < Math.floor(before.length / 4); p += 1) {
+    if (!isTerrain(mask, p)) {
+      continue;
+    }
+    const { a, b, stops } = stopsAt(before, after, p, floor);
+    if (stops <= THIRD_STOP) {
+      continue;
+    }
+    beyond += 1;
+    if (listed.length < most) {
+      listed.push(
+        `(${String(p % widthPx)}, ${String(Math.floor(p / widthPx))}) ${(a / share).toExponential(1)} → ${(b / share).toExponential(1)}`,
+      );
+    }
+  }
+  if (beyond === 0) {
+    return "none";
+  }
+  return beyond > listed.length
+    ? `${listed.join(", ")} and ${String(beyond - listed.length)} more`
+    : listed.join(", ");
 }
 
 /**

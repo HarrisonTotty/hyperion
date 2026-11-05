@@ -49,6 +49,21 @@ describe("photorealisticPasses", () => {
     },
   );
 
+  it.each(QUALITY_SETTINGS)(
+    "puts the visibility buffer's ID raster and resolve, built, in the bodies pass's place on %s (R14.T2.c to T2.e)",
+    (setting) => {
+      const passes = photorealisticPasses(setting).passes;
+      const labels = passes.map((pass) => pass.label);
+      const at = labels.indexOf("terrain id raster");
+      expect(passes.slice(at, at + 2)).toEqual([
+        { label: "terrain id raster", owner: "R14", built: true },
+        { label: "terrain resolve", owner: "R14", built: true },
+      ]);
+      expect(labels.indexOf("bodies")).toBeLessThan(at);
+      expect(at).toBeLessThan(labels.indexOf("discs"));
+    },
+  );
+
   it("leaves the slots of plans not yet built empty, R06's sky built (R07.T8.a)", () => {
     const empty = photorealisticPasses("high").passes.filter((pass) => !pass.built);
     expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R11"]));

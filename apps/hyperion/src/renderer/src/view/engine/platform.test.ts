@@ -11,6 +11,7 @@ import {
   requiredFeatures,
   requiredLimits,
   styleAvailability,
+  subpixelBitsOf,
   summariseAdapter,
   takesFallbackAdapter,
   WANTED_FEATURES,
@@ -138,6 +139,7 @@ describe("the capability summary", () => {
       rg11b10Renderable: true,
       depthClipControl: true,
       primitiveIndex: false,
+      subpixelBits: 8,
       maxTextureDimension2D: 16_384,
       subgroupMinSize: 8,
       maxStorageBufferBindingSize: 134_217_728,
@@ -153,6 +155,15 @@ describe("the capability summary", () => {
     expect(capabilities.float32Blendable).toBe(true);
     expect(capabilities.depthClipControl).toBe(true);
     expect(capabilities.subgroupMinSize).toBe(4);
+  });
+
+  it("reads SwiftShader's sub-pixel grid as 4 bits, and every other adapter's as 8 (R14.T2.d)", () => {
+    const fallback = { ...INTEL_UHD_620_INFO, isFallbackAdapter: true };
+    expect([
+      subpixelBitsOf(SWIFTSHADER_INFO),
+      subpixelBitsOf(INTEL_UHD_620_INFO),
+      subpixelBitsOf(fallback),
+    ]).toEqual([4, 8, 8]);
   });
 
   it("gives no subgroup size without subgroups", () => {

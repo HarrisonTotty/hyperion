@@ -54,6 +54,7 @@ import {
   writeTerrainClusterRecords,
 } from "../../clusters/terrain";
 import { terrainClusterMesh } from "../../clusters/templates";
+import { RESOLVE_SCREEN_MESH } from "../../clusters/resolve";
 import { deindexedClusterMesh } from "../../clusters/visibility";
 import { packPhaseFactorRows } from "../../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../../engine/gpuFlags";
@@ -187,6 +188,16 @@ export const TERRAIN_CLUSTER_ID_MESH = deindexedClusterMesh(
   TERRAIN_CLUSTER_MESH,
   "terrain cluster ids",
 );
+
+/**
+ * The texel of a view's resolve frame (plan R14, R14.T2.d; {@link TerrainResources.resolveFrame})
+ * that holds its contacts' count, after its lights' rows; two texels a contact follow it, its centre
+ * and held radius, then its ramp (`resolveTerrain.wgsl`'s `RESOLVE_CONTACTS_TEXEL`).
+ */
+export const RESOLVE_CONTACTS_TEXEL = TERRAIN_LIGHT_BUFFER_ROWS;
+
+/** A resolve frame's texels: the lights' rows, the contacts' count and {@link MAX_CONTACTS} contacts. */
+export const RESOLVE_FRAME_TEXELS = RESOLVE_CONTACTS_TEXEL + 1 + 2 * MAX_CONTACTS;
 
 /** The shadow cascades' passes of a view's cluster buckets (plan R14, R14.T1.b), the first four. */
 export const CLUSTER_CASTER_PASSES = 4;
@@ -1022,6 +1033,13 @@ interface MadeFields {
    * {@link TERRAIN_CLUSTER_ID_MESH}); `null` otherwise.
    */
   readonly clusterIdMesh: MeshHandle | null;
+  /**
+   * On a lit layout made with its clusters, the visibility buffer's resolve's full-screen triangle
+   * (plan R14, R14.T2.d; `clusters/resolve.ts`' `RESOLVE_SCREEN_MESH`); `null` otherwise.
+   */
+  readonly screenMesh: MeshHandle | null;
+  /** Each view's resolve frame, made at its first frame by the visibility buffer (R14.T2.d). */
+  readonly resolveFrames: Map<string, TextureHandle>;
   /** Each view's cluster buffers, made at its first cluster frame on the device (R14.T1.b). */
   readonly clusters: Map<string, TerrainClusterBuffers>;
   /** Each view's frame buffers, made at its first frame on the device. */
@@ -1069,6 +1087,8 @@ export class TerrainResources {
   readonly #slotRecord = new ArrayBuffer(SLOT_RECORD_BYTES);
   readonly #slotRecordBytes = new Uint8Array(this.#slotRecord);
   readonly #instanceCount = new Uint32Array(1);
+  /** A resolve frame's contacts' count texel, as written (plan R14, R14.T2.d). */
+  readonly #resolveCount = new Float32Array(4);
   #made: Made;
   #normalsScratch: Uint16Array;
   /** Whether each slot holds a bake's horizon map (R10.T8.b), cleared with the slots on a restore. */
@@ -1156,6 +1176,14 @@ export class TerrainResources {
    */
   get clusterIdMesh(): MeshHandle | null {
     return this.#made.clusterIdMesh;
+  }
+
+  /**
+   * The visibility buffer's resolve's full-screen triangle (plan R14, R14.T2.d), on a lit layout made
+   * with its clusters; `null` otherwise.
+   */
+  get screenMesh(): MeshHandle | null {
+    return this.#made.screenMesh;
   }
 
   /**
@@ -1292,6 +1320,86 @@ export class TerrainResources {
   }
 
   /**
+   * `view`'s resolve frame (plan R14, R14.T2.d): its lights' rows and its contacts as one row of
+   * {@link RESOLVE_FRAME_TEXELS} `rgba32float` texels, which the visibility buffer's resolve reads by
+   * `textureLoad` in place of the lights' and the contacts' storage buffers, so that it reads eight
+   * at most; made at its first call on the current device, on a lit layout, and written from then on
+   * with each of the view's lights ({@link TerrainResources.setLighting}) and frames
+   * ({@link TerrainResources.writeFrame}); released with the view's other buffers. `null` on the
+   * other layouts.
+   *
+   * @throws Error once the resources are disposed.
+   */
+  resolveFrame(view: string): TextureHandle | null {
+    if (this.#disposed) {
+      throw new Error("the terrain's resources were disposed: they make nothing more");
+    }
+    const made = this.#made;
+    if (made.lit === null) {
+      return null;
+    }
+    let frame = made.resolveFrames.get(view);
+    if (frame === undefined) {
+      frame = this.#engine.createTexture({
+        name:
+          view === DEFAULT_TERRAIN_VIEW
+            ? "terrain resolve frame"
+            : `terrain resolve frame (${view})`,
+        size: { width: RESOLVE_FRAME_TEXELS, height: 1 },
+        dimension: "2d",
+        format: "rgba32float",
+        mips: 1,
+        usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+        category: "other",
+      });
+      // No star and no contact until the view's next lights and frame are written into it.
+      this.#engine.writeTexture(
+        frame,
+        { x: 0, y: 0 },
+        { width: RESOLVE_FRAME_TEXELS, height: 1 },
+        new Float32Array(4 * RESOLVE_FRAME_TEXELS),
+      );
+      made.resolveFrames.set(view, frame);
+    }
+    return frame;
+  }
+
+  /**
+   * Releases `view`'s resolve frame (plan R14, R14.T2.d), where it has one: at a frame of a setting
+   * that shades forward, so that a frame by IDs makes it again.
+   */
+  releaseResolveFrame(view: string): void {
+    const frame = this.#made.resolveFrames.get(view);
+    if (frame !== undefined) {
+      this.#made.resolveFrames.delete(view);
+      this.#engine.releaseTexture(frame);
+    }
+  }
+
+  /** Writes `contacts` into a view's resolve frame: their count, then each one's two texels. */
+  #writeResolveContacts(frame: TextureHandle, contacts: ContactRecords): void {
+    this.#resolveCount[0] = contacts.count;
+    this.#engine.writeTexture(
+      frame,
+      { x: RESOLVE_CONTACTS_TEXEL, y: 0 },
+      { width: 1, height: 1 },
+      this.#resolveCount,
+    );
+    if (contacts.count > 0) {
+      this.#engine.writeTexture(
+        frame,
+        { x: RESOLVE_CONTACTS_TEXEL + 1, y: 0 },
+        { width: 2 * contacts.count, height: 1 },
+        new Uint8Array(
+          contacts.buffer,
+          CONTACTS_HEADER_BYTES,
+          contacts.count * CONTACT_RECORD_BYTES,
+        ),
+      );
+    }
+  }
+
+  /**
    * Releases `view`'s frame buffers, once it no longer draws the terrain (R10.T16.b); nothing for
    * a view with none made, or for {@link DEFAULT_TERRAIN_VIEW}, whose go with the resources. A
    * caller never releases a view a frame not yet submitted draws.
@@ -1315,6 +1423,7 @@ export class TerrainResources {
       this.#made.clusters.delete(view);
       this.#releaseClusters(clusters);
     }
+    this.releaseResolveFrame(view);
   }
 
   /**
@@ -1423,7 +1532,12 @@ export class TerrainResources {
     this.#rows.setElsewhere(lighting.elsewhere);
     this.#writeTable(lit);
     const { equatorialRadiusM: a, polarRadiusM: c } = this.#figure;
-    this.#engine.writeBuffer(lights, 0, packTerrainLighting(lighting, c / a));
+    const rows = packTerrainLighting(lighting, c / a);
+    this.#engine.writeBuffer(lights, 0, rows);
+    const frame = this.#made.resolveFrames.get(view);
+    if (frame !== undefined) {
+      this.#engine.writeTexture(frame, { x: 0, y: 0 }, { width: rows.length / 4, height: 1 }, rows);
+    }
   }
 
   /**
@@ -1677,6 +1791,10 @@ export class TerrainResources {
       this.#engine.writeBuffer(buffers.instances, 0, instances.bytes());
     }
     this.#engine.writeBuffer(buffers.contacts, 0, contacts.bytes());
+    const frame = this.#made.resolveFrames.get(view);
+    if (frame !== undefined) {
+      this.#writeResolveContacts(frame, contacts);
+    }
     this.#instanceCount[0] = instances.count;
     // `instanceCount` is the second of drawIndexedIndirect's five words.
     this.#engine.writeBuffer(buffers.indirect, 4, this.#instanceCount);
@@ -1755,7 +1873,8 @@ export class TerrainResources {
    * and a disposal releases the rest (the batch review's S3).
    */
   #release(made: Made): void {
-    const { lit, normals, interiorMesh, clusterMesh, clusterIdMesh, clusterRecords } = made;
+    const { lit, normals, interiorMesh, clusterMesh, clusterIdMesh, screenMesh, clusterRecords } =
+      made;
     const releases: Array<() => void> = [
       ...[...made.fields.values()].map((buffer) => () => {
         this.#engine.releaseBuffer(buffer);
@@ -1794,6 +1913,13 @@ export class TerrainResources {
               this.#engine.releaseMesh(clusterIdMesh);
             },
           ]),
+      ...(screenMesh === null
+        ? []
+        : [
+            (): void => {
+              this.#engine.releaseMesh(screenMesh);
+            },
+          ]),
       ...(clusterRecords === null
         ? []
         : [
@@ -1817,10 +1943,14 @@ export class TerrainResources {
       ...[...made.clusters.values()].map((clusters) => () => {
         this.#releaseClusters(clusters);
       }),
+      ...[...made.resolveFrames.values()].map((frame) => () => {
+        this.#engine.releaseTexture(frame);
+      }),
     ];
     made.views.clear();
     made.casters.clear();
     made.clusters.clear();
+    made.resolveFrames.clear();
     for (const release of releases) {
       try {
         release();
@@ -2107,6 +2237,7 @@ export class TerrainResources {
         interiorMesh,
         clusterMesh: clustered ? engine.createMesh(TERRAIN_CLUSTER_MESH.mesh) : null,
         clusterIdMesh: clustered && traits.lit ? engine.createMesh(TERRAIN_CLUSTER_ID_MESH) : null,
+        screenMesh: clustered && traits.lit ? engine.createMesh(RESOLVE_SCREEN_MESH) : null,
         clusterRecords: clustered
           ? engine.createBuffer({
               name: "terrain cluster records",
@@ -2116,6 +2247,7 @@ export class TerrainResources {
             })
           : null,
         clusters: new Map(),
+        resolveFrames: new Map(),
         views,
         casters,
       };

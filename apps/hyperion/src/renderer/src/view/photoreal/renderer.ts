@@ -10,8 +10,13 @@
  * the discs under 32 px at once for the draws after it to read (R07.T8.d), where the frame has
  * such a disc; then the mesh bodies' figures, opaque with depth, as the
  * `bodies` pass where the frame has any (T9), with the terrain of the bodies handed over to it
- * where the frame has a {@link FrameTerrain} (plan R10, R10.T10.e), drawn after their figures, the
- * reference surface beneath it; then the painter's sequence of Design note 2: host
+ * where the frame has a {@link FrameTerrain} (plan R10, R10.T10.e), the reference surface beneath
+ * it, opaque first as Apple's GPUs ask (plan R14, R14.T2.e; its Design note 7): the terrain that
+ * never discards, then the figures, which may, then the rest of the terrain; or, where the terrain
+ * shades by the visibility buffer (plan R14, R14.T2.c and T2.d), its ID raster into the view's
+ * visibility target with the scene's depth, then the resolve's pass, which shades the raster's
+ * pixels once, then draws the figures and the rest of the terrain over them; then the painter's
+ * sequence of Design note 2: host
  * discs (R06's pass, meter class 0), disc bodies, mesh bodies' limbs and point bodies, back to
  * front by power. Then the bloom
  * chain over the light above the display's range, the tone-mapping pass with each host disc's glare
@@ -124,6 +129,12 @@ import type { SpriteRecord } from "../wireframe/drawList";
 import { sphereOutsideView, type SurveyedDatumFrame, WIREFRAME_MESHES } from "../wireframe/submit";
 import { surveyedDatumsOf } from "./overlay";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
+import { withVisibilityIds } from "../clusters/resolve";
+import {
+  VISIBILITY_RASTER_LABEL,
+  VISIBILITY_RESOLVE_LABEL,
+  VisibilityBuffer,
+} from "../clusters/visibility";
 import { createSceneTarget } from "./sceneTarget";
 import { log } from "../../lib/pinnedMath";
 
@@ -202,16 +213,28 @@ export interface FrameTerrain {
    * `null` otherwise, when its draws draw it forward.
    */
   visibility(): FrameVisibility | null;
+  /**
+   * Of the last {@link FrameTerrain.draws}, those that never discard, in their order (plan R14,
+   * R14.T2.e): each body's interior patches', which the `bodies` pass draws before the mesh bodies'
+   * figures, and the rest after them.
+   */
+  opaqueDraws(): ReadonlyArray<DrawItem>;
 }
 
 /**
  * A frame's terrain by the visibility buffer (plan R14, R14.T2.c; Design note 9), the same
  * triangles as its forward draws, each part every handed-over body's in the frame's order: the ID
- * raster's draws, into the view's visibility target with the scene's depth, then the draws drawn
- * forward over the resolve, depth-tested against the raster's depth (`TerrainVisibility`).
+ * raster's draws, into the view's visibility target with the scene's depth, then the resolve's,
+ * which shade its pixels once, then the draws drawn forward over them, depth-tested against the
+ * raster's depth (`TerrainVisibility`).
  */
 export interface FrameVisibility {
   readonly raster: ReadonlyArray<DrawItem>;
+  /**
+   * Each body's resolve (plan R14, R14.T2.d), drawn first in the resolve's pass, with the view's IDs
+   * bound (`clusters/resolve.ts`' `withVisibilityIds`).
+   */
+  readonly resolve: ReadonlyArray<DrawItem>;
   readonly forward: ReadonlyArray<DrawItem>;
 }
 
@@ -451,6 +474,11 @@ interface Resources {
    * each after it the one before (R08.T10.b): made at the first frame that draws an atmosphere.
    */
   readonly airTargets: RenderTarget[];
+  /**
+   * The view's visibility target (plan R14, R14.T2.c), drawn with the scene target's depth: made at
+   * the first frame whose terrain shades by it, and let go at a frame whose setting shades forward.
+   */
+  visibility: VisibilityBuffer | null;
   glare: BufferHandle;
   glareCapacity: number;
   stars: BufferHandle;
@@ -617,6 +645,11 @@ export class PhotorealRenderer {
    * record that carries both, each on the generation it was asked on; `kernel` `null` until made.
    */
   #formCells: Record<CellForm, FormCells | null> = noFormCells();
+  /** Each resolve's draw with the view's IDs bound, by the draw (plan R14, R14.T2.d). */
+  readonly #resolveDraws = new WeakMap<
+    DrawItem,
+    { readonly ids: TextureHandle; readonly draw: DrawItem }
+  >();
   readonly #unsubscribe: () => void;
 
   constructor(engine: RenderEngine, viewName: string) {
@@ -781,6 +814,7 @@ export class PhotorealRenderer {
       pyramidKernel,
       atmosphere,
       airTargets: [],
+      visibility: null,
       glare: this.#glareBuffer(GLARE_CAPACITY),
       glareCapacity: GLARE_CAPACITY,
       stars: this.#spriteBuffer(MIN_SPRITE_BYTES),
@@ -817,6 +851,7 @@ export class PhotorealRenderer {
       for (const target of resources.airTargets) {
         target.resize(size);
       }
+      resources.visibility?.resize(size);
       resources.size = size;
     }
     const radPx = radPerPx(frame.camera, frame.viewport);
@@ -832,6 +867,20 @@ export class PhotorealRenderer {
       );
       resources.kernelKey = key;
     }
+  }
+
+  /**
+   * `draw`, a resolve's, with the view's IDs `ids` bound (`withVisibilityIds`), kept by the draw so
+   * that a draw kept from frame to frame is too, until the IDs' texture changes.
+   */
+  #withIds(draw: DrawItem, ids: TextureHandle): DrawItem {
+    const held = this.#resolveDraws.get(draw);
+    if (held?.ids === ids) {
+      return held.draw;
+    }
+    const bound = withVisibilityIds(draw, ids);
+    this.#resolveDraws.set(draw, { ids, draw: bound });
+    return bound;
   }
 
   /** The star sprites' draw, its buffer grown by doubling, or `null` with none. */
@@ -969,16 +1018,54 @@ export class PhotorealRenderer {
     // ride this pass's resolve: nothing is rendered between them and it. A frame whose terrain
     // draws nothing submits none, so the pass always follows them.
     const occlusion = this.#occlusionOf(resources, frame, geometry);
-    const meshes = [
-      ...this.#bodies.meshDraws(plan),
-      ...(frame.terrain?.draws(plan, bodies, occlusion ?? undefined) ?? []),
-    ];
-    if (meshes.length > 0) {
-      resources.target.render({
-        label: PHOTOREAL_PASS_LABELS.bodies,
+    const figures = this.#bodies.meshDraws(plan);
+    const terrainDraws = frame.terrain?.draws(plan, bodies, occlusion ?? undefined) ?? [];
+    // The terrain by the visibility buffer where every body it draws gives it (plan R14, R14.T2.c
+    // and T2.d), a frame with the two-pass occlusion drawing forward.
+    const byIds = occlusion === null ? (frame.terrain?.visibility() ?? null) : null;
+    const opaque = frame.terrain?.opaqueDraws() ?? [];
+    // Opaque first (plan R14, R14.T2.e): the terrain that never discards, then the figures, which
+    // may, then the rest of the terrain; by the visibility buffer, the raster is that opaque pass.
+    const after = [...figures, ...terrainDraws.filter((draw) => !opaque.includes(draw))];
+    if (byIds === null) {
+      if (resources.visibility !== null && geometry.shading === "forward") {
+        resources.visibility.dispose();
+        resources.visibility = null;
+      }
+      const meshes = [...opaque, ...after];
+      if (meshes.length > 0) {
+        resources.target.render({
+          label: PHOTOREAL_PASS_LABELS.bodies,
+          viewRotation,
+          projection,
+          draws: meshes,
+          postProcesses: [],
+          colourLoad: "load",
+        });
+      }
+    } else {
+      const visibility = (resources.visibility ??= new VisibilityBuffer(
+        this.#engine,
+        this.#name,
+        resources.target,
+        resources.size,
+      ));
+      visibility.target.render({
+        label: VISIBILITY_RASTER_LABEL,
         viewRotation,
         projection,
-        draws: meshes,
+        draws: byIds.raster,
+        postProcesses: [],
+      });
+      resources.target.render({
+        label: VISIBILITY_RESOLVE_LABEL,
+        viewRotation,
+        projection,
+        draws: [
+          ...byIds.resolve.map((draw) => this.#withIds(draw, visibility.ids)),
+          ...figures,
+          ...byIds.forward,
+        ],
         postProcesses: [],
         colourLoad: "load",
       });
@@ -1447,6 +1534,7 @@ export class PhotorealRenderer {
       for (const target of resources.airTargets) {
         target.dispose();
       }
+      resources.visibility?.dispose();
       // The atmospheres' composite and its triangle, made with the view's pipelines; their
       // kernels have no release.
       this.#engine.releaseMaterial(resources.atmosphere.composite);

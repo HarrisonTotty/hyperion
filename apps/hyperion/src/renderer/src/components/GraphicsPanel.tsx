@@ -53,7 +53,11 @@ const FEATURE_NAMES: ReadonlyArray<
   readonly [
     keyof Omit<
       GpuCapabilities,
-      "maxTextureDimension2D" | "subgroupMinSize" | "maxStorageBufferBindingSize" | "maxBufferSize"
+      | "maxTextureDimension2D"
+      | "subgroupMinSize"
+      | "maxStorageBufferBindingSize"
+      | "maxBufferSize"
+      | "subpixelBits"
     >,
     GPUFeatureName,
   ]

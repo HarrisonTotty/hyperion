@@ -56,6 +56,12 @@ import type { KernelPair } from "../view/engine/kernels";
 import type { DrawItem, RenderEngine, TextureHandle } from "../view/engine/types";
 import { annulusEdges } from "../view/lighting/annuli";
 import type { ClusterPassStats } from "../view/clusters/stats";
+import { withVisibilityIds } from "../view/clusters/resolve";
+import {
+  VISIBILITY_RASTER_LABEL,
+  VISIBILITY_RESOLVE_LABEL,
+  VisibilityBuffer,
+} from "../view/clusters/visibility";
 import {
   GEOMETRY_BEFORE_R14,
   type GeometrySettings,
@@ -79,6 +85,7 @@ import {
   TerrainPass,
   type TerrainPassView,
   type TerrainView,
+  type TerrainVisibility,
   type TerrainViewFrame,
 } from "../view/terrain/terrainPass";
 import { HeightWorkerPool } from "../view/terrain/workers/pool";
@@ -87,6 +94,7 @@ import type { CapturedImage } from "./atmosphere";
 import { againstUnshadowed, NEVER_BRIGHTER } from "./cascadeDarkening";
 import { bytesDigest, type Checks, halfTexels, pause, projection } from "./harness";
 import {
+  beyondThirdStop,
   captureOf,
   captureScale,
   isTerrain,
@@ -1429,6 +1437,191 @@ export async function checkShadowCascades(
     offChange();
     pool.terminate();
     tally.dispose();
+  }
+  return images;
+}
+
+/**
+ * `byIds` drawn from `view` into a frame of its own as the renderer draws a frame by the visibility
+ * buffer (plan R14, R14.T2.c to T2.e): its ID raster into a visibility target drawn with the frame's
+ * depth, then its resolve over the IDs and its forward draws, loading the frame's colour and depth;
+ * read back four channels a texel.
+ */
+async function texelsByIds(
+  engine: RenderEngine,
+  name: string,
+  view: TerrainView,
+  byIds: TerrainVisibility,
+  size: { readonly widthPx: number; readonly heightPx: number },
+): Promise<Float32Array> {
+  const target = engine.createRenderTarget({
+    name,
+    size,
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  let buffer: VisibilityBuffer | null = null;
+  try {
+    buffer = new VisibilityBuffer(engine, name, target, size);
+    const frame = {
+      viewRotation: viewRotation4(view.orientation),
+      projection: projection(size.widthPx / size.heightPx),
+      postProcesses: [],
+    };
+    // A pass of no draws clears the frame's colour and depth before the raster, as the sky's does.
+    target.render({ ...frame, label: name, draws: [] });
+    buffer.target.render({ ...frame, label: VISIBILITY_RASTER_LABEL, draws: byIds.raster });
+    const ids = buffer.ids;
+    target.render({
+      ...frame,
+      label: VISIBILITY_RESOLVE_LABEL,
+      draws: [...byIds.resolve.map((draw) => withVisibilityIds(draw, ids)), ...byIds.forward],
+      colourLoad: "load",
+    });
+    return halfTexels(await engine.readTexture(target.colour));
+  } finally {
+    buffer?.dispose();
+    target.dispose();
+  }
+}
+
+/** How long the visibility buffer's forms may take to compile on the high setting's path, ms. */
+const VISIBILITY_FORMS_TIMEOUT_MS = 60_000;
+
+/**
+ * R14.T2.d's frame by the visibility buffer on the high setting under its shadow cascades (`R14.T2.d
+ * the cascades' frame by the visibility buffer`), in a part of its own: R10.T9.b's world and pose made
+ * again, its pass streamed there, then R14.T1.d's frame, its casters at their cascade's texel,
+ * forward and by IDs, from the same selection and residents at the same exposure, at the
+ * comparison's size: the resolve's cascades' receiver takes the face's normal from the triangle's
+ * edges where the forward fragment takes its place's screen derivatives. With `captures`, both.
+ */
+export async function checkVisibilityCascades(
+  engine: RenderEngine,
+  checks: Checks,
+  captures = false,
+): Promise<CapturedImage[]> {
+  const images: CapturedImage[] = [];
+  const field = moonLikeFixture("first");
+  const pool = new HeightWorkerPool({
+    workers: 2,
+    createWorker: () =>
+      new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
+        type: "module",
+      }),
+  });
+  const survey = new SurveyedCells();
+  const offChange = pool.onFieldChange((change) => {
+    survey.add(change);
+  });
+  const shadows = new TerrainShadows(engine, { cascades: true });
+  let pass: TerrainPass | null = null;
+  try {
+    field.blocks.forEach((block, n) => {
+      if (n === 0) {
+        pool.fieldInit(field.body, block);
+      } else {
+        pool.fieldChunk(field.body, block);
+      }
+    });
+    const held = await until(
+      () => pool.fieldBlocks(field.body)?.reported === field.blocks.length,
+      FIELD_TIMEOUT_MS,
+    );
+    if (!held) {
+      throw new Error("the workers did not take the fixture's blocks in time");
+    }
+    const place = placeOverCentre(CASCADES_EAST_M, CASCADES_NORTH_M);
+    const nu = vector(spheroidNormal(MOON_LIKE_FIGURE, place));
+    const ground = await pool.groundReadout(field.body, field.seed, {
+      originM: vector(surfacePoint(MOON_LIKE_FIGURE, place, 20_000)),
+      direction: { x: -nu.x, y: -nu.y, z: -nu.z },
+      maxM: 40_000,
+      slopeBaselineM: 2,
+      padWidthM: 1,
+      seasonMeanAnomalyRad: undefined,
+    });
+    if (ground?.kind !== "ground") {
+      throw new Error(`the cascades' pose has no ground under it: ${ground?.kind ?? "no field"}`);
+    }
+    const view = viewFrom(
+      along(vector(ground.sight.hitM), 1, nu, CASCADES_HEIGHT_M),
+      CASCADES_DEPRESSION_DEG,
+      CASCADES_HEADING_DEG,
+    );
+    const hold = new LaneHold();
+    const made = new TerrainPass({
+      engine,
+      setting: "high",
+      terrain: { ...TERRAIN_SETTINGS.high, cacheBytes: CACHE_BYTES },
+      geometry: smokeGeometry("high"),
+      planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
+      source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
+      createPool: (bake) => hold.wrap(pool.lane(bake)),
+      survey,
+      shadows,
+      reliefM: () => MOON_LIKE_RELIEF_M,
+    });
+    made.setReducedMotion(true);
+    pass = made;
+    await made.ready();
+    const passView: TerrainPassView = {
+      id: viewId("cascades by IDs"),
+      view,
+      tauPx: TERRAIN_SETTINGS.high.tauPx,
+      weight: 1,
+    };
+    const light = lighting(CASCADES_SUN_RAD);
+    const streamed = await streamedFor(made, pool, hold, passView, light);
+    made.setGeometry(EVERY_FRAME);
+    const forward = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const forwardTexels = await texelsOf(
+      engine,
+      "cascades: forward",
+      view,
+      forward.draws,
+      COMPARISON,
+    );
+    // The visibility buffer's forms asked at the first frame that shades by IDs, made meanwhile.
+    made.setGeometry({ ...EVERY_FRAME, shading: "visibility" });
+    let byIds = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    await until(() => {
+      byIds = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+      return byIds.visibility !== null;
+    }, VISIBILITY_FORMS_TIMEOUT_MS);
+    const visibility = byIds.visibility;
+    const idTexels =
+      visibility === null
+        ? null
+        : await texelsByIds(engine, "cascades: by IDs", view, visibility, COMPARISON);
+    made.setGeometry(HIGH_AT_STRIDE_1);
+    const apart = idTexels === null ? null : stopsApart(forwardTexels, idTexels);
+    const weight = byIds.cascades?.set.weight ?? 0;
+    if (captures && idTexels !== null) {
+      const scale = captureScale(forwardTexels);
+      images.push(
+        captureOf("r14-t2d-cascades-forward", forwardTexels, COMPARISON, scale),
+        captureOf("r14-t2d-cascades-by-ids", idTexels, COMPARISON, scale),
+      );
+    }
+    checks.check(
+      "R14.T2.d on the high setting under its shadow cascades, the frame by the visibility buffer, its receiver's normal the face's, draws the forward frame: at least 99.5% of its terrain texels within a third of a stop, the rest listed",
+      streamed &&
+        weight > 0 &&
+        apart !== null &&
+        apart.terrain > 0.3 * COMPARISON.widthPx * COMPARISON.heightPx &&
+        apart.within >= 0.995 * apart.terrain,
+      apart === null
+        ? `the forms were not made in ${String(VISIBILITY_FORMS_TIMEOUT_MS)} ms`
+        : `streamed ${String(streamed)}; the cascades' weight ${weight.toFixed(3)}; ${String(byIds.patches.interior)} interior and ${String(byIds.patches.edge)} edge patches; ${String(visibility?.raster.length)} raster, ${String(visibility?.forward.length)} forward draws; ${String(apart.terrain)} terrain texels, ${String(apart.differing)} differing, ${((100 * apart.within) / apart.terrain).toFixed(3)}% within a third of a stop, the rest ${String(apart.terrain - apart.within)}, the largest ${apart.largestStops.toFixed(3)} stops, forward → by IDs of the brightest: ${idTexels === null ? "—" : beyondThirdStop(forwardTexels, idTexels, COMPARISON.widthPx)}; digests ${bytesDigest(forwardTexels)} forward, ${idTexels === null ? "—" : bytesDigest(idTexels)} by IDs`,
+    );
+  } finally {
+    pass?.dispose();
+    shadows.dispose();
+    offChange();
+    pool.terminate();
   }
   return images;
 }

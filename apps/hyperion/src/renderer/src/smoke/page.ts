@@ -183,8 +183,8 @@ import { checkTwins } from "./twins";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
-import { checkShadowCascades, checkSharedPass } from "./sharedPass";
-import { checkStridesUnderCraft, checkTerrainFrame } from "./terrainFrame";
+import { checkShadowCascades, checkSharedPass, checkVisibilityCascades } from "./sharedPass";
+import { checkStridesUnderCraft, checkTerrainFrame, checkVisibilityFrame } from "./terrainFrame";
 import { checkWireframeTerrain } from "./wireframeTerrain";
 import { checkForcedLoss, checkOneLayerArrays, checkTargetsAsyncIndirectTiming } from "./work";
 
@@ -296,9 +296,12 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * joined, with that check alone (2026-11-03). R08.T8.d's packed far limb brought eighteen march
  * kernels' catalogue (some 120 s on a pod) and its general forms' frames on the Saturn-class
  * figure (some 45 s), so part 17 joined, with those two, and part 16 keeps its check alone
- * (2026-11-03).
+ * (2026-11-03). Part 15 stood at 317 s of its 360 s on a 32-CPU pod (2026-11-05), so plan R14's
+ * frame by the visibility buffer (R14.T2.c to T2.e), which streams a pass of its own and compiles
+ * the shading's forms, took part 18, alone, and its frame under the high setting's cascades, which
+ * streams R10.T9.b's pose's pass of its own, part 19 (part 7 stood at 293 s of its 360 s).
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
+type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -340,6 +343,10 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 16;
     case "17":
       return 17;
+    case "18":
+      return 18;
+    case "19":
+      return 19;
     default:
       return null;
   }
@@ -359,6 +366,7 @@ function capabilityLine(capabilities: GpuCapabilities): string {
     `float32-blendable ${capabilities.float32Blendable ? "yes" : "no"}`,
     `rg11b10 ${capabilities.rg11b10Renderable ? "yes" : "no"}`,
     `primitive-index ${capabilities.primitiveIndex ? "yes" : "no"}`,
+    `sub-pixel bits ${String(capabilities.subpixelBits)}`,
   ].join(", ");
 }
 
@@ -689,6 +697,19 @@ async function run(
   await group(16, "R14.T3.c the ground under a grounded craft", () =>
     checkStridesUnderCraft(engine, checks),
   );
+  // In part 18, alone: its own pass's frame by the visibility buffer against the forward frame
+  // (plan R14, R14.T2.c to T2.e), the shading's forms compiled at its first frame by IDs; beside
+  // part 15's frame check, which stood at 317 s of its 360 s on a pod (2026-11-05), it would pass
+  // its watchdog. With the captures, the frame drawn both ways.
+  await group(18, "R14.T2 the frame by the visibility buffer", async () => {
+    images = [...images, ...(await checkVisibilityFrame(engine, checks, captures))];
+  });
+  // In part 19, alone: the high setting's cascades' frame by the visibility buffer (plan R14,
+  // R14.T2.d), its own pass streamed to R10.T9.b's pose; beside part 7's cascades, which stood at
+  // 293 s of 360 s on a pod (2026-11-05), it would pass that part's two thirds.
+  await group(19, "R14.T2.d the cascades' frame by the visibility buffer", async () => {
+    images = [...images, ...(await checkVisibilityCascades(engine, checks, captures))];
+  });
   await group(7, "R14.T1.b the cluster cull against its twin", () =>
     checkClusterCull(engine, checks),
   );

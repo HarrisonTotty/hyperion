@@ -62,12 +62,18 @@ import {
 import type { ClusterPassStats } from "../view/clusters/stats";
 import { CLUSTER_BASE_UNIFORM } from "../view/clusters/buckets";
 import { TERRAIN_CLUSTERS_PER_PAGE } from "../view/clusters/terrain";
+import { withVisibilityIds } from "../view/clusters/resolve";
 import {
   unpackVisibilityId,
   VISIBILITY_RASTER_LABEL,
   VISIBILITY_RESOLVE_LABEL,
   VisibilityBuffer,
 } from "../view/clusters/visibility";
+import {
+  terrainLitClusterMaterialSpec,
+  terrainResolveMaterialSpec,
+} from "../view/terrain/terrainMaterial";
+import { type PlaceAgreement, probePlaces } from "./resolveProbe";
 import { lookAlong, rotate } from "../view/camera/quaternion";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
@@ -86,9 +92,17 @@ import {
   type GeometrySettings,
   SETTINGS,
   TERRAIN_SETTINGS,
+  type TerrainVertexPath,
 } from "../view/quality/qualitySetting";
 import type { CapturedImage } from "./atmosphere";
-import { captureOf, captureScale, isTerrain, maskOf, stopsApart } from "./leverCaptures";
+import {
+  beyondThirdStop,
+  captureOf,
+  captureScale,
+  isTerrain,
+  maskOf,
+  stopsApart,
+} from "./leverCaptures";
 import { AU_M } from "../view/scenes/kept";
 import { CoverageMask } from "../view/terrain/coverage";
 import {
@@ -167,6 +181,17 @@ const FIELD_TIMEOUT_MS = 60_000;
  * R14.T2.c), ms: a lit vertex stage, compiled on SwiftShader in some seconds.
  */
 const ID_FORM_TIMEOUT_MS = 60_000;
+
+/** The share of the judged terrain pixels the resolve must draw within ⅓ stop of T2.a's (R14.T2.d). */
+const RESOLVE_WITHIN_SHARE = 0.995;
+
+/**
+ * The most units in the last place the resolve's place may stand from the rasteriser's at the 99th
+ * percentile of the pixels (plan R14, R14.T2.d's "a few ulps"): both formed from the corners
+ * snapped to the device's sub-pixel grid, SwiftShader's 99th percentile 2 and its largest 5
+ * (test-render part 18, 2026-11-05).
+ */
+const PLACE_P99_ULPS = 4;
 const STREAM_TIMEOUT_MS = 90_000;
 
 /**
@@ -566,15 +591,15 @@ async function drawnScene(
 }
 
 /**
- * A frame drawn as the renderer draws it by the visibility buffer (plan R14, R14.T2.c): `before` in
- * the bodies pass, then `visibility`'s ID raster into a visibility target drawn with the scene's
- * depth, then its forward draws over it, loading the scene's colour and depth; read back, its IDs
- * with it.
+ * A frame drawn as the renderer draws it by the visibility buffer (plan R14, R14.T2.c to T2.e):
+ * `visibility`'s ID raster into a visibility target drawn with the scene's depth, then the resolve's
+ * pass, loading the scene's colour and depth: its resolve over the IDs, then `figures`, then its
+ * forward draws; read back, its IDs with it.
  */
 async function drawnByIds(
   engine: RenderEngine,
   pose: Pose,
-  before: ReadonlyArray<DrawItem>,
+  figures: ReadonlyArray<DrawItem>,
   visibility: FrameVisibility,
 ): Promise<DrawnScene> {
   const target = createSceneTarget(engine, "smoke frame by IDs", VIEWPORT);
@@ -586,23 +611,29 @@ async function drawnByIds(
       throw new Error("the scene target has no depth");
     }
     const frame = poseFrame(pose);
-    target.render({ ...frame, label: PHOTOREAL_PASS_LABELS.bodies, draws: before });
+    // The sky's pass clears the scene's colour and depth before the raster, as the renderer's does.
+    target.render({ ...frame, label: PHOTOREAL_PASS_LABELS.bodies, draws: [] });
     buffer.target.render({ ...frame, label: VISIBILITY_RASTER_LABEL, draws: visibility.raster });
+    const ids = buffer.ids;
     target.render({
       ...frame,
       label: VISIBILITY_RESOLVE_LABEL,
-      draws: visibility.forward,
+      draws: [
+        ...visibility.resolve.map((draw) => withVisibilityIds(draw, ids)),
+        ...figures,
+        ...visibility.forward,
+      ],
       colourLoad: "load",
     });
-    const [colour, depthBytes, ids] = await Promise.all([
+    const [colour, depthBytes, idBytes] = await Promise.all([
       engine.readTexture(target.colour),
       engine.readTexture(depth),
-      engine.readTexture(buffer.ids),
+      engine.readTexture(ids),
     ]);
     return {
       colour: halfTexels(colour),
       depth: new Float32Array(depthBytes),
-      ids: new Uint32Array(ids),
+      ids: new Uint32Array(idBytes),
     };
   } finally {
     buffer?.dispose();
@@ -664,12 +695,69 @@ async function idsNamed(
   return { pixels, namingNone, clusters: seen.size };
 }
 
+/**
+ * The resolve's place of each pixel against the rasteriser's (plan R14, R14.T2.d; `resolveProbe.ts`):
+ * `visibility`'s raster drawn into a fresh visibility target, then both probes over the frame,
+ * the rasteriser's by its `opaque` buckets, of the `path` the pass draws on.
+ */
+async function probedByIds(
+  engine: RenderEngine,
+  pose: Pose,
+  visibility: FrameVisibility,
+  opaque: ReadonlyArray<DrawItem>,
+  path: TerrainVertexPath,
+): Promise<PlaceAgreement> {
+  const resolveDraw = visibility.resolve[0];
+  if (resolveDraw === undefined) {
+    throw new Error("the frame by IDs has no resolve");
+  }
+  const target = createSceneTarget(engine, "smoke place probe", VIEWPORT);
+  let buffer: VisibilityBuffer | null = null;
+  try {
+    buffer = new VisibilityBuffer(engine, "smoke place probe", target, VIEWPORT);
+    const frame = poseFrame(pose);
+    buffer.target.render({ ...frame, label: VISIBILITY_RASTER_LABEL, draws: visibility.raster });
+    return await probePlaces({
+      engine,
+      frame,
+      size: VIEWPORT,
+      opaque,
+      lit: terrainLitClusterMaterialSpec(path, false),
+      resolve: terrainResolveMaterialSpec(path, false),
+      resolveDraw,
+      ids: buffer.ids,
+    });
+  } finally {
+    buffer?.dispose();
+    target.dispose();
+  }
+}
+
+/** The pixels outside `mask`'s bodies at which two frames' texels differ at all. */
+function differingElsewhere(a: Float32Array, b: Float32Array, mask: Float32Array): number {
+  let pixels = 0;
+  for (let p = 0; 4 * p + 3 < Math.min(a.length, b.length); p += 1) {
+    if (isTerrain(mask, p)) {
+      continue;
+    }
+    for (let c = 0; c < 4; c += 1) {
+      if (!Object.is(a[4 * p + c], b[4 * p + c])) {
+        pixels += 1;
+        break;
+      }
+    }
+  }
+  return pixels;
+}
+
 /** A frame through the photorealistic renderer (plan R14, R14.T3.d), its scene read back. */
 interface SceneFrame {
   readonly colour: Float32Array;
   readonly depth: Float32Array;
   /** Whether its terrain drew a late raster. */
   readonly late: boolean;
+  /** Whether its terrain gave the renderer its frame by the visibility buffer (R14.T2.c–d). */
+  readonly byIds: boolean;
 }
 
 /** What a frame through the renderer is drawn with: its renderer and canvas, a pass and its view. */
@@ -684,23 +772,31 @@ interface SceneOf {
 
 /**
  * One frame of `of`'s view through its renderer at `geometry`, as `VIEW` draws it, with no
- * symbology, held back where `present` is `false` (a cut): its scene's colour and depth.
+ * symbology, held back where `present` is `false` (a cut), at `nowMs` (now by default): its scene's
+ * colour and depth.
  */
 async function sceneFrame(
   of: SceneOf,
   geometry: GeometrySettings,
   present: boolean,
+  nowMs = performance.now(),
 ): Promise<SceneFrame> {
   const { engine, photoreal, canvas, pass, mask, view } = of;
-  const frame = steppedFrame(pass, mask, view, performance.now());
+  const frame = steppedFrame(pass, mask, view, nowMs);
   let late = false;
+  let byIds = false;
   const terrain: FrameTerrain = {
     surveyCoverage: (body) => frame.terrain.surveyCoverage(body),
     surveyedWhole: (body) => frame.terrain.surveyedWhole(body),
     draws: (...args) => frame.terrain.draws(...args),
     symbologyDepth: () => frame.terrain.symbologyDepth(),
     sceneDepth: () => frame.terrain.sceneDepth(),
-    visibility: () => frame.terrain.visibility(),
+    visibility: () => {
+      const visibility = frame.terrain.visibility();
+      byIds = visibility !== null;
+      return visibility;
+    },
+    opaqueDraws: () => frame.terrain.opaqueDraws(),
     lateDraws: () => {
       const draws = frame.terrain.lateDraws();
       late = draws.length > 0;
@@ -737,7 +833,7 @@ async function sceneFrame(
     engine.readTexture(colours.scene.colour),
     engine.readTexture(depth),
   ]);
-  return { colour: halfTexels(colour), depth: new Float32Array(depthBytes), late };
+  return { colour: halfTexels(colour), depth: new Float32Array(depthBytes), late, byIds };
 }
 
 /** A frame and its pass's counters: the last of nine drawn alike. */
@@ -783,6 +879,41 @@ async function occlusionRun(
   } finally {
     pass.setGeometry(geometry);
     pass.measureClusters(false);
+  }
+}
+
+/**
+ * `of`'s view through the renderer drawn forward and by the visibility buffer (plan R14, R14.T2.c
+ * to T2.e), from the same selection and residents, at `geometry` but its `shading`: the forward
+ * frame, and the first frame by IDs once its forms are made, or `null` where they were not in time.
+ * Every frame is drawn at the one time, so that the camera's strides' hold fades (R14.T3.c), which
+ * follow the frame's time, stand alike in both.
+ */
+async function visibilityRun(
+  of: SceneOf,
+  geometry: GeometrySettings,
+): Promise<{ readonly forward: SceneFrame; readonly byIds: SceneFrame | null }> {
+  const { pass } = of;
+  const forwardGeometry: GeometrySettings = { ...geometry, shading: "forward" };
+  const visibleGeometry: GeometrySettings = { ...geometry, shading: "visibility" };
+  try {
+    const at = performance.now();
+    pass.setGeometry(forwardGeometry);
+    const forward = await sceneFrame(of, forwardGeometry, true, at);
+    pass.setGeometry(visibleGeometry);
+    let frame = await sceneFrame(of, visibleGeometry, true, at);
+    const started = performance.now();
+    while (!frame.byIds && performance.now() - started < ID_FORM_TIMEOUT_MS) {
+      // Its forms compile meanwhile, the frames drawn forward until they are made.
+      // oxlint-disable-next-line no-await-in-loop
+      await pause(50);
+      // Each frame is drawn after the pause that lets the forms compile.
+      // oxlint-disable-next-line no-await-in-loop
+      frame = await sceneFrame(of, visibleGeometry, true, at);
+    }
+    return { forward, byIds: frame.byIds ? frame : null };
+  } finally {
+    pass.setGeometry(geometry);
   }
 }
 
@@ -1232,43 +1363,6 @@ export async function checkTerrainFrame(
       `${String(patches.interior)} interior and ${String(patches.edge)} edge patches: lit triangles ${String(litClusterTriangles)} by clusters, ${litClusterTriangles === null ? "—" : (litClusterTriangles / litTriangles).toFixed(4)} of T1.a's ${String(litTriangles)}; digests ${bytesDigest(byMesh)} by the interior mesh, ${bytesDigest(byClusters)} by clusters; tie pixels ${String(ties.pixels)}, the largest difference ${ties.largest.toExponential(3)}`,
     );
 
-    // R14.T2.c: the lit pass's interior patches by the visibility buffer's ID raster, into the
-    // scene's depth and an r32uint ID a pixel, then its edge patches forward over them, against the
-    // forward pass's frame (T2.a's), from the same selection and residents, in one run; the ID form
-    // asked at the first frame that shades by IDs, and compiled meanwhile.
-    relief.setGeometry(LOW_AT_STRIDE_1);
-    const forwardFrame = liveFrame(relief, mask, pose, performance.now());
-    const forwardScene = await drawnScene(engine, pose, [
-      ...renderer.meshDraws(forwardFrame.plan),
-      ...forwardFrame.terrainDraws,
-    ]);
-    relief.setGeometry({ ...LOW_AT_STRIDE_1, shading: "visibility" });
-    let idFrame = liveFrame(relief, mask, pose, performance.now());
-    await until(() => {
-      idFrame = liveFrame(relief, mask, pose, performance.now());
-      return idFrame.terrain.visibility() !== null;
-    }, ID_FORM_TIMEOUT_MS);
-    const byIds = idFrame.terrain.visibility();
-    const idScene =
-      byIds === null
-        ? null
-        : await drawnByIds(engine, pose, renderer.meshDraws(idFrame.plan), byIds);
-    const named =
-      byIds === null || idScene?.ids === null || idScene === null
-        ? null
-        : await idsNamed(engine, byIds.raster, idScene.ids);
-    relief.setGeometry(LOW_AT_STRIDE_1);
-    const depthSame =
-      idScene !== null && bytesDigest(idScene.depth) === bytesDigest(forwardScene.depth);
-    const idPath = engine.capabilities.primitiveIndex ? "primitive_index" : "de-indexed";
-    checks.check(
-      "R14.T2.c the lit pass's interior patches by the visibility buffer's ID raster, its edge patches forward after it, leave the scene's depth T2.a's, byte for byte, an ID at their pixels naming each one's cluster and triangle",
-      withRelief.done && depthSame && named !== null && named.pixels > 0 && named.namingNone === 0,
-      byIds === null
-        ? `the ID form was not made in ${String(ID_FORM_TIMEOUT_MS)} ms`
-        : `${String(byIds.raster.length)} raster and ${String(byIds.forward.length)} forward draws, the raster ${idPath}; the depth ${depthSame ? "the same bytes" : "differs"}, digests ${bytesDigest(forwardScene.depth)} forward, ${idScene === null ? "—" : bytesDigest(idScene.depth)} by IDs; ${String(named?.pixels)} pixels of ${String(VIEWPORT.widthPx * VIEWPORT.heightPx)} hold an ID, of ${String(named?.clusters)} clusters, ${String(named?.namingNone)} naming none; IDs digest ${idScene?.ids === null || idScene === null ? "—" : bytesDigest(idScene.ids)}`,
-    );
-
     // R14.T1.g: the edge patches through the cull and the stable compaction beside the interior
     // patches, their fins and skirt heads as `terrain-fin` clusters and every cluster the survey's
     // edge comes near by the fin forms, against their lit mesh's draw, from the same selection and
@@ -1558,6 +1652,7 @@ export async function checkTerrainFrame(
             sceneDepth: () => false,
             lateDraws: () => [],
             visibility: () => null,
+            opaqueDraws: () => [],
           };
       // The datums the renderer packs the overlay with, from its plan.
       let datums = 0;
@@ -1924,6 +2019,226 @@ export async function checkTerrainFrame(
     for (const pass of passes) {
       pass.dispose();
     }
+    offChange();
+    pool.terminate();
+    mask.release();
+  }
+  return images;
+}
+
+/**
+ * Plan R14, R14.T2.c to T2.e's checks on the device (`R14.T2 the frame by the visibility buffer`),
+ * in a part of their own: part 15's frame check's world, workers and coverage mask made again, and
+ * one lit pass on the low setting over the place, its changes cut at their first draw, as that
+ * check's are. Its frame by the visibility buffer, composed as the renderer draws it, against the
+ * forward frame (T2.a's), from the same selection and residents, at stride 1; then through the
+ * renderer at the low setting's geometry, over the place and at a 2° graze.
+ */
+export async function checkVisibilityFrame(
+  engine: RenderEngine,
+  checks: Checks,
+  captures = false,
+): Promise<CapturedImage[]> {
+  const images: CapturedImage[] = [];
+  const field = moonLikeFixture("first");
+  const pool = new HeightWorkerPool({
+    workers: 2,
+    createWorker: () =>
+      new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
+        type: "module",
+      }),
+  });
+  const survey = new SurveyedCells();
+  const mask = new CoverageMask(engine, "visibility frame smoke: coverage mask");
+  const offChange = pool.onFieldChange((change) => {
+    survey.add(change);
+    mask.survey(change);
+  });
+  let made: TerrainPass | null = null;
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  const photoreal = new PhotorealRenderer(engine, "visibility frame smoke");
+  const canvas = engine.createView(addCanvas(), "visibility frame smoke");
+  canvas.resize(VIEWPORT);
+  try {
+    field.blocks.forEach((block, n) => {
+      if (n === 0) {
+        pool.fieldInit(field.body, block);
+      } else {
+        pool.fieldChunk(field.body, block);
+      }
+    });
+    const held = await until(
+      () => pool.fieldBlocks(field.body)?.reported === field.blocks.length,
+      FIELD_TIMEOUT_MS,
+    );
+    if (!held) {
+      throw new Error("the workers did not take the fixture's blocks in time");
+    }
+    // Made once the field's levels are held, as the frame check's passes are.
+    const hold = new LaneHold();
+    const relief = new TerrainPass({
+      engine,
+      setting: "low",
+      terrain: { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES },
+      geometry: smokeGeometry("low"),
+      planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
+      source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
+      createPool: (bake) => hold.wrap(pool.lane(bake)),
+      survey,
+    });
+    made = relief;
+    relief.setReducedMotion(true);
+    laneHolds.set(relief, hold);
+    await relief.ready();
+    const pose = poseOver();
+    const withRelief = await settled(relief, pool, mask, pose);
+
+    // R14.T2.c: the lit pass's interior patches by the visibility buffer's ID raster, into the
+    // scene's depth and an r32uint ID a pixel, then its edge patches forward over them, against the
+    // forward pass's frame (T2.a's), from the same selection and residents, in one run; the ID form
+    // asked at the first frame that shades by IDs, and compiled meanwhile.
+    relief.setGeometry(LOW_AT_STRIDE_1);
+    const forwardFrame = liveFrame(relief, mask, pose, performance.now());
+    const forwardScene = await drawnScene(engine, pose, [
+      ...renderer.meshDraws(forwardFrame.plan),
+      ...forwardFrame.terrainDraws,
+    ]);
+    relief.setGeometry({ ...LOW_AT_STRIDE_1, shading: "visibility" });
+    let idFrame = liveFrame(relief, mask, pose, performance.now());
+    await until(() => {
+      idFrame = liveFrame(relief, mask, pose, performance.now());
+      return idFrame.terrain.visibility() !== null;
+    }, ID_FORM_TIMEOUT_MS);
+    const byIds = idFrame.terrain.visibility();
+    const idScene =
+      byIds === null
+        ? null
+        : await drawnByIds(engine, pose, renderer.meshDraws(idFrame.plan), byIds);
+    const placed =
+      byIds === null
+        ? null
+        : await probedByIds(
+            engine,
+            pose,
+            byIds,
+            idFrame.terrain.opaqueDraws(),
+            relief.layout.vertexPath,
+          );
+    const named =
+      byIds === null || idScene?.ids === null || idScene === null
+        ? null
+        : await idsNamed(engine, byIds.raster, idScene.ids);
+    relief.setGeometry(LOW_AT_STRIDE_1);
+    const depthSame =
+      idScene !== null && bytesDigest(idScene.depth) === bytesDigest(forwardScene.depth);
+    const idPath = engine.capabilities.primitiveIndex ? "primitive_index" : "de-indexed";
+    checks.check(
+      "R14.T2.c the lit pass's interior patches by the visibility buffer's ID raster, its edge patches forward after it, leave the scene's depth T2.a's, byte for byte, an ID at their pixels naming each one's cluster and triangle",
+      withRelief.done && depthSame && named !== null && named.pixels > 0 && named.namingNone === 0,
+      byIds === null
+        ? `the ID form was not made in ${String(ID_FORM_TIMEOUT_MS)} ms`
+        : `${String(byIds.raster.length)} raster and ${String(byIds.forward.length)} forward draws, the raster ${idPath}; the depth ${depthSame ? "the same bytes" : "differs"}, digests ${bytesDigest(forwardScene.depth)} forward, ${idScene === null ? "—" : bytesDigest(idScene.depth)} by IDs; ${String(named?.pixels)} pixels of ${String(VIEWPORT.widthPx * VIEWPORT.heightPx)} hold an ID, of ${String(named?.clusters)} clusters, ${String(named?.namingNone)} naming none; IDs digest ${idScene?.ids === null || idScene === null ? "—" : bytesDigest(idScene.ids)}`,
+    );
+
+    // R14.T2.d: the same frame by IDs with its resolve, the figures and the rest of the terrain
+    // after it, against T2.a's: its terrain, judged by the terrain alone, within ⅓ stop, every other
+    // pixel the same bytes (the reference surface at the survey's edge among them); and the
+    // resolve's place of each pixel, from its triangle's refetched vertices and its barycentrics,
+    // against the rasteriser's interpolant there.
+    const judged = await drawnScene(engine, pose, forwardFrame.terrainDraws);
+    const apart =
+      idScene === null ? null : stopsApart(forwardScene.colour, idScene.colour, judged.colour);
+    const elsewhere =
+      idScene === null
+        ? null
+        : differingElsewhere(forwardScene.colour, idScene.colour, judged.colour);
+    if (captures && idScene !== null) {
+      const exposure = captureScale(forwardScene.colour, judged.colour);
+      images.push(
+        captureOf("r14-t2d-frame-forward", forwardScene.colour, VIEWPORT, exposure),
+        captureOf("r14-t2d-frame-by-ids", idScene.colour, VIEWPORT, exposure),
+        maskOf("r14-t2d-terrain-mask", judged.colour, VIEWPORT),
+      );
+    }
+    checks.check(
+      "R14.T2.d the frame by the visibility buffer, each raster pixel shaded once by the resolve, draws T2.a's: at least 99.5% of its terrain within ⅓ stop, the rest listed, every other pixel byte for byte",
+      withRelief.done &&
+        apart !== null &&
+        apart.terrain > 0 &&
+        apart.within >= RESOLVE_WITHIN_SHARE * apart.terrain &&
+        elsewhere === 0 &&
+        depthSame,
+      apart === null
+        ? "no frame by IDs"
+        : `terrain ${String(apart.terrain)} px: ${String(apart.within)} within ⅓ stop (${((100 * apart.within) / apart.terrain).toFixed(3)}%), ${String(apart.terrain - apart.within)} beyond it, ${String(apart.differing)} differing at all, the largest ${apart.largestStops.toFixed(4)} stops; beyond it, forward → by IDs of the brightest: ${idScene === null ? "—" : beyondThirdStop(forwardScene.colour, idScene.colour, VIEWPORT.widthPx, judged.colour)}; ${String(elsewhere)} other pixels differ; digests ${bytesDigest(forwardScene.colour)} forward, ${idScene === null ? "—" : bytesDigest(idScene.colour)} by IDs`,
+    );
+    checks.check(
+      "R14.T2.d the resolve's place of each pixel, its triangle's three vertices refetched by the lit vertex function and its barycentrics from their clip positions snapped to the device's sub-pixel grid, is the rasteriser's interpolant's within a few ulps",
+      placed !== null &&
+        placed.compared > 0 &&
+        placed.unmatched === 0 &&
+        placed.p99Ulps <= PLACE_P99_ULPS,
+      placed === null
+        ? "no frame by IDs"
+        : `${String(placed.compared)} axis values compared, ${String(placed.unmatched)} pixels drawn by one probe alone; units in the last place apart: median ${placed.medianUlps.toFixed(2)}, 99th percentile ${placed.p99Ulps.toFixed(2)}, the largest ${placed.largestUlps.toFixed(1)}, ${placed.largestRelative.toExponential(2)} of the distance`,
+    );
+    // R14.T2.e: the bodies pass opaque first, as the renderer draws it: the terrain that never
+    // discards, then the mesh bodies' figures, which may, then the rest of the terrain; against
+    // T2.a's order, the figures first, byte for byte, depth deciding (ties listed).
+    const opaqueFirst = forwardFrame.terrain.opaqueDraws();
+    const ordered = await drawnScene(engine, pose, [
+      ...opaqueFirst,
+      ...renderer.meshDraws(forwardFrame.plan),
+      ...forwardFrame.terrainDraws.filter((draw) => !opaqueFirst.includes(draw)),
+    ]);
+    const orderTies = differingTexels(forwardScene.colour, ordered.colour);
+    const orderDepth = bytesDigest(ordered.depth) === bytesDigest(forwardScene.depth);
+    checks.check(
+      "R14.T2.e the bodies pass drawn opaque first, the terrain that never discards before the figures and the rest of the terrain after them, draws T2.a's frame, byte for byte",
+      withRelief.done && opaqueFirst.length > 0 && orderTies.pixels === 0 && orderDepth,
+      `${String(opaqueFirst.length)} opaque terrain draws of ${String(forwardFrame.terrainDraws.length)}, then ${String(renderer.meshDraws(forwardFrame.plan).length)} figures; tie pixels ${String(orderTies.pixels)}, the largest difference ${orderTies.largest.toExponential(3)}; the depth ${orderDepth ? "the same bytes" : "differs"}; digests ${bytesDigest(forwardScene.colour)} in T2.a's order, ${bytesDigest(ordered.colour)} opaque first`,
+    );
+
+    // R14.T2.d through the renderer, as `VIEW` draws at the low setting's geometry (its camera's
+    // strides among it), over the place and at a 2° graze from 10 km up, where the triangles graze:
+    // the frame by the visibility buffer, its ID raster, resolve and forward draws in the
+    // renderer's passes, against its forward frame: its bodies' pixels within ⅓ stop, at least 99.5%
+    // of them, its depth the same bytes.
+    await photoreal.prepare(VIEWPORT, "low", "eye", pose.camera);
+    const graze = grazingPose((2 * Math.PI) / 180, 10_000, (5 * Math.PI) / 180);
+    for (const [name, view] of [
+      ["over the place", pose],
+      ["at a 2° graze", graze],
+    ] as const) {
+      // Each view streams the one pass and draws on the one canvas, so in turn.
+      // oxlint-disable-next-line no-await-in-loop
+      const settledThere = view === pose ? withRelief : await settled(relief, pool, mask, view);
+      // The pass's frames by IDs over the view the pass has just settled on.
+      // oxlint-disable-next-line no-await-in-loop
+      const run = await visibilityRun(
+        { engine, photoreal, canvas, pass: relief, mask, view },
+        SETTINGS.low.geometry,
+      );
+      const runApart = run.byIds === null ? null : stopsApart(run.forward.colour, run.byIds.colour);
+      const runDepth =
+        run.byIds !== null && bytesDigest(run.byIds.depth) === bytesDigest(run.forward.depth);
+      checks.check(
+        `R14.T2.d through the renderer, ${name}, the frame by the visibility buffer draws the forward frame: at least 99.5% of its bodies' pixels within ⅓ stop, its depth byte for byte`,
+        settledThere.done &&
+          runApart !== null &&
+          runApart.terrain > 0 &&
+          runApart.within >= RESOLVE_WITHIN_SHARE * runApart.terrain &&
+          runDepth,
+        runApart === null
+          ? `the forms were not made in ${String(ID_FORM_TIMEOUT_MS)} ms`
+          : `settled ${String(settledThere.done)}; bodies ${String(runApart.terrain)} px: ${String(runApart.within)} within ⅓ stop (${((100 * runApart.within) / runApart.terrain).toFixed(3)}%), ${String(runApart.differing)} differing at all, the largest ${runApart.largestStops.toFixed(4)} stops; beyond ⅓ stop, forward → by IDs of the brightest: ${run.byIds === null ? "—" : beyondThirdStop(run.forward.colour, run.byIds.colour, VIEWPORT.widthPx)}; the depth ${runDepth ? "the same bytes" : "differs"}; digests ${bytesDigest(run.forward.colour)} forward, ${run.byIds === null ? "—" : bytesDigest(run.byIds.colour)} by IDs`,
+      );
+    }
+  } finally {
+    canvas.dispose();
+    photoreal.dispose();
+    renderer.dispose();
+    made?.dispose();
     offChange();
     pool.terminate();
     mask.release();
