@@ -87,6 +87,7 @@ use crate::math;
 use crate::rng::{DomainTag, ObjectKey, PowerLaw, Stream, Threshold, tags};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{Dex, HydrogenPerCm3, KilometresPerSecond, LightYears, SolarMasses, Years};
+use crate::words::{WordSink, WordSource};
 
 use super::ids::{FeatureId, FeatureKind, FeatureProcess};
 use super::kinds::cloud::{CLOUD_MASS_MAX, CLOUD_MASS_MIN, CLOUD_MASS_SLOPE, CloudMarks};
@@ -239,6 +240,110 @@ impl FeatureRecord {
             FeatureMarks::Cloud(_) => Some(FeatureKind::MolecularCloud),
         }
     }
+
+    /// Writes a nursery's or a cloud's every bit into `sink`, as the features' gas index keeps it
+    /// for a caller that stores it
+    /// ([`FeatureGasIndex::write_words`](super::gas_overlay::FeatureGasIndex::write_words)): its
+    /// kind, its ID's cell and candidate number, its centre's cell and offset in metres, its
+    /// component (a 0, or a 1 and its index), its reach, then its marks. Its process is its
+    /// marks' kind's. The record is taken apart in full, so that a field added fails to compile
+    /// here until it is written. A cluster, which carries no gas and which no index holds, writes
+    /// its kind alone, which [`read_gas_words`](Self::read_gas_words) refuses.
+    pub(crate) fn write_gas_words(&self, sink: &mut impl WordSink) {
+        let Self {
+            id,
+            process: _,
+            position,
+            component,
+            marks,
+            reach,
+        } = self;
+        match marks {
+            FeatureMarks::Nursery(_) => sink.word(GAS_NURSERY),
+            FeatureMarks::Cloud(_) => sink.word(GAS_CLOUD),
+            FeatureMarks::Globular(_) | FeatureMarks::OpenCluster(_) => {
+                sink.word(NO_GAS);
+                return;
+            }
+        }
+        let feature = id.feature_ref();
+        for coordinate in feature.cell().to_array() {
+            sink.word(u64::from(coordinate.cast_unsigned()));
+        }
+        sink.word(u64::from(feature.index()));
+        for coordinate in position.cell().to_array() {
+            sink.word(u64::from(coordinate.cast_unsigned()));
+        }
+        for offset in position.offset_metres() {
+            sink.float(offset);
+        }
+        match component {
+            Some(component) => {
+                sink.word(1);
+                sink.count(component.index());
+            }
+            None => sink.word(0),
+        }
+        sink.float(reach.value());
+        match marks {
+            FeatureMarks::Nursery(marks) => marks.write_words(sink),
+            FeatureMarks::Cloud(marks) => marks.write_words(sink),
+            FeatureMarks::Globular(_) | FeatureMarks::OpenCluster(_) => {}
+        }
+    }
+
+    /// The nursery or cloud of `galaxy` that [`write_gas_words`](Self::write_gas_words) wrote into
+    /// `source`, or `None` for too few words, a cluster, or an ID, centre or component that is not
+    /// one.
+    #[must_use]
+    pub(crate) fn read_gas_words(source: &mut impl WordSource, galaxy: &Galaxy) -> Option<Self> {
+        let kind = source.word()?;
+        if kind != GAS_NURSERY && kind != GAS_CLOUD {
+            return None;
+        }
+        let cell = FeatureCell::new(read_coordinates(source)?).ok()?;
+        let index = u16::try_from(source.word()?).ok()?;
+        let id = FeatureId::of(cell, index)?;
+        let cell = LyCell::new(read_coordinates(source)?);
+        let offset = [source.float()?, source.float()?, source.float()?];
+        let position = GalacticPosition::new(cell, offset).ok()?;
+        let component = match source.word()? {
+            0 => None,
+            1 => Some(galaxy.fields().component_ids().nth(source.count()?)?),
+            _ => return None,
+        };
+        let reach = LightYears::new(source.float()?);
+        let (process, marks) = if kind == GAS_NURSERY {
+            let marks = NurseryMarks::read_words(source)?;
+            (FeatureProcess::Nursery, FeatureMarks::Nursery(marks))
+        } else {
+            (
+                FeatureProcess::Cloud,
+                FeatureMarks::Cloud(CloudMarks::read_words(source)?),
+            )
+        };
+        Some(Self {
+            id,
+            process,
+            position,
+            component,
+            marks,
+            reach,
+        })
+    }
+}
+
+/// The kinds a feature's gas words lead with ([`FeatureRecord::write_gas_words`]): a nursery, a
+/// cloud, and a cluster, which carries no gas.
+const GAS_NURSERY: u64 = 0;
+const GAS_CLOUD: u64 = 1;
+const NO_GAS: u64 = 2;
+
+/// A cell's three coordinates, each written as its `i32`'s bits.
+#[must_use]
+fn read_coordinates(source: &mut impl WordSource) -> Option<[i32; 3]> {
+    let mut coordinate = || Some(u32::try_from(source.word()?).ok()?.cast_signed());
+    Some([coordinate()?, coordinate()?, coordinate()?])
 }
 
 /// Everything a feature cell holds: its candidate counts per process and its features in index
@@ -2225,5 +2330,43 @@ mod tests {
         b.sort();
         assert_eq!(a, b);
         assert_ne!(a, []);
+    }
+
+    /// A nursery's and a cloud's gas words read back as the record, bit for bit, about the
+    /// Sun-like point, and none of them cut short reads; a cluster's, which no gas index holds,
+    /// read as none (perf-sky-tables-on-disk).
+    #[test]
+    fn gas_features_read_back_from_their_words_and_clusters_are_refused() {
+        use crate::words::testing::Words;
+
+        let galaxy = milky_way(0);
+        let (mut gas, mut clusters) = (0, 0);
+        for c in [[0, 6, 0], [0, 6, -1]] {
+            for feature in FeatureCatalogue::cell(&galaxy, cell(c)).features() {
+                let mut words = Words::default();
+                feature.write_gas_words(&mut words);
+                let back = FeatureRecord::read_gas_words(&mut words.cut(words.len()), &galaxy);
+                match feature.marks() {
+                    FeatureMarks::Nursery(_) | FeatureMarks::Cloud(_) => {
+                        assert_eq!(back.as_ref(), Some(feature));
+                        let short = words.cut(words.len() - 1);
+                        assert_eq!(
+                            FeatureRecord::read_gas_words(&mut short.cut(short.len()), &galaxy),
+                            None,
+                            "cut short"
+                        );
+                        gas += 1;
+                    }
+                    FeatureMarks::Globular(_) | FeatureMarks::OpenCluster(_) => {
+                        assert_eq!((back, words.len()), (None, 1), "{feature:?}");
+                        clusters += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            gas > 10 && clusters > 10,
+            "{gas} with gas, {clusters} clusters"
+        );
     }
 }

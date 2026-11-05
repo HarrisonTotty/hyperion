@@ -108,6 +108,7 @@ use crate::tables::gauss_legendre::{GL32_NODES, GL32_WEIGHTS};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::consts::SOLAR_ABSOLUTE_MAGNITUDE_V;
 use crate::units::{HeliumExcess, Magnitudes, SolarLuminositiesV, SolarMasses, Years};
+use crate::words::{WordSink, WordSource};
 
 use super::binary_light::{self, Applied};
 use super::photometry::{absolute_v_of_state, colour_of_state};
@@ -748,6 +749,174 @@ impl LuminosityTables {
                 .map(LuminosityFunction::heap_bytes)
                 .sum::<usize>()
     }
+
+    /// What the tables' words mean ([`write_words`](Self::write_words)), for a caller that keys
+    /// what it stores by it, as the server keeps a galaxy's tables on disk across its restarts
+    /// (perf-sky-tables-on-disk): 1.
+    ///
+    /// It is raised whenever the words written change: a field added to a table, or a list laid
+    /// out otherwise. The tables' values move only with the generator version, which such a caller
+    /// keys by too.
+    pub const FORMAT: u32 = 1;
+
+    /// Writes the tables' every bit into `sink`, for a caller that keeps them beyond its process:
+    /// what [`read_words`](Self::read_words) reads back.
+    ///
+    /// The words: the time (whole seconds, as the bits of the `i64`, then nanoseconds), the solar
+    /// radius, the layout (its length; per component its first bin, its bins' means and its
+    /// radial means), then the functions (their count; per function its snapshots' count; per
+    /// snapshot its light and counts brighter, its stars beyond, dark and remnant, its colour sums,
+    /// four to an edge, and the pair correction's light, σ and clamp). Each list is preceded by
+    /// its length and capacity, so that the tables read back own the heap these do
+    /// ([`heap_bytes`](Self::heap_bytes)). The structs are taken apart in full, so that a field
+    /// added to any of them fails to compile here until it is written, and [`FORMAT`](Self::FORMAT)
+    /// is raised.
+    pub fn write_words(&self, sink: &mut impl WordSink) {
+        let Self {
+            time,
+            solar_radius,
+            layout,
+            functions,
+        } = self;
+        sink.word(time.seconds().cast_unsigned());
+        sink.word(u64::from(time.subsec_nanos()));
+        sink.float(*solar_radius);
+        sink.lengths(layout.len(), layout.capacity());
+        for bins in layout {
+            let ComponentBins {
+                first,
+                means,
+                radial_means,
+            } = bins;
+            sink.count(*first);
+            sink.floats(means);
+            sink.floats(radial_means);
+        }
+        sink.lengths(functions.len(), functions.capacity());
+        for function in functions {
+            let LuminosityFunction { snapshots } = function;
+            sink.lengths(snapshots.len(), snapshots.capacity());
+            for snapshot in snapshots {
+                let Snapshot {
+                    light_fainter,
+                    count_brighter,
+                    beyond,
+                    dark,
+                    remnants,
+                    colour_fainter,
+                    pair,
+                } = snapshot;
+                sink.floats(light_fainter);
+                sink.floats(count_brighter);
+                sink.float(*beyond);
+                sink.float(*dark);
+                sink.float(*remnants);
+                sink.lengths(colour_fainter.len(), colour_fainter.capacity());
+                for &sums in colour_fainter {
+                    for value in sums {
+                        sink.float(value);
+                    }
+                }
+                let Applied {
+                    light,
+                    sigma,
+                    clamped,
+                } = pair;
+                sink.float(*light);
+                sink.float(*sigma);
+                sink.float(*clamped);
+            }
+        }
+    }
+
+    /// The tables of `galaxy` that `source` holds as [`write_words`](Self::write_words) wrote
+    /// them, or `None` for words that are not such tables.
+    ///
+    /// Each list is allocated at the capacity written. Words too few, or tables whose readers
+    /// would index out of them (a component of `galaxy`'s too few or too many, a snapshot or edge
+    /// too few, a component's bins out of step with the functions), read as `None`. It reads no
+    /// more than the tables' words, so a caller checks that nothing is left over
+    /// ([`WordSource::words_left`]).
+    #[must_use]
+    pub fn read_words(source: &mut impl WordSource, galaxy: &Galaxy) -> Option<Self> {
+        let seconds = source.word()?.cast_signed();
+        let nanos = u32::try_from(source.word()?).ok()?;
+        let time = UniverseTime::new(seconds, nanos).ok()?;
+        let solar_radius = source.float()?;
+        let layout = source.list(|source| {
+            Some(ComponentBins {
+                first: source.count()?,
+                means: source.floats()?,
+                radial_means: source.floats()?,
+            })
+        })?;
+        let functions = source.list(|source| {
+            Some(LuminosityFunction {
+                snapshots: source.list(read_snapshot)?,
+            })
+        })?;
+        if layout.len() != galaxy.fields().component_ids().count() {
+            return None;
+        }
+        let mut bins = 0_usize;
+        for component in &layout {
+            let gradient = component.means.len() > 1;
+            if component.first != bins
+                || component.means.is_empty()
+                || (gradient && component.radial_means.is_empty())
+            {
+                return None;
+            }
+            bins = bins.checked_add(component.means.len())?;
+        }
+        let edges = MAGNITUDE_BINS + 1;
+        let whole = |snapshot: &Snapshot| {
+            snapshot.light_fainter.len() == edges
+                && snapshot.count_brighter.len() == edges
+                && snapshot.colour_fainter.len() == edges
+        };
+        let laid_out = functions.len() == bins.checked_mul(LAYER_COUNT)?
+            && functions.iter().all(|function| {
+                function.snapshots.len() == EMITTED_AGO_YEARS.len()
+                    && function.snapshots.iter().all(whole)
+            });
+        laid_out.then_some(Self {
+            time,
+            solar_radius,
+            layout,
+            functions,
+        })
+    }
+}
+
+/// A snapshot as [`LuminosityTables::write_words`] wrote it.
+#[must_use]
+fn read_snapshot(source: &mut impl WordSource) -> Option<Snapshot> {
+    let light_fainter = source.floats()?;
+    let count_brighter = source.floats()?;
+    let (beyond, dark, remnants) = (source.float()?, source.float()?, source.float()?);
+    let colour_fainter = source.list(|source| {
+        Some([
+            source.float()?,
+            source.float()?,
+            source.float()?,
+            source.float()?,
+        ])
+    })?;
+    let pair = Applied {
+        light: source.float()?,
+        sigma: source.float()?,
+        clamped: source.float()?,
+    };
+    Some(Snapshot {
+        light_fainter,
+        count_brighter,
+        beyond,
+        dark,
+        remnants,
+        colour_fainter,
+        pair,
+    })
 }
 
 /// The mass nodes of one [`SampleJob`] at most: some ten jobs per \[Fe/H\] node (the Milky Way's
@@ -2387,138 +2556,34 @@ impl BrownDwarfGrid {
 }
 
 /// The tables' every bit as a file's bytes and back, for the copy the sky's tests share within a
-/// nextest run ([`crate::sky::testing::shared`]). Test support only: the library does no I/O.
-///
-/// The payload, in [`WordWriter`]'s little-endian words: the time (whole seconds, as the bits of
-/// the `i64`, then nanoseconds), the solar radius, the layout (its length; per component its first
-/// bin, its bins' means and its radial means), then the functions (their count; per function its
-/// snapshots' count; per snapshot its light and counts brighter, its stars beyond, dark and
-/// remnant, its colour sums, four to an edge, and the pair correction's light, σ and clamp). Each
-/// list is preceded by its length and capacity, so that the decoded tables own the heap the
-/// encoded ones did ([`LuminosityTables::heap_bytes`]). The structs are taken apart in full, so
-/// that a field added to any of them fails to compile here until the codec writes it.
+/// nextest run ([`crate::sky::testing::shared`]): [`LuminosityTables::write_words`]' words in a
+/// [`WordWriter`]'s framing. Test support only: the library does no I/O.
 #[cfg(test)]
 pub(crate) mod file {
-    use super::{Applied, ComponentBins, LuminosityFunction, LuminosityTables, Snapshot};
+    use super::LuminosityTables;
+    use crate::galaxy::Galaxy;
     use crate::sky::testing::shared::{WordReader, WordWriter};
-    use crate::time::UniverseTime;
 
     /// The bytes of `tables`' file.
     ///
     /// # Panics
     ///
-    /// If a value of the tables is a NaN, whose bits are unspecified ([`WordWriter::float`]).
+    /// If a value of the tables is a NaN, whose bits are unspecified ([`WordWriter`]'s floats).
     #[must_use]
     pub(crate) fn encode(tables: &LuminosityTables) -> Vec<u8> {
-        let LuminosityTables {
-            time,
-            solar_radius,
-            layout,
-            functions,
-        } = tables;
-        let mut w = WordWriter::with_capacity(tables.heap_bytes() + 64 * layout.len());
-        w.word(time.seconds().cast_unsigned());
-        w.word(u64::from(time.subsec_nanos()));
-        w.float(*solar_radius);
-        w.lengths(layout.len(), layout.capacity());
-        for bins in layout {
-            let ComponentBins {
-                first,
-                means,
-                radial_means,
-            } = bins;
-            w.count(*first);
-            w.floats(means);
-            w.floats(radial_means);
-        }
-        w.lengths(functions.len(), functions.capacity());
-        for function in functions {
-            let LuminosityFunction { snapshots } = function;
-            w.lengths(snapshots.len(), snapshots.capacity());
-            for snapshot in snapshots {
-                let Snapshot {
-                    light_fainter,
-                    count_brighter,
-                    beyond,
-                    dark,
-                    remnants,
-                    colour_fainter,
-                    pair,
-                } = snapshot;
-                w.floats(light_fainter);
-                w.floats(count_brighter);
-                w.float(*beyond);
-                w.float(*dark);
-                w.float(*remnants);
-                w.lengths(colour_fainter.len(), colour_fainter.capacity());
-                for &sums in colour_fainter {
-                    for value in sums {
-                        w.float(value);
-                    }
-                }
-                let Applied {
-                    light,
-                    sigma,
-                    clamped,
-                } = pair;
-                w.float(*light);
-                w.float(*sigma);
-                w.float(*clamped);
-            }
-        }
+        let mut w = WordWriter::with_capacity(tables.heap_bytes() + 64 * tables.layout.len());
+        tables.write_words(&mut w);
         w.finish()
     }
 
-    /// The tables of a file [`encode`] wrote, or `None` for any other bytes: a damaged, cut or
-    /// lengthened file, or one of another format ([`WordReader::open`]). Each list is allocated at
-    /// the capacity written ([`WordReader::list`]).
+    /// The tables of `galaxy` in a file [`encode`] wrote, or `None` for any other bytes: a
+    /// damaged, cut or lengthened file, or one of another format ([`WordReader::open`]).
     #[must_use]
-    pub(crate) fn decode(bytes: &[u8]) -> Option<LuminosityTables> {
+    pub(crate) fn decode(bytes: &[u8], galaxy: &Galaxy) -> Option<LuminosityTables> {
         let mut r = WordReader::open(bytes)?;
-        let seconds = r.word()?.cast_signed();
-        let nanos = u32::try_from(r.word()?).ok()?;
-        let time = UniverseTime::new(seconds, nanos).ok()?;
-        let solar_radius = r.float()?;
-        let layout = r.list(|r| {
-            Some(ComponentBins {
-                first: r.count()?,
-                means: r.floats()?,
-                radial_means: r.floats()?,
-            })
-        })?;
-        let functions = r.list(|r| {
-            Some(LuminosityFunction {
-                snapshots: r.list(snapshot)?,
-            })
-        })?;
+        let tables = LuminosityTables::read_words(&mut r, galaxy)?;
         r.end()?;
-        Some(LuminosityTables {
-            time,
-            solar_radius,
-            layout,
-            functions,
-        })
-    }
-
-    fn snapshot(r: &mut WordReader<'_>) -> Option<Snapshot> {
-        let light_fainter = r.floats()?;
-        let count_brighter = r.floats()?;
-        let (beyond, dark, remnants) = (r.float()?, r.float()?, r.float()?);
-        let colour_fainter = r.list(|r| Some([r.float()?, r.float()?, r.float()?, r.float()?]))?;
-        let pair = Applied {
-            light: r.float()?,
-            sigma: r.float()?,
-            clamped: r.float()?,
-        };
-        Some(Snapshot {
-            light_fainter,
-            count_brighter,
-            beyond,
-            dark,
-            remnants,
-            colour_fainter,
-            pair,
-        })
+        Some(tables)
     }
 }
 
@@ -2856,7 +2921,7 @@ mod tests {
         let ids = [Population::Halo, Population::Bulge].map(|p| component_of(galaxy, p));
         let tables = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &ids, options);
         let bytes = file::encode(&tables);
-        let back = file::decode(&bytes).expect("a whole file");
+        let back = file::decode(&bytes, galaxy).expect("a whole file");
         assert_eq!(bits(&back), bits(&tables));
         assert_eq!(back.time, tables.time);
         assert_eq!(back.heap_bytes(), tables.heap_bytes());
@@ -2872,18 +2937,102 @@ mod tests {
         ] {
             let mut damaged = bytes.clone();
             damaged[at] ^= 0x01;
-            assert!(file::decode(&damaged).is_none(), "byte {at} changed");
+            assert!(
+                file::decode(&damaged, galaxy).is_none(),
+                "byte {at} changed"
+            );
         }
         assert!(
-            file::decode(&bytes[..bytes.len() - 8]).is_none(),
+            file::decode(&bytes[..bytes.len() - 8], galaxy).is_none(),
             "cut short"
         );
         let mut long = bytes.clone();
         long.extend_from_slice(&[0; 8]);
-        assert!(file::decode(&long).is_none(), "lengthened");
+        assert!(file::decode(&long, galaxy).is_none(), "lengthened");
         let dark = LuminosityTables::dark(galaxy);
-        let back = file::decode(&file::encode(&dark)).expect("a whole file");
+        let back = file::decode(&file::encode(&dark), galaxy).expect("a whole file");
         assert_eq!(bits(&back), bits(&dark));
+    }
+
+    /// Tables whose words hold together but whose readers would index out of them read as none: a
+    /// component of the galaxy's too few, a snapshot's edge too few, a function's snapshot too few,
+    /// a component's bins out of step with the functions, a gradient component with no radial
+    /// means; and so do words cut short (perf-sky-tables-on-disk).
+    #[test]
+    fn tables_their_readers_would_index_out_of_read_as_none() {
+        use crate::words::testing::Words;
+
+        /// How the test spoils a copy of the tables.
+        type Spoil = fn(&mut LuminosityTables);
+
+        let galaxy = milky_way_galaxy();
+        let dark = LuminosityTables::dark(galaxy);
+        let read = |tables: &LuminosityTables| {
+            let mut words = Words::default();
+            tables.write_words(&mut words);
+            let len = words.len();
+            let back = LuminosityTables::read_words(&mut words, galaxy);
+            (back, words.words_left(), len)
+        };
+        let (back, left, len) = read(&dark);
+        assert_eq!(left, 0);
+        // Some 9 × 10⁶ words, compared whole rather than printed.
+        assert!(
+            back.is_some_and(|back| bits(&back) == bits(&dark)),
+            "the tables read back differ"
+        );
+        let mut words = Words::default();
+        dark.write_words(&mut words);
+        assert!(
+            LuminosityTables::read_words(&mut words.cut(len - 1), galaxy).is_none(),
+            "cut short"
+        );
+        // The first component made a gradient's: a second bin, its functions and the radial
+        // means it is read by.
+        let graded = |radial_means: Vec<f64>| {
+            let mut tables = dark.clone();
+            let mean = tables.layout[0].means[0];
+            tables.layout[0].means.push(mean + 0.1);
+            tables.layout[0].radial_means = radial_means;
+            for bins in &mut tables.layout[1..] {
+                bins.first += 1;
+            }
+            let functions: Vec<_> = tables.functions[..LAYER_COUNT].to_vec();
+            tables.functions.splice(LAYER_COUNT..LAYER_COUNT, functions);
+            tables
+        };
+        let (back, ..) = read(&graded(vec![-0.2, -0.1]));
+        assert!(back.is_some(), "a gradient with its radial means");
+        let spoil: [(&str, Spoil); 5] = [
+            ("a component too few", |tables| {
+                let last = tables.layout.pop().expect("a component");
+                tables.functions.truncate(last.first * LAYER_COUNT);
+            }),
+            ("an edge too few", |tables| {
+                tables.functions[0].snapshots[0].light_fainter.pop();
+            }),
+            ("a colour edge too few", |tables| {
+                tables.functions[3].snapshots[2].colour_fainter.pop();
+            }),
+            ("a snapshot too few", |tables| {
+                tables.functions[1].snapshots.pop();
+            }),
+            ("a function too few", |tables| {
+                tables.functions.pop();
+            }),
+        ];
+        for (what, spoil) in spoil {
+            let mut tables = dark.clone();
+            spoil(&mut tables);
+            assert!(read(&tables).0.is_none(), "{what}");
+        }
+        assert!(
+            read(&graded(Vec::new())).0.is_none(),
+            "a gradient without its radial means"
+        );
+        let mut shifted = dark.clone();
+        shifted.layout[1].first += 1;
+        assert!(read(&shifted).0.is_none(), "a component's bins out of step");
     }
 
     /// The full tables the sky's tests share ([`milky_way_tables`]) are a fresh build's bit for
@@ -2911,7 +3060,7 @@ mod tests {
             file::encode(shared_tables) == bytes,
             "the shared tables' bytes differ"
         );
-        let back = file::decode(&bytes).expect("a whole file");
+        let back = file::decode(&bytes, milky_way_galaxy()).expect("a whole file");
         assert!(bits(&back) == expected, "a fresh build's file differs");
         assert!(
             file::encode(&back) == bytes,
@@ -2921,8 +3070,10 @@ mod tests {
         drop(back);
         match sharing {
             Sharing::Read | Sharing::Written => {
-                let from_file = read_shared(MILKY_WAY_TABLES_FILE, file::decode)
-                    .expect("the file this process read or wrote");
+                let from_file = read_shared(MILKY_WAY_TABLES_FILE, |bytes| {
+                    file::decode(bytes, milky_way_galaxy())
+                })
+                .expect("the file this process read or wrote");
                 assert!(bits(&from_file) == expected, "this run's file differs");
                 assert!(
                     file::encode(&from_file) == bytes,

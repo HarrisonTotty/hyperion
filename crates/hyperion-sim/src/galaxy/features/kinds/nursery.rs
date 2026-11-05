@@ -87,6 +87,7 @@ use crate::units::consts::{
 use crate::units::{
     Dex, HydrogenPerCm3, Kelvin, KelvinPerCm3, KilometresPerSecond, LightYears, SolarMasses, Years,
 };
+use crate::words::{WordSink, WordSource};
 
 use super::cloud::cloud_radius;
 use super::open_cluster::{NURSERY_MASS_MIN, dissolution_time, present_mass};
@@ -215,6 +216,80 @@ pub struct NurseryMarks {
 }
 
 impl NurseryMarks {
+    /// Writes the marks' every bit into `sink`, in their fields' order, the bound as 0 or 1: a
+    /// nursery's part of the features' gas index's words
+    /// ([`FeatureGasIndex::write_words`](crate::galaxy::features::gas_overlay::FeatureGasIndex::write_words)).
+    /// The marks are taken apart in full, so that a field added fails to compile here until it is
+    /// written.
+    pub(crate) fn write_words(&self, sink: &mut impl WordSink) {
+        let Self {
+            age_at_epoch,
+            mass,
+            bound,
+            embedded_duration,
+            dissolution_age,
+            expansion_speed,
+            age_spread,
+            efficiency,
+            fe_h,
+            bubble_interior,
+            half_mass_radius,
+            concentration,
+        } = self;
+        sink.float(age_at_epoch.value());
+        sink.float(mass.value());
+        sink.word(u64::from(*bound));
+        for value in [
+            embedded_duration.value(),
+            dissolution_age.value(),
+            expansion_speed.value(),
+            age_spread.value(),
+            *efficiency,
+            fe_h.value(),
+            bubble_interior.value(),
+            half_mass_radius.value(),
+            *concentration,
+        ] {
+            sink.float(value);
+        }
+    }
+
+    /// The marks [`write_words`](Self::write_words) wrote into `source`, or `None` for too few
+    /// words or a bound neither 0 nor 1.
+    #[must_use]
+    pub(crate) fn read_words(source: &mut impl WordSource) -> Option<Self> {
+        let age_at_epoch = Years::new(source.float()?);
+        let mass = SolarMasses::new(source.float()?);
+        let bound = match source.word()? {
+            0 => false,
+            1 => true,
+            _ => return None,
+        };
+        let embedded_duration = Years::new(source.float()?);
+        let dissolution_age = Years::new(source.float()?);
+        let expansion_speed = KilometresPerSecond::new(source.float()?);
+        let age_spread = Years::new(source.float()?);
+        let efficiency = source.float()?;
+        let fe_h = Dex::new(source.float()?);
+        let bubble_interior = HydrogenPerCm3::new(source.float()?);
+        let half_mass_radius = LightYears::new(source.float()?);
+        let concentration = source.float()?;
+        Some(Self {
+            age_at_epoch,
+            mass,
+            bound,
+            embedded_duration,
+            dissolution_age,
+            expansion_speed,
+            age_spread,
+            efficiency,
+            fe_h,
+            bubble_interior,
+            half_mass_radius,
+            concentration,
+        })
+    }
+
     /// The nursery's age at the epoch: the time since its first stars formed.
     #[must_use]
     pub const fn age_at_epoch(&self) -> Years {

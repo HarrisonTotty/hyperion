@@ -445,6 +445,19 @@ impl SkyTables {
         }
     }
 
+    /// The luminosity tables: what a store keeps of them, with the [`features`](Self::features)'
+    /// index, since the envelope and the offset bounds are made again in a few milliseconds.
+    #[must_use]
+    pub(crate) fn luminosity(&self) -> &LuminosityTables {
+        &self.tables
+    }
+
+    /// The features' gas index the tables' jobs march, if they carry one.
+    #[must_use]
+    pub(crate) fn features(&self) -> Option<&FeatureGasIndex> {
+        self.features.as_ref()
+    }
+
     /// The bytes the tables, the envelope, the offset bounds and the features' gas index own on
     /// the heap.
     #[must_use]

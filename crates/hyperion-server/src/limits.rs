@@ -234,6 +234,13 @@ pub const SKY_FILE_QUEUE: usize = 4;
 /// after a restart. A list's lookup waits for room.
 pub const ENVELOPE_FILE_QUEUE: usize = 64;
 
+/// The sky tables waiting to be written to disk, and the lookups waiting to read them (rendering
+/// plan R06; perf-sky-tables-on-disk). A galaxy's tables are queued once they are built, some
+/// 70 MB written in well under a second, and a server builds them once a galaxy, so four is room
+/// enough; tables that find none are not written, which only costs their build after a restart.
+/// A lookup waits for room.
+pub const SKY_TABLE_FILE_QUEUE: usize = 4;
+
 /// Most targets one `extinction` request may name (plan 07, P07.T10.c).
 ///
 /// A position target is some 130 bytes of JSON, so 64 of them, with the origin and the envelope,
@@ -293,6 +300,7 @@ mod tests {
         );
         assert_eq!(SKY_FILE_QUEUE, 4);
         assert_eq!(ENVELOPE_FILE_QUEUE, 64);
+        assert_eq!(SKY_TABLE_FILE_QUEUE, 4);
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);

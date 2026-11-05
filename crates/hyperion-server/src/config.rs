@@ -250,6 +250,11 @@ pub const DEFAULT_KEPT_SKIES_DISK_MIB: usize = 256;
 /// 32 galaxies of the server tests' 321 streams, or of 7 of the largest galaxies' 1,500. No option
 /// or variable sets it; [`ServerConfigBuilder::kept_envelopes_disk_bytes`] does.
 pub const DEFAULT_KEPT_ENVELOPES_DISK_MIB: usize = 16;
+/// The sky tables' files' budget, in MiB (rendering plan R06; perf-sky-tables-on-disk, lean,
+/// 2026-11-05): the tables' budget in memory, [`DEFAULT_SKY_TABLES_MIB`] (`decision-r06-tables.md`,
+/// item B.2), two galaxies' tables of some 68 MiB, or one galaxy's with its features' gas index.
+/// No option or variable sets it; [`ServerConfigBuilder::kept_sky_tables_disk_bytes`] does.
+pub const DEFAULT_KEPT_SKY_TABLES_DISK_MIB: usize = DEFAULT_SKY_TABLES_MIB;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -759,6 +764,7 @@ pub struct ServerConfig {
     sky_qos: SkyQos,
     global_list_warm_up: GlobalListWarmUp,
     kept_envelopes_disk_bytes: usize,
+    kept_sky_tables_disk_bytes: usize,
     feature_members: FeatureMembers,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
@@ -939,6 +945,13 @@ impl ServerConfig {
         self.kept_envelopes_disk_bytes
     }
 
+    /// The sky tables' files' budget, bytes, under the data directory (rendering plan R06;
+    /// perf-sky-tables-on-disk): 0 keeps none there.
+    #[must_use]
+    pub fn kept_sky_tables_disk_bytes(&self) -> usize {
+        self.kept_sky_tables_disk_bytes
+    }
+
     /// Whether the server serves plan 09's feature members (P09.T40.a).
     #[must_use]
     pub fn feature_members(&self) -> FeatureMembers {
@@ -1027,6 +1040,7 @@ impl Default for ServerConfigBuilder {
                 sky_qos: SkyQos::default(),
                 global_list_warm_up: GlobalListWarmUp::default(),
                 kept_envelopes_disk_bytes: DEFAULT_KEPT_ENVELOPES_DISK_MIB * BYTES_PER_MIB,
+                kept_sky_tables_disk_bytes: DEFAULT_KEPT_SKY_TABLES_DISK_MIB * BYTES_PER_MIB,
                 feature_members: FeatureMembers::default(),
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
@@ -1236,6 +1250,14 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn kept_envelopes_disk_bytes(mut self, bytes: usize) -> Self {
         self.config.kept_envelopes_disk_bytes = bytes;
+        self
+    }
+
+    /// Budget of the sky tables' files under the data directory, bytes;
+    /// [`DEFAULT_KEPT_SKY_TABLES_DISK_MIB`] by default, and 0 keeps none there.
+    #[must_use]
+    pub fn kept_sky_tables_disk_bytes(mut self, bytes: usize) -> Self {
+        self.config.kept_sky_tables_disk_bytes = bytes;
         self
     }
 

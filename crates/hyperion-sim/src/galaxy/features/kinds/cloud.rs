@@ -29,6 +29,7 @@ use crate::galaxy::gas::MASS_PER_HYDROGEN_FACTOR;
 use crate::math;
 use crate::units::consts::{HYDROGEN_MASS_KG, METRES_PER_LIGHT_YEAR, SOLAR_MASS_KG};
 use crate::units::{HydrogenPerCm3, LightYears, SolarMasses};
+use crate::words::{WordSink, WordSource};
 
 /// The clouds' mass function falls as `M^−CLOUD_MASS_SLOPE`.
 pub const CLOUD_MASS_SLOPE: f64 = 1.7;
@@ -91,6 +92,27 @@ pub struct CloudMarks {
 }
 
 impl CloudMarks {
+    /// Writes the marks' every bit into `sink`, its mass and then its dust per hydrogen: a cloud's
+    /// part of the features' gas index's words
+    /// ([`FeatureGasIndex::write_words`](crate::galaxy::features::gas_overlay::FeatureGasIndex::write_words)).
+    pub(crate) fn write_words(&self, sink: &mut impl WordSink) {
+        let Self {
+            mass,
+            dust_per_hydrogen,
+        } = self;
+        sink.float(mass.value());
+        sink.float(*dust_per_hydrogen);
+    }
+
+    /// The marks [`write_words`](Self::write_words) wrote into `source`, or `None` for too few
+    /// words.
+    #[must_use]
+    pub(crate) fn read_words(source: &mut impl WordSource) -> Option<Self> {
+        let mass = SolarMasses::new(source.float()?);
+        let dust_per_hydrogen = source.float()?;
+        Some(Self::new(mass, dust_per_hydrogen))
+    }
+
     /// A cloud of `mass` whose dust per hydrogen is `dust_per_hydrogen` times the solar ratio.
     #[must_use]
     pub(crate) const fn new(mass: SolarMasses, dust_per_hydrogen: f64) -> Self {

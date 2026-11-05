@@ -1297,6 +1297,80 @@ async fn a_sky_asked_again_after_a_restart_is_answered_from_its_file_byte_for_by
     restarted.stop().await;
 }
 
+/// A server started again over its data directory reads its galaxy's sky tables back from their
+/// file at the universe's open, rather than building them, and a sky it serves over them is the
+/// cold server's, byte for byte: its final reply's JSON and payload, after as many replies
+/// (perf-sky-tables-on-disk). The caps are forced and the band coarse, over the galaxy's own
+/// tables, which a forced sky otherwise leaves dark; no reply is kept, so that the relaunched sky
+/// is censused again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_relaunched_server_reads_its_sky_tables_back_and_serves_the_cold_sky() {
+    let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a small forced cap")
+        .with_galaxy_tables()
+        .with_band_spec(COARSE_BAND);
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = || {
+        sky_config(data_dir.path(), caps, 3)
+            .kept_skies(KeptSkies::Off)
+            .build()
+    };
+    let server = TestServer::start_with(config()).await;
+    let (mut client, universe) = opened(&server).await;
+    let id = client.send_request(RequestBody::Sky(sky(&universe))).await;
+    let cold = raw_replies_to(&mut client, id).await;
+    server
+        .stats_until("the galaxy's tables are written", |stats| {
+            stats.sky_tables().files().written() == 1
+        })
+        .await;
+    assert_eq!(server.stats().sky_tables().builds(), 1);
+    client.close().await;
+    server.stop().await;
+
+    let relaunched = TestServer::start_with(config()).await;
+    let mut client = relaunched.connected().await;
+    let body = RequestBody::OpenUniverse(OpenUniverseRequest {
+        universe: universe.clone(),
+    });
+    match client.request(body).await {
+        Ok(ResponseBody::OpenUniverse(_)) => {}
+        other => panic!("expected the opened universe, got {other:?}"),
+    }
+    relaunched
+        .stats_until("the open's sky tables are read back", |stats| {
+            stats.sky_tables().cache().entries() == 1
+        })
+        .await;
+    let id = client.send_request(RequestBody::Sky(sky(&universe))).await;
+    let again = raw_replies_to(&mut client, id).await;
+    let tables = relaunched.stats().sky_tables();
+    assert_eq!(
+        (
+            tables.builds(),
+            tables.files().hits(),
+            tables.files().written()
+        ),
+        (0, 1, 0),
+        "read back, not built: {tables:?}"
+    );
+    assert_eq!(again.replies, cold.replies);
+    assert_eq!(again.body, cold.body, "the JSON, byte for byte");
+    assert!(
+        again.payload == cold.payload,
+        "the payload, byte for byte: {} and {} bytes",
+        again.payload.len(),
+        cold.payload.len()
+    );
+    assert!(
+        again.payload.len() > 1_000,
+        "the stars and the band: {}",
+        again.payload.len()
+    );
+    client.close().await;
+    relaunched.stop().await;
+}
+
 /// How far a camera may move from where a sky was seen before its nearest listed star in `sent`
 /// shifts a tenth of a pixel at 1080p across 60°, m: the bound by which the client holds a sky,
 /// `parallaxShiftPx` (Design note 13), from the star's distance on the wire.
@@ -2733,5 +2807,89 @@ async fn first_answers_after_a_launch_and_a_relaunch() {
         if let [first, relaunched] = &answers[..] {
             assert_eq!(relaunched, first, "the relaunched range answer");
         }
+    }
+}
+
+/// perf-sky-tables-on-disk's table of a sky to its end: on a server of eight workers that serves
+/// the sky to its derived caps and warms the global list at an open, the seconds from a universe's
+/// open to its open's answer, and to the first and the final reply of [`first_answers_after_a_launch_and_a_relaunch`]'s
+/// sky near the Sun, at a first launch over a fresh data directory and again after a relaunch over
+/// it. No sky's final reply is kept, so that the relaunched sky is censused again, as a sky asked
+/// anywhere else would be. A camera's sky near the Sun takes an hour or more of eight workers, so
+/// the client's wait for each frame is [`common::PATIENCE_ENV`]'s, to be set to some hours. Its
+/// figures depend on the machine and the build, so it asserts only that the relaunched sky's final
+/// reply is the first's, its JSON and its payload.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "measurement, run by hand: HYPERION_TEST_PATIENCE_SECS=14400 cargo test --release \
+            -p hyperion-server --test sky final_sky_replies_after_a_launch_and_a_relaunch -- \
+            --ignored --nocapture"]
+async fn final_sky_replies_after_a_launch_and_a_relaunch() {
+    let workers = NonZeroUsize::new(8).expect("eight");
+    eprintln!(
+        "| Launch | Open (s) | First reply after the open (s) | Final reply after the open (s) |"
+    );
+    eprintln!("| --- | --- | --- | --- |");
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = || {
+        TestServer::config(data_dir.path())
+            .workers(workers)
+            .sky_service(SkyService::Served)
+            .global_list_warm_up(hyperion_server::GlobalListWarmUp::AtOpen)
+            .kept_skies(KeptSkies::Off)
+            .build()
+    };
+    let mut universe = None;
+    let mut finals = Vec::new();
+    for launch in ["first", "relaunched"] {
+        let server = TestServer::start_with(config()).await;
+        let mut client = server.connected().await;
+        let id = match &universe {
+            Some(id) => UniverseIdHex::clone(id),
+            None => client.create_universe("Sky: measured", SEED).await.id,
+        };
+        universe = Some(id.clone());
+        let started = std::time::Instant::now();
+        let body = RequestBody::OpenUniverse(OpenUniverseRequest {
+            universe: id.clone(),
+        });
+        match client.request(body).await {
+            Ok(ResponseBody::OpenUniverse(_)) => {}
+            other => panic!("expected the opened universe, got {other:?}"),
+        }
+        let open = started.elapsed();
+        let sky_id = client.send_request(RequestBody::Sky(sky(&id))).await;
+        let (mut first, mut payload) = (None, Vec::new());
+        let (last, body) = loop {
+            match client.next_frame().await {
+                Frame::Binary(_, bytes) => payload.extend(bytes),
+                Frame::Message(ServerMessage::PartialResponse { id: answered, .. })
+                    if answered == sky_id =>
+                {
+                    first.get_or_insert_with(|| started.elapsed());
+                    payload.clear();
+                }
+                Frame::Message(ServerMessage::Response {
+                    id: answered, body, ..
+                }) if answered == sky_id => break (started.elapsed(), body),
+                Frame::Message(other) => panic!("expected the sky's replies, got {other:?}"),
+            }
+        };
+        let first = first.unwrap_or(last);
+        eprintln!(
+            "| {launch} | {:.2} | {:.2} | {:.2} |",
+            open.as_secs_f64(),
+            first.saturating_sub(open).as_secs_f64(),
+            last.saturating_sub(open).as_secs_f64()
+        );
+        finals.push((serde_json::to_string(&body).unwrap(), payload));
+        client.close().await;
+        server.stop().await;
+    }
+    if let [first, relaunched] = &finals[..] {
+        assert_eq!(relaunched.0, first.0, "the relaunched final reply's JSON");
+        assert!(
+            relaunched.1 == first.1,
+            "the relaunched final reply's payload"
+        );
     }
 }

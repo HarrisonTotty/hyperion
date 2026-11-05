@@ -10122,3 +10122,18 @@ CensusCost)`.
   `sky::luminosity::realised_cells`'s (was `tests/sky_luminosity.rs`), on the budget's grid
   (`FieldShareRules::None`, `CarveOutRules::Unclaimed`, `DisplacedRules::FieldOnly`); the tables
   stay on the whole budget.
+- **R06, a galaxy's sky tables on disk (lane `perf-sky-tables-on-disk`, 2026-11-05, at 28; no
+  output moved).**
+  - _Sim._ `words::{WordSink, WordSource}`; `LuminosityTables::{FORMAT, write_words, read_words}`
+    and `FeatureGasIndex::{FORMAT, write_words, read_words(source, galaxy)}`, whose readers give
+    `None` for words their readers would index out of. The tests' `luminosity::file` frames them.
+  - _Server._ `SkyTableFiles` under `<data>/sky-tables/`, keyed as the kept skies' are, plus the
+    tables' source and gas and both formats; `SkyTablesService::{with_files, close_files}`;
+    `SkyTablesCounters::files() -> SkyTableFileCounters` (exported);
+    `ServerConfig{,Builder}::kept_sky_tables_disk_bytes` (160 MiB, no option);
+    `limits::SKY_TABLE_FILE_QUEUE` (4). Only `SkyTablesSource::Galaxy` tables are kept (lean,
+    2026-11-05). A read counts no build: a test that waits on `builds() > 0` after a relaunch waits
+    on `files().hits()`.
+  - _Left._ A cold build's plan job (5.1 s on one worker) leads it; after the tables, a relaunched
+    first reply waits on the census plan (2.0 s), its first step's march (2.2 s) and the band
+    (4.9 s).

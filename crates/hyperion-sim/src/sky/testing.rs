@@ -39,7 +39,7 @@ pub(crate) fn milky_way_tables_shared() -> &'static (LuminosityTables, shared::S
             MILKY_WAY_TABLES_FILE,
             || LuminosityTables::build(milky_way_galaxy()),
             luminosity::file::encode,
-            luminosity::file::decode,
+            |bytes| luminosity::file::decode(bytes, milky_way_galaxy()),
         )
     })
 }

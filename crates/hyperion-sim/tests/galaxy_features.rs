@@ -35,6 +35,7 @@ use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::{Composition, lifetime};
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{LightYears, SolarMasses, Years};
+use hyperion_sim::words::{WordSink, WordSource};
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden;
@@ -649,6 +650,89 @@ fn gas_index_finds_what_the_cells_find() {
         indexed.modifiers_near_segment(a, b, &mut out);
         out
     });
+}
+
+/// A table's words as little-endian bytes, as a store outside the sim keeps them, read back from the
+/// first.
+#[derive(Debug, Default)]
+struct Bytes {
+    bytes: Vec<u8>,
+    at: usize,
+}
+
+impl Bytes {
+    /// The bytes written, cut to the first `len`, to be read again from the first.
+    fn cut(&self, len: usize) -> Self {
+        Self {
+            bytes: self.bytes[..len].to_vec(),
+            at: 0,
+        }
+    }
+}
+
+impl WordSink for Bytes {
+    fn word(&mut self, word: u64) {
+        self.bytes.extend(word.to_le_bytes());
+    }
+
+    fn float(&mut self, value: f64) {
+        WordSink::word(self, hyperion_testkit::float::bits(value));
+    }
+}
+
+impl WordSource for Bytes {
+    fn word(&mut self) -> Option<u64> {
+        let word = self.bytes.get(self.at..self.at + 8)?;
+        self.at += 8;
+        Some(u64::from_le_bytes(word.try_into().ok()?))
+    }
+
+    fn float(&mut self) -> Option<f64> {
+        WordSource::word(self).map(f64::from_bits)
+    }
+
+    fn words_left(&self) -> usize {
+        (self.bytes.len() - self.at) / 8
+    }
+}
+
+/// The features' gas index reads back from its words as it was assembled, bit for bit, every
+/// nursery and cloud and the field at each one's centre, its spheres and bins made again, owning
+/// the heap the assembled one does, finding the same gas; and its words read as none for another
+/// galaxy or cut short (perf-sky-tables-on-disk).
+#[test]
+fn the_gas_index_reads_back_from_its_words_bit_for_bit() {
+    let galaxy = milky_way();
+    let index = FeatureGasIndex::build(&galaxy, &NoFeatureCache);
+    let mut written = Bytes::default();
+    index.write_words(&mut written);
+    let len = written.bytes.len();
+    let mut words = written.cut(len);
+    let back = FeatureGasIndex::read_words(&mut words, &galaxy).expect("the words written");
+    assert_eq!(words.words_left(), 0);
+    assert_eq!(back.heap_bytes(), index.heap_bytes());
+    // Some 2 × 10⁵ features and 50 MB, compared whole rather than printed.
+    assert!(back == index, "the index read back differs");
+    let mut again = Bytes::default();
+    back.write_words(&mut again);
+    assert!(again.bytes == written.bytes, "its words differ");
+    let gas = |index| {
+        let mut found = Vec::new();
+        FeatureGas::indexed(&galaxy, index, Years::ZERO).modifiers_near_segment(
+            &GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).unwrap(),
+            &GalacticPosition::from_light_years([0.0, -60_000.0, 0.0]).unwrap(),
+            &mut found,
+        );
+        found
+    };
+    let found = gas(&back);
+    assert_ne!(found.len(), 0, "the gas along the ray");
+    assert_eq!(found, gas(&index));
+
+    let other = Galaxy::from_params(Seed::new(SEED + 1), GalaxyParams::milky_way_like())
+        .expect("another Milky Way");
+    assert!(FeatureGasIndex::read_words(&mut written.cut(len), &other).is_none());
+    assert!(FeatureGasIndex::read_words(&mut written.cut(len - 8), &galaxy).is_none());
 }
 
 /// The features' gas about the Sun-like point, bit for bit, its superbubbles merged and walled

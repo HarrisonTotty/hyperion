@@ -43,11 +43,11 @@ use axum::{Router, routing::get};
 
 use crate::compute::{
     BulkGate, CpuPool, DensityMapService, ENVELOPE_FILES_DIR, EnvelopeFiles, ExtinctionMapService,
-    GalaxyCache, GalaxyFeaturesService, GlobalListService, SharedBodyCache, SharedBriefCache,
-    SharedCellCache, SharedCentreOrbitCache, SharedClassCellCache, SharedClusterModelCache,
-    SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSprayForces,
-    SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
-    TubeTableCache,
+    GalaxyCache, GalaxyFeaturesService, GlobalListService, SKY_TABLE_FILES_DIR, SharedBodyCache,
+    SharedBriefCache, SharedCellCache, SharedCentreOrbitCache, SharedClassCellCache,
+    SharedClusterModelCache, SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache,
+    SharedSprayForces, SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTableFiles,
+    SkyTablesService, SkyTablesSource, StartPoolError, TubeTableCache,
 };
 use crate::connections::Connections;
 use crate::limits::{
@@ -354,8 +354,8 @@ impl Server {
     /// [`CLOSE_TIMEOUT`](limits::CLOSE_TIMEOUT) to finish closing, so a client that has stopped
     /// reading cannot hold this up. The sky tables' builds and the global lists' warm-ups that
     /// opens started, and the coarse passes that prefetches started, are given up, and the kept
-    /// skies' files still queued are written. Then the CPU pool stops: queued jobs are dropped and
-    /// the workers finish the jobs in hand.
+    /// skies', the envelopes' and the sky tables' files still queued are written. Then the CPU pool
+    /// stops: queued jobs are dropped and the workers finish the jobs in hand.
     ///
     /// # Errors
     ///
@@ -369,9 +369,10 @@ impl Server {
         // Nor do the global lists' warm-ups started at opens.
         self.state.global_lists.stop_warming();
         // The kept skies' files queued are written before the process can end, and the streams'
-        // envelopes'.
+        // envelopes' and the sky tables'.
         self.state.sky_files.close().await;
         self.state.tube_tables.close_envelope_files().await;
+        self.state.sky_tables.close_files().await;
         self.state
             .pool
             .shutdown()
@@ -523,6 +524,7 @@ fn log_start(config: &ServerConfig) {
         kept_skies = ?config.kept_skies(),
         kept_skies_disk_mib = config.kept_skies_disk_bytes() / (1 << 20),
         kept_envelopes_disk_mib = config.kept_envelopes_disk_bytes() / (1 << 20),
+        kept_sky_tables_disk_mib = config.kept_sky_tables_disk_bytes() / (1 << 20),
         held_skies = ?config.held_skies(),
         sky_qos = ?config.sky_qos(),
         extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
@@ -587,13 +589,25 @@ fn system_caches(
 /// galaxy's features' gas index, which every ray and star sightline of their skies marches beside
 /// the smooth field, where the feature members are served (P09.T40.a's gate), and one whose skies
 /// march the smooth field alone where they are held.
+///
+/// Where the sky is served from the galaxy's own tables, it keeps them on disk under the data
+/// directory, in their own budget (perf-sky-tables-on-disk). A test's tables that hold no star,
+/// built at once, are not kept; nor is anything, and no thread is started for them, where the sky
+/// is not served.
 #[must_use]
 fn sky_tables_service(config: &ServerConfig, pool: Arc<CpuPool>) -> SkyTablesService {
-    let service =
-        SkyTablesService::new(pool, config.sky_caps().tables(), config.sky_tables_bytes());
-    match config.feature_members() {
+    let source = config.sky_caps().tables();
+    let service = SkyTablesService::new(pool, source, config.sky_tables_bytes());
+    let service = match config.feature_members() {
         FeatureMembers::Served => service.with_features(),
         FeatureMembers::Held => service,
+    };
+    match (config.sky_service(), source) {
+        (SkyService::Served, SkyTablesSource::Galaxy) => service.with_files(SkyTableFiles::new(
+            config.data_dir().join(SKY_TABLE_FILES_DIR),
+            u64::try_from(config.kept_sky_tables_disk_bytes()).unwrap_or(u64::MAX),
+        )),
+        (SkyService::Served, SkyTablesSource::Dark) | (SkyService::Unsupported, _) => service,
     }
 }
 
@@ -713,6 +727,40 @@ mod tests {
         let _router = server.router();
         server.shutdown().await.unwrap();
         assert!(!data_dir.exists());
+    }
+
+    /// Only a server that serves the sky from its galaxy's own tables keeps them on disk, in their
+    /// budget: one whose tables are a test's that hold no star, or that serves no sky, has no files
+    /// for them and starts no thread (perf-sky-tables-on-disk).
+    #[tokio::test]
+    async fn only_the_galaxy_s_own_sky_tables_are_kept_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let forced = SkyCaps::forced(hyperion_sim::units::LightYears::new(10.0)).unwrap();
+        for (service, caps, budget) in [
+            (
+                SkyService::Served,
+                SkyCaps::DERIVED,
+                config::DEFAULT_KEPT_SKY_TABLES_DISK_MIB << 20,
+            ),
+            (SkyService::Served, forced, 0),
+            (SkyService::Unsupported, SkyCaps::DERIVED, 0),
+        ] {
+            let config = ServerConfig::builder()
+                .data_dir(dir.path())
+                .sky_service(service)
+                .sky_caps(caps)
+                .build();
+            let pool = Arc::new(start_pool(NonZeroUsize::MIN, None).unwrap());
+            let tables = sky_tables_service(&config, Arc::clone(&pool));
+            assert_eq!(
+                tables.counters().files().budget(),
+                u64::try_from(budget).unwrap(),
+                "{service:?}, {caps:?}"
+            );
+            tables.close_files().await;
+            pool.shutdown().await.unwrap();
+        }
+        assert!(!dir.path().join(SKY_TABLE_FILES_DIR).exists());
     }
 
     /// Asserts that every cache of `fresh` holds nothing and has done nothing yet, its budget the

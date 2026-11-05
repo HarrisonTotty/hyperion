@@ -90,6 +90,8 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 
+use crate::words::{WordSink, WordSource};
+
 /// The directory, in a profile directory, that holds the shared copies of every run.
 const ROOT: &str = "sky-fixtures";
 
@@ -470,7 +472,18 @@ impl WordWriter {
         writer
     }
 
-    pub(crate) fn word(&mut self, word: u64) {
+    /// The file's bytes: what was written, then its checksum.
+    #[must_use]
+    pub(crate) fn finish(mut self) -> Vec<u8> {
+        let mut checksum = Fingerprint::new();
+        checksum.update(&self.bytes);
+        self.word(checksum.finish());
+        self.bytes
+    }
+}
+
+impl WordSink for WordWriter {
+    fn word(&mut self, word: u64) {
         self.bytes.extend_from_slice(&word.to_le_bytes());
     }
 
@@ -479,41 +492,8 @@ impl WordWriter {
     /// # Panics
     ///
     /// If `value` is a NaN, whose bits are unspecified ([`hyperion_testkit::float::bits`]).
-    pub(crate) fn float(&mut self, value: f64) {
+    fn float(&mut self, value: f64) {
         self.word(hyperion_testkit::float::bits(value));
-    }
-
-    /// A length or an index.
-    pub(crate) fn count(&mut self, n: usize) {
-        self.word(u64::try_from(n).expect("a length fits 64 bits on every target"));
-    }
-
-    /// A list's length and capacity, which [`WordReader::list`] reads back and allocates it at, so
-    /// that a decoded fixture owns the heap the encoded one did.
-    pub(crate) fn lengths(&mut self, len: usize, capacity: usize) {
-        self.count(len);
-        self.count(capacity);
-    }
-
-    /// `values`' length and capacity ([`lengths`](Self::lengths)), then each value's bits.
-    ///
-    /// # Panics
-    ///
-    /// If a value is a NaN, whose bits are unspecified ([`hyperion_testkit::float::bits`]).
-    pub(crate) fn floats(&mut self, values: &Vec<f64>) {
-        self.lengths(values.len(), values.capacity());
-        for &value in values {
-            self.float(value);
-        }
-    }
-
-    /// The file's bytes: what was written, then its checksum.
-    #[must_use]
-    pub(crate) fn finish(mut self) -> Vec<u8> {
-        let mut checksum = Fingerprint::new();
-        checksum.update(&self.bytes);
-        self.word(checksum.finish());
-        self.bytes
     }
 }
 
@@ -542,54 +522,27 @@ impl<'a> WordReader<'a> {
         (reader.word()? == MAGIC && reader.word()? == FORMAT_VERSION).then_some(reader)
     }
 
-    pub(crate) fn word(&mut self) -> Option<u64> {
+    /// `Some` if the payload has been read to its end, and nothing is left over.
+    #[must_use]
+    pub(crate) fn end(self) -> Option<()> {
+        self.rest.is_empty().then_some(())
+    }
+}
+
+impl WordSource for WordReader<'_> {
+    fn word(&mut self) -> Option<u64> {
         let (word, rest) = self.rest.split_first_chunk::<8>()?;
         self.rest = rest;
         Some(u64::from_le_bytes(*word))
     }
 
     /// A value of the bits written.
-    pub(crate) fn float(&mut self) -> Option<f64> {
+    fn float(&mut self) -> Option<f64> {
         self.word().map(f64::from_bits)
     }
 
-    /// A length or an index.
-    pub(crate) fn count(&mut self) -> Option<usize> {
-        usize::try_from(self.word()?).ok()
-    }
-
-    /// A list's length and capacity ([`WordWriter::lengths`]), then that many items, each read by
-    /// `item`, which reads at least one word; allocated at the capacity written. Before anything
-    /// is allocated, the length is checked against the words left, and the capacity against
-    /// twice the length and some: a vector grown by doubling holds no more. A list that fails
-    /// either check reads as none, so its fixture is built instead.
-    pub(crate) fn list<T>(
-        &mut self,
-        mut item: impl FnMut(&mut Self) -> Option<T>,
-    ) -> Option<Vec<T>> {
-        let (len, capacity) = (self.count()?, self.count()?);
-        if len > self.rest.len() / 8
-            || capacity < len
-            || capacity > len.saturating_mul(2).saturating_add(64)
-        {
-            return None;
-        }
-        let mut items = Vec::with_capacity(capacity);
-        for _ in 0..len {
-            items.push(item(self)?);
-        }
-        Some(items)
-    }
-
-    /// A length and capacity, then that many values ([`list`](Self::list)).
-    pub(crate) fn floats(&mut self) -> Option<Vec<f64>> {
-        self.list(Self::float)
-    }
-
-    /// `Some` if the payload has been read to its end, and nothing is left over.
-    #[must_use]
-    pub(crate) fn end(self) -> Option<()> {
-        self.rest.is_empty().then_some(())
+    fn words_left(&self) -> usize {
+        self.rest.len() / 8
     }
 }
 

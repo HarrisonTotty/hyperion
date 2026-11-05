@@ -40,6 +40,7 @@ use crate::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use crate::id::FeatureCell;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{HydrogenPerCm3, KelvinPerCm3, LightYears, Years};
+use crate::words::{WordSink, WordSource};
 
 use super::catalogue::{
     EDGE, FeatureCatalogue, FeatureCellCache, FeatureMarks, FeatureRecord, MAX_FEATURE_REACH,
@@ -213,6 +214,32 @@ impl CentreGas {
             dust_per_hydrogen: gas.dust_per_hydrogen(centre),
             pressure: gas.pressure(centre),
         }
+    }
+
+    /// Writes the field's every bit into `sink`: the mean density, the dust per hydrogen and the
+    /// pressure.
+    fn write_words(&self, sink: &mut impl WordSink) {
+        let Self {
+            mean_density,
+            dust_per_hydrogen,
+            pressure,
+        } = self;
+        sink.float(mean_density.value());
+        sink.float(*dust_per_hydrogen);
+        sink.float(pressure.value());
+    }
+
+    /// The field [`write_words`](Self::write_words) wrote into `source`.
+    #[must_use]
+    fn read_words(source: &mut impl WordSource) -> Option<Self> {
+        let mean_density = HydrogenPerCm3::new(source.float()?);
+        let dust_per_hydrogen = source.float()?;
+        let pressure = KelvinPerCm3::new(source.float()?);
+        Some(Self {
+            mean_density,
+            dust_per_hydrogen,
+            pressure,
+        })
     }
 
     /// The dust per hydrogen nucleus of the gas a bubble here sweeps up into its wall, where the
@@ -444,15 +471,23 @@ impl FeatureGasIndex {
             centre_gas.extend(slab.centre_gas);
         }
         assert_eq!(xs.next(), None, "a features' gas index takes every slab");
-        let farthest = MAX_FEATURE_REACH.value() - REACH_MARGIN_LY;
         assert!(
-            features
-                .iter()
-                .all(|feature| feature.reach().value() < farthest),
+            features.iter().all(within_the_margin),
             "a nursery or cloud reaches within {REACH_MARGIN_LY} ly of the catalogue's farthest"
         );
         features.shrink_to_fit();
         centre_gas.shrink_to_fit();
+        Self::binned(galaxy.seed(), features, centre_gas)
+    }
+
+    /// The index of the galaxy of `seed` over its `features` and the field at each one's centre,
+    /// `centre_gas`: their spheres and bins made.
+    ///
+    /// # Panics
+    ///
+    /// If there are more than `u32::MAX` features, or the bins hold more than `u32::MAX` entries.
+    #[must_use]
+    fn binned(seed: Seed, features: Vec<FeatureRecord>, centre_gas: Vec<CentreGas>) -> Self {
         let spheres = features
             .iter()
             .map(|feature| {
@@ -483,13 +518,69 @@ impl FeatureGasIndex {
             });
         }
         Self {
-            seed: galaxy.seed(),
+            seed,
             features,
             centre_gas,
             spheres,
             starts,
             entries,
         }
+    }
+
+    /// What the index's words mean ([`write_words`](Self::write_words)), for a caller that keys
+    /// what it stores by it, as the server keeps a galaxy's sky tables on disk across its restarts
+    /// (perf-sky-tables-on-disk): 1.
+    ///
+    /// It is raised whenever the words written change: a field added to a feature, its marks or
+    /// the field at its centre, or a list laid out otherwise. The index's features move only with
+    /// the generator version, which such a caller keys by too.
+    pub const FORMAT: u32 = 1;
+
+    /// Writes the index's every bit into `sink`, for a caller that keeps it beyond its process:
+    /// what [`read_words`](Self::read_words) reads back.
+    ///
+    /// The words: the galaxy's seed; the
+    /// features' count and capacity, then each feature's
+    /// ([`FeatureRecord`]'s kind, ID, centre, component, reach and marks); then the field at each
+    /// one's centre, its count and capacity first, then each one's mean density, dust per
+    /// hydrogen and pressure. The spheres and the bins are made again from them on reading, as
+    /// [`assemble`](Self::assemble) makes them.
+    pub fn write_words(&self, sink: &mut impl WordSink) {
+        let Self {
+            seed,
+            features,
+            centre_gas,
+            spheres: _,
+            starts: _,
+            entries: _,
+        } = self;
+        sink.word(seed.get());
+        sink.lengths(features.len(), features.capacity());
+        for feature in features {
+            feature.write_gas_words(sink);
+        }
+        sink.lengths(centre_gas.len(), centre_gas.capacity());
+        for gas in centre_gas {
+            gas.write_words(sink);
+        }
+    }
+
+    /// The index of `galaxy` that `source` holds as [`write_words`](Self::write_words) wrote it,
+    /// [`assemble`](Self::assemble)'s bit for bit, or `None` for words that are not one.
+    ///
+    /// Words too few, another galaxy's, a feature that is no nursery or cloud, whose component is
+    /// none of `galaxy`'s or that reaches where `assemble` refuses it, or a field for each feature
+    /// too few or too many, read as `None`. It reads no more than the index's words, so a caller checks that nothing is left
+    /// over ([`WordSource::words_left`]).
+    #[must_use]
+    pub fn read_words(source: &mut impl WordSource, galaxy: &Galaxy) -> Option<Self> {
+        if source.word()? != galaxy.seed().get() {
+            return None;
+        }
+        let features = source.list(|source| FeatureRecord::read_gas_words(source, galaxy))?;
+        let centre_gas = source.list(CentreGas::read_words)?;
+        (centre_gas.len() == features.len() && features.iter().all(within_the_margin))
+            .then(|| Self::binned(galaxy.seed(), features, centre_gas))
     }
 
     /// The galaxy's nurseries and clouds, in the order [`FeatureCatalogue::near`] gives them.
@@ -550,6 +641,13 @@ impl FeatureGasIndex {
         });
         found.sort_unstable();
     }
+}
+
+/// Whether `feature` stops [`REACH_MARGIN_LY`] short of [`MAX_FEATURE_REACH`], as every feature an
+/// index holds does (module documentation).
+#[must_use]
+fn within_the_margin(feature: &FeatureRecord) -> bool {
+    feature.reach().value() < MAX_FEATURE_REACH.value() - REACH_MARGIN_LY
 }
 
 /// Whether `process`'s features carry gas: the nurseries and the clouds.

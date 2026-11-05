@@ -59,6 +59,11 @@
 //! - [`sky`]: the naked eye's threshold and glare; later the census of the stars an observer
 //!   sees, the unresolved band and the host stars' discs.
 //!
+//! And for a caller that keeps a built table beyond its process:
+//!
+//! - [`words`]: a table's words, written to the caller's sink and read back from its source, for
+//!   the server's sky tables on disk.
+//!
 //! [`math`], [`units`], [`version`] and the mechanism of [`rng`] live in `hyperion-base`, beneath
 //! this crate, and are re-exported here at their old paths. This crate's runtime dependencies are
 //! that crate and `hyperion-surface` (whose domain-tag registry the sim's own is checked disjoint
@@ -79,6 +84,7 @@ pub mod stellar;
 pub mod substance;
 pub mod tables;
 pub mod time;
+pub mod words;
 
 pub use hyperion_base::{GENERATOR_VERSION, GeneratorVersion, math, units, version};
 pub use rng::Seed;

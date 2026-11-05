@@ -42,6 +42,12 @@
 //! is given tables that hold no star, built in one job at once, unless its caps ask for the
 //! galaxy's own ([`SkyCaps::with_galaxy_tables`](super::SkyCaps::with_galaxy_tables)). The service
 //! is made with the one source its server's caps name, so its cache holds one kind of tables.
+//!
+//! A service with files ([`SkyTablesService::with_files`]; perf-sky-tables-on-disk) looks for a
+//! galaxy's tables in them inside the flight, before it builds, and writes what it builds there,
+//! so that a server started again over its data directory reads its galaxies' tables back rather
+//! than building them: the server's, where its tables are the galaxy's own. Tables read so count
+//! no build.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -59,7 +65,10 @@ use hyperion_sim::sky::luminosity::{
 use tokio::task::JoinSet;
 
 use super::sky::{BulkJobs, SkyTables, SkyTablesSource, bulk};
-use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SingleFlight};
+use super::{
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SingleFlight,
+    SkyTableFileCounters, SkyTableFiles,
+};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
 impl HeapBytes for SkyTables {
@@ -69,11 +78,13 @@ impl HeapBytes for SkyTables {
     }
 }
 
-/// The sky tables' counters: the cache's size and use, and the builds that filled it.
+/// The sky tables' counters: the cache's size and use, the builds that filled it, and the files
+/// they are kept in on disk.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct SkyTablesCounters {
     cache: LruCounters,
     builds: u64,
+    files: SkyTableFileCounters,
 }
 
 impl SkyTablesCounters {
@@ -94,6 +105,14 @@ impl SkyTablesCounters {
     pub fn builds(&self) -> u64 {
         self.builds
     }
+
+    /// The files the tables are kept in under the data directory, and their use: a hit is a
+    /// galaxy's tables read back rather than built (perf-sky-tables-on-disk). All zeros where the
+    /// server keeps none: the sky not served, or its tables a test's that hold no star.
+    #[must_use]
+    pub fn files(&self) -> SkyTableFileCounters {
+        self.files
+    }
 }
 
 /// The sky tables of every galaxy the server holds, in one byte budget, each built once on the
@@ -112,11 +131,14 @@ pub(crate) struct SkyTablesService {
     /// Whether every table this service builds carries its galaxy's features' gas index, which
     /// its jobs march (P09.T40.a), or lends them the smooth field alone.
     features: TablesGas,
+    /// Where the tables are looked for before they are built, and written once they are: none
+    /// unless [`with_files`](Self::with_files).
+    files: Arc<SkyTableFiles>,
 }
 
 /// The gas a service's tables lend their jobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TablesGas {
+pub(crate) enum TablesGas {
     /// The smooth field alone.
     Smooth,
     /// Plan 09's features' too, from the galaxy's [`FeatureGasIndex`].
@@ -139,6 +161,7 @@ impl SkyTablesService {
             builds: Arc::new(AtomicU64::new(0)),
             prefetching: Mutex::new(JoinSet::new()),
             features: TablesGas::Smooth,
+            files: Arc::new(SkyTableFiles::off()),
         }
     }
 
@@ -149,6 +172,16 @@ impl SkyTablesService {
     pub(crate) fn with_features(self) -> Self {
         Self {
             features: TablesGas::Indexed,
+            ..self
+        }
+    }
+
+    /// This service, which looks for its tables in `files` before it builds them and writes those
+    /// it builds there (perf-sky-tables-on-disk): the server's, under its data directory.
+    #[must_use]
+    pub(crate) fn with_files(self, files: SkyTableFiles) -> Self {
+        Self {
+            files: Arc::new(files),
             ..self
         }
     }
@@ -243,16 +276,25 @@ impl SkyTablesService {
             .abort_all();
     }
 
+    /// Writes the tables queued for the service's files, then closes them: for the server's
+    /// shutdown, after [`stop_prefetching`](Self::stop_prefetching). Tables built after it are not
+    /// written, and none is looked for.
+    pub(crate) async fn close_files(&self) {
+        self.files.close().await;
+    }
+
     /// The build of `galaxy`'s tables under `key`, joined if one is in progress: it looks for them
-    /// once more inside the flight, then builds them from the service's source and keeps them.
+    /// once more inside the flight, then in the service's files, then builds them from the
+    /// service's source, keeps them and writes them to the files.
     fn flight(&self, key: GalaxyKey, galaxy: &Arc<Galaxy>) -> Flight<SkyTables, ComputeError> {
         let source = self.source;
-        let (pool, held, builds, galaxy, features) = (
+        let (pool, held, builds, galaxy, features, files) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.held),
             Arc::clone(&self.builds),
             Arc::clone(galaxy),
             self.features,
+            Arc::clone(&self.files),
         );
         self.flights.run(key, move || async move {
             // As in `GalaxyCache::get`: a caller can arrive just after another flight has
@@ -266,6 +308,28 @@ impl SkyTablesService {
             // Cancels the build's queued jobs once every waiter on this flight has gone.
             let _cancel_on_drop = CancelOnDrop::new(token.clone());
             let started = Instant::now();
+            let kind = (source, features);
+            if let Some(file) = files.get(key, kind).await {
+                // Made whole on the pool, whose workers alone are probed for a floating-point
+                // mode that flushes subnormals.
+                let galaxy = Arc::clone(&galaxy);
+                let read = bulk(&pool, &token, move |_: &CancelToken| file.tables(&galaxy)).await?;
+                match read {
+                    Some(tables) => {
+                        let tables = Arc::new(tables);
+                        tracing::info!(
+                            seed = %SeedHex::from_u64(key.seed()),
+                            generator_version = %key.generator_version(),
+                            read_ms = started.elapsed().as_secs_f64() * 1e3,
+                            heap_mib = SkyTables::heap_bytes(&tables) / (1 << 20),
+                            "read a galaxy's sky tables from their file"
+                        );
+                        drop(held.insert(key, Arc::clone(&tables)));
+                        return Ok(tables);
+                    }
+                    None => files.remove_bad(key, kind),
+                }
+            }
             // The index's slabs are queued first, so that the tables' stages find the workers
             // they leave.
             let slabs = match features {
@@ -306,6 +370,7 @@ impl SkyTablesService {
             // Tables larger than the whole budget are handed back and not stored; the waiters
             // get them either way.
             drop(held.insert(key, Arc::clone(&tables)));
+            files.keep(key, kind, &tables);
             Ok(tables)
         })
     }
@@ -317,6 +382,7 @@ impl SkyTablesService {
         SkyTablesCounters {
             cache: self.held.counters(),
             builds: self.builds.load(Ordering::Relaxed),
+            files: self.files.counters(),
         }
     }
 }
@@ -736,6 +802,91 @@ mod tests {
         let (_, galaxy) = galaxy();
         let other = GalaxyKey::new(SEED + 1, GENERATOR_VERSION);
         drop(service.get(other, &galaxy).await);
+    }
+
+    /// A service with files writes the tables it builds there, and a service started again over
+    /// them, as a restarted server's, reads them back at an open, made whole in one job, and builds
+    /// none: the same tables, bit for bit, counted a file's hit (perf-sky-tables-on-disk).
+    #[tokio::test]
+    async fn a_service_started_again_reads_the_tables_it_built_from_its_files() {
+        use crate::compute::SKY_TABLE_FILES_DIR;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let (key, galaxy) = galaxy();
+        let with_files = |pool: &Arc<CpuPool>| {
+            SkyTablesService::new(Arc::clone(pool), SkyTablesSource::Dark, 64 << 20).with_files(
+                SkyTableFiles::new(dir.path().join(SKY_TABLE_FILES_DIR), 1 << 30),
+            )
+        };
+        let pool = one_worker();
+        let service = with_files(&pool);
+        let built = timeout(WAIT, service.get(key, &galaxy))
+            .await
+            .unwrap()
+            .unwrap();
+        until("the tables are written", || {
+            service.counters().files().written() == 1
+        })
+        .await;
+        timeout(WAIT, service.close_files()).await.unwrap();
+        let counters = service.counters();
+        assert_eq!(
+            (counters.builds(), counters.files().misses()),
+            (1, 1),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+
+        let pool = one_worker();
+        let restarted = with_files(&pool);
+        assert!(restarted.prefetch(key, &galaxy), "an open starts the read");
+        until("the tables are read", || {
+            restarted.counters().cache().entries() == 1
+        })
+        .await;
+        let read = timeout(WAIT, restarted.get(key, &galaxy))
+            .await
+            .unwrap()
+            .unwrap();
+        let counters = restarted.counters();
+        assert_eq!(
+            (
+                counters.builds(),
+                counters.files().hits(),
+                counters.cache().hits()
+            ),
+            (0, 1, 1),
+            "{counters:?}"
+        );
+        assert_eq!(
+            pool.counters().completed(),
+            1,
+            "the read's one job: {:?}",
+            pool.counters()
+        );
+        let words = |tables: &SkyTables| {
+            let mut words = Vec::new();
+            tables.luminosity().write_words(&mut Words(&mut words));
+            words
+        };
+        // Some 9 × 10⁶ words, compared whole rather than printed.
+        assert!(words(&read) == words(&built), "the tables read back differ");
+        assert_eq!(read.heap_bytes(), built.heap_bytes());
+        timeout(WAIT, restarted.close_files()).await.unwrap();
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// The tables' words, each float by its bits.
+    struct Words<'a>(&'a mut Vec<u64>);
+
+    impl hyperion_sim::words::WordSink for Words<'_> {
+        fn word(&mut self, word: u64) {
+            self.0.push(word);
+        }
+
+        fn float(&mut self, value: f64) {
+            self.0.push(value.to_bits());
+        }
     }
 
     /// A service with the features' gas builds tables with their galaxy's index on the pool, whose
