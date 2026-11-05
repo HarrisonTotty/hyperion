@@ -3,21 +3,26 @@
  * routing): a `thickScattering` world routed within the range its passing gates cover, a Titan-class
  * haze's opened by `titan-class`'s gate alone, its verdict passing with its named exceptions, a
  * `cloudDeck` world by its floor's range, a deck over a surface's opened by the Venus-class cases'
- * gates and a gas envelope's by `giant-deck`'s envelope variant alone once its recorded verdict
- * passes (R08.T16.a.2), and the polarisation correction asked of every world with air once routed.
+ * gates and a gas envelope's by `giant-deck`'s envelope variant once its recorded verdict passes,
+ * widened to the cool giants' on the `envelope` giant route once `jupiter-envelope`'s passes with its
+ * named exceptions (R08.T16.a.2), and the polarisation correction asked of every world with air once
+ * routed.
  */
+import { decodeServerMessage, type ResponseFor, type SystemIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { venusClassMedium } from "../../../test/atmosphereFixtures";
-import { detailOf, recordInput } from "../../../test/atmosphereRecords";
+import { type DetailAnswer, detailOf, recordInput } from "../../../test/atmosphereRecords";
 import {
   handIceGiantDetail,
   handJupiterDetail,
   handSaturnDetail,
 } from "../../../test/giantFixtures";
-import { jupiterDetail } from "../../../test/planetaryFixture";
+import { jupiterEnvelopeCase } from "../../../test/jupiterEnvelopeCase";
+import { hotJupiterDetail, jupiterDetail } from "../../../test/planetaryFixture";
 import { assembleMedium } from "../assemble";
 import { R05_EARTH_REFERENCE } from "../earth";
+import servedGiants from "../fixtures/served-giants.json" with { type: "json" };
 import * as cases from "../reference/cases";
 import {
   giantDeckReferenceCase,
@@ -40,7 +45,14 @@ import {
 import {
   ABOVE_DECK_GATE_TALLIES,
   bakedAsHaze,
+  channelWithinRouteRange,
+  CHROMOPHORE_GATE_EXCEPTIONS,
+  CHROMOPHORE_GATE_MISSES,
   CHROMOPHORE_GATE_TALLIES,
+  chromophoreGatePasses,
+  COOL_GIANT_DECK_ROUTE_RANGE,
+  COOL_GIANT_ROUTE_RANGE,
+  coolGiantRouteRangeOf,
   CORRECTION_ROUTED,
   correctionRouted,
   DECK_LOWEST_SUN_SINE,
@@ -53,6 +65,8 @@ import {
   ENVELOPE_ROUTE_RANGE,
   type GateImageTally,
   type GateMiss,
+  GIANT_ROUTE,
+  giantDeckRouteRange,
   HAZE_GATE_EXCEPTIONS,
   HAZE_GATE_MISSES,
   HAZE_GATE_TALLIES,
@@ -81,9 +95,15 @@ const REGIMES: ReadonlyArray<AtmosphereRegime> = [
 /** One channel as the router reads it. */
 type Channel = ReturnType<typeof regimeChannels>[number];
 
+/** What a range bounds of a channel. */
+type ChannelReading = Pick<
+  Channel,
+  "opticalDepth" | "singleScatteringAlbedo" | "asymmetry" | "groundAlbedo"
+>;
+
 /** Each bound of a {@link ThickRouteRange}, its side, and what it bounds of a channel. */
 const BOUNDS: ReadonlyArray<
-  readonly [keyof ThickRouteRange, "most" | "least", (c: Channel) => number]
+  readonly [keyof ThickRouteRange, "most" | "least", (c: ChannelReading) => number]
 > = [
   ["mostOpticalDepth", "most", (c) => c.opticalDepth],
   ["leastSingleScatteringAlbedo", "least", (c) => c.singleScatteringAlbedo],
@@ -515,7 +535,7 @@ describe("the absorbing envelope's gate (R08.T16.a.2)", () => {
     );
   });
 
-  it("leaves the envelope's range giant-deck's alone, jupiter-envelope's gate not passing", () => {
+  it("leaves the closed route's envelope range giant-deck's alone, jupiter-envelope's gate not passing without its named exceptions", () => {
     expect([deckGatePasses(CHROMOPHORE_GATE_TALLIES), DECK_ROUTE_RANGE?.envelope]).toEqual([
       false,
       ENVELOPE_ROUTE_RANGE,
@@ -573,6 +593,267 @@ describe("the absorbing envelope's gate (R08.T16.a.2)", () => {
     },
     180_000,
   );
+});
+
+/** Whether a value on file is a giant's channels, [τ, ω̄, ḡ] a channel. */
+function isChannels(value: unknown): value is ReadonlyArray<ReadonlyArray<number>> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (channel) => Array.isArray(channel) && channel.every((figure) => typeof figure === "number"),
+    )
+  );
+}
+
+/** The `Dev Fixture`'s giants on file (`fixtures/served-giants.json`), as the router reads them. */
+const SERVED = servedGiants.giants.map(([id, selfLuminous, channels]) => {
+  if (!isChannels(channels)) {
+    throw new Error(`the served giant ${String(id)}'s channels are on file as [tau, omega, g]`);
+  }
+  return {
+    id: String(id),
+    selfLuminous: selfLuminous === true,
+    channels: channels.map(([tau, omega, g]) => ({
+      opticalDepth: tau ?? Number.NaN,
+      singleScatteringAlbedo: omega ?? Number.NaN,
+      asymmetry: g ?? Number.NaN,
+      groundAlbedo: 0,
+    })),
+  };
+});
+
+/**
+ * The served giants on file the envelope route routes, as `giantDeckRouteRange` reads each one's
+ * regime: neither self-luminous nor out of its range.
+ */
+const SERVED_COOL = SERVED.filter((each) => {
+  const range = giantDeckRouteRange(
+    { kind: "cloudDeck", deckAltitudeM: 1, ...(each.selfLuminous ? { selfLuminous: true } : {}) },
+    "envelope",
+  )?.envelope;
+  return (
+    range !== null &&
+    range !== undefined &&
+    each.channels.every((c) => channelWithinRouteRange(c, range))
+  );
+});
+
+/** The served cool giant on file, `41ffecb1ffc00013.0400`, as its frame decodes. */
+function servedCoolGiant(): ResponseFor<"body_detail"> {
+  const message = decodeServerMessage(JSON.stringify(servedGiants.frame));
+  if (message.type !== "response" || message.body.kind !== "body_detail") {
+    throw new Error("the served giant's frame is a body_detail response");
+  }
+  return message.body;
+}
+
+/** An answer's record assembled as the optics worker assembles it, its regime and medium. */
+function assembledGiant(
+  answer: DetailAnswer,
+  system?: SystemIdHex,
+): {
+  readonly medium: AtmosphereMedium;
+  readonly regime: AtmosphereRegime;
+} {
+  const detail = system === undefined ? detailOf(answer) : detailOf(answer, system);
+  const assembled = assembleMedium(recordInput(detail), { envelopes: true });
+  if (assembled.medium === undefined || assembled.regime.kind !== "cloudDeck") {
+    throw new Error("the giant draws an envelope's medium, split at its floor");
+  }
+  return { medium: assembled.medium, regime: assembled.regime };
+}
+
+/** A split envelope's channels above its floor. */
+function channelsAbove(split: {
+  readonly medium: AtmosphereMedium;
+  readonly regime: AtmosphereRegime;
+}): ReadonlyArray<ChannelReading> {
+  const { medium, regime } = split;
+  return regimeChannels(
+    upperMediumOf(medium, regime.kind === "cloudDeck" ? regime.deckAltitudeM : Number.NaN),
+  );
+}
+
+describe("the cool giants' route (R08.T16.a.2; research-leans-43's lean, kept by main)", () => {
+  const SERVED_ID = "41ffecb1ffc00013.0400";
+
+  it("holds the chromophore gate's misses to vectorGate.json's jupiterEnvelope, value by value", () => {
+    const channels = ["r", "g", "b"];
+    const recorded = committedGate.jupiterEnvelope.geometries.flatMap((row) =>
+      channels.flatMap((channel, c) =>
+        row[19 + c] === "miss"
+          ? [{ image: row[1], value: `${String(row[0])}/${channel}`, ratio: row[22 + c] }]
+          : [],
+      ),
+    );
+    expect(CHROMOPHORE_GATE_MISSES).toEqual(recorded);
+  });
+
+  it("bounds each exception at its recorded miss, rounded outward at its third figure", () => {
+    expect(
+      CHROMOPHORE_GATE_EXCEPTIONS.map((exception) => {
+        const miss = CHROMOPHORE_GATE_MISSES.find((each) => each.value === exception.value);
+        return [
+          exception.value,
+          miss === undefined ? null : outwardSteps(exception.bound, [miss.ratio], "most")[0],
+          exception.cause.length > 0,
+        ];
+      }),
+    ).toEqual(
+      CHROMOPHORE_GATE_MISSES.map((miss) => [
+        miss.value,
+        expect.toSatisfy((steps: number) => steps >= 0 && steps < 1),
+        true,
+      ]),
+    );
+  });
+
+  it("passes the chromophore gate with its named exceptions, and not without them", () => {
+    expect([
+      deckGatePasses(CHROMOPHORE_GATE_TALLIES),
+      chromophoreGatePasses(CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES),
+      chromophoreGatePasses(CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES, []),
+    ]).toEqual([false, true, false]);
+  });
+
+  /** The chromophore gate's verdict with one miss more on the limb, in a pass's place. */
+  const unlisted: GateMiss = { image: "limb", value: "limb-3H/g", ratio: 1.01 };
+  const withUnlisted = CHROMOPHORE_GATE_TALLIES.map((image) =>
+    image.image === "limb" ? tallied(image, image.passes - 1, image.misses + 1, 4) : image,
+  );
+  it.each([
+    ["an unlisted miss", withUnlisted, [...CHROMOPHORE_GATE_MISSES, unlisted]],
+    [
+      "a listed miss past its bound",
+      CHROMOPHORE_GATE_TALLIES,
+      CHROMOPHORE_GATE_MISSES.map((miss) =>
+        miss.value === "disc-p75/r" ? { ...miss, ratio: 1.551 } : miss,
+      ),
+    ],
+    ["a miss its list leaves out", CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES.slice(1)],
+  ] as const)("closes the chromophore gate on %s", (_, tallies, misses) => {
+    expect(chromophoreGatePasses(tallies, misses)).toBe(false);
+  });
+
+  /** A cool giant's split regime, and a self-luminous one's. */
+  const cool: AtmosphereRegime = { kind: "cloudDeck", deckAltitudeM: 5_000 };
+  const luminous: AtmosphereRegime = { ...cool, selfLuminous: true };
+
+  it("takes the envelope route on both settings, its deck routes widened to the cool giants' range", () => {
+    expect([
+      GIANT_ROUTE,
+      COOL_GIANT_DECK_ROUTE_RANGE,
+      giantDeckRouteRange(cool, "envelope"),
+    ]).toEqual([
+      "envelope",
+      { ground: SURFACE_DECK_ROUTE_RANGE, envelope: COOL_GIANT_ROUTE_RANGE },
+      COOL_GIANT_DECK_ROUTE_RANGE,
+    ]);
+  });
+
+  it.each([
+    ["on the closed route", () => giantDeckRouteRange(cool, "closed")],
+    [
+      "for a self-luminous body on the envelope route",
+      () => giantDeckRouteRange(luminous, "envelope"),
+    ],
+    [
+      "where the chromophore gate's verdict does not pass",
+      () => coolGiantRouteRangeOf(CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES.slice(1)),
+    ],
+  ] as const)("keeps giant-deck's envelope range %s", (_, rangeOf) => {
+    expect(rangeOf()).toBe(DECK_ROUTE_RANGE);
+  });
+
+  it("opens no cool giants' range where giant-deck's envelope gate does not pass", () => {
+    const surfaceOnly: DeckRouteRange = { ground: SURFACE_DECK_ROUTE_RANGE, envelope: null };
+    expect([
+      coolGiantRouteRangeOf(CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES, surfaceOnly),
+      coolGiantRouteRangeOf(CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES, null),
+    ]).toEqual([surfaceOnly, null]);
+  });
+
+  it("holds the served giants on file to their assembly: the cool giant's frame gives its row", () => {
+    const row = SERVED.find((each) => each.id === SERVED_ID);
+    const served = assembledGiant(servedCoolGiant(), "41ffecb1ffc00013");
+    const channels = channelsAbove(served);
+    expect([
+      SERVED.length,
+      served.regime.selfLuminous ?? false,
+      channels.map((c) => [c.opticalDepth, c.singleScatteringAlbedo, c.asymmetry]),
+    ]).toEqual([
+      35,
+      row?.selfLuminous,
+      (row?.channels ?? []).map((c) => [
+        expect.closeTo(c.opticalDepth, 4),
+        expect.closeTo(c.singleScatteringAlbedo, 6),
+        expect.closeTo(c.asymmetry, 6),
+      ]),
+    ]);
+  }, 180_000);
+
+  it("refuses by name the Dev Fixture's two self-luminous giants and the two absorbing past the range, and routes its 31 others", () => {
+    const refused = SERVED.filter((each) => !SERVED_COOL.includes(each));
+    expect([SERVED_COOL.length, refused.map((each) => [each.id, each.selfLuminous])]).toEqual([
+      31,
+      [
+        ["41ffecb1ffc0000d.0200", true],
+        ["41ffecb1ffc00013.0200", false],
+        ["41ffecb200000004.0100", true],
+        ["41ffecb200000011.0100", false],
+      ],
+    ]);
+  });
+
+  it.each(BOUNDS)(
+    "sets the cool giants' %s at the extreme of the cases, the hand and generated giants and the served cool giants, rounded outward at its third figure",
+    (key, side, read) => {
+      const held = [
+        regimeChannels(upperMediumOf(giant().medium, envelopeFloorM(giant().medium))),
+        regimeChannels(
+          upperMediumOf(
+            jupiterEnvelopeCase().referenceCase.medium,
+            jupiterEnvelopeCase().split.altitudeM,
+          ),
+        ),
+        ...[handJupiterDetail(), jupiterDetail(), handSaturnDetail(), handIceGiantDetail()].map(
+          (detail) => channelsAbove(assembledGiant(detail)),
+        ),
+      ].flat();
+      const served = SERVED_COOL.flatMap((each) => each.channels);
+      const values = [...held.map(read), ...served.map(read)];
+      expect(outwardSteps(COOL_GIANT_ROUTE_RANGE[key], values, side)).toEqual([
+        expect.toSatisfy((steps: number) => steps >= 0 && steps < 1),
+      ]);
+    },
+    180_000,
+  );
+
+  it("routes the served cool giant, the generated and the hand Jupiter, the hand Saturn and the ice giant through their envelopes' decks on the envelope route alone", () => {
+    const giants = [
+      assembledGiant(servedCoolGiant(), "41ffecb1ffc00013"),
+      ...[jupiterDetail(), handJupiterDetail(), handSaturnDetail(), handIceGiantDetail()].map(
+        (detail) => assembledGiant(detail),
+      ),
+    ];
+    expect(
+      giants.map(({ medium, regime }) => [
+        deckRouted(regime, medium, true, giantDeckRouteRange(regime, "envelope")),
+        deckRouted(regime, medium, true, giantDeckRouteRange(regime, "closed")),
+      ]),
+    ).toEqual(giants.map(() => [true, false]));
+  }, 180_000);
+
+  it("refuses the hot Jupiter by name on the envelope route: self-luminous, and absorbing past the cool giants' range in every channel", () => {
+    const { medium, regime } = assembledGiant(hotJupiterDetail());
+    expect([
+      regime.selfLuminous,
+      deckRouted(regime, medium, true, giantDeckRouteRange(regime, "envelope")),
+      channelsAbove({ medium, regime }).map((c) =>
+        channelWithinRouteRange(c, COOL_GIANT_ROUTE_RANGE),
+      ),
+    ]).toEqual([true, false, [false, false, false]]);
+  }, 180_000);
 });
 
 /** `titan-class`, and the regime it routes under a clear sky, how its gate reads it. */

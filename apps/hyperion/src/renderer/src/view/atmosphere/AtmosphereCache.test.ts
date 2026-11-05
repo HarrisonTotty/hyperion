@@ -141,6 +141,7 @@ import {
 import {
   correctionRouted,
   DECK_LOWEST_SUN_SINE,
+  type GiantRoute,
   LOW_SUN_REASON,
   LOW_SUN_SINE,
   TWILIGHT_REASON,
@@ -382,6 +383,7 @@ function harness(
   routes: ((regime: AtmosphereRegime) => boolean) | "product" = routesNone,
   corrects: ((column: SpectralColumn) => boolean) | "product" = routesNone,
   bakedAsHaze?: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
+  giantRoute?: GiantRoute,
 ): Harness {
   const seam = new BodyDetailSeam();
   const builder = new ScriptedBuilder();
@@ -394,6 +396,7 @@ function harness(
     ...(routes === "product" ? {} : { routes }),
     ...(corrects === "product" ? {} : { corrects }),
     ...(bakedAsHaze === undefined ? {} : { bakedAsHaze }),
+    ...(giantRoute === undefined ? {} : { giantRoute }),
     tables: (built, slots) => {
       if (factory.throws !== null) {
         throw factory.throws;
@@ -2038,7 +2041,7 @@ describe("a gas envelope's entry (R08.T16.a.2)", () => {
   // Generator version 27's record puts its floor at 0.566 bar, inside its NH₃ deck's haze, τ 10 of
   // its own (P14.T24.h.b part 6), so its tables' figure lies 12.8 km above its 1-bar figure; 26's
   // floor, at 14.45 bar, lay below it.
-  it("stands a served Jupiter-class record's disc on its tables' figure at albedo 0, above its record's 1-bar figure, while its route is closed", async () => {
+  it("stands a served Jupiter-class record's disc on its tables' figure at albedo 0, above its record's 1-bar figure, while its route is closed (the closed giant route)", async () => {
     const answered = answerFor(A, jupiterDetail());
     const detail = detailOf(answered);
     const bare = assembleMedium(recordInput(detail), { envelopes: true });
@@ -2051,7 +2054,7 @@ describe("a gas envelope's entry (R08.T16.a.2)", () => {
     if (medium.envelope === undefined) {
       throw new Error("the generated Jupiter draws its envelope");
     }
-    const h = harness(undefined, "product", "product");
+    const h = harness(undefined, "product", "product", undefined, "closed");
     note(h, [lit(A)]);
     await answer(h, A, answered);
     await land(h, A, { kind: "built", assembled });
@@ -2105,6 +2108,40 @@ describe("a gas envelope's entry (R08.T16.a.2)", () => {
       true,
       floor.equatorialRadiusM / distanceM,
       [0, 0, 0],
+    ]);
+  }, 120_000);
+
+  // R08.T16.a.2's cool giants (research-leans-43's lean, kept by main): the product's route.
+  it("routes a served Jupiter-class record through its envelope's deck on the envelope giant route, the product's: its deck asked at its floor and its disc on its medium's datum", async () => {
+    const answered = answerFor(A, jupiterDetail());
+    const bare = assembleMedium(recordInput(detailOf(answered)), { envelopes: true });
+    if (bare.medium === undefined || bare.drawn.envelope === undefined) {
+      throw new Error("the generated Jupiter draws its envelope");
+    }
+    const assembled = withCurves(bare, absorberCurveSlots(bare.drawn));
+    const { drawn: medium } = bare;
+    const floorM = medium.envelope?.floorAltitudeM ?? Number.NaN;
+    const routed = async (giantRoute?: GiantRoute): Promise<Harness> => {
+      const h = harness(undefined, "product", "product", undefined, giantRoute);
+      note(h, [lit(A)]);
+      await answer(h, A, answered);
+      await land(h, A, { kind: "built", assembled });
+      note(h, [lit(A)]);
+      return h;
+    };
+    const product = await routed();
+    const closed = await routed("closed");
+    expect([
+      latestDeck(product).ask.split,
+      product.cache.discGroundOf(A),
+      closed.builder.decks.length,
+    ]).toEqual([
+      { altitudeM: floorM, floor: "envelope" },
+      {
+        figure: medium.body.figure,
+        tableFigure: deckDatumOf(medium.body.figure, medium.body.gravity, floorM),
+      },
+      0,
     ]);
   }, 120_000);
 

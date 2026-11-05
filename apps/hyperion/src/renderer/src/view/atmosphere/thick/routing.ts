@@ -10,8 +10,11 @@
  * {@link HAZE_GATE_EXCEPTIONS}, R08.T14.d.4), which it does. A
  * `cloudDeck` world routes to its deck's bake only within the range its
  * passing deck gates cover ({@link DECK_ROUTE_RANGE}, R08.T15.b.2): a gas envelope's, open on
- * `giant-deck`'s envelope variant alone, whose recorded verdict passes since the march steps a ray
- * onto an envelope's floor from the camera ({@link ENVELOPE_GATE_TALLIES}, R08.T16.a.2); a deck over
+ * `giant-deck`'s envelope variant alone on the `closed` giant route, whose recorded verdict passes
+ * since the march steps a ray onto an envelope's floor from the camera
+ * ({@link ENVELOPE_GATE_TALLIES}, R08.T16.a.2), and widened to the cool giants'
+ * ({@link COOL_GIANT_ROUTE_RANGE}) on the `envelope` route, both settings', once `jupiter-envelope`'s
+ * gate passes with its named exceptions ({@link giantDeckRouteRange}); a deck over
  * a surface's, open on R08.T15's two gates, `giant-deck`'s above its split and the Venus-class
  * cases' ({@link ABOVE_DECK_GATE_TALLIES}, {@link SURFACE_DECK_GATE_TALLIES}). Tests route by
  * injection (`AtmosphereCache`'s `routes`).
@@ -26,7 +29,7 @@ import type { AtmosphereMedium } from "../medium";
 import { correctionBySources } from "./columnLayout";
 import type { DeckFloor } from "./deck";
 import { upperMediumOf } from "./deckRead";
-import { type AtmosphereRegime, regimeChannels } from "./regime";
+import { type AtmosphereRegime, type ChannelRegime, regimeChannels } from "./regime";
 import type { SpectralColumn } from "./spectralColumn";
 
 /**
@@ -77,14 +80,24 @@ export const THICK_ROUTE_RANGE: ThickRouteRange = {
 
 /** Whether every channel of `medium`, as `classifyRegime` reads it, lies within `range`. */
 export function withinRouteRange(medium: AtmosphereMedium, range: ThickRouteRange): boolean {
-  return regimeChannels(medium).every(
-    (channel) =>
-      channel.opticalDepth <= range.mostOpticalDepth &&
-      channel.singleScatteringAlbedo >= range.leastSingleScatteringAlbedo &&
-      channel.asymmetry <= range.mostAsymmetry &&
-      channel.groundAlbedo <= range.mostGroundAlbedo &&
-      channel.opticalDepth * channel.asymmetry <= range.mostForwardDepth &&
-      channel.opticalDepth * (1 - channel.singleScatteringAlbedo) <= range.mostAbsorbedDepth,
+  return regimeChannels(medium).every((channel) => channelWithinRouteRange(channel, range));
+}
+
+/** Whether one channel, as `regime.ts`'s `regimeChannels` gives it, lies within `range`. */
+export function channelWithinRouteRange(
+  channel: Pick<
+    ChannelRegime,
+    "opticalDepth" | "singleScatteringAlbedo" | "asymmetry" | "groundAlbedo"
+  >,
+  range: ThickRouteRange,
+): boolean {
+  return (
+    channel.opticalDepth <= range.mostOpticalDepth &&
+    channel.singleScatteringAlbedo >= range.leastSingleScatteringAlbedo &&
+    channel.asymmetry <= range.mostAsymmetry &&
+    channel.groundAlbedo <= range.mostGroundAlbedo &&
+    channel.opticalDepth * channel.asymmetry <= range.mostForwardDepth &&
+    channel.opticalDepth * (1 - channel.singleScatteringAlbedo) <= range.mostAbsorbedDepth
   );
 }
 
@@ -166,7 +179,8 @@ export const ENVELOPE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
  * `jupiterEnvelope.tallies.images`, the hand Jupiter's medium split at its envelope floor through
  * the route an envelope takes, its chromophore absorbing above the floor, against the vector I of
  * its reference at seed 15, held to the file by the test. Of its 27 values 11 pass, 4 miss and 12
- * are refused, so the envelope's range stays `giant-deck`'s ({@link ENVELOPE_ROUTE_RANGE}):
+ * are refused, so that it passes only with its misses named ({@link CHROMOPHORE_GATE_EXCEPTIONS}),
+ * which open a cool giant's range ({@link COOL_GIANT_ROUTE_RANGE}) on the `envelope` setting:
  *
  * - the disc's red at p60–p75 reads 1.11–1.12 of the reference, a miss at p75 (1.5 times the
  *   gate's edge; refused at p60) and at seed 11 a miss at p60;
@@ -185,6 +199,55 @@ export const CHROMOPHORE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
   { image: "disc-p75", comparisons: 3, passes: 1, misses: 1, refusals: 1 },
   { image: "disc-p85", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
   { image: "limb", comparisons: 12, passes: 6, misses: 2, refusals: 4 },
+];
+
+/**
+ * `jupiter-envelope`'s misses through the envelope's route (R08.T16.a.2): `vectorGate.json`'s
+ * `jupiterEnvelope.geometries`, every channel that misses, held to the file by the test.
+ */
+export const CHROMOPHORE_GATE_MISSES: ReadonlyArray<GateMiss> = [
+  { image: "disc-p60", value: "disc-p60/b", ratio: 2.163649 },
+  { image: "disc-p75", value: "disc-p75/r", ratio: 1.544877 },
+  { image: "limb", value: "limb-0.3H/b", ratio: 1.332044 },
+  { image: "limb", value: "limb-1H/b", ratio: 2.319952 },
+];
+
+/**
+ * The chromophore gate's named exceptions (R08.T16.a.2; main's ruling on research-leans-43, item
+ * 1, 2026-11-05): `jupiter-envelope`'s four misses, each held to its bound, as the haze gate's are
+ * ({@link HAZE_GATE_EXCEPTIONS}). Each image reads farther from the reference through the analytic
+ * path, the one a closed envelope is drawn by, than through the route, judged per image in the
+ * gate's edge units over its values judged and refused alike, on the case's medium as traced at
+ * generator version 26 (`reference/caseGate.ts`'s `caseTwin`; the lane's outbox, not on file): the
+ * closed path's disc 2.8–11.8 of the edge and its limb 3.3, against the route's 0.6–2.9 and 2.3. A
+ * new miss, or one of these past its bound, closes the cool giants' range
+ * ({@link coolGiantRouteRangeOf}).
+ */
+export const CHROMOPHORE_GATE_EXCEPTIONS: ReadonlyArray<GateException> = [
+  {
+    value: "disc-p60/b",
+    bound: 2.17,
+    cause:
+      "the route's blue at 1.13 of the reference, Psi_ms's 1.73: the image's worst channel through the analytic path, its blue, at 11.8 of the edge",
+  },
+  {
+    value: "disc-p75/r",
+    bound: 1.55,
+    cause:
+      "the route's red at 1.11 of the reference, mode-free; the image's worst channel through the analytic path, its green at 1.47 of the reference, 6.25 of the edge",
+  },
+  {
+    value: "limb-0.3H/b",
+    bound: 1.34,
+    cause:
+      "the limb's blue at 0.91 of the reference, dark under every bake tried; the analytic path's limb 0.77–0.84 of it in every channel, its worst 3.31 of the edge",
+  },
+  {
+    value: "limb-1H/b",
+    bound: 2.32,
+    cause:
+      "the limb's blue at 0.85 of the reference, as limb-0.3H's; the analytic path's blue there 2.94 of the edge, its limb's worst 3.31",
+  },
 ];
 
 /**
@@ -392,8 +455,38 @@ export function hazeGatePasses(
   misses: ReadonlyArray<GateMiss>,
   exceptions: ReadonlyArray<GateException> = HAZE_GATE_EXCEPTIONS,
 ): boolean {
-  const judged = tallies.filter((image) => !HAZE_UNJUDGED_IMAGES.includes(image.image));
-  const judgedMisses = misses.filter((miss) => !HAZE_UNJUDGED_IMAGES.includes(miss.image));
+  return passesWithExceptions(tallies, misses, exceptions, HAZE_UNJUDGED_IMAGES);
+}
+
+/**
+ * Whether the chromophore gate's recorded verdict passes (R08.T16.a.2; main's ruling on
+ * research-leans-43, 2026-11-05), as {@link hazeGatePasses} reads the haze's over every image:
+ * every image passing somewhere, and every miss one of `exceptions` within its bound, `misses`
+ * accounting for every image's tally of them.
+ *
+ * @param misses - The verdict's misses ({@link CHROMOPHORE_GATE_MISSES}).
+ * @param exceptions - The named exceptions: {@link CHROMOPHORE_GATE_EXCEPTIONS}, or a test's.
+ */
+export function chromophoreGatePasses(
+  tallies: ReadonlyArray<GateImageTally>,
+  misses: ReadonlyArray<GateMiss>,
+  exceptions: ReadonlyArray<GateException> = CHROMOPHORE_GATE_EXCEPTIONS,
+): boolean {
+  return passesWithExceptions(tallies, misses, exceptions, []);
+}
+
+/**
+ * Whether a gate's recorded verdict passes with its named exceptions over the images it judges, all
+ * but `unjudged` ({@link hazeGatePasses}' remarks).
+ */
+function passesWithExceptions(
+  tallies: ReadonlyArray<GateImageTally>,
+  misses: ReadonlyArray<GateMiss>,
+  exceptions: ReadonlyArray<GateException>,
+  unjudged: ReadonlyArray<string>,
+): boolean {
+  const judged = tallies.filter((image) => !unjudged.includes(image.image));
+  const judgedMisses = misses.filter((miss) => !unjudged.includes(miss.image));
   return (
     judged.length > 0 &&
     judged.every(
@@ -484,12 +577,11 @@ export function bakedAsHaze(
  * case): τ to 10.04 (blue), ḡ to 0.7323 (red), τ ḡ to 7.331 (red); its deck is conservative, so
  * ω̄ is 1 and τ (1 − ω̄) 0, and an envelope's floor is black. A Jupiter-class envelope lies outside
  * it, its chromophore absorbing (the hand Jupiter's τ (1 − ω̄) 0.025–0.19 and blue τ 17.0 above
- * its floor, its chromophore at generator version 27's disc column), and stays
- * `ATMOSPHERE: APPROXIMATE`: the gate covering it, `jupiter-envelope`'s, misses
- * ({@link CHROMOPHORE_GATE_TALLIES}). Outside it too stand the hand Saturn, the sim's own
- * Saturn's gases and decks (green τ 10.4 and blue 23.0 above its floor at 103.5 bar, its
+ * its floor, its chromophore at generator version 27's disc column), and so do the hand Saturn, the
+ * sim's own Saturn's gases and decks (green τ 10.4 and blue 23.0 above its floor at 103.5 bar, its
  * chromophore's τ (1 − ω̄) the hand Jupiter's), and the hand ice giant (blue τ 10.29, red ḡ
- * 0.7340; `routing.test.ts`).
+ * 0.7340; `routing.test.ts`): on the `closed` giant route each stays `ATMOSPHERE: APPROXIMATE`, and
+ * on the `envelope` route each routes on {@link COOL_GIANT_ROUTE_RANGE}.
  */
 export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
   mostOpticalDepth: 10.1,
@@ -498,6 +590,39 @@ export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
   mostGroundAlbedo: 0,
   mostForwardDepth: 7.34,
   mostAbsorbedDepth: 0,
+};
+
+/**
+ * The range a cool giant's envelope routes over on the `envelope` giant route (R08.T16.a.2;
+ * research-leans-43's lean, kept by main, 2026-11-05), once the chromophore gate passes with its
+ * named exceptions ({@link CHROMOPHORE_GATE_EXCEPTIONS}): the channels above their floors of the
+ * served cool giants and the cases, a box over {@link ENVELOPE_ROUTE_RANGE}, so that the deck bake's
+ * J takes Ψ_ms's place where the analytic path's disc runs green +14% and blue +35% over
+ * `jupiter-envelope`'s reference at p0, +41% and +73% at p60 (the lane's evidence).
+ *
+ * @remarks
+ * Each bound is the extreme, rounded outward at its third figure (the test holds them), of
+ * `giant-deck`'s and `jupiter-envelope`'s cases, the hand and the generated Jupiter, the hand
+ * Saturn and ice giant, and the `Dev Fixture`'s 31 cool giants at generator version 28
+ * (`fixtures/served-giants.json`, every giant with an `ok` envelope of 192 systems about the one
+ * `41ffecb1ffc00013.0400` stands in): τ to 25.54 (a clear giant's blue, its floor the gas's
+ * Rayleigh alone), ω̄ from 0.9778 and τ (1 − ω̄) to 0.2243 (a temperate giant's red and blue under
+ * its haze), ḡ to 0.7709 (the generated Jupiter's red, its floor in its NH₃ deck's haze) and τ ḡ
+ * to 7.518, over a black floor. Past `jupiter-envelope`'s own channels (`vectorGate.json`'s: τ to
+ * 16.67, ω̄ from 0.9888, ḡ to 0.5756) and `giant-deck`'s (ḡ to 0.7323, τ ḡ to 7.331) it is main's
+ * ruling, not a gate (lean, 2026-11-05): such a giant routed is drawn without `THICK_REASON`, though
+ * both gates judge the disc and the limb alone; the hand Saturn's case, a later lane's, settles blue
+ * τ 17–25. A served giant absorbing past it (ω̄ 0.81–0.92 and τ (1 − ω̄) 0.69–2.0, two giants at
+ * 983 and 1,115 K) lies outside it, and a self-luminous one is refused by name
+ * ({@link giantDeckRouteRange}).
+ */
+export const COOL_GIANT_ROUTE_RANGE: ThickRouteRange = {
+  mostOpticalDepth: 25.6,
+  leastSingleScatteringAlbedo: 0.977,
+  mostAsymmetry: 0.771,
+  mostGroundAlbedo: 0,
+  mostForwardDepth: 7.52,
+  mostAbsorbedDepth: 0.225,
 };
 
 /**
@@ -548,7 +673,8 @@ export function deckRouteRangeOf(
  * Venus-class cases' with their refused images passed over ({@link SURFACE_DECK_GATE_TALLIES}). A camera beneath a routed deck over a surface reads its low
  * sun as past the gates' range ({@link DECK_LOWEST_SUN_SINE}). No served giant tried lies within
  * the envelope's range, the hand and the generated Jupiter and Saturn by their chromophore, the ice
- * giant by its blue τ and red ḡ, so none routes on it ({@link CHROMOPHORE_GATE_TALLIES}). A
+ * giant by its blue τ and red ḡ, so none routes on it: the `closed` giant route's, which the
+ * `envelope` route widens to {@link COOL_GIANT_ROUTE_RANGE} ({@link giantDeckRouteRange}). A
  * routed deck's frame waits on the owner's RTX run against `decision-r08-t11-frame.md`'s 16.67 ms,
  * an item on RM4's close list, not a condition of the route (main's ruling of 2026-11-02).
  */
@@ -565,7 +691,9 @@ export const DECK_ROUTE_RANGE: DeckRouteRange | null = deckRouteRangeOf(ENVELOPE
  * `thickScattering` take none ({@link thickBakeRouted} routes the latter).
  *
  * @param envelope - Whether the body's cover is a gas envelope's, which splits at its floor.
- * @param range - The ranges its gates pass over: {@link DECK_ROUTE_RANGE}, or a test's.
+ * @param range - The ranges its gates pass over: {@link giantDeckRouteRange}'s for the view's giant
+ *   route, as the atmosphere cache passes them; {@link DECK_ROUTE_RANGE}, the `closed` route's, if
+ *   absent; or a test's.
  */
 export function deckRouted(
   regime: AtmosphereRegime,
@@ -591,6 +719,69 @@ export function deckRouted(
     }
   }
   return routed;
+}
+
+/**
+ * How a cool giant's envelope is drawn inside 10⁹ m (R08.T16.a.2; research-leans-43's lean, kept by
+ * main, 2026-11-05), a field of each quality setting (`settings.ts`'s `AtmosphereViewSettings`):
+ * `envelope`, through the envelope's deck route, the deck bake's J in Ψ_ms's place, wherever its
+ * medium above the floor lies within {@link COOL_GIANT_ROUTE_RANGE}; `closed`, the way back, the
+ * route open on `giant-deck`'s range alone ({@link DECK_ROUTE_RANGE}), every other envelope drawn by
+ * the analytic term above its floor under `ATMOSPHERE: APPROXIMATE`.
+ */
+export type GiantRoute = "closed" | "envelope";
+
+/** The giant route both quality settings take: `envelope` (lean, 2026-11-05). */
+export const GIANT_ROUTE: GiantRoute = "envelope";
+
+/**
+ * The deck routes the `envelope` giant route opens (R08.T16.a.2): `range`'s, its envelope's widened
+ * to {@link COOL_GIANT_ROUTE_RANGE} where `range` opens an envelope's, `giant-deck`'s gate passing,
+ * and the chromophore gate's verdict, `tallies` and `misses`, passes with its named exceptions
+ * ({@link chromophoreGatePasses}); `range` itself where either does not.
+ */
+export function coolGiantRouteRangeOf(
+  tallies: ReadonlyArray<GateImageTally>,
+  misses: ReadonlyArray<GateMiss>,
+  range: DeckRouteRange | null = DECK_ROUTE_RANGE,
+): DeckRouteRange | null {
+  const opened = range !== null && range.envelope !== null;
+  return opened && chromophoreGatePasses(tallies, misses)
+    ? { ground: range.ground, envelope: COOL_GIANT_ROUTE_RANGE }
+    : range;
+}
+
+/**
+ * The deck routes the `envelope` giant route opens (R08.T16.a.2): {@link DECK_ROUTE_RANGE}'s, a gas
+ * envelope's widened to {@link COOL_GIANT_ROUTE_RANGE}, since the chromophore gate passes with its
+ * named exceptions ({@link CHROMOPHORE_GATE_TALLIES}, {@link CHROMOPHORE_GATE_EXCEPTIONS}).
+ */
+export const COOL_GIANT_DECK_ROUTE_RANGE: DeckRouteRange | null = coolGiantRouteRangeOf(
+  CHROMOPHORE_GATE_TALLIES,
+  CHROMOPHORE_GATE_MISSES,
+);
+
+/**
+ * The deck routes a body routed `regime` takes on `giantRoute` (R08.T16.a.2), as {@link deckRouted}
+ * reads them: {@link COOL_GIANT_DECK_ROUTE_RANGE} on `envelope`, but {@link DECK_ROUTE_RANGE} for a
+ * self-luminous body, refused by name: its deck's bake carries no thermal light
+ * (`AtmosphereCache.ts`'s `DECK_THERMAL_REASON`) and no gate covers a self-luminous envelope (the
+ * `Dev Fixture`'s two, `fixtures/served-giants.json`); {@link DECK_ROUTE_RANGE} on `closed`.
+ */
+export function giantDeckRouteRange(
+  regime: AtmosphereRegime,
+  giantRoute: GiantRoute,
+): DeckRouteRange | null {
+  let range: DeckRouteRange | null;
+  switch (giantRoute) {
+    case "closed":
+      range = DECK_ROUTE_RANGE;
+      break;
+    case "envelope":
+      range = regime.selfLuminous === true ? DECK_ROUTE_RANGE : COOL_GIANT_DECK_ROUTE_RANGE;
+      break;
+  }
+  return range;
 }
 
 /**

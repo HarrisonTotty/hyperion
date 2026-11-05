@@ -6152,6 +6152,8 @@ Acceptance: `pnpm test`.
   depth, as built"). _A served giant's disc on its floor built 2026-11-02_ (Risks, "The disc's
   ground, as built"). _The hand Saturn's case, `saturn-envelope`, traced 2026-11-05_ (Risks,
   "saturn-envelope, traced").
+  ground, as built"). _Cool giants routed through their envelopes on the `envelope` giant route
+  2026-11-05_ (Risks, "The cool giants' route, as built").
 
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
@@ -25097,3 +25099,31 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     ended `TEST JUPITER`'s march above its floor from 5 × 10⁸ m on low's and high's stepped half
     resolution, in columns where `f32` put it on the nearer pixel. Smoke part 12 holds the frame
     marched as a view marches it (`viewMarchOverBody`).
+- **The cool giants' route, as built** (R08.T16.a.2, 2026-11-05; lane `fix-r08-cool-giant-route`;
+  research-leans-43's lean, kept by main with four corrections; figures in the lane's outbox).
+  Renderer only; no reference traced (main's ruling).
+  - `thick/routing.ts`: `CHROMOPHORE_GATE_MISSES` and `CHROMOPHORE_GATE_EXCEPTIONS`
+    (`jupiter-envelope`'s four misses at their 26 tallies, bounds 2.17, 1.55, 1.34 and 2.32; the
+    analytic path's worse figures per image, on the case as traced at 26, are the outbox's, not on
+    file), `chromophoreGatePasses`; `COOL_GIANT_ROUTE_RANGE`, `coolGiantRouteRangeOf` (it needs
+    `giant-deck`'s envelope gate too) and `COOL_GIANT_DECK_ROUTE_RANGE`; `GiantRoute` (`closed`,
+    the way back, or `envelope`), `GIANT_ROUTE` and `giantDeckRouteRange(regime, giantRoute)`,
+    which keeps `DECK_ROUTE_RANGE` for a self-luminous envelope (refused by name: its deck bakes no
+    thermal light); `channelWithinRouteRange`.
+  - The setting: `AtmosphereViewSettings.giantRoute`, `envelope` on both (lean, 2026-11-05);
+    `AtmosphereCacheOptions.giantRoute` (`GIANT_ROUTE` if absent), `AtmosphereCache.giantRoute`,
+    and `useAtmosphereCache`'s required `giantRoute`. No launch switch: `closed` is a code edit.
+  - `view/atmosphere/fixtures/served-giants.json`: the Dev Fixture's 35 giants at 28, each one's
+    channels above its floor, and `41ffecb1ffc00013.0400`'s frame; 31 route, two self-luminous and
+    two absorbing past the range refused. The bounds are their extremes; a new generator version
+    re-dumps them.
+  - _Past the gates_ (lean, 2026-11-05): the range reaches blue τ 25.6, ḡ 0.771 and τ ḡ 7.52, past
+    both gates' cases (`jupiter-envelope`'s τ 16.7 and ḡ 0.576, `giant-deck`'s ḡ 0.732), which
+    judge the disc and the limb alone; a giant routed there drops `THICK_REASON` once its deck
+    lands. For the owner's UX list: `ATMOSPHERE: APPROXIMATE` clears of it for a routed cool giant.
+  - `TEST JUPITER` now routes on the product's route (its deck baked on arrival, its disc on its
+    medium's datum), so T16.b.2's Jupiter crossing 10⁹ m by hand is open.
+  - Out of scope (main's ruling): `TEST SATURN`, `saturn-oblate`'s clear air over a grey ground,
+    already thick-routed.
+  - Pending: the owner's RTX frame of a routed envelope (now the product's), an RM4 close item; the
+    hand Saturn's case settles blue τ 17–25.

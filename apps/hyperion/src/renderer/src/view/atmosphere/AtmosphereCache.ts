@@ -147,8 +147,9 @@
  *
  * **The cloud deck** (R08.T15.a.2; Design note 9's split). A drawn body whose regime is
  * `cloudDeck` and which the router routes (`routes`, `thick/routing.ts`'s `deckRouted`, which
- * routes a gas envelope within `giant-deck`'s range alone and a deck over a surface within the
- * Venus-class cases': `DECK_ROUTE_RANGE`, R08.T16.a.2 and R08.T15.b.2) is drawn over its deck:
+ * routes a gas envelope within `giant-deck`'s range on the `closed` giant route and a cool giant's
+ * on `envelope`, both settings', and a deck over a surface within the Venus-class cases':
+ * `giantDeckRouteRange`, R08.T16.a.2 and R08.T15.b.2) is drawn over its deck:
  * its tables are made of its upper medium on the deck's datum (`thick/deckRead.ts`'s
  * `upperMediumOf` and `deckDatumOf`), its deck's bake asked in their thick bake's place, every band
  * in one ask ({@link AtmosphereBuilder.bakeDeck}), on the body's own figure, its split the regime's
@@ -248,6 +249,9 @@ import {
   DECK_LOWEST_SUN_SINE,
   deckRouted,
   discTableRouted,
+  GIANT_ROUTE,
+  type GiantRoute,
+  giantDeckRouteRange,
   LOW_SUN_REASON,
   LOW_SUN_SINE,
   thickBakeRouted,
@@ -557,13 +561,20 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
    * takes its thick bake (R08.T14.c) or its deck's (R08.T15.b.2): `thick/routing.ts`'s
    * `thickBakeRouted` or `deckRouted` if absent, which route a `thickScattering` world within the
    * range its gates pass over (R08.T14.d.4) and a `cloudDeck` world within its deck gates' range,
-   * a gas envelope's alone (`DECK_ROUTE_RANGE`); a test's routing otherwise.
+   * a gas envelope's on {@link AtmosphereCacheOptions.giantRoute}'s (`giantDeckRouteRange`); a
+   * test's routing otherwise.
    */
   readonly routes?: (
     regime: AtmosphereRegime,
     medium: AtmosphereMedium,
     envelope: boolean,
   ) => boolean;
+  /**
+   * How a cool giant's envelope routes where `routes` is absent (R08.T16.a.2): the view's setting's
+   * (`SETTINGS[s].atmosphereView.giantRoute`), or `thick/routing.ts`'s `GIANT_ROUTE`, both
+   * settings', if absent.
+   */
+  readonly giantRoute?: GiantRoute;
   /**
    * Whether a routed body in `regime` from `medium` is baked as a haze route's bake is (R08.T14.d.4;
    * `thick/bake.ts`'s remarks, "Own wavelengths" and "Curved streams"): `thick/routing.ts`'s
@@ -1371,6 +1382,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     medium: AtmosphereMedium,
     envelope: boolean,
   ) => boolean;
+  readonly #giantRoute: GiantRoute;
   readonly #bakedAsHaze: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean;
   readonly #corrects: (column: SpectralColumn) => boolean;
   readonly #discs: (column: SpectralColumn) => boolean;
@@ -1389,14 +1401,25 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#builder = opts.builder;
     this.#tables = opts.tables;
     this.#schedule = opts.schedule ?? scheduleTimeout;
+    const giantRoute = opts.giantRoute ?? GIANT_ROUTE;
+    this.#giantRoute = giantRoute;
     this.#routes =
       opts.routes ??
       ((regime, medium, envelope): boolean =>
-        thickBakeRouted(regime, medium) || deckRouted(regime, medium, envelope));
+        thickBakeRouted(regime, medium) ||
+        deckRouted(regime, medium, envelope, giantDeckRouteRange(regime, giantRoute)));
     this.#bakedAsHaze =
       opts.bakedAsHaze ?? ((regime, medium): boolean => bakedAsHaze(regime, medium));
     this.#corrects = opts.corrects ?? ((column): boolean => correctionRouted(column));
     this.#discs = opts.discs ?? ((column): boolean => discTableRouted(column));
+  }
+
+  /**
+   * How its cool giants' envelopes route (R08.T16.a.2), as it was made: its
+   * {@link AtmosphereCacheOptions.giantRoute}, which its default routing reads.
+   */
+  get giantRoute(): GiantRoute {
+    return this.#giantRoute;
   }
 
   /** How many bodies the cache holds, drawn or not. */

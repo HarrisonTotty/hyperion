@@ -102,7 +102,7 @@
  *
  * - (R) `titan-class` through its haze route (R08.T14.d.4): its sphere, its thick table with the
  *   correction summed in;
- * - (S) the hand Jupiter routed through its envelope's deck (R08.T16.a.2; its gate stays closed):
+ * - (S) the hand Jupiter routed through its envelope's deck (R08.T16.a.2; the `envelope` giant route):
  *   its upper medium on its floor's datum, the deck at the floor, its black disc on the medium's own
  *   datum below it (research-rm4-rm5-close-out §1.3), so that the march reads the deck over the disc;
  * - (T) a self-luminous medium through R08.T18.b's thermal forms: the measured Earth's air at

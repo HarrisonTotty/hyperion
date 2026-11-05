@@ -60,6 +60,13 @@ describe("the atmosphere's view settings (R08.T7)", () => {
     }
   });
 
+  it("routes cool giants through their envelopes' decks on both settings (R08.T16.a.2's lean)", () => {
+    expect(QUALITY_SETTINGS.map((setting) => SETTINGS[setting].atmosphereView.giantRoute)).toEqual([
+      "envelope",
+      "envelope",
+    ]);
+  });
+
   it("sizes the kernels for four stars and two planetshine sources, past every setting's bound", () => {
     expect([MAX_SKY_SOURCES, MAX_SKY_LIGHT_SLOTS]).toEqual([6, 4]);
     for (const setting of QUALITY_SETTINGS) {

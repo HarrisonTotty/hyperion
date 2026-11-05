@@ -508,7 +508,7 @@ export async function titanHazeMedium(): Promise<RoutedMedium> {
  * (S)'s medium: the hand Jupiter (`test/giantFixtures.ts`) as its record is assembled (an envelope's
  * cover, the optics workers' `OPTICS_ASSEMBLY`; no line species' tables, as its tests assemble it,
  * which adds no absorber term), routed through its envelope's deck at its floor (R08.T16.a.2,
- * `--smoke-thick-read=1`'s override; its chromophore keeps the route closed): its upper medium on
+ * `--smoke-thick-read=1`'s override, as the `envelope` giant route routes it): its upper medium on
  * the floor's datum (`deckDatumOf`), the deck's table at the floor, and its black disc drawn on the
  * medium's own datum, the column's base 1,049 km under the floor, as a routed envelope's disc stands
  * (research-rm4-rm5-close-out §1.3), so that the march reads the deck over the disc. Its giants

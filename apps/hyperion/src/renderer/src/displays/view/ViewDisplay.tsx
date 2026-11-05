@@ -3026,6 +3026,7 @@ function ViewPanels({
     requests: server === null && served === null ? null : share.atmosphere,
     createWorker: opticsWorkers,
     performanceThreads,
+    giantRoute: SETTINGS[setting].atmosphereView.giantRoute,
   });
   // The inspection's survey as it ended, held for the opening it was sent at; `null` while it is out.
   const survey = inspection?.survey ?? null;

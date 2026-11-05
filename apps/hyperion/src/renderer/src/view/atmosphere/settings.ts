@@ -23,6 +23,7 @@ import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { type AtmosphereSettings, type MarchBand, TABLE_SIZES, type TableSizes } from "./hillaire";
+import { GIANT_ROUTE, type GiantRoute } from "./thick/routing";
 
 /**
  * The sources the sky's kernels hold, and the stars among them, `hillaire.ts`'s (where the kernels'
@@ -95,6 +96,12 @@ export interface AtmosphereViewSettings {
   readonly marchSourceCap: number;
   /** The quality limits this plan lists for R12's audit (R12.T7.b), one statement each. */
   readonly qualityLimits: ReadonlyArray<string>;
+  /**
+   * How a cool giant's envelope is drawn inside 10⁹ m (R08.T16.a.2; `thick/routing.ts`'s
+   * {@link GiantRoute}): `envelope` on both settings, through its deck's route, a lean
+   * (2026-11-05); `closed` is the way back. The atmosphere cache reads it as it is made.
+   */
+  readonly giantRoute: GiantRoute;
 }
 
 /**
@@ -129,6 +136,7 @@ export const ATMOSPHERE_VIEW_SETTINGS: Readonly<Record<QualitySetting, Atmospher
     skyPlanetshineSources: PLANETSHINE_SOURCES_HIGH,
     marchSourceCap: TABLE_SIZES.high.marchSourceCap,
     qualityLimits: [...SHARED_LIMITS, marchSourceLimit("high")],
+    giantRoute: GIANT_ROUTE,
   },
   low: {
     skySunCap: MAX_BODY_LIGHTS,
@@ -139,6 +147,7 @@ export const ATMOSPHERE_VIEW_SETTINGS: Readonly<Record<QualitySetting, Atmospher
       marchSourceLimit("low"),
       `The low setting's sky takes ${PLANETSHINE_SOURCES_LOW} planetshine source, against ${PLANETSHINE_SOURCES_HIGH} on high (R07 Design note 18).`,
     ],
+    giantRoute: GIANT_ROUTE,
   },
 };
 

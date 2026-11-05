@@ -23,6 +23,7 @@ import {
   type OpticsWorkerLike,
   OpticsWorkerPool,
 } from "../../view/atmosphere/opticsPool";
+import type { GiantRoute } from "../../view/atmosphere/thick/routing";
 import type { ViewEngineState } from "./useViewEngine";
 
 /**
@@ -48,6 +49,8 @@ export interface AtmosphereCacheInput {
    * `null` where absent.
    */
   readonly performanceThreads?: number | null | undefined;
+  /** How its cool giants' envelopes route (R08.T16.a.2): `SETTINGS[s].atmosphereView.giantRoute`. */
+  readonly giantRoute: GiantRoute;
 }
 
 /** The cache the hook holds, outside React, so that its making is an effect's and renders it. */
@@ -77,11 +80,11 @@ class CacheHolder {
 
 /**
  * `VIEW`'s atmosphere cache on its engine, or `null` with no engine ready: made in an effect, kept
- * while the engine, the requests and the worker factory stay, and disposed, its workers terminated
+ * while the engine, the requests, the worker factory and the giant route stay, and disposed, its workers terminated
  * and its tables released, when any changes or the caller unmounts.
  */
 export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache | null {
-  const { engineState, requests, createWorker, performanceThreads = null } = input;
+  const { engineState, requests, createWorker, performanceThreads = null, giantRoute } = input;
   const engine = engineState.kind === "ready" ? engineState.engine : null;
   const [holder] = useState(() => new CacheHolder());
   const cache = useSyncExternalStore(holder.subscribe, holder.get);
@@ -96,13 +99,14 @@ export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache
         createWorker,
       }),
       tables: atmosphereTablesOn(engine),
+      giantRoute,
     });
     holder.set(made);
     return () => {
       holder.set(null);
       made.dispose();
     };
-  }, [engine, requests, createWorker, performanceThreads, holder]);
+  }, [engine, requests, createWorker, performanceThreads, giantRoute, holder]);
   return cache;
 }
 
