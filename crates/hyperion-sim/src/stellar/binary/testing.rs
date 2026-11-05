@@ -212,11 +212,22 @@ pub(crate) fn shows_a_dwarf_above_the_limit(
     timeline: &crate::stellar::binary::BinaryTimeline,
     until: f64,
 ) -> bool {
+    dwarfs_above_the_limit(timeline, until).contains(&true)
+}
+
+/// [`shows_a_dwarf_above_the_limit`] for each member, primary first.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn dwarfs_above_the_limit(
+    timeline: &crate::stellar::binary::BinaryTimeline,
+    until: f64,
+) -> [bool; 2] {
     use crate::stellar::Phase;
     use crate::stellar::binary::star::Member;
     use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 
-    timeline
+    let mut above = [false; 2];
+    let ages = timeline
         .segments()
         .iter()
         .flat_map(|s| {
@@ -233,15 +244,28 @@ pub(crate) fn shows_a_dwarf_above_the_limit(
                 .into_iter()
                 .chain(knots.map(|k| k[0]))
         })
-        .filter(|&age| age <= until)
-        .any(|age| {
-            timeline.state_at(Years::new(age)).stars().iter().any(|s| {
-                matches!(
-                    s.phase(),
-                    Phase::HeliumWhiteDwarf
-                        | Phase::CarbonOxygenWhiteDwarf
-                        | Phase::OxygenNeonWhiteDwarf
-                ) && s.mass() > CHANDRASEKHAR_MASS
-            })
-        })
+        .filter(|&age| age <= until);
+    for age in ages {
+        for (k, s) in timeline
+            .state_at(Years::new(age))
+            .stars()
+            .iter()
+            .enumerate()
+        {
+            above[k] |= matches!(
+                s.phase(),
+                Phase::HeliumWhiteDwarf
+                    | Phase::CarbonOxygenWhiteDwarf
+                    | Phase::OxygenNeonWhiteDwarf
+            ) && s.mass() > CHANDRASEKHAR_MASS;
+        }
+    }
+    above
+}
+
+/// Whether `input`'s primary dies when plan 06 says, its death pinned (design note 16).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn pinned_primary(input: &BinaryInput) -> bool {
+    super::evolve::pinned_death_age_years(input).is_some()
 }

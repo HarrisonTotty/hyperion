@@ -15,7 +15,8 @@
 //! where its core is the dwarf's (`Engine::degenerate_giant`), so that a strip leaves a helium
 //! white dwarf again and helium ignites only when the core reaches the track's own flash. A core at
 //! or below `Mc,BGB`(`M_HeF`), which the held placement already puts on a degenerate branch, or not
-//! below every such branch's flash keeps the held placement.
+//! below that track's flash keeps the held placement. Such a dwarf does not swell while its donor
+//! is held to the heavy donor's thermal rate (`Engine::feeds_a_swollen_dwarf`, lean, 2026-11-02).
 
 use crate::GeneratorVersion;
 use crate::stellar::rules::StellarRules;
@@ -26,11 +27,12 @@ use crate::stellar::rules::StellarRules;
 ///
 /// Below it every pair takes the held arm, [`SwollenDwarfRules::AtBase`], the code of version 27
 /// verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `StellarRules::every_29_hold()`. The bump to 29 deletes this hold: this module with
+/// `StellarRules::every_29_hold()`. The bump to 29 deletes the hold, not the rule: this module with
 /// [`SwollenDwarfRules`], the stellar rules' `swollen_dwarf` field, the swell's read of it, the
 /// brief's read of [`SwollenDwarfRules::fitted_tables_hold`], and the tripwire
-/// (`the_swollen_dwarf_is_held_only_until_the_29_bump`); the bump refits the pair-light and reach
-/// tables, which the engine's runs fit.
+/// (`the_swollen_dwarf_is_held_only_until_the_29_bump`). It keeps `Engine::degenerate_giant`,
+/// `sse::degenerate_giant_mass` and `Engine::feeds_a_swollen_dwarf` applied always, and refits the
+/// pair-light and reach tables, which the engine's runs fit.
 pub(crate) const SWOLLEN_DWARF_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
 /// Where a helium white dwarf fed hydrogen is placed as a giant (the stellar rules'

@@ -93,7 +93,7 @@ impl Engine {
         // luminosity through the small-envelope perturbation (HPT section 6.3). A star with no envelope left there is a naked helium star or a white dwarf
         // (HPT section 6; BSE `hrdiag`): it is stripped first, and is held only if that
         // leaves it with nothing to lose.
-        if i == 0 && self.pin_pending() {
+        if self.pin_pending(i) {
             self.hold(&track, offset);
             return;
         }
@@ -149,12 +149,14 @@ impl Engine {
         self.explode(i, before, remnant, kick);
     }
 
-    /// Whether the primary's pin is still to come, or due now (P11.T4.k): its collapse is plan
-    /// 06's, so the binary ends it no sooner (design note 16).
+    /// Whether member `i` is the primary whose pin is still to come, or due now (P11.T4.k): its
+    /// collapse is plan 06's, so the binary ends it no sooner (design note 16).
     #[must_use]
-    pub(super) fn pin_pending(&self) -> bool {
-        self.pin
-            .is_some_and(|p| p.death.age().value() >= self.age - clock_resolution_years(self.age))
+    pub(super) fn pin_pending(&self, i: usize) -> bool {
+        i == 0
+            && self.pin.is_some_and(|p| {
+                p.death.age().value() >= self.age - clock_resolution_years(self.age)
+            })
     }
 
     /// Holds the pinned primary, whose own track `track` (at `offset`) dies now, at its last

@@ -1225,11 +1225,13 @@ impl Engine {
                 false
             }
             // A dwarf at the Chandrasekhar mass collapses below, edge-lit or not (`dwarf_limit`,
-            // P11.T4's fix).
+            // P11.T4's fix), but from 29 for a pinned primary's, which is left to its pin.
             Kind::CarbonOxygenWhiteDwarf
                 if kd.surface() == Surface::Helium
                     && self.accreted_helium[a_idx] >= EDGE_LIT_HELIUM
-                    && !dwarf_limit::collapses(ma) =>
+                    && (!dwarf_limit::collapses(ma)
+                        || (self.ctx.rules().dwarf_limit.leaves_the_pin()
+                            && self.pin_pending(a_idx))) =>
             {
                 let masses = masses_now(self);
                 self.pool(PooledIaEvent::new(
@@ -1384,14 +1386,17 @@ impl Engine {
             return false;
         }
         // From 29 a helium dwarf's core stays degenerate where the held placement would put it on
-        // a heavier star's branch (`swollen_dwarf`, P11.T4's fix).
-        let degenerate = (kind == Kind::HeliumWhiteDwarf
-            && self.ctx.rules().swollen_dwarf == SwollenDwarfRules::Degenerate)
-            .then(|| self.degenerate_giant(i, m, core))
-            .flatten();
-        if degenerate.is_some() && !self.feeds_a_swollen_dwarf(i, m) {
+        // a heavier star's branch (`swollen_dwarf`, P11.T4's fix). The refusal is decided before
+        // the track is built, which every refused step would build.
+        let degenerate = kind == Kind::HeliumWhiteDwarf
+            && self.ctx.rules().swollen_dwarf == SwollenDwarfRules::Degenerate
+            && sse::degenerate_giant_mass(SolarMasses::new(core), self.ctx.coeffs()).is_some();
+        if degenerate && !self.feeds_a_swollen_dwarf(i, m) {
             return false;
         }
+        let degenerate = degenerate
+            .then(|| self.degenerate_giant(i, m, core))
+            .flatten();
         // Where no star of the kind has such a core, or no ask places one exactly, the accretor
         // keeps the mass as it is (ruling p11-c2-swell, item 7; BSE's gntage instead places a
         // giant of another type, `gntage.f` 34–49, 132–137 and 281–294).
@@ -1422,11 +1427,12 @@ impl Engine {
     /// transfer is not the heavy donor's thermal rate, which holds onto a compact accretor alone
     /// ([`heavy_donor::thermal_rate`]).
     ///
-    /// Otherwise the swollen giant, fed at the donor's rate onto a giant, a nuclear one (about
-    /// 10⁻¹⁴ M☉ yr⁻¹ from a 0.9 M☉ donor onto a 0.38 M☉ dwarf at 100 d, Z = 0.004), burns its
-    /// envelope of one step into core in about 10⁴ years and is stripped back to the dwarf, which
-    /// swells again at the next step: a cycle to [`MAX_SEGMENTS`](super::MAX_SEGMENTS) (measured,
-    /// 2026-11-02). The dwarf goes on accreting as it is instead, as below the swell's other gates,
+    /// Otherwise the swollen giant, fed at the overflow law's rate onto a giant, far below the
+    /// swell's 2.71 × 10⁻⁷ M☉ yr⁻¹ (BSE section 2.6.6; about 10⁻¹⁴ M☉ yr⁻¹ from a 0.9 M☉ donor
+    /// onto a 0.38 M☉ dwarf at 100 d, Z = 0.004, as the engine measured it), burns its envelope of
+    /// one step into core in about 10⁴ years and is stripped back to the dwarf, which swells again
+    /// at the next step: a cycle to [`MAX_SEGMENTS`](super::MAX_SEGMENTS) (measured, 2026-11-02).
+    /// The dwarf goes on accreting as it is instead, as below the swell's other gates,
     /// until its core passes the degenerate branch's flash (lean, 2026-11-02).
     #[must_use]
     fn feeds_a_swollen_dwarf(&self, i: usize, m: f64) -> bool {

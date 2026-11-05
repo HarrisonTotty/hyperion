@@ -21,10 +21,13 @@ fn version() -> StellarRules {
 fn the_swollen_dwarf_is_held_only_until_the_29_bump() {
     assert!(
         GENERATOR_VERSION < SWOLLEN_DWARF_VERSION,
-        "the bump to 29 deletes P11.T4's swollen-dwarf hold: `SWOLLEN_DWARF_VERSION`, \
-         `SwollenDwarfRules` with its `AtBase` arm, `StellarRules::swollen_dwarf`, the swell's \
-         read of it, the brief's read of `SwollenDwarfRules::fitted_tables_hold`, this module and \
-         its line in `stellar/rules.rs`, and refits the pair-light and reach tables"
+        "the bump to 29 deletes P11.T4's swollen-dwarf hold, not its rule: \
+         `SWOLLEN_DWARF_VERSION`, `SwollenDwarfRules` with its `AtBase` arm, \
+         `StellarRules::swollen_dwarf` and the swell's read of it, the brief's read of \
+         `SwollenDwarfRules::fitted_tables_hold`, this module and its line in \
+         `stellar/rules.rs`; it keeps `Engine::degenerate_giant`, `sse::degenerate_giant_mass` \
+         and `Engine::feeds_a_swollen_dwarf` applied always, and refits the pair-light and \
+         reach tables"
     );
     assert_eq!(version().swollen_dwarf, SwollenDwarfRules::AtBase);
     let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).swollen_dwarf;

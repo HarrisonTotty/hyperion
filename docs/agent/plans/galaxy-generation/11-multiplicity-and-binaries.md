@@ -7648,3 +7648,10 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   `heavy_donor::thermal_rate`, which stops once it is a giant, so it would be stripped back and
   swell again to the segment cap (lean, 2026-11-02). The brief's gate refuses the fitted tables
   under it.
+- **P11.T4's dwarf limit made whole, held at 29** (lane `p11-wd-union`; rebased onto land/next on
+  2026-11-05, nothing moves at 24–28). From `DWARF_LIMIT_VERSION` = 29 (`DwarfLimitRules::Whole`;
+  the held arm is v27's code): a pinned primary whose pin is pending is left to its pin
+  (`Engine::pin_pending`, now one predicate with the member's index), its unplaced product typed by
+  the held arm and held by `held_product` (research-leans-34 §1(b)); a helium-giant product is
+  typed by its mass (HPT §6.1); a helium core of 0.5 M☉ or more is its helium star (HPT §6); only
+  CO and ONe dwarfs stop at M_Ch in a detached phase.

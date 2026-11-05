@@ -1051,7 +1051,7 @@ pub(crate) fn new_star_mass(
             0.0,
         )),
         NewStar::PulsingAgb => {
-            let m0 = inverse_mc_bagb(pulsing_agb_helium_core(mc), c)?;
+            let m0 = inverse_mc_bagb(pulsing_agb_helium_core(SolarMasses::new(mc)).value(), c)?;
             Some((SolarMasses::new(m0), Phase::ThermallyPulsingAgb, 0.0))
         }
         NewStar::HeliumGiant => {
@@ -1090,9 +1090,9 @@ pub(crate) fn new_star_mass(
 /// tracks' first giant branches reach their helium flash with their envelope and at its largest
 /// core. Measured on the built tracks (2026-11-02), the branch's last core is 0.41, 0.45, 0.46,
 /// 0.46 and 0.39 M☉ at Z = 0.02 for 0.7, 0.9, 1.2, 1.6 and 1.9 M☉ (`M_HeF` 2.00 M☉), and 0.49,
-/// 0.49, 0.49, 0.48 and 0.35 M☉ at Z = 0.0003 (`M_HeF` 1.83 M☉): lighter tracks lose their
-/// envelope to their wind first, and near `M_HeF` the flash comes early (HPT equation 49's
-/// e^(15 (M − `M_HeF`))).
+/// 0.49, 0.49 and 0.48 M☉ at Z = 0.0003 for 0.7, 0.9, 1.2 and 1.6 M☉ (`M_HeF` 1.83 M☉): lighter
+/// tracks lose their envelope to their wind first, and near `M_HeF` the flash comes early (HPT
+/// equation 49's e^(15 (M − `M_HeF`))).
 const DEGENERATE_GIANT_SHARE: f64 = 0.7;
 
 /// The initial mass, M☉, of the track a helium white dwarf of `mc` M☉ fed hydrogen swells onto with
@@ -1114,21 +1114,22 @@ pub(crate) fn degenerate_giant_mass(mc: SolarMasses, c: &ZCoeffs) -> Option<Sola
     (above_base && mc.value() < gb::mc_hei(m0, c).value()).then_some(m0)
 }
 
-/// The core at the base of the AGB, M☉, of a thermally pulsing AGB star placed with the
-/// carbon–oxygen core `mc` M☉ (BSE section 2.7.4, `gntage.f`'s `mcx` for type 6, as BSE solves
-/// HPT's relations back): `Mc,BAGB` = (Mc + 0.35) ÷ 0.773 at or above `Mc,DU` of `Mc,BAGB` = 2.25
-/// (0.44 × 2.25 + 0.448 M☉), where only the core at the supernova (HPT equation 75) could reach it;
+/// The core at the base of the AGB of a thermally pulsing AGB star placed with the carbon–oxygen
+/// core `mc` (BSE section 2.7.4, `gntage.f`'s `mcx` for type 6, as BSE solves HPT's relations
+/// back): `Mc,BAGB` = (Mc + 0.35) ÷ 0.773 at or above `Mc,DU` of `Mc,BAGB` = 2.25 (0.44 × 2.25 +
+/// 0.448 M☉), where only the core at the supernova (HPT equation 75) could reach it;
 /// (Mc − 0.448) ÷ 0.44 above 0.8 M☉, the core at the second dredge-up (HPT equation 69); and the
 /// core itself below.
 #[must_use]
-pub(crate) fn pulsing_agb_helium_core(mc: f64) -> f64 {
-    if mc >= 0.44 * 2.25 + 0.448 {
+pub(crate) fn pulsing_agb_helium_core(mc: SolarMasses) -> SolarMasses {
+    let mc = mc.value();
+    SolarMasses::new(if mc >= 0.44 * 2.25 + 0.448 {
         (mc + 0.35) / 0.773
     } else if mc > 0.8 {
         (mc - 0.448) / 0.44
     } else {
         mc
-    }
+    })
 }
 
 /// The initial mass whose core at the base of the AGB is `mc` (HPT equation 66 inverted:

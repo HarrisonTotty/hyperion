@@ -6500,7 +6500,7 @@ fn merged_state(timeline: &BinaryTimeline) -> (BinaryState, f64) {
 /// as an accreting one. The same pair twice gives the same timeline.
 #[test]
 fn an_unplaced_carbon_oxygen_core_collapses_at_the_chandrasekhar_mass() {
-    use super::dwarf_limit::{Unplaced, collapses, unplaced};
+    use super::dwarf_limit::{CoreSource, DwarfLimitRules, Unplaced, collapses};
     use super::star::Kind;
     use super::testing::shows_a_dwarf_above_the_limit;
 
@@ -6542,10 +6542,19 @@ fn an_unplaced_carbon_oxygen_core_collapses_at_the_chandrasekhar_mass() {
             crate::stellar::remnant::RemnantKind::NeutronStar,
             "{name}"
         );
-        let Unplaced::WhiteDwarf { mass, .. } = unplaced(Kind::PulsingAgb, core, core, None) else {
+        let core_mass = SolarMasses::new(core);
+        let Unplaced::WhiteDwarf { mass, .. } = DwarfLimitRules::Held.unplaced(
+            Kind::PulsingAgb,
+            core_mass,
+            core_mass,
+            CoreSource::Other,
+        ) else {
             panic!("{name}: a carbon–oxygen core leaves a dwarf");
         };
-        assert!(collapses(mass), "{name}: a {mass} M☉ dwarf collapses");
+        assert!(
+            collapses(mass.value()),
+            "{name}: a {mass:?} dwarf collapses"
+        );
         assert_eq!(evolve(&input, until), timeline, "{name}");
     }
 }
@@ -6616,10 +6625,15 @@ fn an_unplaced_helium_core_is_its_helium_star() {
         super::star::Kind::HeliumGiant,
     ] {
         assert_eq!(
-            super::dwarf_limit::unplaced(kind, 1.626, 0.457_2, None),
+            super::dwarf_limit::DwarfLimitRules::Held.unplaced(
+                kind,
+                SolarMasses::new(1.626),
+                SolarMasses::new(0.457_2),
+                super::dwarf_limit::CoreSource::Other
+            ),
             super::dwarf_limit::Unplaced::WhiteDwarf {
                 phase: Phase::CarbonOxygenWhiteDwarf,
-                mass: 0.457_2
+                mass: SolarMasses::new(0.457_2)
             },
             "{kind:?}"
         );
@@ -6686,6 +6700,330 @@ fn no_pinned_pair_shows_a_dwarf_above_the_limit() {
             describe(&timeline)
         );
     }
+}
+
+/// Version 27's rules with P11.T4's dwarf-limit arm of 29 on alone, so that no other hold moves
+/// what it holds equal (`stellar/rules/dwarf_limit_hold.rs`).
+fn dwarf_limit_rules() -> crate::stellar::rules::StellarRules {
+    crate::stellar::rules::StellarRules {
+        dwarf_limit: super::dwarf_limit::DwarfLimitRules::Whole,
+        ..crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION)
+    }
+}
+
+/// What a merger's product of `kind`, `m` M☉ and core `core` M☉ with `burnt` of its helium burnt
+/// leaves in an engine of metallicity `z` with no pin, under `rules`, once the merger is recorded:
+/// the engine and its primary's state then.
+fn unplaced_product(
+    kind: super::star::Kind,
+    m: f64,
+    core: f64,
+    burnt: f64,
+    z: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> (super::evolve::Engine, crate::stellar::StarState) {
+    use super::common_envelope::CoalescedProduct;
+
+    let mut engine = fed_dwarf_engine(0.6, z, rules);
+    let product = engine.product_member(CoalescedProduct::Star {
+        kind,
+        mass: m,
+        core,
+        burnt,
+        fraction: 0.0,
+    });
+    engine.finish_merger_with(product);
+    let state = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    (engine, state)
+}
+
+/// P11.T4's dwarf limit: a merger's product that no star of its kind can hold, in a pair with no
+/// pin, leaves the engine's own remnant. Thermally pulsing AGB products around a carbon–oxygen core
+/// of 1.765 and 1.948 M☉ (pinned pairs 0252's and 0902's mergers, Z = 0.02 and 0.0005) are
+/// oxygen–neon under both arms and collapse at once to the 1.26 M☉ neutron star of an
+/// accretion-induced collapse, with no Type Ia candidate pooled; one around a 0.457 M☉ core
+/// (0787's, Z = 0.004) is a carbon–oxygen dwarf. Core-helium-burning products with nothing burnt
+/// around a helium core of 1.4433 and 6.977 M☉ (of layers D and E, Z = 0.02, 2026-11-02) are the
+/// naked helium star of that core under both; one around 1.4368 M☉ (Z = 0.0005), below the
+/// Chandrasekhar mass, is a carbon–oxygen dwarf under the held arm and its helium star under the
+/// arm of 29, which takes any helium core of 0.5 M☉ or more for one (HPT section 6).
+#[test]
+fn an_unplaced_merger_product_takes_the_engine_s_own_remnant() {
+    use super::star::Kind;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+
+    let held = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let (ns, co, he) = (
+        Phase::NeutronStar,
+        Phase::CarbonOxygenWhiteDwarf,
+        Phase::HeliumMainSequence,
+    );
+    for (kind, m, core, burnt, z, held_phase, arm_phase) in [
+        (Kind::PulsingAgb, 4.331_5, 1.764_8, 1.0, 0.02, ns, ns),
+        (Kind::PulsingAgb, 3.689_9, 1.947_7, 1.0, 0.0005, ns, ns),
+        (Kind::PulsingAgb, 2.240_1, 0.457_2, 1.0, 0.004, co, co),
+        (Kind::CoreHeliumBurning, 4.984_3, 1.443_3, 0.0, 0.02, he, he),
+        (
+            Kind::CoreHeliumBurning,
+            17.965_6,
+            6.977_3,
+            0.0,
+            0.02,
+            he,
+            he,
+        ),
+        (
+            Kind::CoreHeliumBurning,
+            4.334_3,
+            1.436_8,
+            0.0,
+            0.0005,
+            co,
+            he,
+        ),
+    ] {
+        let case = format!("{kind:?} of {m} M☉ around {core} M☉");
+        for (rules, phase) in [(held, held_phase), (dwarf_limit_rules(), arm_phase)] {
+            let case = format!("{case}, {:?}", rules.dwarf_limit);
+            let (engine, state) = unplaced_product(kind, m, core, burnt, z, rules);
+            assert_eq!(state.phase(), phase, "{case}");
+            if phase == Phase::NeutronStar {
+                let [collapse] = engine.supernovae.as_slice() else {
+                    panic!("{case}: one collapse, not {:?}", engine.supernovae);
+                };
+                assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
+                assert!(engine.pooled.is_none(), "{case}");
+            } else {
+                assert!(
+                    state.mass().value().total_cmp(&core).is_eq(),
+                    "{case}: a mass of {:?}",
+                    state.mass()
+                );
+                assert!(engine.supernovae.is_empty(), "{case}");
+            }
+        }
+    }
+}
+
+/// P11.T4's dwarf limit: the dwarf an unplaced product leaves, by its kind, mass, core and the
+/// dwarf it merged from ([`DwarfLimitRules::unplaced`]). Under the arm of 29 oxygen–neon where a
+/// thermally pulsing AGB product's core at the base of the AGB, as its placement solves it back, is
+/// 1.6 M☉ or more, where a helium giant's mass is (HPT section 6.1), or where it merged from an
+/// oxygen–neon dwarf, and the naked helium star of a helium core of 0.5 M☉ or more; under the held
+/// arm a helium giant is typed by its core as a thermally pulsing star is, and a helium core is its
+/// helium star only from the Chandrasekhar mass.
+///
+/// [`DwarfLimitRules::unplaced`]: super::dwarf_limit::DwarfLimitRules::unplaced
+#[test]
+fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
+    use super::dwarf_limit::{CoreSource, DwarfLimitRules, Unplaced};
+    use super::star::Kind;
+
+    let w = |phase, mass: f64| Unplaced::WhiteDwarf {
+        phase,
+        mass: SolarMasses::new(mass),
+    };
+    let h = |mass: f64| Unplaced::HeliumStar {
+        mass: SolarMasses::new(mass),
+    };
+    let (co, one, he) = (
+        Phase::CarbonOxygenWhiteDwarf,
+        Phase::OxygenNeonWhiteDwarf,
+        Phase::HeliumWhiteDwarf,
+    );
+    let (agb, giant, cheb) = (Kind::PulsingAgb, Kind::HeliumGiant, Kind::CoreHeliumBurning);
+    let (other, ne) = (CoreSource::Other, CoreSource::OxygenNeonDwarf);
+    // (Mc − 0.448) ÷ 0.44 = 1.6 at Mc = 1.152.
+    for (kind, m, core, source, whole, held) in [
+        (agb, 5.0, 1.0, other, w(co, 1.0), w(co, 1.0)),
+        (agb, 5.0, 1.2, other, w(one, 1.2), w(one, 1.2)),
+        (giant, 1.4, 1.2, other, w(co, 1.2), w(one, 1.2)),
+        (giant, 1.7, 1.0, other, w(one, 1.0), w(co, 1.0)),
+        (giant, 1.4, 1.0, ne, w(one, 1.0), w(one, 1.0)),
+        (cheb, 5.0, 1.2, other, h(1.2), w(co, 1.2)),
+        (cheb, 5.0, 0.5, other, h(0.5), w(co, 0.5)),
+        (cheb, 5.0, 1.5, other, h(1.5), h(1.5)),
+        (Kind::GiantBranch, 5.0, 0.4, other, w(he, 0.4), w(he, 0.4)),
+    ] {
+        let case = format!("{kind:?} of {m} M☉ around {core} M☉ from {source:?}");
+        let (m, core) = (SolarMasses::new(m), SolarMasses::new(core));
+        let whole_unplaced = DwarfLimitRules::Whole.unplaced(kind, m, core, source);
+        assert_eq!(whole_unplaced, whole, "{case}");
+        let held_unplaced = DwarfLimitRules::Held.unplaced(kind, m, core, source);
+        assert_eq!(held_unplaced, held, "{case}");
+    }
+}
+
+/// P11.T4's dwarf limit: over the pinned thousand the arm of 29 alone moves only pairs that merge,
+/// listed, and no pair shows a white dwarf above the Chandrasekhar mass under either arm: a pinned
+/// primary's merged dwarf is left to its pin, as version 27's `held_product` holds its unplaced
+/// product (research-leans-34 §1(b)).
+#[test]
+fn the_dwarf_limit_leaves_a_pinned_primary_to_its_pin() {
+    use super::testing::shows_a_dwarf_above_the_limit;
+
+    let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let until = 1.2e10;
+    let mut mix = Mix(0x0b1e_0001);
+    let mut moved = Vec::new();
+    for i in 0..1000 {
+        let input = pinned_pair(&mut mix, i);
+        let held = evolve(&input.clone().with_rules(held_rules), Years::new(until));
+        let arm = evolve(
+            &input.clone().with_rules(dwarf_limit_rules()),
+            Years::new(until),
+        );
+        assert!(!shows_a_dwarf_above_the_limit(&arm, until), "pair {i:04}");
+        if !same_outcome(&held, &arm) {
+            let merges =
+                |t: &BinaryTimeline| t.segments().iter().any(|s| s.kind() == SegmentKind::Merged);
+            assert!(
+                merges(&held) || merges(&arm),
+                "pair {i:04}: {}",
+                describe(&held)
+            );
+            moved.push(i);
+        }
+    }
+    assert_eq!(moved, DWARF_LIMIT_MOVERS);
+}
+
+/// The pinned pairs the dwarf limit's arm of 29 moves, as measured (2026-11-05, at generator
+/// version 27).
+const DWARF_LIMIT_MOVERS: [u32; 0] = [];
+
+/// A carbon–oxygen white dwarf of `dwarf` M☉ beside a 3 M☉ star at the start of its thermally
+/// pulsing AGB, 3,000 R☉ apart, detached, solar, with no pin, under `rules`.
+fn wind_fed_dwarf_engine(
+    dwarf: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> super::evolve::Engine {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let input = pair(3.0, dwarf, 1.0e4, 0.0, 0.02).with_rules(rules);
+    let ctx = Arc::new(Context::of(&input));
+    let track = Arc::new(crate::stellar::sse::Track::full_with(
+        SolarMasses::new(3.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+        ctx.track_options(),
+    ));
+    let at = track
+        .age_in_phase(Phase::ThermallyPulsingAgb, 0.0)
+        .expect("a 3 M☉ star has a thermally pulsing AGB");
+    let age = at + 1.0e6;
+    let giant = Member::Track {
+        track,
+        offset: super::evolve::offset_for(age, at),
+    };
+    let wd = Member::Remnant {
+        phase: Phase::CarbonOxygenWhiteDwarf,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    let k = input.orbit();
+    let orbit = LiveOrbit::new(age, 3.0e3, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(ctx, age, 1.0e10, [wd, giant], orbit, None);
+    engine.segment_start = age;
+    engine.kind = SegmentKind::Detached;
+    engine
+}
+
+/// P11.T4's dwarf limit: a carbon–oxygen dwarf of 1.439 M☉ that a 3 M☉ star's AGB wind feeds in a
+/// detached phase stops at the Chandrasekhar mass under both arms and collapses there to the
+/// 1.26 M☉ neutron star of an accretion-induced collapse, its Type Ia candidate pooled first (as
+/// first built, it grew past the limit to 1.4454 M☉ by the end of the giant's AGB).
+#[test]
+fn a_dwarf_a_wind_feeds_stops_at_the_chandrasekhar_mass() {
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+
+    let held = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    for rules in [held, dwarf_limit_rules()] {
+        let case = format!("{:?}", rules.dwarf_limit);
+        let mut engine = wind_fed_dwarf_engine(1.439, rules);
+        engine.detached_phase();
+        let [collapse] = engine.supernovae.as_slice() else {
+            panic!("{case}: one collapse, not {:?}", engine.supernovae);
+        };
+        assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
+        assert!(
+            collapse
+                .age()
+                .value()
+                .total_cmp(&WIND_FED_COLLAPSE_AGE)
+                .is_eq(),
+            "{case}: {:?}",
+            collapse.age()
+        );
+        let pooled = engine
+            .pooled
+            .expect("the dwarf's Type Ia candidate is pooled");
+        assert_eq!(pooled.channel(), IaPoolChannel::Accretion, "{case}");
+        let at = pooled.masses()[0].value();
+        assert!(
+            (at / CHANDRASEKHAR_MASS.value() - 1.0).abs() < 1e-6,
+            "{case}: a dwarf of {at} M☉ at the collapse"
+        );
+    }
+}
+
+/// The age of the wind-fed dwarf's collapse, years, as measured (2026-11-02, at generator version
+/// 25, and the same at 27).
+const WIND_FED_COLLAPSE_AGE: f64 = 480_515_539.091_214_66;
+
+/// P11.T4's dwarf limit and swollen dwarf: each arm of 29 is deterministic. The same pair, engine
+/// or swell twice under it gives the same timeline or member: an edge-lit dwarf's pair (5.43 +
+/// 1.69 M☉ at 7 d) and the wind-fed dwarf under the dwarf limit's arm alone, a fed helium dwarf's
+/// swell under the swollen dwarf's alone, and a swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d,
+/// Z = 0.004) under every 29 hold.
+#[test]
+fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
+    use super::rlof::Fed;
+    use super::star::{Kind, Member, Path};
+    use super::swollen_dwarf::SwollenDwarfRules;
+    use crate::stellar::rules::StellarRules;
+
+    let until = Years::new(1.2e10);
+    let input = pair(5.43, 1.69, 7.0, 0.0, 0.02).with_rules(dwarf_limit_rules());
+    assert_eq!(evolve(&input, until), evolve(&input, until));
+    let wind = || {
+        let mut engine = wind_fed_dwarf_engine(1.439, dwarf_limit_rules());
+        engine.detached_phase();
+        (engine.age, engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(wind(), wind());
+    let swollen = StellarRules {
+        swollen_dwarf: SwollenDwarfRules::Degenerate,
+        ..StellarRules::of_version(crate::GENERATOR_VERSION)
+    };
+    let swell = || {
+        let mut engine = fed_dwarf_engine(0.38, 0.004, swollen);
+        let (age, m) = (engine.age, 0.381);
+        engine.members[1] = Member::MainSequence {
+            helium: false,
+            mass: Path::starting(age, 0.3),
+            tau: Path::starting(age, 0.5),
+        };
+        let s = engine.structure(0, age, m, 0.0).expect("a white dwarf");
+        let fed = Fed {
+            kind: Kind::HeliumWhiteDwarf,
+            before: 0.38,
+            core_before: 0.38,
+            gained: 1.0e-3,
+            dt: 1.0e3,
+        };
+        assert!(engine.swell(0, Kind::HeliumWhiteDwarf, m, &s, fed));
+        engine.members
+    };
+    assert_eq!(swell(), swell());
+    let input = pair(1.1, 0.9, 100.0, 0.0, 0.004).with_rules(StellarRules::every_29_hold());
+    assert_eq!(evolve(&input, until), evolve(&input, until));
 }
 
 /// `MAX_SEGMENTS` at 27: the sky-light fit's system 984 of layer E's cell 48
@@ -6765,9 +7103,11 @@ fn same_outcome(a: &BinaryTimeline, b: &BinaryTimeline) -> bool {
 // --- P11.T4: the swollen helium dwarf (held at 29) ----------------------------------------------
 
 /// A helium white dwarf of `dwarf` M☉ fed by a 2.5 M☉ main-sequence donor at τ = 0.5 in
-/// transfer, at Z = 0.004 and 5 Gyr, under `rules` (`fed_engine`'s pair, under any rules).
+/// transfer, at metallicity `z` and 5 Gyr, with no pin, under `rules` (`fed_engine`'s pair, under
+/// any rules).
 fn fed_dwarf_engine(
     dwarf: f64,
+    z: f64,
     rules: crate::stellar::rules::StellarRules,
 ) -> super::evolve::Engine {
     use std::sync::Arc;
@@ -6777,7 +7117,7 @@ fn fed_dwarf_engine(
     use super::timeline::Context;
 
     let age = 5.0e9;
-    let input = pair(2.0, 2.5, 1.0, 0.0, 0.004).with_rules(rules);
+    let input = pair(2.0, 2.5, 1.0, 0.0, z).with_rules(rules);
     let k = input.orbit();
     let accretor = Member::Remnant {
         phase: Phase::HeliumWhiteDwarf,
@@ -6834,7 +7174,7 @@ fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
         dt,
     };
     let swollen = |rules, donor: f64| {
-        let mut engine = fed_dwarf_engine(dwarf, rules);
+        let mut engine = fed_dwarf_engine(dwarf, 0.004, rules);
         let age = engine.age;
         engine.members[1] = Member::MainSequence {
             helium: false,
@@ -6870,8 +7210,10 @@ fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
         );
         if degenerate {
             assert!((m0 / m_hef - 0.7).abs() < 1e-12, "{m0} against {m_hef}");
+            assert!(m0.total_cmp(&SWOLLEN_GIANT[0]).is_eq(), "{m0}");
             let core = giant.core_mass().value();
             assert!((core - dwarf).abs() <= 1e-9 * dwarf, "{core}");
+            assert!(core.total_cmp(&SWOLLEN_GIANT[1]).is_eq(), "{core}");
             assert_eq!(left, Phase::HeliumWhiteDwarf);
         } else {
             assert!(m0 > m_hef, "{m0} against {m_hef}");
@@ -6882,6 +7224,10 @@ fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
     assert!(!swells);
     assert!(engine.segments.is_empty(), "a refusal closes no segment");
 }
+
+/// The swollen giant's track's initial mass and its core at the placement, M☉, under every 29 hold
+/// (2026-11-02, at generator version 25, and the same at 27).
+const SWOLLEN_GIANT: [f64; 2] = [1.303_933_496_419_151_8, 0.379_999_999_812_082_2];
 
 /// P11.T4's swollen dwarf: two pairs whose primary leaves a helium white dwarf after a common
 /// envelope beside a lighter main-sequence companion that then overflows at its thermal rate

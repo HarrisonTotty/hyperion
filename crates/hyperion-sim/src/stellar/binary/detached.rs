@@ -721,17 +721,25 @@ impl Engine {
 
     /// The time, years, in which member `i`, a white dwarf a wind feeds at `rates` from `s`,
     /// reaches the Chandrasekhar mass, at which it stops (P11.T4's `dwarf_limit`,
-    /// [`Stop::Chandrasekhar`]); `None` for any other member.
+    /// [`Stop::Chandrasekhar`]); `None` for any other member. From 29 a carbon–oxygen or
+    /// oxygen–neon dwarf only, and none for a pinned primary whose pin is pending
+    /// (`Engine::pin_pending`).
     #[must_use]
     fn to_the_dwarf_limit(&self, i: usize, s: &Snapshot, rates: &Rates) -> Option<f64> {
         let limit = CHANDRASEKHAR_MASS.value();
+        let whole = self.ctx.rules().dwarf_limit.leaves_the_pin();
+        if whole && self.pin_pending(i) {
+            return None;
+        }
         let Member::Remnant { phase, .. } = &self.members[i] else {
             return None;
         };
+        // From 29 a helium dwarf is left out: it ignites at 0.7 M☉ (BSE section 2.6.6), far below
+        // the limit.
         let dwarf = matches!(
             phase,
-            Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
-        );
+            Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+        ) || (!whole && *phase == Phase::HeliumWhiteDwarf);
         (dwarf && rates.mass[i] > 0.0).then(|| ((limit - s.masses[i]) / rates.mass[i]).max(0.0))
     }
 

@@ -44,7 +44,7 @@ use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts};
 use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
-use super::dwarf_limit::{self, Unplaced};
+use super::dwarf_limit::{self, CoreSource, DwarfLimitRules, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
 use super::params::BinaryParams;
 use super::rlof::kelvin_helmholtz;
@@ -334,7 +334,7 @@ impl Engine {
         let age = self.age;
         let (track, offset) = self.members[i].track()?;
         let (mass, _) = self.current(i);
-        let pinned = i == 0 && self.pin_pending();
+        let pinned = self.pin_pending(i);
         let member = match track.remains_at(
             track_age,
             mass,
@@ -663,7 +663,7 @@ impl Engine {
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
                 Kind::LowMassMainSequence | Kind::MainSequence,
-            ) => self.new_star_around(Kind::PulsingAgb, total, m_hi, 1.0, 0.0, Some(hi)),
+            ) => self.new_star_around(Kind::PulsingAgb, total, m_hi, 1.0, 0.0, CoreSource::of(hi)),
             (Kind::HeliumWhiteDwarf, Kind::HeliumMainSequence) => {
                 let tau = s_lo.burnt * m_lo / total;
                 self.helium_main_sequence(total, tau)
@@ -671,7 +671,7 @@ impl Engine {
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
                 Kind::HeliumMainSequence,
-            ) => self.new_star_around(Kind::HeliumGiant, total, m_hi, 1.0, 0.0, Some(hi)),
+            ) => self.new_star_around(Kind::HeliumGiant, total, m_hi, 1.0, 0.0, CoreSource::of(hi)),
             (Kind::HeliumWhiteDwarf, Kind::HeliumWhiteDwarf) => {
                 self.pool(PooledIaEvent::new(
                     Years::new(self.age),
@@ -686,7 +686,7 @@ impl Engine {
                     IaPoolChannel::Merger,
                     masses,
                 ));
-                self.new_star_around(Kind::HeliumGiant, total, m_hi, 1.0, 0.0, Some(hi))
+                self.new_star_around(Kind::HeliumGiant, total, m_hi, 1.0, 0.0, CoreSource::of(hi))
             }
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
@@ -702,8 +702,18 @@ impl Engine {
                 } else {
                     Phase::CarbonOxygenWhiteDwarf
                 };
-                // `finish_merger` collapses a dwarf at the Chandrasekhar mass (P11.T4's fix).
-                self.white_dwarf(phase, total)
+                // `finish_merger` collapses a dwarf at the Chandrasekhar mass (P11.T4's fix), but from
+                // 29 for a pinned primary's, which collapses at once at it as before the fix.
+                let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
+                if pinned && !dwarf_limit::collapses(total) {
+                    self.white_dwarf(phase, total)
+                } else if pinned {
+                    self.finish_merger(self.white_dwarf(phase, total));
+                    self.accretion_induced_collapse(0, total);
+                    return;
+                } else {
+                    self.white_dwarf(phase, total)
+                }
             }
             (
                 Kind::NeutronStar | Kind::BlackHole,
@@ -750,8 +760,10 @@ impl Engine {
     /// A white dwarf product at or above the Chandrasekhar mass collapses at once, as an accreting
     /// one does (`Engine::accretor_events`): a Type Ia candidate is pooled unless it is oxygen–neon,
     /// with the two stars' masses before the merger, and the dwarf collapses by accretion-induced
-    /// collapse (P11.T4's fix, `dwarf_limit::collapses`).
+    /// collapse (P11.T4's fix, `dwarf_limit::collapses`); from 29 a pinned primary's product is
+    /// left to its pin ([`Engine::pin_pending`], P11.T4's `dwarf_limit`).
     fn finish_merger(&mut self, product: Member) {
+        let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
         let dwarf = if let Member::Remnant { phase, mass, .. } = &product
             && matches!(
                 phase,
@@ -760,6 +772,7 @@ impl Engine {
                     | Phase::OxygenNeonWhiteDwarf
             )
             && dwarf_limit::collapses(mass.at(self.age))
+            && !pinned
         {
             Some((*phase, mass.at(self.age)))
         } else {
@@ -1225,12 +1238,11 @@ impl Engine {
     /// places it; a star that cannot be placed becomes the remnant of its core.
     #[must_use]
     fn new_star(&self, kind: Kind, m: f64, core: f64, burnt: f64, fraction: f64) -> Member {
-        self.new_star_around(kind, m, core, burnt, fraction, None)
+        self.new_star_around(kind, m, core, burnt, fraction, CoreSource::Other)
     }
 
-    /// [`Engine::new_star`] for a product whose core is the white dwarf of kind `dwarf` it merged
-    /// from, if it is one, which types the dwarf an unplaced product leaves (P11.T4's fix,
-    /// `dwarf_limit::unplaced`).
+    /// [`Engine::new_star`] for a product whose core came from `source`, which types the dwarf an
+    /// unplaced product leaves (P11.T4's fix, [`DwarfLimitRules::unplaced`]).
     #[must_use]
     fn new_star_around(
         &self,
@@ -1239,7 +1251,7 @@ impl Engine {
         core: f64,
         burnt: f64,
         fraction: f64,
-        dwarf: Option<Kind>,
+        source: CoreSource,
     ) -> Member {
         let target = match kind {
             Kind::LowMassMainSequence | Kind::MainSequence => {
@@ -1277,11 +1289,18 @@ impl Engine {
             Kind::Massless => return Member::Gone,
         };
         self.placed_star(0, target, m, core).unwrap_or_else(|| {
-            match dwarf_limit::unplaced(kind, m, core, dwarf) {
+            // A pinned primary's product is left to its pin, its dwarf typed by the held arm and
+            // held by `held_product` (research-leans-34 §1(b)).
+            let limit = if self.pin_pending(0) {
+                DwarfLimitRules::Held
+            } else {
+                self.ctx.rules().dwarf_limit
+            };
+            match limit.unplaced(kind, SolarMasses::new(m), SolarMasses::new(core), source) {
                 Unplaced::WhiteDwarf { phase, mass } => self
-                    .held_product(target, phase, SolarMasses::new(mass))
-                    .unwrap_or_else(|| self.white_dwarf(phase, mass)),
-                Unplaced::HeliumStar { mass } => self.helium_main_sequence(mass, burnt),
+                    .held_product(target, phase, mass)
+                    .unwrap_or_else(|| self.white_dwarf(phase, mass.value())),
+                Unplaced::HeliumStar { mass } => self.helium_main_sequence(mass.value(), burnt),
             }
         })
     }
@@ -1299,7 +1318,7 @@ impl Engine {
     /// could take, so this state is a lean (2026-11-01, recorded in plan 11).
     #[must_use]
     fn held_product(&self, target: NewStar, phase: Phase, mass: SolarMasses) -> Option<Member> {
-        if !self.pin_pending() {
+        if !self.pin_pending(0) {
             return None;
         }
         let kind = WhiteDwarfCore::of(phase)?;
