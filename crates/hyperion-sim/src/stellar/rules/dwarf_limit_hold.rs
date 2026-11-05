@@ -11,8 +11,8 @@
 //!   above the Chandrasekhar mass (under the held arm some did) but a pinned primary's (design
 //!   note 16), counted apart, which `Engine::held_product` takes as at 27. Every 29 hold adds
 //!   P11.T4's holds at 29; the merger products no star holds, by what they leave; and the
-//!   swollen carbon–oxygen and oxygen–neon dwarfs that come back the other kind, none under every
-//!   29 hold.
+//!   swollen dwarfs and placed products of dwarfs that come back the other kind, none under every
+//!   29 hold; and the deaths of giants whose cores are dwarfs', by ending.
 
 use crate::planetary::testing::in_shares;
 
@@ -24,6 +24,7 @@ use crate::id::Layer;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules, unplaced_counts};
+use crate::stellar::binary::swollen_dwarf::dwarf_core_deaths;
 use crate::stellar::binary::testing::{
     dwarfs_above_the_limit, generated_pairs, pinned_primary, swollen_dwarf_kinds,
 };
@@ -66,8 +67,9 @@ fn the_dwarf_limit_is_held_only_until_the_29_bump() {
          merger, `Engine::finish_merger`, the edge-lit arm of `Engine::accretor_events` and \
          `Engine::to_the_dwarf_limit`, the brief's read of \
          `DwarfLimitRules::fitted_tables_hold`, its tripwire and its line in \
-         `stellar/rules.rs`; it keeps `DwarfLimitRules::unplaced`'s new arm and the pin's \
-         bypasses applied always, and refits the pair-light and reach tables"
+         `stellar/rules.rs`; it keeps `DwarfLimitRules::unplaced`'s new arm, \
+         `DwarfLimitRules::placed`'s record and the pin's bypasses applied always, and refits \
+         the pair-light and reach tables"
     );
     assert_eq!(version().dwarf_limit, DwarfLimitRules::Held);
     let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).dwarf_limit;
@@ -110,6 +112,10 @@ struct Figures {
     /// The same through a merger product placed on a track of its own, which the swollen dwarf's
     /// rule does not reach.
     merged: [[usize; 2]; 3],
+    /// The deaths of giants whose cores are carbon–oxygen or oxygen–neon dwarfs', by ending
+    /// (`swollen_dwarf::dwarf_core_deaths`): their tracks' own, a white dwarf of the dwarf's kind,
+    /// and an electron capture and a disruption at their tracks' deaths.
+    endings: [[usize; 4]; 3],
 }
 
 /// The census of [`PAIRS`] pairs of each of layers C, D and E in `galaxy`, each run under `rules`.
@@ -122,14 +128,16 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
         unplaced: [[0; 6]; 3],
         swollen: [[0; 2]; 3],
         merged: [[0; 2]; 3],
+        endings: [[0; 4]; 3],
     };
     for (k, layer) in [Layer::C, Layer::D, Layer::E].into_iter().enumerate() {
         let seed = CELLS_SEED + u64::try_from(k).expect("a small index");
         let pairs = generated_pairs(galaxy, layer, PAIRS, seed);
         let (co, one) = (Phase::CarbonOxygenWhiteDwarf, Phase::OxygenNeonWhiteDwarf);
         let shares = in_shares(SHARES, THREADS, |share| {
-            // The share runs on one thread, whose counter it reads before and after.
+            // The share runs on one thread, whose counters it reads before and after.
             let unplaced_before = unplaced_counts();
+            let endings_before = dwarf_core_deaths();
             let mut counts = [0_usize; 8];
             for (input, age) in pairs.iter().skip(share).step_by(SHARES) {
                 let input = input.clone().with_rules(rules);
@@ -156,9 +164,12 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
             let unplaced_after = unplaced_counts();
             let unplaced: [usize; 6] =
                 core::array::from_fn(|j| unplaced_after[j] - unplaced_before[j]);
-            (counts, unplaced)
+            let endings_after = dwarf_core_deaths();
+            let endings: [usize; 4] =
+                core::array::from_fn(|j| endings_after[j] - endings_before[j]);
+            (counts, unplaced, endings)
         });
-        for (counts, unplaced) in shares {
+        for (counts, unplaced, endings) in shares {
             figures.run[k] += counts[0];
             figures.above[k] += counts[1];
             figures.pinned[k] += counts[2];
@@ -170,6 +181,9 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
             for (total, n) in figures.unplaced[k].iter_mut().zip(unplaced) {
                 *total += n;
             }
+            for (total, n) in figures.endings[k].iter_mut().zip(endings) {
+                *total += n;
+            }
         }
     }
     figures
@@ -179,7 +193,9 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
 /// generator version 27; the 27 pin before, run [5983, 15222, 18105] and massless [149, 18, 2],
 /// was stale at version 27's base; under the held arm of version 25, 94 of layer D's pairs and 157
 /// of E's showed a dwarf above the limit; the unplaced products: no iron core, every thermally
-/// pulsing product of layer E that no star holds being a pinned primary's).
+/// pulsing product of layer E that no star holds being a pinned primary's; under every 29 hold no
+/// placed product changes kind, and the carbon–oxygen cores whose tracks would collapse disrupt at
+/// their deaths and leave nothing, which leaves both members `NoRemnant`).
 const CENSUS_FIGURES: [Figures; 2] = [
     Figures {
         run: [8_519, 17_814, 19_213],
@@ -189,15 +205,17 @@ const CENSUS_FIGURES: [Figures; 2] = [
         unplaced: [[0; 6], [0, 4, 0, 3, 0, 0], [0, 0, 0, 0, 0, 109]],
         swollen: [[0, 0], [1, 0], [0, 0]],
         merged: [[6, 0], [371, 26], [25, 0]],
+        endings: [[0; 4]; 3],
     },
     Figures {
         run: [8_519, 17_814, 19_213],
         above: [0; 3],
         pinned: [0; 3],
-        massless: [174, 20, 10],
+        massless: [174, 400, 47],
         unplaced: [[0; 6], [0, 1, 0, 6, 0, 0], [0, 0, 0, 0, 0, 109]],
         swollen: [[0; 2]; 3],
-        merged: [[6, 0], [371, 26], [25, 0]],
+        merged: [[0; 2]; 3],
+        endings: [[25, 0, 0, 0], [341, 54, 143, 381], [14, 6, 19, 37]],
     },
 ];
 
@@ -219,5 +237,11 @@ fn no_white_dwarf_passes_the_chandrasekhar_mass_under_every_27_hold() {
         figures
     });
     assert_eq!(figures[1].swollen, [[0; 2]; 3], "{:?}", figures[1]);
+    // Carbon burning is not undone: no oxygen–neon core comes back carbon–oxygen.
+    assert!(
+        figures[1].merged.iter().all(|[_, back]| *back == 0),
+        "{:?}",
+        figures[1]
+    );
     assert_eq!(figures, CENSUS_FIGURES);
 }

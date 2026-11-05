@@ -57,6 +57,14 @@
 //!   mass;
 //! - only a carbon–oxygen or oxygen–neon dwarf a wind feeds stops at the Chandrasekhar mass in a
 //!   detached phase: a helium dwarf ignites at 0.7 M☉ (BSE section 2.6.6), far below it;
+//! - a product a star of its kind can hold, of a carbon–oxygen or oxygen–neon dwarf parent, keeps
+//!   that dwarf's kind ([`DwarfLimitRules::placed`], `Engine::dwarf_cores`; oxygen–neon if either
+//!   parent's core is), so that its strip, its own death and a later unplaced product take it,
+//!   whatever its track's `Mc,BAGB` would type it: BSE carries no composition and re-types the
+//!   core, but carbon burning is not undone, and a cold carbon–oxygen core a shell grows below
+//!   about 2 × 10⁻⁶ M☉ yr⁻¹ ignites carbon at its centre at the Chandrasekhar mass, not off it
+//!   (Nomoto and Iben 1985, ApJ 297, 531; Kawai, Saio and Nomoto 1987, ApJ 315, 229), as on the
+//!   thermally pulsing AGB (fix-p11-placed-product-kind, research-leans-35 §7);
 //! - a thermally pulsing AGB product whose `Mc,BAGB`, as its placement solves it back, is 2.25 M☉
 //!   or more (a carbon–oxygen core of 1.438 M☉ or more; the engine's `IRON_CORE_MC_BAGB`) and that
 //!   merged from no dwarf has an iron core (HPT section 6), which BSE section 2.7.4 makes a neutron
@@ -88,8 +96,8 @@ use super::star::Kind;
 /// [`DwarfLimitRules::Held`] arm and its branches, the stellar rules' `dwarf_limit` field and its
 /// reads in the engine, the brief's read of [`DwarfLimitRules::fitted_tables_hold`] and the
 /// tripwire (`the_dwarf_limit_is_held_only_until_the_29_bump`). It keeps, applied always, the
-/// typing of [`DwarfLimitRules::unplaced`]'s new arm, the pin's bypasses and
-/// `Engine::iron_core_collapse`, and refits the
+/// typing of [`DwarfLimitRules::unplaced`]'s new arm, the record of [`DwarfLimitRules::placed`],
+/// the pin's bypasses and `Engine::iron_core_collapse`, and refits the
 /// pair-light and reach tables, which the engine's runs fit.
 pub(crate) const DWARF_LIMIT_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
@@ -187,7 +195,7 @@ pub(crate) fn unplaced_counts() -> [usize; 6] {
 /// oxygen–neon white dwarf, whose product's dwarf is of its kind whatever its mass, since gaining
 /// and losing a hydrogen envelope does not change a core's composition, or anything else. The
 /// engine keeps it too for the giant each dwarf swells into, whose every exit takes it
-/// (`Engine::swollen_cores`; P11.T4's swollen dwarf from `SWOLLEN_DWARF_VERSION`).
+/// (`Engine::dwarf_cores`; P11.T4's swollen dwarf from `SWOLLEN_DWARF_VERSION`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CoreSource {
     /// A carbon–oxygen white dwarf.
@@ -199,6 +207,18 @@ pub(super) enum CoreSource {
 }
 
 impl CoreSource {
+    /// The source of a product whose core is both this one's and `other`'s: oxygen–neon if either
+    /// is (carbon burning is not undone), carbon–oxygen if either is otherwise (P11.T4's dwarf
+    /// limit; research-leans-35 §7).
+    #[must_use]
+    pub(super) const fn with(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::OxygenNeonDwarf, _) | (_, Self::OxygenNeonDwarf) => Self::OxygenNeonDwarf,
+            (Self::CarbonOxygenDwarf, _) | (_, Self::CarbonOxygenDwarf) => Self::CarbonOxygenDwarf,
+            (Self::Other, Self::Other) => Self::Other,
+        }
+    }
+
     /// The source of a product whose core is a star of `kind`.
     #[must_use]
     pub(super) fn of(kind: Kind) -> Self {
@@ -264,6 +284,19 @@ impl CoreSource {
 }
 
 impl DwarfLimitRules {
+    /// The dwarf whose kind a merger's product that a star of its kind can hold keeps, its core
+    /// from `source` (`Engine::dwarf_cores`): `source` under [`DwarfLimitRules::Whole`], since a
+    /// core keeps its composition whatever its placement's `Mc,BAGB` would type it, and none under
+    /// [`DwarfLimitRules::Held`], whose product takes its track's kind as BSE's does (BSE carries
+    /// no composition).
+    #[must_use]
+    pub(super) const fn placed(self, source: CoreSource) -> CoreSource {
+        match self {
+            Self::Held => CoreSource::Other,
+            Self::Whole => source,
+        }
+    }
+
     /// What the product of `kind`, mass `m` and core `core` from `source` leaves where no star of
     /// its kind has such a core: see the module documentation.
     #[must_use]

@@ -26,7 +26,7 @@ fn the_swollen_dwarf_is_held_only_until_the_29_bump() {
          `StellarRules::swollen_dwarf` and the swell's two reads of it, the brief's read of \
          `SwollenDwarfRules::fitted_tables_hold`, this module and its line in \
          `stellar/rules.rs`; it keeps `Engine::degenerate_giant`, `sse::degenerate_giant_mass`, \
-         `Engine::feeds_a_swollen_dwarf`, `Engine::swollen_cores` at every swell and \
+         `Engine::feeds_a_swollen_dwarf`, `Engine::dwarf_cores` at every swell and \
          `SwollenDeath` applied always, and refits the pair-light and reach tables"
     );
     assert_eq!(version().swollen_dwarf, SwollenDwarfRules::AtBase);

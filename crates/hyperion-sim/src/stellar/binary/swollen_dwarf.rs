@@ -26,10 +26,11 @@
 //! comes back carbon–oxygen, as does 1 of the dwarf-limit census's swollen dwarfs of layer D the
 //! other way (2026-11-03). Gaining and losing a hydrogen envelope does not change a core's
 //! composition, so from 29 the swell records the dwarf's kind for its member
-//! (`Engine::swollen_cores`, fix-p11-swollen-dwarf-kind), and every exit of the giant takes it:
+//! (`Engine::dwarf_cores`, fix-p11-swollen-dwarf-kind), and every exit of the giant takes it:
 //! its strip leaves a dwarf of that kind, a merger product no star holds made from it is one
 //! (`dwarf_limit::CoreSource`), and its own track's death ends as the dwarf's core would
-//! ([`SwollenDeath`]). A merger product placed on a track of its own is that track's, as before.
+//! ([`SwollenDeath`]). A merger product placed on a track of its own keeps it too, from the dwarf
+//! limit's arm (`dwarf_limit::DwarfLimitRules::placed`, fix-p11-placed-product-kind).
 
 use crate::GeneratorVersion;
 use crate::stellar::Phase;
@@ -50,7 +51,7 @@ use super::dwarf_limit::CoreSource;
 /// [`SwollenDwarfRules::fitted_tables_hold`], and the tripwire
 /// (`the_swollen_dwarf_is_held_only_until_the_29_bump`). It keeps `Engine::degenerate_giant`,
 /// `sse::degenerate_giant_mass`, `Engine::feeds_a_swollen_dwarf`, the record of the dwarf's kind
-/// at every swell (`Engine::swollen_cores`) and [`SwollenDeath`] applied always, and refits the
+/// at every swell (`Engine::dwarf_cores`) and [`SwollenDeath`] applied always, and refits the
 /// pair-light and reach tables, which the engine's runs fit.
 pub(crate) const SWOLLEN_DWARF_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
@@ -130,4 +131,60 @@ impl SwollenDeath {
             }
         }
     }
+}
+
+impl SwollenDeath {
+    /// Counts the death of a giant whose core is a dwarf's on this thread ([`dwarf_core_deaths`]).
+    #[cfg(test)]
+    pub(super) fn count(self) {
+        count_dwarf_core_death(match self {
+            Self::Own => Ending::Own,
+            Self::WhiteDwarf(_) => Ending::WhiteDwarf,
+            Self::ElectronCapture => Ending::ElectronCapture,
+            Self::Disruption => Ending::Disruption,
+        });
+    }
+}
+
+/// How a giant whose core is a dwarf's ended ([`dwarf_core_deaths`]'s columns, in order).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ending {
+    /// Its track's own death.
+    Own,
+    /// A white dwarf of the dwarf's kind at its track's death.
+    WhiteDwarf,
+    /// An electron capture at its track's death.
+    ElectronCapture,
+    /// A disruption at its track's death.
+    Disruption,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// This thread's deaths of giants whose cores are dwarfs' since it started
+    /// ([`dwarf_core_deaths`]).
+    static DWARF_CORE_DEATHS: core::cell::Cell<[usize; 4]> =
+        const { core::cell::Cell::new([0; 4]) };
+}
+
+/// Counts a death of `ending` ([`dwarf_core_deaths`]) on this thread.
+#[cfg(test)]
+pub(super) fn count_dwarf_core_death(ending: Ending) {
+    DWARF_CORE_DEATHS.with(|counts| {
+        let mut c = counts.get();
+        c[ending as usize] += 1;
+        counts.set(c);
+    });
+}
+
+/// The deaths of giants whose cores are carbon–oxygen or oxygen–neon dwarfs'
+/// (`Engine::dwarf_cores`) this thread's engines have acted on since it started, by ending: their
+/// tracks' own, a white
+/// dwarf of the dwarf's kind, and an electron capture and a disruption at their tracks' deaths
+/// ([`SwollenDeath`]), a test build's counter for the dwarf limit's census ([`Ending`]'s order).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn dwarf_core_deaths() -> [usize; 4] {
+    DWARF_CORE_DEATHS.with(core::cell::Cell::get)
 }

@@ -6734,7 +6734,7 @@ fn unplaced_product(
         },
         source,
     );
-    engine.finish_merger_with(product, super::dwarf_limit::CoreSource::Other);
+    engine.finish_merger_with(product);
     let state = engine.members[0].state_at(&engine.ctx, 0, engine.age);
     (engine, state)
 }
@@ -6920,6 +6920,8 @@ fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
         (agb, 5.0, 1.2, cod, w(co, 1.2), w(one, 1.2)),
         (agb, 5.0, 1.5, cod, w(co, 1.5), w(one, 1.5)),
         (giant, 1.7, 1.0, cod, w(co, 1.0), w(co, 1.0)),
+        (giant, 1.7, 1.43, other, w(one, 1.43), w(one, 1.43)),
+        (giant, 2.0, 1.5, ne, w(one, 1.5), w(one, 1.5)),
         (giant, 1.4, 1.2, other, w(co, 1.2), w(one, 1.2)),
         (giant, 1.7, 1.0, other, w(one, 1.0), w(co, 1.0)),
         (giant, 1.4, 1.0, ne, w(one, 1.0), w(one, 1.0)),
@@ -6937,13 +6939,14 @@ fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
     }
 }
 
-/// P11.T4's dwarf limit: over the pinned thousand the arm of 29 alone moves only pairs that merge,
-/// listed, and no pair shows a white dwarf above the Chandrasekhar mass under either arm: a pinned
-/// primary's merged dwarf is left to its pin, as version 27's `held_product` holds its unplaced
-/// product (research-leans-34 §1(b)).
+/// P11.T4's dwarf limit: over the pinned thousand the arm of 29 alone moves only pairs that place
+/// a merger product of a carbon–oxygen or oxygen–neon dwarf, which keeps the dwarf's kind
+/// (fix-p11-placed-product-kind), listed, and no pair shows a white dwarf above the Chandrasekhar
+/// mass under either arm: a pinned primary's merged dwarf is left to its pin, as version 27's
+/// `held_product` holds its unplaced product (research-leans-34 §1(b)).
 #[test]
 fn the_dwarf_limit_leaves_a_pinned_primary_to_its_pin() {
-    use super::testing::shows_a_dwarf_above_the_limit;
+    use super::testing::{places_a_dwarf_s_product, shows_a_dwarf_above_the_limit};
 
     let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
     let until = 1.2e10;
@@ -6951,18 +6954,23 @@ fn the_dwarf_limit_leaves_a_pinned_primary_to_its_pin() {
     let mut moved = Vec::new();
     for i in 0..1000 {
         let input = pinned_pair(&mut mix, i);
+        let endings = super::swollen_dwarf::dwarf_core_deaths();
         let held = evolve(&input.clone().with_rules(held_rules), Years::new(until));
+        // Under the held arms no star's core is ever a dwarf's.
+        assert_eq!(
+            super::swollen_dwarf::dwarf_core_deaths(),
+            endings,
+            "pair {i:04}"
+        );
         let arm = evolve(
             &input.clone().with_rules(dwarf_limit_rules()),
             Years::new(until),
         );
         assert!(!shows_a_dwarf_above_the_limit(&arm, until), "pair {i:04}");
         if !same_outcome(&held, &arm) {
-            let merges =
-                |t: &BinaryTimeline| t.segments().iter().any(|s| s.kind() == SegmentKind::Merged);
             assert!(
-                merges(&held) || merges(&arm),
-                "pair {i:04}: {}",
+                places_a_dwarf_s_product(&held),
+                "pair {i:04} moves with no dwarf's product: {}",
                 describe(&held)
             );
             moved.push(i);
@@ -6971,9 +6979,12 @@ fn the_dwarf_limit_leaves_a_pinned_primary_to_its_pin() {
     assert_eq!(moved, DWARF_LIMIT_MOVERS);
 }
 
-/// The pinned pairs the dwarf limit's arm of 29 moves, as measured (2026-11-05, at generator
-/// version 27).
-const DWARF_LIMIT_MOVERS: [u32; 0] = [];
+/// The pinned pairs the dwarf limit's arm of 29 moves, each placing a dwarf's merger product, as
+/// measured (2026-11-05, at generator version 27; at 25 0407 too).
+const DWARF_LIMIT_MOVERS: [u32; 34] = [
+    24, 29, 59, 80, 151, 170, 174, 181, 246, 287, 288, 293, 316, 371, 419, 422, 426, 466, 475, 488,
+    528, 546, 576, 665, 719, 760, 763, 766, 800, 834, 862, 864, 916, 988,
+];
 
 /// A carbon–oxygen white dwarf of `dwarf` M☉ beside a 3 M☉ star at the start of its thermally
 /// pulsing AGB, 3,000 R☉ apart, detached, solar, with no pin, under `rules`.
@@ -7063,9 +7074,9 @@ const WIND_FED_COLLAPSE_AGE: f64 = 480_515_539.091_214_66;
 /// P11.T4's dwarf limit and swollen dwarf: each arm of 29 is deterministic. The same pair, engine
 /// or swell twice under it gives the same timeline or member: an edge-lit dwarf's pair (5.43 +
 /// 1.69 M☉ at 7 d), an unplaced product's iron core and the wind-fed dwarf under the dwarf limit's
-/// arm alone, a fed helium dwarf's
-/// swell under the swollen dwarf's alone, and a swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d,
-/// Z = 0.004) under every 29 hold.
+/// arm alone, a fed helium dwarf's swell and a carbon–oxygen and an oxygen–neon dwarf's giant with
+/// its kind under the swollen dwarf's alone, and a swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d,
+/// Z = 0.004), pinned pair 0080 and an oxygen–neon dwarf's placed product under every 29 hold.
 #[test]
 fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
     use super::rlof::Fed;
@@ -7119,6 +7130,28 @@ fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
     assert_eq!(swell(), swell());
     let input = pair(1.1, 0.9, 100.0, 0.0, 0.004).with_rules(StellarRules::every_29_hold());
     assert_eq!(evolve(&input, until), evolve(&input, until));
+    for (phase, dwarf) in [
+        (Phase::OxygenNeonWhiteDwarf, 1.07),
+        (Phase::CarbonOxygenWhiteDwarf, 1.25),
+    ] {
+        let swollen_kind = || {
+            let engine = swollen_dwarf_engine(phase, dwarf, 0.02, swollen);
+            (engine.members, engine.dwarf_cores)
+        };
+        assert_eq!(swollen_kind(), swollen_kind(), "{phase:?}");
+    }
+    let input = pinned_pair_number(80).with_rules(StellarRules::every_29_hold());
+    assert_eq!(evolve(&input, until), evolve(&input, until));
+    let placed = || {
+        let engine = placed_product_engine(
+            Phase::OxygenNeonWhiteDwarf,
+            1.07,
+            0.02,
+            StellarRules::every_29_hold(),
+        );
+        (engine.members, engine.dwarf_cores)
+    };
+    assert_eq!(placed(), placed());
 }
 
 /// `MAX_SEGMENTS` at 27: the sky-light fit's system 984 of layer E's cell 48
@@ -7588,7 +7621,6 @@ fn a_swollen_carbon_oxygen_dwarf_s_giant_disrupts_where_its_track_captures_elect
 #[test]
 fn an_unplaced_product_of_a_swollen_dwarf_keeps_its_kind() {
     use super::common_envelope::CoalescedProduct;
-    use super::dwarf_limit::CoreSource;
     use super::star::Kind;
     use crate::stellar::remnant::collapse::electron_capture_remnant;
     use crate::stellar::rules::StellarRules;
@@ -7599,7 +7631,7 @@ fn an_unplaced_product_of_a_swollen_dwarf_keeps_its_kind() {
     ] {
         let case = format!("{phase:?} of {dwarf} M☉");
         let mut engine = swollen_dwarf_engine(phase, dwarf, 0.02, StellarRules::every_29_hold());
-        let source = engine.swollen_cores[0];
+        let source = engine.dwarf_cores[0];
         assert_eq!(source.dwarf(), Some(phase), "{case}");
         let product = engine.product_member(
             CoalescedProduct::Star {
@@ -7611,13 +7643,156 @@ fn an_unplaced_product_of_a_swollen_dwarf_keeps_its_kind() {
             },
             source,
         );
-        engine.finish_merger_with(product, CoreSource::Other);
+        engine.finish_merger_with(product);
         let [collapse] = engine.supernovae.as_slice() else {
             panic!("{case}: one collapse, not {:?}", engine.supernovae);
         };
         assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
         assert_eq!(engine.pooled.is_some(), pooled, "{case}");
     }
+}
+
+// --- P11.T4: the placed product's kind and the helium product's core (held at 29) -------------
+
+/// A white dwarf of `phase` and `dwarf` M☉ merged with `fed_dwarf_engine`'s 2.5 M☉ main-sequence
+/// star at metallicity `z` under `rules` (BSE table 2: a thermally pulsing AGB star around the
+/// dwarf), placed on a track by its core.
+fn placed_product_engine(
+    phase: Phase,
+    dwarf: f64,
+    z: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> super::evolve::Engine {
+    use super::star::{Member, Path};
+
+    let mut engine = fed_dwarf_engine(dwarf, z, rules);
+    let age = engine.age;
+    engine.members[0] = Member::Remnant {
+        phase,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    engine.mix();
+    assert!(
+        matches!(engine.members[0], Member::Shaped { .. }) && engine.members[1].is_gone(),
+        "{phase:?} of {dwarf} M☉: a placed product, not {:?}",
+        engine.members
+    );
+    engine
+}
+
+/// P11.T4's dwarf limit: a placed merger product of a carbon–oxygen or oxygen–neon dwarf and a
+/// main-sequence star (BSE table 2, 11 or 12 + 1 → 6) keeps the dwarf's kind under every 29 hold,
+/// whatever its track's `Mc,BAGB` (research-leans-35 §7). An oxygen–neon dwarf of 1.07 M☉ is placed
+/// on a track whose `Mc,BAGB`, 1.41 M☉, would type it carbon–oxygen, and a carbon–oxygen one of
+/// 1.25 M☉ on one whose 1.82 M☉ would type it oxygen–neon: under the version's rules the strip
+/// and the track's death leave the track's kind, under every 29 hold the dwarf's. A carbon–oxygen
+/// one of 1.43 M☉ at Z = 0.004 is placed on a 7.41 M☉ track that collapses by electron capture at
+/// its death: under every 29 hold its carbon–oxygen core takes the carbon–oxygen ending there, a
+/// disruption that leaves nothing, not a neutron star.
+#[test]
+fn a_placed_product_of_a_dwarf_keeps_its_kind() {
+    use super::star::Member;
+    use crate::stellar::rules::StellarRules;
+
+    let version = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let every_29 = StellarRules::every_29_hold();
+    let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
+    for (phase, dwarf, z, held, kept) in [
+        (one, 1.07, 0.02, co, one),
+        (co, 1.25, 0.02, one, co),
+        (co, 1.43, 0.004, Phase::NeutronStar, Phase::NoRemnant),
+    ] {
+        for (rules, kind) in [(version, held), (every_29, kept)] {
+            let case = format!("{phase:?} of {dwarf} M☉ at Z = {z}, {kind:?}");
+            let mut engine = placed_product_engine(phase, dwarf, z, rules);
+            if matches!(
+                kind,
+                Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+            ) {
+                let (stripped, _) = engine.stripped_member(0);
+                let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
+                assert_eq!(left, kind, "{case}: stripped");
+            }
+            let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+                panic!("{case}: a giant the binary carries");
+            };
+            let death = track.death().expect("a track built in full");
+            engine.age = offset + death.age().value();
+            engine.die(0);
+            let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+            assert_eq!(dead.phase(), kind, "{case}: dead, {dead:?}");
+            assert!(engine.pooled.is_none(), "{case}");
+        }
+    }
+}
+
+/// P11.T4's dwarf limit: a placed product's core is a dwarf's where either parent's is, oxygen–neon
+/// if either is (carbon burning is not undone), and the held arm keeps none.
+#[test]
+fn a_placed_product_s_dwarf_is_either_parent_s() {
+    use super::dwarf_limit::{CoreSource, DwarfLimitRules};
+
+    let (co, one, other) = (
+        CoreSource::CarbonOxygenDwarf,
+        CoreSource::OxygenNeonDwarf,
+        CoreSource::Other,
+    );
+    for (a, b, both) in [
+        (one, co, one),
+        (co, one, one),
+        (one, other, one),
+        (other, co, co),
+        (co, co, co),
+        (other, other, other),
+    ] {
+        assert_eq!(a.with(b), both, "{a:?} with {b:?}");
+        assert_eq!(DwarfLimitRules::Whole.placed(both), both);
+        assert_eq!(DwarfLimitRules::Held.placed(both), other);
+    }
+}
+
+/// P11.T4's dwarf limit: a strip keeps a star's dwarf core where it leaves a star and gives it to
+/// the white dwarf it leaves. An early-AGB product of a carbon–oxygen dwarf's (4 M☉ around a
+/// 1.8 M☉ helium core) is stripped to its naked helium giant, which keeps the record; an
+/// oxygen–neon dwarf's placed product is stripped to an oxygen–neon dwarf, whose own phase holds
+/// the kind, and the record goes.
+#[test]
+fn a_strip_keeps_a_dwarf_core_where_it_leaves_a_star() {
+    use super::common_envelope::CoalescedProduct;
+    use super::dwarf_limit::CoreSource;
+    use super::star::{Kind, Member};
+    use crate::stellar::rules::StellarRules;
+
+    let every_29 = StellarRules::every_29_hold();
+    let mut engine = fed_dwarf_engine(0.6, 0.02, every_29);
+    let product = engine.product_member(
+        CoalescedProduct::Star {
+            kind: Kind::EarlyAgb,
+            mass: 4.0,
+            core: 1.8,
+            burnt: 0.7,
+            fraction: 0.0,
+        },
+        CoreSource::CarbonOxygenDwarf,
+    );
+    engine.finish_merger_with(product);
+    assert!(
+        matches!(engine.members[0], Member::Shaped { .. }),
+        "a placed product"
+    );
+    assert_eq!(engine.dwarf_cores[0], CoreSource::CarbonOxygenDwarf);
+    engine.strip(0);
+    let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert!(left.phase().is_living(), "a naked helium star: {left:?}");
+    assert_eq!(engine.dwarf_cores[0], CoreSource::CarbonOxygenDwarf);
+    let mut engine = placed_product_engine(Phase::OxygenNeonWhiteDwarf, 1.07, 0.02, every_29);
+    assert_eq!(engine.dwarf_cores[0], CoreSource::OxygenNeonDwarf);
+    engine.strip(0);
+    let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(left.phase(), Phase::OxygenNeonWhiteDwarf);
+    assert_eq!(engine.dwarf_cores[0], CoreSource::Other);
 }
 
 /// P11.T4's swollen dwarf: how a swollen dwarf's giant ends where its own track dies

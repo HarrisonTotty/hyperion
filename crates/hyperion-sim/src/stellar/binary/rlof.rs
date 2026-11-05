@@ -89,7 +89,7 @@ use crate::stellar::sse::{self, NewStar, Structure, Track};
 use crate::units::{SolarMasses, Years};
 
 use super::detached::{Snapshot, orbital_momentum, semi_major_axis};
-use super::dwarf_limit::{self, CoreSource};
+use super::dwarf_limit;
 use super::evolve::{Engine, roche_lobe};
 use super::heavy_donor;
 use super::ns_accretion::NS_ACCRETION_EFFICIENCY;
@@ -1289,7 +1289,8 @@ impl Engine {
                 let accretor = self.members[a_idx].restarted(self.age);
                 let mut accretor = accretor;
                 accretor.record(self.age, ma + md, ta);
-                self.finish_merger_with(accretor.into(), self.swollen_cores[a_idx]);
+                let source = self.dwarf_cores[a_idx];
+                self.finish_merger_with(super::common_envelope::Product::Member(accretor, source));
                 true
             }
             Member::MainSequence { helium: false, .. } if md < sse::MIN_INITIAL_MASS.value() => {
@@ -1351,7 +1352,7 @@ impl Engine {
     ///    inside the mass to the step's end, so that the next step does not strip the giant again
     ///    (`hrdiag.f` 357–367, P11.T4.g's strip);
     /// 4. the segment is closed and the member set, a carbon–oxygen or oxygen–neon dwarf's giant
-    ///    keeping the dwarf's kind from version 29 ([`Engine::swollen_cores`], P11.T4's
+    ///    keeping the dwarf's kind from version 29 ([`Engine::dwarf_cores`], P11.T4's
     ///    `swollen_dwarf`).
     ///
     /// A refusal at any step leaves the member as it is, with the step's mass (for a helium star,
@@ -1419,12 +1420,13 @@ impl Engine {
         if !(later - now < net_gain && later < m) {
             return false;
         }
+        let source = self.dwarf_core(i, kind);
         self.close_segment();
         self.set_member(i, member);
-        // From 29 a carbon–oxygen or oxygen–neon dwarf's giant keeps the dwarf's kind
+        // From 29 the giant keeps the kind of the carbon–oxygen or oxygen–neon dwarf its core is
         // (`swollen_dwarf`, P11.T4's fix).
         if self.ctx.rules().swollen_dwarf == SwollenDwarfRules::Degenerate {
-            self.swollen_cores[i] = CoreSource::of(kind);
+            self.dwarf_cores[i] = source;
         }
         true
     }

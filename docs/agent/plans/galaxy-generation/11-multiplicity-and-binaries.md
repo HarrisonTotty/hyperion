@@ -7665,3 +7665,12 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     exit of the giant takes it: its strip, a merger it survives as itself, an unplaced product made
     from it, and its own death (`SwollenDeath`). Pinned pair 0080's ONe dwarf no longer strips back
     to CO.
+  - From fix-p11-placed-product-kind (dwarf limit at 29): a placed merger product of a CO or ONe
+    dwarf parent keeps the dwarf's kind (`DwarfLimitRules::placed`, `CoreSource::with`; ONe if
+    either parent's core is); `swollen_cores` is now `Engine::dwarf_cores`, and
+    `common_envelope::Product::Member` carries the `CoreSource`. A kept CO core whose track would
+    collapse disrupts at the track's death and leaves nothing (research-leans-35 §7).
+  - A giant's own ONe-typing track counts for a product's core only where no dwarf's core is
+    recorded for it: as first built, a swollen CO dwarf placed on an ONe-typing track (a 0.774 M☉
+    core on a 6.54 M☉ track, pinned pair 0417) came back ONe through a merger. No placed product
+    changes kind in the census now (4 in layer D at 25, 109 at 27 before the fix).

@@ -382,8 +382,8 @@ impl Engine {
                 last_luminosity,
                 ..
             } => {
-                // A swollen dwarf's giant leaves the dwarf's kind (`swollen_dwarf`, P11.T4's fix).
-                let phase = self.swollen_cores[i].dwarf_phase(phase);
+                // A star whose core is a dwarf's leaves the dwarf's kind (P11.T4's fixes).
+                let phase = self.dwarf_cores[i].dwarf_phase(phase);
                 Member::Remnant {
                     phase,
                     birth: age,
@@ -408,13 +408,40 @@ impl Engine {
         }
     }
 
-    /// Sets member `i` to what its strip leaves, `member`: a bare core that dies at once
-    /// (`collapses`) keeps a swollen dwarf's kind for its death ([`Engine::swollen_cores`]).
+    /// Sets member `i` to what its strip leaves, `member`: a star whose core is a dwarf's
+    /// ([`Engine::dwarf_cores`]) keeps that kind where the strip leaves a star, living or a bare
+    /// core that dies at once (`collapses`), and gives it to a white dwarf it leaves.
     fn set_stripped(&mut self, i: usize, member: Member, collapses: bool) {
-        let source = self.swollen_cores[i];
+        let source = self.dwarf_cores[i];
+        let dwarf = matches!(member, Member::Remnant { .. }) && !collapses;
         self.set_member(i, member);
-        if collapses {
-            self.swollen_cores[i] = source;
+        if !dwarf {
+            self.dwarf_cores[i] = source;
+        }
+    }
+
+    /// Whether member `i`, of type `kind`, is a giant whose own track types its carbon–oxygen core
+    /// oxygen–neon (a thermally pulsing AGB star of `Mc,BAGB`, or a helium giant of mass, 1.6 M☉
+    /// or more; HPT sections 6.1 and 6.2.1), which a merger product's core is too.
+    #[must_use]
+    fn own_oxygen_neon_core(&self, i: usize, kind: Kind) -> bool {
+        // A giant whose core is a dwarf's (a swollen dwarf's, a placed product's) has that core, not
+        // its track's: a swell places a carbon–oxygen dwarf's core on whatever track holds it.
+        self.dwarf_cores[i] == CoreSource::Other
+            && matches!(kind, Kind::PulsingAgb | Kind::HeliumGap | Kind::HeliumGiant)
+            && self.members[i]
+                .track()
+                .is_some_and(|(track, _)| track.types_oxygen_neon())
+    }
+
+    /// The white dwarf whose core member `i`, of type `kind`, is: its own if it is a
+    /// carbon–oxygen or oxygen–neon dwarf, the one its giant's core came from otherwise
+    /// ([`Engine::dwarf_cores`]).
+    #[must_use]
+    pub(super) fn dwarf_core(&self, i: usize, kind: Kind) -> CoreSource {
+        match CoreSource::of(kind) {
+            CoreSource::Other => self.dwarf_cores[i],
+            source @ (CoreSource::CarbonOxygenDwarf | CoreSource::OxygenNeonDwarf) => source,
         }
     }
 
@@ -439,21 +466,24 @@ impl Engine {
             self.mix();
             return;
         };
+        // The product's core is both members' (BSE section 2.7.1): a dwarf's where either is, and
+        // oxygen–neon where either's is, a giant's own included (research-leans-35 §7).
+        let parents = [(d, remains.s1.kind), (1 - d, remains.s2.kind)];
+        let source = self
+            .dwarf_core(d, remains.s1.kind)
+            .with(self.dwarf_core(1 - d, remains.s2.kind));
+        let source = if source == CoreSource::CarbonOxygenDwarf
+            && parents
+                .into_iter()
+                .any(|(i, kind)| self.own_oxygen_neon_core(i, kind))
+        {
+            CoreSource::OxygenNeonDwarf
+        } else {
+            source
+        };
         let product = coalesced_product(&remains, self.ctx.giant_exponent());
-        let product = self.product_member(product, self.merged_core_source(d));
+        let product = self.product_member(product, source);
         self.finish_merger(product);
-    }
-
-    /// The dwarf the core of a common envelope's merger product came from, whose core is both
-    /// members' cores: a swollen dwarf's giant's ([`Engine::swollen_cores`]), member `first`'s
-    /// before the other's (lean, 2026-11-03), or [`CoreSource::Other`].
-    #[must_use]
-    fn merged_core_source(&self, first: usize) -> CoreSource {
-        [first, 1 - first]
-            .into_iter()
-            .map(|i| self.swollen_cores[i])
-            .find(|&source| source != CoreSource::Other)
-            .unwrap_or(CoreSource::Other)
     }
 
     /// What a coalescence in a common envelope leaves, from what [`coalesced_product`] gives:
@@ -658,7 +688,7 @@ impl Engine {
             // its dwarf's kind.
             let k = usize::from(self.members[0].is_gone());
             let survivor = self.members[k].clone();
-            self.finish_merger_keeping(survivor.into(), self.swollen_cores[k]);
+            self.finish_merger(Product::Member(survivor, self.dwarf_cores[k]));
             return;
         };
         let (k0, k1) = (Kind::of(a.state.phase(), m0), Kind::of(b.state.phase(), m1));
@@ -772,22 +802,16 @@ impl Engine {
                     s_hi.state.core_mass().value(),
                     s_hi.burnt,
                     s_hi.state.phase_fraction(),
-                    self.swollen_cores[first],
+                    self.dwarf_core(first, hi),
                 )
             }
         };
         self.finish_merger(product);
     }
 
-    /// Records the merger as [`Engine::finish_merger_keeping`] does, for a product built by the
-    /// caller.
-    pub(super) fn finish_merger_with(&mut self, product: Product, source: CoreSource) {
-        self.finish_merger_keeping(product, source);
-    }
-
-    /// [`Engine::finish_merger_keeping`] for a product that is no swollen dwarf's giant.
-    fn finish_merger(&mut self, product: Product) {
-        self.finish_merger_keeping(product, CoreSource::Other);
+    /// Records the merger as [`Engine::finish_merger`] does, for a product built by the caller.
+    pub(super) fn finish_merger_with(&mut self, product: Product) {
+        self.finish_merger(product);
     }
 
     /// Records the merger: `product` in the primary's place, nothing in the secondary's, no orbit.
@@ -798,12 +822,14 @@ impl Engine {
     /// collapse (P11.T4's fix, `dwarf_limit::collapses`); from 29 a pinned primary's product is
     /// left to its pin ([`Engine::pin_pending`], P11.T4's `dwarf_limit`), and an unplaced product's
     /// iron core ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]),
-    /// pooling no candidate. From 29 a swollen dwarf's giant that merges as itself keeps its
-    /// dwarf's kind, `source` ([`Engine::swollen_cores`], P11.T4's `swollen_dwarf`).
-    fn finish_merger_keeping(&mut self, product: Product, source: CoreSource) {
-        let (product, iron_core) = match product {
-            Product::Member(member) => (member, None),
-            Product::IronCore { co_core, mass } => (Member::Gone, Some((co_core, mass))),
+    /// pooling no candidate. From 29 a product whose core is a carbon–oxygen or oxygen–neon dwarf's
+    /// keeps that kind ([`Engine::dwarf_cores`]).
+    fn finish_merger(&mut self, product: Product) {
+        let (product, source, iron_core) = match product {
+            Product::Member(member, source) => (member, source, None),
+            Product::IronCore { co_core, mass } => {
+                (Member::Gone, CoreSource::Other, Some((co_core, mass)))
+            }
         };
         let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
         let dwarf = if let Member::Remnant { phase, mass, .. } = &product
@@ -823,7 +849,7 @@ impl Engine {
         let masses = dwarf.map(|_| [0, 1].map(|i| SolarMasses::new(self.current(i).0)));
         self.close_segment();
         self.set_member(0, product);
-        self.swollen_cores[0] = source;
+        self.dwarf_cores[0] = source;
         self.set_member(1, Member::Gone);
         self.orbit = None;
         self.kind = SegmentKind::Merged;
@@ -1288,8 +1314,9 @@ impl Engine {
         self.new_star_around(kind, m, core, burnt, fraction, CoreSource::Other)
     }
 
-    /// [`Engine::new_star`] for a product whose core came from `source`, which types the dwarf an
-    /// unplaced product leaves (P11.T4's fix, [`DwarfLimitRules::unplaced`]).
+    /// [`Engine::new_star`] for a product whose core came from `source`: from version 29 it types
+    /// the dwarf an unplaced product leaves ([`DwarfLimitRules::unplaced`]), and a placed
+    /// product keeps its kind ([`DwarfLimitRules::placed`], [`Engine::dwarf_cores`]).
     #[must_use]
     fn new_star_around(
         &self,
@@ -1338,9 +1365,6 @@ impl Engine {
             Kind::NeutronStar | Kind::BlackHole => return self.compact(kind, m).into(),
             Kind::Massless => return Member::Gone.into(),
         };
-        if let Some(star) = self.placed_star(0, target, m, core) {
-            return star.into();
-        }
         // A pinned primary's product is left to its pin, its dwarf typed by the held arm and held
         // by `held_product` (research-leans-34 §1(b)).
         let limit = if self.pin_pending(0) {
@@ -1348,6 +1372,10 @@ impl Engine {
         } else {
             self.ctx.rules().dwarf_limit
         };
+        if let Some(star) = self.placed_star(0, target, m, core) {
+            // From 29 a placed product keeps its dwarf parent's kind (P11.T4's fix).
+            return Product::Member(star, limit.placed(source));
+        }
         let unplaced = limit.unplaced(kind, SolarMasses::new(m), SolarMasses::new(core), source);
         #[cfg(test)]
         unplaced.count(self.pin_pending(0));
@@ -1581,13 +1609,14 @@ fn held_core(core: &StarState, core_radius: SolarRadii) -> Member {
     Member::Frozen { state, core_radius }
 }
 
-/// What a merger leaves in the primary's place ([`Engine::finish_merger`]): a member, or the iron
-/// core of a product that no star can hold, which collapses at once (from version 27, P11.T4's
-/// dwarf limit, [`Unplaced::IronCore`]).
+/// What a merger leaves in the primary's place ([`Engine::finish_merger`]): a member, with the
+/// white dwarf its core is if a dwarf's (from version 29, P11.T4's swollen dwarf and dwarf limit,
+/// [`Engine::dwarf_cores`]), or the iron core of a product that no star can hold, which collapses
+/// at once (from version 29, P11.T4's dwarf limit, [`Unplaced::IronCore`]).
 #[derive(Debug, Clone)]
 pub(super) enum Product {
-    /// The member.
-    Member(Member),
+    /// The member, and the dwarf its core is.
+    Member(Member, CoreSource),
     /// A star of `mass` whose carbon–oxygen core of `co_core` is an iron core.
     IronCore {
         /// Its carbon–oxygen core.
@@ -1598,8 +1627,9 @@ pub(super) enum Product {
 }
 
 impl From<Member> for Product {
+    /// A member whose core is no dwarf's.
     fn from(member: Member) -> Self {
-        Self::Member(member)
+        Self::Member(member, CoreSource::Other)
     }
 }
 

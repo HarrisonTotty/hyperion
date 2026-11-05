@@ -24,7 +24,7 @@
 use crate::math;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::RemnantRecipe;
-use crate::stellar::remnant::collapse::RemnantDraws;
+use crate::stellar::remnant::collapse::{IRON_CORE_MC_BAGB, RemnantDraws};
 use crate::stellar::remnant::structure::{OXYGEN_NEON_MC_BAGB, white_dwarf_radius};
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
@@ -603,6 +603,31 @@ impl Track {
         // sse's degenerate core radius, 5 R_WD, held to the radius, as a held state's is.
         core.core_radius = SolarRadii::new(core.core_radius.value().min(radius.value()));
         core
+    }
+
+    /// Whether the track's carbon–oxygen core burns to oxygen–neon (HPT section 6): its early AGB's
+    /// `Mc,BAGB`, or its helium star's mass (HPT section 6.1), is 1.6 M☉ or more and below the
+    /// 2.25 M☉ from which the core goes on to iron.
+    #[must_use]
+    pub(crate) fn types_oxygen_neon(&self) -> bool {
+        let oxygen_neon = |mc_bagb: SolarMasses| {
+            (OXYGEN_NEON_MC_BAGB.value()..IRON_CORE_MC_BAGB.value()).contains(&mc_bagb.value())
+        };
+        self.segments.iter().any(|s| match &s.model {
+            Model::EarlyAgb { phase, .. } => oxygen_neon(phase.mc_bagb()),
+            Model::HeliumShellBurning { star, .. } => oxygen_neon(star.mass()),
+            Model::Protostar(_)
+            | Model::PreMainSequence(_)
+            | Model::MainSequence { .. }
+            | Model::HertzsprungGap { .. }
+            | Model::FirstGiantBranch { .. }
+            | Model::FlashBridge { .. }
+            | Model::CoreHeliumBurning { .. }
+            | Model::ThermallyPulsingAgb { .. }
+            | Model::HeliumMainSequence { .. }
+            | Model::PostAgb { .. }
+            | Model::Remnant { .. } => false,
+        })
     }
 
     /// The bare core of `mc` M☉ that [`Track::remains_at`] leaves at `age` when it is no white

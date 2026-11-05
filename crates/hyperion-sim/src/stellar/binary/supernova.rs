@@ -124,7 +124,12 @@ impl Engine {
         let phase = track
             .remnant_clock()
             .map_or(Phase::NoRemnant, |(phase, ..)| phase);
-        let member = match SwollenDeath::of(self.swollen_cores[i], death.kind(), phase) {
+        let ending = SwollenDeath::of(self.dwarf_cores[i], death.kind(), phase);
+        #[cfg(test)]
+        if self.dwarf_cores[i] != super::dwarf_limit::CoreSource::Other {
+            ending.count();
+        }
+        let member = match ending {
             SwollenDeath::Own => Member::Track {
                 track: std::sync::Arc::clone(&track),
                 offset,

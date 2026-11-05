@@ -317,6 +317,33 @@ pub(crate) fn swollen_dwarf_kinds(
     found
 }
 
+/// Whether `timeline` places a merger product of a carbon–oxygen or oxygen–neon dwarf: a member
+/// that is such a dwarf in one segment, and a later segment in which the primary is a star the
+/// binary carries beside nothing (P11.T4's dwarf limit, fix-p11-placed-product-kind).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn places_a_dwarf_s_product(timeline: &crate::stellar::binary::BinaryTimeline) -> bool {
+    use crate::stellar::Phase;
+    use crate::stellar::binary::star::Member;
+
+    let dwarf = |member: &Member| {
+        matches!(
+            member,
+            Member::Remnant {
+                phase: Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf,
+                ..
+            }
+        )
+    };
+    let segments = timeline.segments();
+    segments.iter().enumerate().any(|(k, before)| {
+        before.members().iter().any(dwarf)
+            && segments[k + 1..].iter().any(|after| {
+                matches!(after.members()[0], Member::Shaped { .. }) && after.members()[1].is_gone()
+            })
+    })
+}
+
 /// Whether `input`'s primary dies when plan 06 says, its death pinned (design note 16).
 #[cfg(test)]
 #[must_use]
