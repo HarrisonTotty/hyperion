@@ -6,6 +6,10 @@ import { lookAlong } from "../camera/quaternion";
 import { R05_EARTH_REFERENCE } from "./earth";
 import { type AtmosphereCamera, type SunState, TABLE_SIZES } from "./hillaire";
 import marchAreaWgsl from "./shaders/marchArea.wgsl?raw";
+import rayMarchBelowDeckWgsl from "./shaders/rayMarchBelowDeck.wgsl?raw";
+import rayMarchCentreWgsl from "./shaders/rayMarchCentre.wgsl?raw";
+import rayMarchFootprintWgsl from "./shaders/rayMarchFootprint.wgsl?raw";
+import rayMarchPackedWgsl from "./shaders/rayMarchPacked.wgsl?raw";
 import {
   farLimbFootprintTwin,
   farLimbShellsOf,
@@ -140,6 +144,26 @@ describe("the half-resolution march over a drawn body (fix-disc-air-rows)", () =
     }
     expect([over > 300, short]).toEqual([true, []]);
   });
+
+  // The packed limb's entry point (R08.T8.d), every view's march on both settings, read its centre
+  // ray's depth from the texel's own pixel, half a pixel from the ray at half resolution: on a
+  // served Earth-like world from 4e7 m the march ended up to 25 km above its datum over half the
+  // disc, above its water deck, which drew nearly clear there in rows (fix-r08-deck-rows).
+  it.each([
+    ["the footprint's", rayMarchFootprintWgsl],
+    ["the tile cull's centre ray's", rayMarchCentreWgsl],
+    ["the packed limb's", rayMarchPackedWgsl],
+    ["the below-deck march's", rayMarchBelowDeckWgsl],
+  ])(
+    "takes %s entry point's centre ray's depth as the twin does, never its own pixel's alone",
+    (_, wgsl) => {
+      const code = wgsl.replaceAll(/\/\/[^\n]*/gu, "");
+      expect(code).toMatch(
+        /let depth = marchTexelDepthOf\(sceneDepth, uv, view\.output\.z, full\);/u,
+      );
+      expect(code).not.toMatch(/let depth = textureLoad\(sceneDepth/u);
+    },
+  );
 
   it("holds the kernels' share of the same surface to the twin's", () => {
     expect(marchAreaWgsl).toContain(

@@ -25216,3 +25216,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     among it (`decision-r08-t10a-leans.md` §2, whose trigger the drawn deck meets); main's question.
   - Fixture: `test/servedDeckedWorld.{json,ts}`; `REFERENCE_SEEDS` 16. Pending: the routed frame
     on the owner's RTX against 16.67 ms; the views from within the air traced at gate counts.
+- **The packed limb's centre ray at the farthest of four** (fix-r08-deck-rows, 2026-11-05;
+  re-landed by fix-r08-decked-air-route). The shader's fix landed first in R08.T17's fix lane
+  (above); `marchDepth.test.ts` now holds all four entry points' centre rays to
+  `marchTexelDepthOf`. Pending: the smoke's packed-against-per-texel check draws a flat plane, whose
+  four depths agree; a receding surface there would hold it.
