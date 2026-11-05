@@ -56,10 +56,20 @@
 //!   (HPT section 6, before equation 76), where the held arm takes one only from the Chandrasekhar
 //!   mass;
 //! - only a carbon–oxygen or oxygen–neon dwarf a wind feeds stops at the Chandrasekhar mass in a
-//!   detached phase: a helium dwarf ignites at 0.7 M☉ (BSE section 2.6.6), far below it.
+//!   detached phase: a helium dwarf ignites at 0.7 M☉ (BSE section 2.6.6), far below it;
+//! - a thermally pulsing AGB product whose `Mc,BAGB`, as its placement solves it back, is 2.25 M☉
+//!   or more (a carbon–oxygen core of 1.438 M☉ or more; the engine's `IRON_CORE_MC_BAGB`) and that
+//!   merged from no dwarf has an iron core (HPT section 6), which BSE section 2.7.4 makes a neutron
+//!   star or black hole (`gntage`: "a type 6 with this sized core mass cannot exist as it should
+//!   already have become a NS or BH as a type 5"). The core is at its supernova already, since
+//!   HPT's `Mc,SN` = 0.773 `Mc,BAGB` − 0.35 (equation 75) is the core itself at the `Mc,BAGB` it is
+//!   solved back to, so it collapses at once with its hydrogen envelope on, by plan 06's iron-core
+//!   collapse and its kick ([`Unplaced::IronCore`], `Engine::iron_core_collapse`), not by the
+//!   accretion-induced collapse of a dwarf as the held arm has it.
 
 use crate::GeneratorVersion;
 use crate::stellar::Phase;
+use crate::stellar::remnant::collapse::IRON_CORE_MC_BAGB;
 use crate::stellar::remnant::structure::{CHANDRASEKHAR_MASS, OXYGEN_NEON_MC_BAGB};
 use crate::stellar::rules::StellarRules;
 use crate::stellar::sse;
@@ -78,7 +88,8 @@ use super::star::Kind;
 /// [`DwarfLimitRules::Held`] arm and its branches, the stellar rules' `dwarf_limit` field and its
 /// reads in the engine, the brief's read of [`DwarfLimitRules::fitted_tables_hold`] and the
 /// tripwire (`the_dwarf_limit_is_held_only_until_the_29_bump`). It keeps, applied always, the
-/// typing of [`DwarfLimitRules::unplaced`]'s new arm and the pin's bypasses, and refits the
+/// typing of [`DwarfLimitRules::unplaced`]'s new arm, the pin's bypasses and
+/// `Engine::iron_core_collapse`, and refits the
 /// pair-light and reach tables, which the engine's runs fit.
 pub(crate) const DWARF_LIMIT_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
@@ -120,6 +131,56 @@ pub(super) enum Unplaced {
         /// Its mass.
         mass: SolarMasses,
     },
+    /// A star of `mass` whose carbon–oxygen core of `co_core` is an iron core, which collapses at
+    /// once with its hydrogen envelope on.
+    IronCore {
+        /// Its carbon–oxygen core.
+        co_core: SolarMasses,
+        /// Its mass.
+        mass: SolarMasses,
+    },
+}
+
+impl Unplaced {
+    /// Counts the product on this thread ([`unplaced_counts`]), `pinned` where it is a pinned
+    /// primary's, left to its pin.
+    #[cfg(test)]
+    pub(super) fn count(self, pinned: bool) {
+        let k = match self {
+            _ if pinned => 5,
+            Self::WhiteDwarf {
+                phase: Phase::HeliumWhiteDwarf,
+                ..
+            } => 0,
+            Self::WhiteDwarf {
+                phase: Phase::OxygenNeonWhiteDwarf,
+                ..
+            } => 2,
+            Self::WhiteDwarf { .. } => 1,
+            Self::HeliumStar { .. } => 3,
+            Self::IronCore { .. } => 4,
+        };
+        UNPLACED.with(|counts| {
+            let mut c = counts.get();
+            c[k] += 1;
+            counts.set(c);
+        });
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// This thread's unplaced products since it started ([`unplaced_counts`]).
+    static UNPLACED: core::cell::Cell<[usize; 6]> = const { core::cell::Cell::new([0; 6]) };
+}
+
+/// The merger products this thread's engines could not place since it started, by what they
+/// left: helium, carbon–oxygen and oxygen–neon dwarfs, naked helium stars, iron cores, and pinned
+/// primaries' products left to their pin (a test build's counter, for the dwarf limit's census).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn unplaced_counts() -> [usize; 6] {
+    UNPLACED.with(core::cell::Cell::get)
 }
 
 /// What a merger's product's core was ([`DwarfLimitRules::unplaced`]): an oxygen–neon white dwarf,
@@ -158,6 +219,16 @@ impl DwarfLimitRules {
         let mass = SolarMasses::new(core.value().max(1e-3).min(m.value()));
         let oxygen_neon_source = source == CoreSource::OxygenNeonDwarf;
         match self {
+            Self::Whole
+                if kind == Kind::PulsingAgb
+                    && source == CoreSource::Other
+                    && sse::pulsing_agb_helium_core(core) >= IRON_CORE_MC_BAGB =>
+            {
+                Unplaced::IronCore {
+                    co_core: mass,
+                    mass: m,
+                }
+            }
             Self::Held if carbon_oxygen_core(kind) => {
                 let oxygen_neon =
                     oxygen_neon_source || sse::pulsing_agb_helium_core(core) >= OXYGEN_NEON_MC_BAGB;

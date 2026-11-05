@@ -1289,7 +1289,7 @@ impl Engine {
                 let accretor = self.members[a_idx].restarted(self.age);
                 let mut accretor = accretor;
                 accretor.record(self.age, ma + md, ta);
-                self.finish_merger_with(accretor);
+                self.finish_merger_with(accretor.into());
                 true
             }
             Member::MainSequence { helium: false, .. } if md < sse::MIN_INITIAL_MASS.value() => {

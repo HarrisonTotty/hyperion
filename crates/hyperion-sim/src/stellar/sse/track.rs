@@ -95,7 +95,9 @@ use crate::stellar::draws::{StarDraws, UnitUniform};
 use crate::stellar::remnant::collapse::{
     COMPANION_STRIPPED_WINDOW, RemnantDraws, SINGLE_STAR_WINDOW,
 };
-use crate::stellar::remnant::{CompactRemnant, Death, RemnantRecipe, SupernovaType};
+use crate::stellar::remnant::{
+    CompactRemnant, Death, ProgenitorAtDeath, RemnantRecipe, SupernovaType,
+};
 use crate::stellar::rules::StellarRules;
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
 use crate::units::{
@@ -616,6 +618,22 @@ pub(crate) struct IronCore {
     pub(crate) supernova: SupernovaType,
     /// The carbon–oxygen core HPT's equation 92 reads under [`RemnantRecipe::Hurley2000`].
     pub(crate) co_core: SolarMasses,
+}
+
+/// The collapse at `age` of an iron core whose carbon–oxygen core is `co_core`, from `progenitor`,
+/// whose envelopes make the supernova `supernova`, under `recipe` with the remnant draws `draws`:
+/// plan 06's seam ([`phases::iron_core_fate`], P06.T18.d) for a star with no track of its own, a
+/// merger's product that no star can hold (plan 11, P11.T4's dwarf limit, `Engine::finish_merger`).
+#[must_use]
+pub(crate) fn iron_core_fate(
+    recipe: RemnantRecipe,
+    age: Years,
+    supernova: SupernovaType,
+    co_core: SolarMasses,
+    progenitor: ProgenitorAtDeath,
+    draws: RemnantDraws,
+) -> Fate {
+    phases::iron_core_fate(recipe, age.value(), supernova, co_core, progenitor, draws)
 }
 
 impl Track {

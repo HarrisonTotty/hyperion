@@ -10,7 +10,7 @@
 //!   them, run to 13.8 Gyr under every 27 hold and under every 29 hold: none shows a white dwarf
 //!   above the Chandrasekhar mass (under the held arm some did) but a pinned primary's (design
 //!   note 16), counted apart, which `Engine::held_product` takes as at 27. Every 29 hold adds
-//!   P11.T4's holds at 29.
+//!   P11.T4's holds at 29; and the merger products no star holds, by what they leave.
 
 use crate::planetary::testing::in_shares;
 
@@ -21,7 +21,7 @@ use crate::galaxy::params::GalaxyParams;
 use crate::id::Layer;
 use crate::rng::Seed;
 use crate::stellar::Phase;
-use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
+use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules, unplaced_counts};
 use crate::stellar::binary::testing::{dwarfs_above_the_limit, generated_pairs, pinned_primary};
 use crate::stellar::binary::{can_interact, evolve};
 use crate::units::Years;
@@ -96,6 +96,10 @@ struct Figures {
     /// Of the pairs run, those left with no star at their age at the epoch (both members
     /// `NoRemnant`).
     massless: [usize; 3],
+    /// The merger products no star could hold, by what they left
+    /// (`dwarf_limit::unplaced_counts`): helium, carbon–oxygen and oxygen–neon dwarfs, naked
+    /// helium stars, iron cores, and pinned primaries' products left to their pin.
+    unplaced: [[usize; 6]; 3],
 }
 
 /// The census of [`PAIRS`] pairs of each of layers C, D and E in `galaxy`, each run under `rules`.
@@ -105,11 +109,14 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
         above: [0; 3],
         pinned: [0; 3],
         massless: [0; 3],
+        unplaced: [[0; 6]; 3],
     };
     for (k, layer) in [Layer::C, Layer::D, Layer::E].into_iter().enumerate() {
         let seed = CELLS_SEED + u64::try_from(k).expect("a small index");
         let pairs = generated_pairs(galaxy, layer, PAIRS, seed);
         let shares = in_shares(SHARES, THREADS, |share| {
+            // The share runs on one thread, whose counter it reads before and after.
+            let unplaced_before = unplaced_counts();
             let mut counts = [0_usize; 4];
             for (input, age) in pairs.iter().skip(share).step_by(SHARES) {
                 let input = input.clone().with_rules(rules);
@@ -128,13 +135,19 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
                 counts[3] +=
                     usize::from(a.phase() == Phase::NoRemnant && b.phase() == Phase::NoRemnant);
             }
-            counts
+            let unplaced_after = unplaced_counts();
+            let unplaced: [usize; 6] =
+                core::array::from_fn(|j| unplaced_after[j] - unplaced_before[j]);
+            (counts, unplaced)
         });
-        for counts in shares {
+        for (counts, unplaced) in shares {
             figures.run[k] += counts[0];
             figures.above[k] += counts[1];
             figures.pinned[k] += counts[2];
             figures.massless[k] += counts[3];
+            for (total, n) in figures.unplaced[k].iter_mut().zip(unplaced) {
+                *total += n;
+            }
         }
     }
     figures
@@ -143,19 +156,22 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
 /// The census's figures under every 27 hold and under every 29 hold, as measured (2026-11-05, at
 /// generator version 27; the 27 pin before, run [5983, 15222, 18105] and massless [149, 18, 2],
 /// was stale at version 27's base; under the held arm of version 25, 94 of layer D's pairs and 157
-/// of E's showed a dwarf above the limit).
+/// of E's showed a dwarf above the limit; the unplaced products: no iron core, every thermally
+/// pulsing product of layer E that no star holds being a pinned primary's).
 const CENSUS_FIGURES: [Figures; 2] = [
     Figures {
         run: [8_519, 17_814, 19_213],
         above: [0; 3],
         pinned: [0; 3],
         massless: [148, 20, 6],
+        unplaced: [[0; 6], [0, 4, 0, 3, 0, 0], [0, 0, 0, 0, 0, 109]],
     },
     Figures {
         run: [8_519, 17_814, 19_213],
         above: [0; 3],
         pinned: [0; 3],
         massless: [174, 20, 10],
+        unplaced: [[0; 6], [0, 1, 0, 6, 0, 0], [0, 0, 0, 0, 0, 109]],
     },
 ];
 

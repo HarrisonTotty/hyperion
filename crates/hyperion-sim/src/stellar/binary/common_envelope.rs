@@ -429,14 +429,14 @@ impl Engine {
         self.finish_merger(product);
     }
 
-    /// The member a coalescence in a common envelope leaves, from what [`coalesced_product`]
-    /// gives: nothing, a compact star, or a star of its kind, mass and core, placed by
+    /// What a coalescence in a common envelope leaves, from what [`coalesced_product`] gives:
+    /// nothing, a compact star, or a star of its kind, mass and core, placed by
     /// [`Engine::new_star`] at the engine's age.
     #[must_use]
-    pub(super) fn product_member(&self, product: CoalescedProduct) -> Member {
+    pub(super) fn product_member(&self, product: CoalescedProduct) -> Product {
         match product {
-            CoalescedProduct::Nothing => Member::Gone,
-            CoalescedProduct::Compact { kind, mass } => self.compact(kind, mass),
+            CoalescedProduct::Nothing => Member::Gone.into(),
+            CoalescedProduct::Compact { kind, mass } => self.compact(kind, mass).into(),
             CoalescedProduct::Star {
                 kind,
                 mass,
@@ -633,7 +633,7 @@ impl Engine {
             } else {
                 self.members[0].clone()
             };
-            self.finish_merger(survivor);
+            self.finish_merger(survivor.into());
             return;
         };
         let (k0, k1) = (Kind::of(a.state.phase(), m0), Kind::of(b.state.phase(), m1));
@@ -646,14 +646,16 @@ impl Engine {
         let (m_hi, m_lo) = (s_hi.state.mass().value(), s_lo.state.mass().value());
         let total = m_hi + m_lo;
         let masses = [SolarMasses::new(m0), SolarMasses::new(m1)];
-        let product = match (hi, lo) {
+        let product: Product = match (hi, lo) {
             (
                 Kind::LowMassMainSequence | Kind::MainSequence,
                 Kind::LowMassMainSequence | Kind::MainSequence,
-            ) => self.main_sequence_merger(false, total, [(m_hi, s_hi), (m_lo, s_lo)]),
-            (Kind::HeliumMainSequence, Kind::HeliumMainSequence) => {
-                self.main_sequence_merger(true, total, [(m_hi, s_hi), (m_lo, s_lo)])
-            }
+            ) => self
+                .main_sequence_merger(false, total, [(m_hi, s_hi), (m_lo, s_lo)])
+                .into(),
+            (Kind::HeliumMainSequence, Kind::HeliumMainSequence) => self
+                .main_sequence_merger(true, total, [(m_hi, s_hi), (m_lo, s_lo)])
+                .into(),
             (Kind::HeliumMainSequence, Kind::LowMassMainSequence | Kind::MainSequence) => {
                 self.new_star(Kind::CoreHeliumBurning, total, m_hi, s_hi.burnt, 0.0)
             }
@@ -666,7 +668,7 @@ impl Engine {
             ) => self.new_star_around(Kind::PulsingAgb, total, m_hi, 1.0, 0.0, CoreSource::of(hi)),
             (Kind::HeliumWhiteDwarf, Kind::HeliumMainSequence) => {
                 let tau = s_lo.burnt * m_lo / total;
-                self.helium_main_sequence(total, tau)
+                self.helium_main_sequence(total, tau).into()
             }
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
@@ -678,7 +680,7 @@ impl Engine {
                     IaPoolChannel::Merger,
                     masses,
                 ));
-                self.helium_main_sequence(total, 0.0)
+                self.helium_main_sequence(total, 0.0).into()
             }
             (Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf, Kind::HeliumWhiteDwarf) => {
                 self.pool(PooledIaEvent::new(
@@ -706,26 +708,26 @@ impl Engine {
                 // 29 for a pinned primary's, which collapses at once at it as before the fix.
                 let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
                 if pinned && !dwarf_limit::collapses(total) {
-                    self.white_dwarf(phase, total)
+                    self.white_dwarf(phase, total).into()
                 } else if pinned {
-                    self.finish_merger(self.white_dwarf(phase, total));
+                    self.finish_merger(self.white_dwarf(phase, total).into());
                     self.accretion_induced_collapse(0, total);
                     return;
                 } else {
-                    self.white_dwarf(phase, total)
+                    self.white_dwarf(phase, total).into()
                 }
             }
             (
                 Kind::NeutronStar | Kind::BlackHole,
                 Kind::LowMassMainSequence | Kind::MainSequence | Kind::HeliumMainSequence,
-            ) => self.compact(hi, m_hi),
+            ) => self.compact(hi, m_hi).into(),
             (Kind::NeutronStar | Kind::BlackHole, _) => {
                 let kind = if hi == Kind::NeutronStar && total > MAX_NEUTRON_STAR_MASS.value() {
                     Kind::BlackHole
                 } else {
                     hi
                 };
-                self.compact(kind, total)
+                self.compact(kind, total).into()
             }
             _ => {
                 // A giant-like star is involved: BSE treats the collision as a common envelope,
@@ -751,7 +753,7 @@ impl Engine {
     }
 
     /// Records the merger as [`Engine::finish_merger`] does, for a product built by the caller.
-    pub(super) fn finish_merger_with(&mut self, product: Member) {
+    pub(super) fn finish_merger_with(&mut self, product: Product) {
         self.finish_merger(product);
     }
 
@@ -761,8 +763,14 @@ impl Engine {
     /// one does (`Engine::accretor_events`): a Type Ia candidate is pooled unless it is oxygen–neon,
     /// with the two stars' masses before the merger, and the dwarf collapses by accretion-induced
     /// collapse (P11.T4's fix, `dwarf_limit::collapses`); from 29 a pinned primary's product is
-    /// left to its pin ([`Engine::pin_pending`], P11.T4's `dwarf_limit`).
-    fn finish_merger(&mut self, product: Member) {
+    /// left to its pin ([`Engine::pin_pending`], P11.T4's `dwarf_limit`), and an unplaced product's
+    /// iron core ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]),
+    /// pooling no candidate.
+    fn finish_merger(&mut self, product: Product) {
+        let (product, iron_core) = match product {
+            Product::Member(member) => (member, None),
+            Product::IronCore { co_core, mass } => (Member::Gone, Some((co_core, mass))),
+        };
         let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
         let dwarf = if let Member::Remnant { phase, mass, .. } = &product
             && matches!(
@@ -786,6 +794,9 @@ impl Engine {
         self.kind = SegmentKind::Merged;
         self.stripped[1] = false;
         self.corotate(0);
+        if let Some((co_core, mass)) = iron_core {
+            self.iron_core_collapse(0, co_core, mass);
+        }
         if let (Some((phase, m)), Some(masses)) = (dwarf, masses) {
             if phase != Phase::OxygenNeonWhiteDwarf {
                 self.pool(PooledIaEvent::new(
@@ -1107,6 +1118,7 @@ impl Engine {
                 // P11.T4.d's rule, the collision of two main-sequence stars (BSE section 2.7.3):
                 // both stars' masses, at both stars' fractional age.
                 self.main_sequence_merger(false, md + mo, [(md, &sd), (mo, &so)])
+                    .into()
             } else {
                 // A Hertzsprung-gap accretor takes the whole donor, as BSE's own dynamical branch
                 // gives an accretor of k 2–6 (`evolv2.f`: "Add all the material to the giant's
@@ -1237,7 +1249,7 @@ impl Engine {
     /// burnt and `fraction` through its phase (a Hertzsprung gap's), placed as BSE section 2.7.4
     /// places it; a star that cannot be placed becomes the remnant of its core.
     #[must_use]
-    fn new_star(&self, kind: Kind, m: f64, core: f64, burnt: f64, fraction: f64) -> Member {
+    fn new_star(&self, kind: Kind, m: f64, core: f64, burnt: f64, fraction: f64) -> Product {
         self.new_star_around(kind, m, core, burnt, fraction, CoreSource::Other)
     }
 
@@ -1252,12 +1264,12 @@ impl Engine {
         burnt: f64,
         fraction: f64,
         source: CoreSource,
-    ) -> Member {
+    ) -> Product {
         let target = match kind {
             Kind::LowMassMainSequence | Kind::MainSequence => {
-                return self.main_sequence_star(m, 0.0);
+                return self.main_sequence_star(m, 0.0).into();
             }
-            Kind::HeliumMainSequence => return self.helium_main_sequence(m, burnt),
+            Kind::HeliumMainSequence => return self.helium_main_sequence(m, burnt).into(),
             Kind::HertzsprungGap => {
                 let mass = track_mass(SolarMasses::new(m));
                 let track = Track::full_with(
@@ -1273,36 +1285,45 @@ impl Engine {
                     track: Arc::new(track),
                     offset: super::evolve::offset_for(self.age, at),
                     mass: Path::starting(self.age, m),
-                };
+                }
+                .into();
             }
             Kind::GiantBranch => NewStar::GiantBranch,
             Kind::CoreHeliumBurning => NewStar::CoreHeliumBurning { burnt },
             Kind::EarlyAgb => NewStar::EarlyAgb,
             Kind::PulsingAgb => NewStar::PulsingAgb,
             Kind::HeliumGap | Kind::HeliumGiant => NewStar::HeliumGiant,
-            Kind::HeliumWhiteDwarf => return self.white_dwarf(Phase::HeliumWhiteDwarf, m),
+            Kind::HeliumWhiteDwarf => return self.white_dwarf(Phase::HeliumWhiteDwarf, m).into(),
             Kind::CarbonOxygenWhiteDwarf => {
-                return self.white_dwarf(Phase::CarbonOxygenWhiteDwarf, m);
+                return self.white_dwarf(Phase::CarbonOxygenWhiteDwarf, m).into();
             }
-            Kind::OxygenNeonWhiteDwarf => return self.white_dwarf(Phase::OxygenNeonWhiteDwarf, m),
-            Kind::NeutronStar | Kind::BlackHole => return self.compact(kind, m),
-            Kind::Massless => return Member::Gone,
+            Kind::OxygenNeonWhiteDwarf => {
+                return self.white_dwarf(Phase::OxygenNeonWhiteDwarf, m).into();
+            }
+            Kind::NeutronStar | Kind::BlackHole => return self.compact(kind, m).into(),
+            Kind::Massless => return Member::Gone.into(),
         };
-        self.placed_star(0, target, m, core).unwrap_or_else(|| {
-            // A pinned primary's product is left to its pin, its dwarf typed by the held arm and
-            // held by `held_product` (research-leans-34 §1(b)).
-            let limit = if self.pin_pending(0) {
-                DwarfLimitRules::Held
-            } else {
-                self.ctx.rules().dwarf_limit
-            };
-            match limit.unplaced(kind, SolarMasses::new(m), SolarMasses::new(core), source) {
-                Unplaced::WhiteDwarf { phase, mass } => self
-                    .held_product(target, phase, mass)
-                    .unwrap_or_else(|| self.white_dwarf(phase, mass.value())),
-                Unplaced::HeliumStar { mass } => self.helium_main_sequence(mass.value(), burnt),
-            }
-        })
+        if let Some(star) = self.placed_star(0, target, m, core) {
+            return star.into();
+        }
+        // A pinned primary's product is left to its pin, its dwarf typed by the held arm and held
+        // by `held_product` (research-leans-34 §1(b)).
+        let limit = if self.pin_pending(0) {
+            DwarfLimitRules::Held
+        } else {
+            self.ctx.rules().dwarf_limit
+        };
+        let unplaced = limit.unplaced(kind, SolarMasses::new(m), SolarMasses::new(core), source);
+        #[cfg(test)]
+        unplaced.count(self.pin_pending(0));
+        match unplaced {
+            Unplaced::WhiteDwarf { phase, mass } => self
+                .held_product(target, phase, mass)
+                .unwrap_or_else(|| self.white_dwarf(phase, mass.value()))
+                .into(),
+            Unplaced::HeliumStar { mass } => self.helium_main_sequence(mass.value(), burnt).into(),
+            Unplaced::IronCore { co_core, mass } => Product::IronCore { co_core, mass },
+        }
     }
 
     /// A merger's product in the primary's place to be placed as `target` that no star of that
@@ -1523,6 +1544,28 @@ fn held_core(core: &StarState, core_radius: SolarRadii) -> Member {
         phase_fraction: core.phase_fraction(),
     });
     Member::Frozen { state, core_radius }
+}
+
+/// What a merger leaves in the primary's place ([`Engine::finish_merger`]): a member, or the iron
+/// core of a product that no star can hold, which collapses at once (from version 27, P11.T4's
+/// dwarf limit, [`Unplaced::IronCore`]).
+#[derive(Debug, Clone)]
+pub(super) enum Product {
+    /// The member.
+    Member(Member),
+    /// A star of `mass` whose carbon–oxygen core of `co_core` is an iron core.
+    IronCore {
+        /// Its carbon–oxygen core.
+        co_core: SolarMasses,
+        /// Its mass, its hydrogen envelope on.
+        mass: SolarMasses,
+    },
+}
+
+impl From<Member> for Product {
+    fn from(member: Member) -> Self {
+        Self::Member(member)
+    }
 }
 
 /// What a common envelope whose cores coalesce leaves to the merger: the envelope's binding

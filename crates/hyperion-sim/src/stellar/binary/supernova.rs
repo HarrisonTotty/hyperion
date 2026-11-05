@@ -54,9 +54,10 @@ use std::sync::Arc;
 use crate::coords::{SystemVector, SystemVelocity};
 use crate::orbit::{Eccentricity, KeplerElements, Orbit, elements_from_state};
 use crate::stellar::Phase;
+use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::{
     CollapseChannel, CompactRemnant, KickDraws, KickLaw, NatalKick, ProgenitorAtDeath, RemnantKind,
-    StandardKickLaw, Stripping,
+    StandardKickLaw, Stripping, SupernovaType,
 };
 use crate::stellar::sse;
 use crate::time::{Span, UniverseTime};
@@ -239,6 +240,42 @@ impl Engine {
             death.progenitor().stripping()
         };
         own_kick(&self.ctx, i, death, remnant, stripping)
+    }
+
+    /// Member `i`, a merger's product of `mass` M☉ with an iron core, collapses now.
+    ///
+    /// The product is one that no star can hold, its hydrogen envelope on, whose carbon–oxygen core
+    /// of `co_core` is an iron core (P11.T4's dwarf limit from version 29, [`Unplaced::IronCore`];
+    /// HPT section 6, BSE section 2.7.4). It takes plan 06's iron-core collapse ([`sse::iron_core_fate`]) under the pair's remnant recipe and the
+    /// member's remnant draws, a hydrogen-rich supernova of its envelope
+    /// ([`SupernovaType::of_envelopes`]), and the kick of plan 06's law for an iron core, the
+    /// progenitor unstripped. The thermally pulsing star's helium core is its carbon–oxygen core,
+    /// as plan 06's own death at `Mc,SN` takes it (`pulsing_agb_end`).
+    ///
+    /// [`Unplaced::IronCore`]: super::dwarf_limit::Unplaced::IronCore
+    pub(super) fn iron_core_collapse(&mut self, i: usize, co_core: SolarMasses, mass: SolarMasses) {
+        let envelope = SolarMasses::new((mass.value() - co_core.value()).max(0.0));
+        let fate = sse::iron_core_fate(
+            self.ctx.track_options().remnant(),
+            Years::new(self.age),
+            SupernovaType::of_envelopes(envelope, SolarMasses::ZERO),
+            co_core,
+            ProgenitorAtDeath::new(co_core, co_core, envelope, Stripping::None),
+            RemnantDraws::of(self.ctx.draws(i)),
+        );
+        let kick = own_kick(&self.ctx, i, &fate.death, &fate.remnant, Stripping::None);
+        let member = if fate.remnant.kind() == RemnantKind::None {
+            Member::Gone
+        } else {
+            Member::Remnant {
+                phase: fate.phase,
+                birth: self.age,
+                origin: Megayears::ZERO,
+                mass: Path::starting(self.age, fate.remnant.mass().value()),
+            }
+        };
+        self.set_member(i, member);
+        self.explode(i, mass.value(), fate.remnant, kick);
     }
 
     /// The primary's pinned death now (design note 16): plan 06's remnant and kick, whatever the

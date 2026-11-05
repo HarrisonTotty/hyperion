@@ -48,7 +48,8 @@ pub(crate) use evolve::{lifetime_under, track_under};
 pub(crate) use track::post_agb_ionising_years;
 pub(crate) use track::{
     Fate, RemnantModel, Stage, bridged_origin, early_agb_cores, fate_of, fate_to_age,
-    is_companion_stripped, is_companion_stripped_by, main_sequence_end_mass, remnant_of,
+    iron_core_fate, is_companion_stripped, is_companion_stripped_by, main_sequence_end_mass,
+    remnant_of,
 };
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
 pub use track::{

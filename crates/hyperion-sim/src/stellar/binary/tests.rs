@@ -6740,8 +6740,11 @@ fn unplaced_product(
 /// P11.T4's dwarf limit: a merger's product that no star of its kind can hold, in a pair with no
 /// pin, leaves the engine's own remnant. Thermally pulsing AGB products around a carbon–oxygen core
 /// of 1.765 and 1.948 M☉ (pinned pairs 0252's and 0902's mergers, Z = 0.02 and 0.0005) are
-/// oxygen–neon under both arms and collapse at once to the 1.26 M☉ neutron star of an
-/// accretion-induced collapse, with no Type Ia candidate pooled; one around a 0.457 M☉ core
+/// oxygen–neon under the held arm and collapse at once to the 1.26 M☉ neutron star of an
+/// accretion-induced collapse; under the arm of 29 they have iron cores (`Mc,BAGB` above 2.25 M☉,
+/// HPT section 6) and collapse at once as one (BSE section 2.7.4): a neutron star of plan 06's
+/// iron-core collapse under the pair's recipe and the primary's remnant draws, with plan 06's
+/// ordinary kick for an iron core. Neither pools a Type Ia candidate. One around a 0.457 M☉ core
 /// (0787's, Z = 0.004) is a carbon–oxygen dwarf. Core-helium-burning products with nothing burnt
 /// around a helium core of 1.4433 and 6.977 M☉ (of layers D and E, Z = 0.02, 2026-11-02) are the
 /// naked helium star of that core under both; one around 1.4368 M☉ (Z = 0.0005), below the
@@ -6749,6 +6752,7 @@ fn unplaced_product(
 /// arm of 29, which takes any helium core of 0.5 M☉ or more for one (HPT section 6).
 #[test]
 fn an_unplaced_merger_product_takes_the_engine_s_own_remnant() {
+    use super::dwarf_limit::DwarfLimitRules;
     use super::star::Kind;
     use crate::stellar::remnant::collapse::electron_capture_remnant;
 
@@ -6787,7 +6791,9 @@ fn an_unplaced_merger_product_takes_the_engine_s_own_remnant() {
             let case = format!("{case}, {:?}", rules.dwarf_limit);
             let (engine, state) = unplaced_product(kind, m, core, burnt, z, rules);
             assert_eq!(state.phase(), phase, "{case}");
-            if phase == Phase::NeutronStar {
+            if phase == Phase::NeutronStar && rules.dwarf_limit == DwarfLimitRules::Whole {
+                assert_an_iron_core_collapse(&case, &engine, state, m, core);
+            } else if phase == Phase::NeutronStar {
                 let [collapse] = engine.supernovae.as_slice() else {
                     panic!("{case}: one collapse, not {:?}", engine.supernovae);
                 };
@@ -6805,11 +6811,70 @@ fn an_unplaced_merger_product_takes_the_engine_s_own_remnant() {
     }
 }
 
+/// `case`'s unplaced product of `m` M☉ around a `core` M☉ carbon–oxygen core in `engine`, `state`
+/// once the merger is recorded, collapsed as an iron core: plan 06's neutron star of the primary's
+/// remnant draws, not electron capture's, with the ordinary kick of an iron core's collapse from
+/// the product with its envelope on, and no Type Ia candidate.
+fn assert_an_iron_core_collapse(
+    case: &str,
+    engine: &super::evolve::Engine,
+    state: crate::stellar::StarState,
+    m: f64,
+    core: f64,
+) {
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::{
+        CollapseChannel, KickDraws, KickLaw, KickMode, ProgenitorAtDeath, RemnantKind,
+        StandardKickLaw, Stripping,
+    };
+
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("{case}: one collapse, not {:?}", engine.supernovae);
+    };
+    let remnant = collapse.remnant();
+    assert_eq!(remnant.kind(), RemnantKind::NeutronStar, "{case}");
+    assert_ne!(remnant, electron_capture_remnant(), "{case}");
+    assert!(
+        remnant
+            .mass()
+            .value()
+            .total_cmp(&IRON_CORE_NEUTRON_STAR_MSUN)
+            .is_eq(),
+        "{case}: {remnant:?}"
+    );
+    assert!(
+        state
+            .mass()
+            .value()
+            .total_cmp(&remnant.mass().value())
+            .is_eq(),
+        "{case}: {state:?}"
+    );
+    let (co_core, envelope) = (SolarMasses::new(core), SolarMasses::new(m - core));
+    let progenitor = ProgenitorAtDeath::new(co_core, co_core, envelope, Stripping::None);
+    let kick = StandardKickLaw::under(dwarf_limit_rules()).kick(
+        CollapseChannel::IronCore,
+        &progenitor,
+        &remnant,
+        &KickDraws::of(engine.ctx.draws(0)),
+    );
+    assert_eq!(collapse.kick(), Some(kick), "{case}");
+    assert_eq!(kick.mode(), KickMode::Ordinary, "{case}");
+    assert!(engine.pooled.is_none(), "{case}");
+    println!("{case}: {remnant:?}, {:?}", kick.speed());
+}
+
+/// The neutron star of the two iron cores' collapses under the median draws, M☉, as measured
+/// (2026-11-03, at generator version 25, and the same at 27).
+const IRON_CORE_NEUTRON_STAR_MSUN: f64 = 1.200_005_831_146_352_6;
+
 /// P11.T4's dwarf limit: the dwarf an unplaced product leaves, by its kind, mass, core and the
 /// dwarf it merged from ([`DwarfLimitRules::unplaced`]). Under the arm of 29 oxygen–neon where a
 /// thermally pulsing AGB product's core at the base of the AGB, as its placement solves it back, is
 /// 1.6 M☉ or more, where a helium giant's mass is (HPT section 6.1), or where it merged from an
-/// oxygen–neon dwarf, and the naked helium star of a helium core of 0.5 M☉ or more; under the held
+/// oxygen–neon dwarf, an iron core where that core at the base of the AGB is 2.25 M☉ or more (a
+/// carbon–oxygen core of 1.438 M☉ or more, HPT section 6) and it merged from no dwarf, and the
+/// naked helium star of a helium core of 0.5 M☉ or more; under the held
 /// arm a helium giant is typed by its core as a thermally pulsing star is, and a helium core is its
 /// helium star only from the Chandrasekhar mass.
 ///
@@ -6826,6 +6891,10 @@ fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
     let h = |mass: f64| Unplaced::HeliumStar {
         mass: SolarMasses::new(mass),
     };
+    let fe = |co_core: f64, mass: f64| Unplaced::IronCore {
+        co_core: SolarMasses::new(co_core),
+        mass: SolarMasses::new(mass),
+    };
     let (co, one, he) = (
         Phase::CarbonOxygenWhiteDwarf,
         Phase::OxygenNeonWhiteDwarf,
@@ -6833,10 +6902,13 @@ fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
     );
     let (agb, giant, cheb) = (Kind::PulsingAgb, Kind::HeliumGiant, Kind::CoreHeliumBurning);
     let (other, ne) = (CoreSource::Other, CoreSource::OxygenNeonDwarf);
-    // (Mc − 0.448) ÷ 0.44 = 1.6 at Mc = 1.152.
+    // (Mc − 0.448) ÷ 0.44 = 1.6 at Mc = 1.152, and 2.25 at 1.438.
     for (kind, m, core, source, whole, held) in [
         (agb, 5.0, 1.0, other, w(co, 1.0), w(co, 1.0)),
         (agb, 5.0, 1.2, other, w(one, 1.2), w(one, 1.2)),
+        (agb, 5.0, 1.43, other, w(one, 1.43), w(one, 1.43)),
+        (agb, 5.0, 1.5, other, fe(1.5, 5.0), w(one, 1.5)),
+        (agb, 5.0, 1.5, ne, w(one, 1.5), w(one, 1.5)),
         (giant, 1.4, 1.2, other, w(co, 1.2), w(one, 1.2)),
         (giant, 1.7, 1.0, other, w(one, 1.0), w(co, 1.0)),
         (giant, 1.4, 1.0, ne, w(one, 1.0), w(one, 1.0)),
@@ -6979,7 +7051,8 @@ const WIND_FED_COLLAPSE_AGE: f64 = 480_515_539.091_214_66;
 
 /// P11.T4's dwarf limit and swollen dwarf: each arm of 29 is deterministic. The same pair, engine
 /// or swell twice under it gives the same timeline or member: an edge-lit dwarf's pair (5.43 +
-/// 1.69 M☉ at 7 d) and the wind-fed dwarf under the dwarf limit's arm alone, a fed helium dwarf's
+/// 1.69 M☉ at 7 d), an unplaced product's iron core and the wind-fed dwarf under the dwarf limit's
+/// arm alone, a fed helium dwarf's
 /// swell under the swollen dwarf's alone, and a swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d,
 /// Z = 0.004) under every 29 hold.
 #[test]
@@ -6992,6 +7065,18 @@ fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
     let until = Years::new(1.2e10);
     let input = pair(5.43, 1.69, 7.0, 0.0, 0.02).with_rules(dwarf_limit_rules());
     assert_eq!(evolve(&input, until), evolve(&input, until));
+    let iron_core = || {
+        let (engine, _) = unplaced_product(
+            Kind::PulsingAgb,
+            4.331_5,
+            1.764_8,
+            1.0,
+            0.02,
+            dwarf_limit_rules(),
+        );
+        (engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(iron_core(), iron_core());
     let wind = || {
         let mut engine = wind_fed_dwarf_engine(1.439, dwarf_limit_rules());
         engine.detached_phase();

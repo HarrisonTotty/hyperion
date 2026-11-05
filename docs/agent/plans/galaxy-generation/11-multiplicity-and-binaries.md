@@ -7655,3 +7655,8 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   the held arm and held by `held_product` (research-leans-34 §1(b)); a helium-giant product is
   typed by its mass (HPT §6.1); a helium core of 0.5 M☉ or more is its helium star (HPT §6); only
   CO and ONe dwarfs stop at M_Ch in a detached phase.
+  - From fix-p11-wd-iron-core (same hold): an unplaced TPAGB product of no dwarf with a CO core of
+    1.438 M☉ or more (`Mc,BAGB` ≥ 2.25 M☉, HPT §6) is `Unplaced::IronCore`, collapsed at once by
+    plan 06's iron-core fate (`sse::iron_core_fate`, `Engine::iron_core_collapse`) with the
+    ordinary kick and no Ia; the held arm's ONe AIC stays. Merger callers pass
+    `common_envelope::Product`. The census counts the unplaced products by kind.
