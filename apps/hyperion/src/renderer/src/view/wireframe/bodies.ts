@@ -451,16 +451,6 @@ export interface BodyWireframe {
   readonly lines: ReadonlyArray<GraticuleLine>;
 }
 
-/**
- * The unit vector of latitude `latRad` and longitude `lonRad` along the body-fixed axes: the
- * direction of planetocentric (geocentric) latitude, as R10's `graticulePatch` takes it (R02.T19,
- * decision-r02-t19-leans item 1).
- */
-function unitAt(latRad: number, lonRad: number): Vec3 {
-  const c = Math.cos(latRad);
-  return vec3(c * Math.cos(lonRad), c * Math.sin(lonRad), Math.sin(latRad));
-}
-
 /** Two unit vectors perpendicular to `axis` and to each other. */
 export function perpendicularPair(axis: Vec3): readonly [Vec3, Vec3] {
   const n = normalise(axis);
@@ -945,8 +935,6 @@ export function graticule(
     return { regime, diameterPx, lines };
   }
   const rotation = graticuleRotation(body);
-  const onSphere = (latRad: number, lonRad: number): Vec3 =>
-    rotateToBody(rotation, unitAt(latRad, lonRad));
   // The body's axes turned into the frame, and each one's facing component −axis · c, on a
   // spheroid in its stretched space, −axis · L c, where it is the sphere of radius a (R02.T19).
   const xAxis = rotateToBody(rotation, vec3(1, 0, 0));
@@ -1013,7 +1001,16 @@ export function graticule(
   for (let k = 0; k < count; k += 1) {
     const lonRad = k * stepRad;
     const major = k === 0;
-    const point = (lat: number): Vec3 => pointOf(onSphere(lat, lonRad));
+    // Its points' directions, body-fixed, (cos φ cos λ, cos φ sin λ, sin φ) at planetocentric
+    // (geocentric) latitude φ, as R10's `graticulePatch` takes it (R02.T19, decision-r02-t19-leans
+    // item 1): the longitude's cosine and sine taken once for its many points, not at each (lane
+    // perf-render-thread-ground), the same products, so the same points.
+    const cosLon = Math.cos(lonRad);
+    const sinLon = Math.sin(lonRad);
+    const point = (lat: number): Vec3 => {
+      const c = Math.cos(lat);
+      return pointOf(rotateToBody(rotation, vec3(c * cosLon, c * sinLon, Math.sin(lat))));
+    };
     lines.push({
       kind: "meridian",
       major,
@@ -1048,7 +1045,11 @@ export function graticule(
       spheroid === null
         ? latRad
         : Math.atan2(spheroid.stretch * Math.sin(latRad), Math.cos(latRad));
-    const point = (lon: number): Vec3 => pointOf(onSphere(onRad, lon));
+    // The parallel's latitude's cosine and sine taken once for its many points, as the meridians'.
+    const cosLat = Math.cos(onRad);
+    const sinLat = Math.sin(onRad);
+    const point = (lon: number): Vec3 =>
+      pointOf(rotateToBody(rotation, vec3(cosLat * Math.cos(lon), cosLat * Math.sin(lon), sinLat)));
     lines.push({
       kind: "parallel",
       major,

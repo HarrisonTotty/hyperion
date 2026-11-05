@@ -1896,3 +1896,26 @@ describe("the datum's cuts over the image, its camera taken once a body (lane pe
     ]);
   });
 });
+
+describe("the graticule's lines, each line's fixed angle's cosine and sine taken once (lane perf-render-thread-ground)", () => {
+  it("draws the wireframe's and the image's lines it drew with each point's own, bit for bit", () => {
+    const views = sampledSphereViews(20_261_105, 64);
+    const lines = [
+      ...views.map(
+        (view) => graticule(view.body, view.camera, FIELD, view.strokeScale, false, null).lines,
+      ),
+      ...views.map(insideLines),
+      ...SATURN_VIEWS.map(
+        ([, xPx, yPx, pole]) => graticule(saturnAt(xPx, yPx, pole), FIELD_CAMERA, FIELD, 2).lines,
+      ),
+    ];
+    const points = Float64Array.from(
+      lines.flat().flatMap((line) => line.runs.flat().flatMap((p) => [p.x, p.y, p.z])),
+    );
+    // FNV-1a 64 of the points' f64 bytes as the graticule drew them at 469a0dad.
+    expect([points.length, fnv1a64(new Uint8Array(points.buffer)).toString(16)]).toEqual([
+      65_964,
+      "180c895f5cd512a8",
+    ]);
+  });
+});
