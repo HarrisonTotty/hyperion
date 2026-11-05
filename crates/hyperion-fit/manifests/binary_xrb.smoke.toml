@@ -1,11 +1,11 @@
 # The X-ray binaries' smoke run: censuses of a five-hundredth of the full run's records at
-# generator version 27, whose few members leave most marks the scratch table's; some seconds on
+# generator version 28, whose few members leave most marks the scratch table's; some seconds on
 # four threads.
 task = "binary_xrb"
 
 [params]
 seed = 0x0b17_15a0_0000_0001
-generator_version = 27
+generator_version = 28
 records = 20_000
 population_records = 600
 young_thin_disc_records = 6_000

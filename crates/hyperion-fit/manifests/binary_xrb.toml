@@ -1,5 +1,5 @@
 # The X-ray binaries' sampler and share row (plan 15, P15.T10.b; read by plan 11's P11.T8.b class
-# from generator version 27), fitted against plan 11's engine at generator version 27's rules
+# from generator version 27), fitted against plan 11's engine at generator version 28's rules
 # through the sim's own census (`stellar::binary::testing::class_census_in`), as
 # `binary_awd.toml`'s are: the same slab of 10^7 records of layers C–E about the solar circle and
 # the same sites ([x, y, z, half-widths] in ly), the young thin disc's census of 3 × 10^6 records,
@@ -12,7 +12,7 @@ task = "binary_xrb"
 
 [params]
 seed = 0x0b17_15a0_0000_0001
-generator_version = 27
+generator_version = 28
 records = 10_000_000
 population_records = 300_000
 young_thin_disc_records = 3_000_000

@@ -1,6 +1,6 @@
 # The accreting white dwarfs' samplers and share rows (plan 15, P15.T10.b; read by plan 11's
 # P11.T8.a classes from generator version 27), fitted against plan 11's engine at generator
-# version 27's rules through the sim's own census (`stellar::binary::testing::class_census_in`),
+# version 28's rules through the sim's own census (`stellar::binary::testing::class_census_in`),
 # on the Milky Way fixture with the binary classes' scratch tables. The slab's census is 10^7
 # records of layers C–E about the solar circle in the band shares' proportion; each population
 # scarce there has 3 × 10^5 records of its own at a site where it lies ([x, y, z, half-widths] in
@@ -14,7 +14,7 @@ task = "binary_awd"
 
 [params]
 seed = 0x0b17_15a0_0000_0001
-generator_version = 27
+generator_version = 28
 records = 10_000_000
 population_records = 300_000
 parts = 32
