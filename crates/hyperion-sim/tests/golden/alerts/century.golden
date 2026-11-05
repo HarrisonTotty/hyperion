@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 7 local rows within 10 ly
 CORE_COLLAPSE NeedsBackgroundScan
 CORE_COLLAPSE.reach_ly = 0x410bb67ae8584caa  # 227023.36344966787
