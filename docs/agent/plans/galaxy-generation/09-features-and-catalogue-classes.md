@@ -6145,3 +6145,16 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _For the 29 bump._ Delete the hold, `SuperbubbleRules`, its field and the tripwire
     `the_superbubbles_merge_only_from_29`; re-bless `galaxy/features/gas.golden`
     (`feature_gas_about_the_sun_is_pinned`); restate T4.b's radii test, which reads `of`.
+- **P09.T37, the 27 range tests within wasm32's 4 GiB (lane `fix-wasm-range-hits`, 2026-11-05, at
+  28; no output moved).**
+  - _Cause._ Not the hits (at most 20,766 a sphere): the tests' class-cell cache kept the eight
+    stellar-merger cells about the centre, 12.2 million places (557 MiB) each, and the sixth
+    cell's places, grown by doubling to 2²⁴, asked for 768 MiB; the grid cache also kept
+    `generate_cell`'s reservation, 1.5 GiB for 0.22 GiB of records about the centre.
+  - _Sim._ `ClassCellSystems::of` reserves a placed class's places exactly, bit for bit.
+  - _Tests (lean, 2026-11-05)._ The verification's `KeepClassCells::under(bytes)` keeps cells of
+    at most `KEPT_CLASS_CELL_BYTES` (64 MiB) in `recent_in_range`, on both targets (`Default`
+    keeps every cell, as `budgets` has it), and `KeepCells` keeps each cell shrunk to its records.
+    The range plans are not walked in chunks: the hits are not what fills the memory.
+  - _Result._ The three pass natively and on wasip1 (wasmtime 49.0.1), peaking at 1.5–3.0 GiB
+    there; figures in the lane's outbox.

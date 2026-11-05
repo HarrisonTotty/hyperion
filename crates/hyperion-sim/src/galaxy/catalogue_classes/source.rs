@@ -404,7 +404,19 @@ impl ClassCellSystems {
         );
         let bound = process.bound(galaxy, &key);
         let candidates = candidate_count(galaxy.seed(), &key, bound);
-        let (mut places, mut members) = (Vec::new(), Vec::new());
+        // A placed class reads a place for every candidate (rule 11), so its places are reserved
+        // exactly. Grown by doubling, a stellar-merger cell about the centre's 12.2 million places
+        // (557 MiB) reached a 768 MiB buffer before being shrunk, past what wasm32's 4 GiB had left
+        // (P09.T37's range tests under every 27 hold, measured 2026-11-05, pod).
+        let mut places = if process.reads_place_first() {
+            Vec::with_capacity(
+                usize::try_from(candidates)
+                    .expect("usize is at least 32 bits, so a u32 count fits"),
+            )
+        } else {
+            Vec::new()
+        };
+        let mut members = Vec::new();
         for index in 0..candidates {
             let id = key
                 .candidate_id(index, 0)

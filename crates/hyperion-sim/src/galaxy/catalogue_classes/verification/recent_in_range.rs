@@ -294,12 +294,21 @@ fn placed_by_id(
 /// `SystemLine::at`).
 const LINE_ROUNDING_M: f64 = 10.0;
 
+/// The largest class cell the tests keep between queries, bytes: 64 MiB.
+///
+/// Eight cells of the stellar mergers meet a sphere about the black hole, each of 12.2 million
+/// places (557 MiB), and eight of the slow accreting white dwarfs, each of 2.0 million (93 MiB):
+/// 5.1 GiB kept, past wasm32's 4 GiB. So they are made again for each query that reads them, in
+/// about 1 s and 0.16 s each, and dropped after it; the cells kept come to 218 MiB, and the 27
+/// tests' wasmtime peaks to 1.5–3.0 GiB (measured 2026-11-05, pod).
+const KEPT_CLASS_CELL_BYTES: usize = 64 << 20;
+
 /// The sources the server registers in `galaxy` beside the grid, handed to `run` with what a
 /// placement by ID reads.
 fn with_served<R>(galaxy: &Galaxy, run: impl FnOnce(&[&dyn SystemSource], Reads<'_>) -> R) -> R {
     let interiors = KeepInteriors::new(galaxy);
     let features = FeatureMemberSource::new(&NoFeatureCache, &interiors);
-    let cells = KeepClassCells::default();
+    let cells = KeepClassCells::under(KEPT_CLASS_CELL_BYTES);
     let classes =
         CatalogueClassSource::registered_in(galaxy).map(|classes| classes.with_cells(&cells));
     let orbits = KeepCentreOrbits::new(galaxy);

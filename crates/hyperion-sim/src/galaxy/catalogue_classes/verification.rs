@@ -20,6 +20,7 @@ mod recent_in_range;
 mod shells;
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::sync::{Arc, Mutex};
 
 use crate::Seed;
@@ -86,6 +87,12 @@ impl TubeLookup for Tubes<'_> {
 /// A grid cache that keeps every cell it is asked for, for one galaxy: the layer-E cell about the
 /// centre takes over a minute to generate under every 27 hold (pod, 16 vCPU), and every query
 /// there reads it.
+///
+/// Each cell is kept shrunk to its records, as [`generate_cell`] asks of a cache that keeps its
+/// buffer: it reserves for every candidate, and the sixteen cells of layers D and E about the
+/// centre keep a tenth to a fifth of theirs (239,000 records of 1.19 million reserved in a layer-D
+/// cell, 130,000 of 1.28 million in a layer-E cell), 1.5 GiB reserved for 0.22 GiB kept, which
+/// wasm32's 4 GiB counts whole (measured 2026-11-05, pod).
 #[derive(Debug, Default)]
 struct KeepCells(BTreeMap<CellKey, Vec<SystemRecord>>);
 
@@ -99,15 +106,40 @@ impl CellCache for KeepCells {
         f(self.0.entry(key).or_insert_with(|| {
             let mut systems = Vec::new();
             generate_cell(galaxy, key, &mut systems);
+            systems.shrink_to_fit();
             systems
         }))
     }
 }
 
-/// A class-cell cache that keeps every cell's systems it makes, for one galaxy: queries about the
+/// A class-cell cache that keeps the cells' systems it makes, for one galaxy: queries about the
 /// centre share their class cells, whose cold systems cost seconds.
-#[derive(Debug, Default)]
-struct KeepClassCells(Mutex<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>);
+///
+/// It keeps every cell ([`Default`]), or only those of at most a number of heap bytes
+/// ([`under`](Self::under)), making the larger ones for each lookup and dropping them after it.
+#[derive(Debug)]
+struct KeepClassCells {
+    kept: Mutex<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>,
+    /// The heap bytes of the largest cell kept ([`ClassCellSystems::heap_bytes`]).
+    largest_bytes: usize,
+}
+
+impl Default for KeepClassCells {
+    fn default() -> Self {
+        Self::under(usize::MAX)
+    }
+}
+
+impl KeepClassCells {
+    /// A cache that keeps the cells of at most `largest_bytes` heap bytes.
+    #[must_use]
+    fn under(largest_bytes: usize) -> Self {
+        Self {
+            kept: Mutex::default(),
+            largest_bytes,
+        }
+    }
+}
 
 impl CatalogueClassCellCache for KeepClassCells {
     fn systems(
@@ -117,10 +149,19 @@ impl CatalogueClassCellCache for KeepClassCells {
         make: &mut dyn FnMut() -> ClassCellSystems,
     ) -> Arc<ClassCellSystems> {
         let mut kept = self
-            .0
+            .kept
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Arc::clone(kept.entry(key).or_insert_with(|| Arc::new(make())))
+        match kept.entry(key) {
+            Entry::Occupied(kept) => Arc::clone(kept.get()),
+            Entry::Vacant(vacant) => {
+                let systems = Arc::new(make());
+                if systems.heap_bytes() <= self.largest_bytes {
+                    vacant.insert(Arc::clone(&systems));
+                }
+                systems
+            }
+        }
     }
 }
 
