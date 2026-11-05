@@ -756,7 +756,7 @@ struct Gate {
 /// times across the window. The pair-light and reach tables the test reads are the version's
 /// tracks', so under another Humphreys–Davidson arm (P06.T42.b's hold) no pair is certified, nor
 /// under a stellar hold's arm other than the version's that the binary engine reads (P11.T4's
-/// `dwarf_limit` and `swollen_dwarf` at 29).
+/// `dwarf_limit`, `swollen_dwarf` and `core_endings` at 29).
 ///
 /// `primary` says where the hierarchy reads the primary's stripped mark: the kick loop's kept
 /// attempt, for a record whose class constrains its kick (P08.T12.c).

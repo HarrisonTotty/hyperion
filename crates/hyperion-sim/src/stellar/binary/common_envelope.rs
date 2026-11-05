@@ -484,6 +484,39 @@ impl Engine {
         }
     }
 
+    /// The white dwarf whose core member `i`, of type `kind`, gives a merger's product: from
+    /// version 29 (P11.T4's dwarf limit, [`DwarfLimitRules::Whole`]) [`Engine::dwarf_core`], and
+    /// before it only the one a swollen dwarf's giant keeps ([`Engine::dwarf_cores`]), as version
+    /// 27 typed a coalescence's or a collision's product by no dwarf parent.
+    #[must_use]
+    fn merged_dwarf_core(&self, i: usize, kind: Kind) -> CoreSource {
+        match self.ctx.rules().dwarf_limit {
+            DwarfLimitRules::Held => self.dwarf_cores[i],
+            DwarfLimitRules::Whole => self.dwarf_core(i, kind),
+        }
+    }
+
+    /// The white dwarf whose core the product of a coalescence of `parents`, each a member's index
+    /// and type, takes ([`Engine::merged_dwarf_core`]). The product's core is both members' (BSE
+    /// section 2.7.1): a dwarf's where either is, and oxygen–neon where either's is, a giant's own
+    /// included (research-leans-35 §7).
+    #[must_use]
+    pub(super) fn coalesced_source(&self, parents: [(usize, Kind); 2]) -> CoreSource {
+        let [(a, kind_a), (b, kind_b)] = parents;
+        let source = self
+            .merged_dwarf_core(a, kind_a)
+            .with(self.merged_dwarf_core(b, kind_b));
+        if source == CoreSource::CarbonOxygenDwarf
+            && parents
+                .into_iter()
+                .any(|(i, kind)| self.own_oxygen_neon_core(i, kind))
+        {
+            CoreSource::OxygenNeonDwarf
+        } else {
+            source
+        }
+    }
+
     /// Sets member `i` to co-rotate with the orbit, if there is one.
     fn corotate(&mut self, i: usize) {
         let Some(orbit) = &self.orbit else {
@@ -505,21 +538,7 @@ impl Engine {
             self.mix();
             return;
         };
-        // The product's core is both members' (BSE section 2.7.1): a dwarf's where either is, and
-        // oxygen–neon where either's is, a giant's own included (research-leans-35 §7).
-        let parents = [(d, remains.s1.kind), (1 - d, remains.s2.kind)];
-        let source = self
-            .dwarf_core(d, remains.s1.kind)
-            .with(self.dwarf_core(1 - d, remains.s2.kind));
-        let source = if source == CoreSource::CarbonOxygenDwarf
-            && parents
-                .into_iter()
-                .any(|(i, kind)| self.own_oxygen_neon_core(i, kind))
-        {
-            CoreSource::OxygenNeonDwarf
-        } else {
-            source
-        };
+        let source = self.coalesced_source([(d, remains.s1.kind), (1 - d, remains.s2.kind)]);
         let product = coalesced_product(&remains, self.ctx.giant_exponent());
         let product = self.product_member(product, source);
         self.finish_merger(product);
@@ -802,15 +821,12 @@ impl Engine {
                 // `finish_merger` collapses a dwarf at the Chandrasekhar mass (P11.T4's fix), but from
                 // 29 for a pinned primary's, which collapses at once at it as before the fix.
                 let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
-                if pinned && !dwarf_limit::collapses(total) {
-                    self.white_dwarf(phase, total).into()
-                } else if pinned {
+                if pinned && dwarf_limit::collapses(total) {
                     self.finish_merger(self.white_dwarf(phase, total).into());
                     self.accretion_induced_collapse(0, total);
                     return;
-                } else {
-                    self.white_dwarf(phase, total).into()
                 }
+                self.white_dwarf(phase, total).into()
             }
             (
                 Kind::NeutronStar | Kind::BlackHole,
@@ -841,7 +857,7 @@ impl Engine {
                     s_hi.state.core_mass().value(),
                     s_hi.burnt,
                     s_hi.state.phase_fraction(),
-                    self.dwarf_core(first, hi),
+                    self.merged_dwarf_core(first, hi),
                 )
             }
         };
@@ -1419,8 +1435,8 @@ impl Engine {
             Kind::NeutronStar | Kind::BlackHole => return self.compact(kind, m).into(),
             Kind::Massless => return Member::Gone.into(),
         };
-        // A pinned primary's product is left to its pin, its dwarf typed by the held arm and held
-        // by `held_product` (research-leans-34 §1(b)).
+        // A pinned primary's product is left to its pin under the held arm, placed or not: its
+        // dwarf typed by it and held by `held_product` (research-leans-34 §1(b)).
         let limit = if self.pin_pending(0) {
             DwarfLimitRules::Held
         } else {

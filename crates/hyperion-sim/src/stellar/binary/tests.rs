@@ -7343,10 +7343,19 @@ fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
         );
         if degenerate {
             assert!((m0 / m_hef - 0.7).abs() < 1e-12, "{m0} against {m_hef}");
-            assert!(m0.total_cmp(&SWOLLEN_GIANT[0]).is_eq(), "{m0}");
+            let pinned = SWOLLEN_GIANT;
+            assert!(
+                m0.total_cmp(&pinned[0]).is_eq(),
+                "{m0} against {}",
+                pinned[0]
+            );
             let core = giant.core_mass().value();
             assert!((core - dwarf).abs() <= 1e-9 * dwarf, "{core}");
-            assert!(core.total_cmp(&SWOLLEN_GIANT[1]).is_eq(), "{core}");
+            assert!(
+                core.total_cmp(&pinned[1]).is_eq(),
+                "{core} against {}",
+                pinned[1]
+            );
             assert_eq!(left, Phase::HeliumWhiteDwarf);
         } else {
             assert!(m0 > m_hef, "{m0} against {m_hef}");
@@ -7730,6 +7739,62 @@ fn a_placed_product_of_a_dwarf_keeps_its_kind() {
             assert_eq!(dead.phase(), kind, "{case}: dead, {dead:?}");
             assert!(engine.pooled.is_none(), "{case}");
         }
+    }
+}
+
+/// P11.T4's dwarf limit: a coalescence reads its parents' dwarfs only from 29. A 0.6 M☉
+/// carbon–oxygen dwarf coalescing with a 1.8 M☉ helium star in its Hertzsprung gap, whose track
+/// types its core oxygen–neon (a helium star of 1.6–2.25 M☉, HPT section 6.1), gives an
+/// oxygen–neon core under every 29 hold (research-leans-35 §7), and under the version's rules none,
+/// as version 27 read no dwarf parent there. Of that core, a thermally pulsing AGB product of
+/// 2.24 M☉ around 0.457 M☉ at Z = 0.004 that no star can hold leaves an oxygen–neon dwarf under
+/// every 29 hold, and the held arm's carbon–oxygen one under the version's rules: a check of the
+/// typing alone, since no oxygen–neon dwarf is so light.
+#[test]
+fn a_coalescence_reads_its_dwarf_parents_only_from_29() {
+    use std::sync::Arc;
+
+    use super::dwarf_limit::CoreSource;
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::rules::StellarRules;
+    use crate::stellar::sse::Track;
+
+    let version = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let track = Arc::new(Track::helium_star_full(
+        SolarMasses::new(1.8),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    ));
+    let at = track
+        .age_in_phase(Phase::HeliumHertzsprungGap, 0.5)
+        .expect("a helium Hertzsprung gap");
+    for (rules, source, phase) in [
+        (version, CoreSource::Other, Phase::CarbonOxygenWhiteDwarf),
+        (
+            StellarRules::every_29_hold(),
+            CoreSource::OxygenNeonDwarf,
+            Phase::OxygenNeonWhiteDwarf,
+        ),
+    ] {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+        let age = engine.age;
+        let offset = super::evolve::offset_for(age, at);
+        engine.members[0] = Member::Shaped {
+            mass: Path::starting(age, track.mass_at(age - offset)),
+            track: Arc::clone(&track),
+            offset,
+        };
+        engine.members[1] = Member::Remnant {
+            phase: Phase::CarbonOxygenWhiteDwarf,
+            birth: 0.5 * age,
+            origin: crate::units::Megayears::ZERO,
+            mass: Path::starting(age, 0.6),
+        };
+        let parents = [(0, Kind::HeliumGap), (1, Kind::CarbonOxygenWhiteDwarf)];
+        assert_eq!(engine.coalesced_source(parents), source, "{rules:?}");
+        let product = (2.240_1, 0.457_2, 1.0);
+        let (_, state) = unplaced_product(Kind::PulsingAgb, product, 0.004, rules, source);
+        assert_eq!(state.phase(), phase, "{rules:?}");
     }
 }
 

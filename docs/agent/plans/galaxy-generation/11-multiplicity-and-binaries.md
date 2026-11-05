@@ -7706,3 +7706,9 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     census.
   - Census under every 29: layer D's no-star pairs 22 → 56 (E 10 → 12): kept CO cores disrupting
     at M_Ch, with no Ia, on those helium stars' tracks.
+- The union on land/next (2026-11-05, held at 29):
+  - A coalescence and a collision read a white-dwarf parent's own kind only under the whole dwarf
+    limit (`Engine::merged_dwarf_core`, `Engine::coalesced_source`); under the held arm only a
+    swollen dwarf's record, as v27 read none there (review). As first ported, an ONe-typing helium
+    giant coalescing with a CO dwarf could type its unplaced product ONe under every 27 hold; no
+    census met one.

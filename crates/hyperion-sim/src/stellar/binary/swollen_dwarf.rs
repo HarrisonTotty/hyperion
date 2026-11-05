@@ -63,7 +63,7 @@ pub(crate) const SWOLLEN_DWARF_VERSION: GeneratorVersion = GeneratorVersion::new
 /// hold of [`SWOLLEN_DWARF_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum SwollenDwarfRules {
-    /// Version 29's and before: BSE's placement, a core above `Mc,BGB`(`M_HeF`) at the base of a
+    /// Version 28's and before: BSE's placement, a core above `Mc,BGB`(`M_HeF`) at the base of a
     /// heavier star's giant branch; a carbon–oxygen or oxygen–neon dwarf's giant ends as its
     /// track's kind.
     AtBase,

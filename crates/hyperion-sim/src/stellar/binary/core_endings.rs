@@ -65,7 +65,7 @@ pub(crate) const CORE_ROUNDING: f64 = 1e-9;
 /// [`CoreEndingRules::Unified`].
 ///
 /// Below it every pair and star takes the held arm, [`CoreEndingRules::Held`], the code of version
-/// 28 verbatim, so every generated value keeps its bits; the tests reach the new arm through
+/// 27 verbatim, so every generated value keeps its bits; the tests reach the new arm through
 /// `StellarRules::every_29_hold()`. The bump to 29 deletes the hold, not the rule: this module
 /// with [`CoreEndingRules`] (but the rules of [`CoreEndingRules::collapse_mass`] and
 /// [`CoreEndingRules::below_the_chandrasekhar_mass`], which move to their callers), the stellar

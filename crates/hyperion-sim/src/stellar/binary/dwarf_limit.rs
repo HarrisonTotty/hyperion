@@ -44,10 +44,11 @@
 //! [`DwarfLimitRules::Held`], is version 27's code verbatim):
 //!
 //! - no white dwarf passes the Chandrasekhar mass but a pinned primary's whose pin is pending
-//!   (design note 16), which is left to its pin (`Engine::pin_pending`): the dwarfs' merger, the
-//!   merged dwarf's collapse in `Engine::finish_merger`, the edge-lit arm of
-//!   `Engine::accretor_events` and the detached phase's stop wait for it, and the unplaced product's
-//!   dwarf is typed by the held arm and held by `Engine::held_product`, as at 27;
+//!   (design note 16), which is left to its pin (`Engine::pin_pending`): the merged dwarf's
+//!   collapse in `Engine::finish_merger`, the edge-lit arm of `Engine::accretor_events` and the
+//!   detached phase's stop wait for it, and its product takes the held arm, placed or not, the
+//!   unplaced one's dwarf held by `Engine::held_product`, as at 27; the dwarfs' own merger
+//!   collapses such a primary's merged dwarf at once at the Chandrasekhar mass, as before the fix;
 //! - a thermally pulsing AGB product leaves an oxygen–neon dwarf where its core at the base of the
 //!   AGB, as its placement solves it back, is 1.6 M☉ or more, a helium giant one where the product's
 //!   mass, standing for the helium star's, is (HPT section 6.1), and either one where it merged from
