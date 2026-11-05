@@ -423,18 +423,28 @@ fn contrast_of(galaxy: &Galaxy, tube: &TubeTable) -> Option<[f64; 2]> {
     (!reference.is_empty()).then(|| [spread(reference)[1], spread(halo)[1]])
 }
 
-/// The drawn Milky Way's medians, as measured (2026-10-31, x86-64), each with its name: its globular
-/// tubes' length, width and dispersion; its one dwarf tube's width, dispersion and wraps; and its
-/// globular streams' axes at 15–18 kpc against the reference density and the smooth halo.
+/// The drawn Milky Way's medians, as measured (2026-11-05, x86-64, at generator version 27), each
+/// with its name: its globular tubes' length, width and dispersion; its one dwarf tube's width,
+/// dispersion and wraps; and its globular streams' axes at 15–18 kpc against the reference density
+/// and the smooth halo.
+///
+/// They were pinned at 24 (2026-10-31) at 136,515 ly, 229 ly, 0.77 km/s, 717 ly, 3.2 km/s, 1.88,
+/// 1.88 × 10⁻⁴ and 3.32, on 262 streams; 26's rules still gave them to 1%. Two 27 folds move them,
+/// each measured alone, the other at its 26 arm, on the tree before the folds. P15.T11.b's fitted
+/// streams per globular give 355 orphans for 257, which widen the globular tubes to 241 ly. They
+/// also move the dwarf's tube to 771 ly and 1.98 wraps: it is numbered after the orphans, and its
+/// spray is keyed by its number. P10.T10.b's coarse spray (500 tracers an arm at `τ_p ÷ 32`)
+/// raises the dispersion to 0.83 km/s and shortens the tubes 6%. Between them the contrast against
+/// the smooth halo falls from 3.35 to 2.78.
 const DRAWN_MEDIANS: [(&str, f64); 8] = [
-    ("the globular tubes' length, ly", 136_515.0),
-    ("the globular tubes' width, ly", 229.0),
-    ("the globular tubes' dispersion, km/s", 0.77),
-    ("the dwarf tube's width, ly", 717.0),
+    ("the globular tubes' length, ly", 131_877.0),
+    ("the globular tubes' width, ly", 243.0),
+    ("the globular tubes' dispersion, km/s", 0.85),
+    ("the dwarf tube's width, ly", 771.0),
     ("the dwarf tube's dispersion, km/s", 3.2),
-    ("the dwarf tube's wraps", 1.88),
-    ("the axis against the reference density", 1.88e-4),
-    ("the axis against the smooth halo", 3.32),
+    ("the dwarf tube's wraps", 1.98),
+    ("the axis against the reference density", 1.47e-4),
+    ("the axis against the smooth halo", 2.78),
 ];
 
 /// Prints the drawn galaxy's figures, each column's least, median and most and how many lie in the
