@@ -2347,21 +2347,22 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     to 19): `Instance.strides` (E_L ÷ τ′_rad, 1 ÷ τ′_rad, the holds' onsets' shares, 0; ≤ 0 none),
     `Instance.edgeBands` (words 20 to 67, `INSTANCE_EDGE_BANDS_WORD`: 4 × 8 × 3 half floats of km
     rounded up, `edgeBandIndex`) and bit 18 of `parentQuadrant`, `INSTANCE_FINEST` (camera passes at
-    stride 1 near a contact). The cull reads words 7, 8, 12 and 13 where an instance has 16 words or
-    more, and 20 to 67 where 68.
+    stride 1 near a contact). The cull reads words 7, 8, 12, 13 and 14 where an instance has 16
+    words or more, and 20 to 67 where 68.
     `SLOT_RECORD_BYTES` is 496 (`SlotRecord.blockErrors`, e₂, e₄ and e₈ a block in half floats, +∞
     unmeasured).
   - Design note 15's rows, by the record sizes (not by allocation events): today's path's
     per-cascade copies are 4 × slots × 272 B (about 1.3 MB on high, not 0.4 MB), each lit view's
     records slots × 272 B, and the slot records 496 B a slot (about 0.6 MB on high).
-  - A coarse–fine hold at k = 0 fades in (the owner's, 2026-11-03; its 300 ms,
-    `STRIDE_HOLD_FADE_MS`, a lean): after it switches on, its edge's level-2 vertices keep its last
-    bands and their stride morph a share falling from 255 to 0, a byte an edge in
-    `Instance.holdFades` (`StrideHoldFades`, a view's, on the CPU; `strideFactor`, `stride_factor`);
-    the cull holds the edge at stride 4 from the first frame. Not the task's stateless morph, nor
-    "the same position at every t" across that edge: for the 300 ms the two sides part, by at most
-    the falling stride displacement, over the skirts. A hold's release, and the hold at k = 1,
-    switch at once.
+  - A coarse–fine hold at k = 0 fades in and out (its onset the owner's, 2026-11-03; its release a
+    lean, 2026-11-05; its 300 ms, `STRIDE_HOLD_FADE_MS`, a lean): each edge's level-2 vertices keep
+    a share of their stride morph that moves towards the hold by 1 over 300 ms from where the last
+    switch left it, a byte an edge in `Instance.holdFades` (`StrideHoldFades`, a view's, on the
+    CPU; `strideFactor`, `stride_factor`): while held, the share, the edge's last bands before the
+    hold; after its release, 1 less the share, its own bands. The cull holds the edge at stride 4
+    while it is held or its byte is not 0 (`strideFadingEdges`). Not the task's stateless morph,
+    nor "the same position at every t" across that edge: for the 300 ms the two sides part, by at
+    most the falling stride displacement, over the skirts. The hold at k = 1 switches at once.
   - Not Design note 3's unslewed τ′ (lean, 2026-11-04; pending the owner's ruling): a patch's stride
     scale takes its view's bands' τ′ (`bandTauPx`), reached at most `BAND_SLEW_PER_STEP` a step as
     the morph bands' is, because the budget's τ′ jumped 1.8 times in one frame on low and turned a
@@ -2378,12 +2379,17 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     descent poses; Mars-like has no field fixture.
   - The acceptance, as the ruling restated it (lit triangles within 10% of the shared bands' share,
     0.031 high and 0.018 low; the rest as the task says), on the whole seamless probe with the hold
-    fade, β = 0.002 and the slewed scale (the figures are in the lane's outbox):
-    - low passes (moves, normals, lit triangles; no crack and every mark as at stride 1 in
-      test-render), so `strides` is `measured` on low; the smoke frames that hold the lit mesh's
-      byte for byte take low's geometry with `strides` off (`LOW_AT_STRIDE_1`).
-    - high fails on moves alone (10 frames' changes past its 1 px), normals and lit triangles
-      passing, so `strides` stays `off` on high (findings).
+    fades, β = 0.002 and the slewed scale (the figures are in the lane's outbox): both settings
+    pass (moves, normals, lit triangles; no crack and every mark as at stride 1 in test-render), so
+    `strides` is `measured` on both. The smoke frames and the pass's tests that hold the lit mesh
+    byte for byte take their setting's geometry with `strides` off (`LOW_AT_STRIDE_1`,
+    `HIGH_AT_STRIDE_1`). Before the release's fade high failed on moves alone, every frame past its
+    1 px a hold's release.
+  - The seamless probe's strides resume by segments (the lane rules' long runs; 4.4 h on high
+    whole): `SEAM_STRIDES_FROM_S` and `SEAM_STRIDES_TO_S` measure one segment, the frame before it
+    only read; a segment's figures are sums, counts and maxima, merged bit for bit (its slow test);
+    `scripts/seamSegments.mjs` plays the segments, keeps each one's file as it ends, resumes at the
+    rest, and accepts from their merge (`SEAM_SEGMENTS`).
   - Not built: the counting harness's strides rule (its flat bakes hold no measured e_s); a GPU
     check of `stride_place` against its twin; the time-fade fallback.
   - For T2.c–d: the lit vertex stage places by `stride_place`; the resolve must too.
