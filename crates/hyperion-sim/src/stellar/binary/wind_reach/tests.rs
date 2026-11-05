@@ -245,13 +245,12 @@ fn the_screen_holds_every_wind_fed_pair() {
     assert!(fed > 200, "the pairs reach the wind: {fed}");
 }
 
-/// The table's reader and the 29 arm's verdicts are pinned bit for bit (the determinism audit):
+/// The table's reader and the bound's verdicts are pinned bit for bit (the determinism audit):
 /// the reach at every 61st mass node, each node of `FE_H_NODES` and every 13th age edge, and the
-/// verdicts of 256 fixed queries under 29's rules.
+/// verdicts of 256 fixed queries.
 #[test]
 fn the_wind_reach_and_the_29_verdicts_are_pinned() {
-    use crate::galaxy::rules::GalaxyRules;
-    use crate::stellar::binary::{PairLight, pair_light_bound_under};
+    use crate::stellar::binary::{PairLight, pair_light_bound};
     use crate::units::Metres;
     use hyperion_testkit::golden;
     use hyperion_testkit::golden::GoldenWriter;
@@ -275,7 +274,6 @@ fn the_wind_reach_and_the_29_verdicts_are_pinned() {
             }
         }
     }
-    let rules = GalaxyRules::every_29_hold().stellar;
     let mut mix = Mix(SEED ^ 0x0001_9029);
     let log_uniform =
         |u: f64, lo: f64, hi: f64| lo * crate::math::exp(u * crate::math::ln(hi / lo));
@@ -286,13 +284,12 @@ fn the_wind_reach_and_the_29_verdicts_are_pinned() {
         let age = log_uniform(mix.unit(), 1.0e5, 1.4e10);
         let fe_h = -2.5 + 2.8 * mix.unit();
         let comp = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
-        let verdict = pair_light_bound_under(
+        let verdict = pair_light_bound(
             SolarMasses::new(a),
             SolarMasses::new(b),
             Metres::new(p * SOLAR_RADIUS_M),
             &comp,
             Years::new(age)..=Years::new(age),
-            rules,
         );
         w.line(&format!(
             "query {i:03}: {a:.6} + {b:.6} M☉, periastron {p:.6e} R☉, age {age:.6e} yr, \

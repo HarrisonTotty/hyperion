@@ -30,22 +30,15 @@
 //! - [`kick_rank`](StellarRules::kick_rank), the ordinary kick's rank table. No version holds a
 //!   second table yet, so every version takes the committed one. The tests reach a test-only
 //!   second table through it, to show that every reader goes through the choke point.
-//! - [`wind_reach`](StellarRules::wind_reach), whether the census's pair bound reads the wind's
-//!   reach for its `Detached`, from 29 ([`WIND_REACH_VERSION`]; P11.T12's fix). Its one reader is
-//!   `light::detached`, which `pair_light_bound_under` reaches with the galaxy's rules from the
-//!   census (`StarBounds`) and the brief's gate.
 //!
-//! The 27 folds put P11's 27 holds on the record, and the 29 folds P11.T4's white-dwarf union; the
-//! holds above but `kick_rank` are at 29.
-//!
-//! [`WIND_REACH_VERSION`]: crate::stellar::binary::wind_reach::WIND_REACH_VERSION
+//! The 27 folds put P11's 27 holds on the record, and the 29 folds P11.T4's white-dwarf union and
+//! P11.T12's wind reach.
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
 
 use crate::GeneratorVersion;
-use crate::stellar::binary::wind_reach::WindReachRules;
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -56,26 +49,22 @@ pub(crate) struct StellarRules {
     ///
     /// [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
     pub(crate) kick_rank: KickRankRules,
-    /// Whether the census's pair bound reads the wind's reach for its `Detached`
-    /// ([`WindReachRules`]), from 29.
-    pub(crate) wind_reach: WindReachRules,
 }
 
 impl StellarRules {
     /// Each field's arm at `version`: the new arm from its `*_VERSION`, the held arm below it.
     ///
-    /// Every version takes the committed kick-rank table; the wind's reach is held below 29.
+    /// Every version takes the committed kick-rank table, and no field is held now.
     #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
+    pub(crate) const fn of_version(_version: GeneratorVersion) -> Self {
         Self {
             kick_rank: KickRankRules::Committed,
-            wind_reach: WindReachRules::of_version(version),
         }
     }
 
     /// Every stellar hold at 29 in force, for a test that asserts a 29 figure without a galaxy:
-    /// P11.T12's `wind_reach`. The stellar part of `GalaxyRules::every_29_hold()`, so a later hold
-    /// at 29 joins both with nothing to edit; the 29 bump deletes it with it.
+    /// none is left, the 29 folds having put them on the record. The stellar part of
+    /// `GalaxyRules::every_29_hold()`; the 29 bump deletes it with it.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_29_hold() -> Self {
@@ -83,14 +72,13 @@ impl StellarRules {
     }
 
     /// The test-only second table in place of the committed one
-    /// ([`KickRankRules::Probe`]), which no version takes, under the version's other rules: the
-    /// tests' door to every reader's choke point.
+    /// ([`KickRankRules::Probe`]), which no version takes: the tests' door to every reader's
+    /// choke point.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn probe() -> Self {
         Self {
             kick_rank: KickRankRules::Probe,
-            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 }

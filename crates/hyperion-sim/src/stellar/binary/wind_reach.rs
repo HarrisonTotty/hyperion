@@ -1,7 +1,6 @@
-//! The wind's reach (plan 11, P11.T12's fix, held at 29): from fitted tables alone, whether a star
-//! of a wide pair can take 10⁻⁴ M☉ of its partner's wind by an age, for the census's pair bound
-//! ([`pair_light_bound`](super::pair_light_bound)), whose `Detached` it bounds from
-//! `WIND_REACH_VERSION`.
+//! The wind's reach (plan 11, P11.T12's fix): from fitted tables alone, whether a star of a wide
+//! pair can take 10⁻⁴ M☉ of its partner's wind by an age, for the census's pair bound
+//! ([`pair_light_bound`](super::pair_light_bound)), whose `Detached` it bounds.
 //!
 //! From version 27 a pair the pre-test's lobe and decay tests pass over is still sent to the engine
 //! where its main-sequence star takes `LEAST_ACCRETED_MSUN` of its partner's wind
@@ -9,9 +8,9 @@
 //! bound's `Detached`, which reads only the lobe and decay tests, answered `Detached` for such
 //! pairs, and the census took each of their stars for its own model: train 27 found a bulge
 //! companion of 0.70 M☉ grown to 0.95 M☉, at M<sub>V</sub> 4.26 against its bound's 6.02. So
-//! from `WIND_REACH_VERSION` (`WindReachRules::Wind`) the bound calls a pair `Detached` only
-//! where this module's screen (`may_take_wind`) clears the threshold by the window's end, for
-//! each of its stars as the accretor and the other as the donor.
+//! from version 29 the bound calls a pair `Detached` only where this module's screen
+//! (`may_take_wind`) clears the threshold by the window's end, for each of its stars as the
+//! accretor and the other as the donor.
 //!
 //! # The screen
 //!
@@ -72,7 +71,6 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::GeneratorVersion;
 use crate::galaxy::displaced::binarity::NEVER_STRIPPED;
 use crate::math;
 use crate::rng::Mark;
@@ -95,39 +93,6 @@ use super::wind_accretion::{
     LEAST_ACCRETED_MSUN, STEPS_PER_INTERVAL, dust_radius, on_the_agb, walk_steps,
     wind_roche_lobe_efficiency,
 };
-
-/// The generator version from which the census's pair bound calls a pair `Detached` only where
-/// neither of its stars can take [`LEAST_ACCRETED_MSUN`] of the other's wind by the window's end
-/// ([`WindReachRules::Wind`]).
-///
-/// Below it `WindReachRules::of_version` is [`WindReachRules::LobeAndDecay`], and every verdict is
-/// version 28's bit for bit. 29's bump deletes this hold, `WindReachRules` with its `LobeAndDecay`
-/// arm, `StellarRules::wind_reach`, the `match` in `light::detached`, the held column of the light
-/// module's tallies and its tripwire (`the_wind_reach_is_held_only_until_the_29_bump`).
-pub(crate) const WIND_REACH_VERSION: GeneratorVersion = GeneratorVersion::new(29);
-
-/// What the census's pair bound reads for its `Detached` (its hold, [`WIND_REACH_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum WindReachRules {
-    /// Version 28's and before: the lobe and decay tests alone, though from 27 the engine feeds a
-    /// passed-over pair its partner's wind.
-    LobeAndDecay,
-    /// Version 29's: the lobe and decay tests, and the wind's reach ([`may_take_wind`]).
-    Wind,
-}
-
-impl WindReachRules {
-    /// The arm at `version`: [`Wind`](Self::Wind) from [`WIND_REACH_VERSION`], the held arm
-    /// below it.
-    #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
-        if version.get() >= WIND_REACH_VERSION.get() {
-            Self::Wind
-        } else {
-            Self::LobeAndDecay
-        }
-    }
-}
 
 /// The margin added to every cell's Bondi–Hoyle sum, dex: 0.1, a factor of 1.26, for the stars
 /// between the samples (lean, 2026-11-05: the reach table's 0.02 dex covers a radius, and the sum

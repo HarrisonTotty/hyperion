@@ -790,14 +790,7 @@ fn gate(
         let [a, b] = pair
             .stars()
             .map(|star| stars[usize::from(star.get())].initial_mass());
-        pair_keeps_own_models(
-            a,
-            b,
-            pair.periastron(),
-            composition,
-            ages.clone(),
-            galaxy.rules().stellar,
-        )
+        pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
     });
     Gate {
         star_count: attempt.hierarchy().star_count(),

@@ -79,7 +79,7 @@ use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, Layer, SystemId};
 use crate::math;
 use crate::observe::{Drift, Retardation, TraceMotionError, retarded};
-use crate::stellar::binary::{PairLight, pair_light_bound_under};
+use crate::stellar::binary::{PairLight, pair_light_bound};
 use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::multiplicity::{
     HierarchyBound, MAX_COMPANIONS, MultiplicityContext, RedrawAttempt, StarIndex, TIDAL_CUT_SHARE,
@@ -1074,7 +1074,7 @@ impl RecordLight {
 ///    so each star's initial mass is exact, with its body and attempt, and so is each star–star
 ///    pair's drawn periastron;
 /// 3. each such pair's [`pair_light_bound`](crate::stellar::binary::pair_light_bound) over the
-///    record's light-time ages, under the galaxy's stellar rules;
+///    record's light-time ages;
 /// 4. for each star, R06.T8.m's phase envelope ([`PhaseEnvelope::brightest`]) at its own mass,
 ///    \[Fe/H\], η and age relative to its lifetime, read by [`brightest`](Self::brightest).
 ///
@@ -1178,16 +1178,7 @@ impl StarBounds {
             record,
             (composition, ages),
             hierarchy,
-            |a, b, periastron| {
-                pair_light_bound_under(
-                    a,
-                    b,
-                    periastron,
-                    &composition,
-                    ages.0..=ages.1,
-                    galaxy.rules().stellar,
-                )
-            },
+            |a, b, periastron| pair_light_bound(a, b, periastron, &composition, ages.0..=ages.1),
         )
     }
 
@@ -2393,20 +2384,6 @@ mod tests {
             }
         }
         cells
-    }
-
-    /// [`milky_way_galaxy`] under every 29 hold, whose pair bound's `Detached` takes the wind's
-    /// reach (P11.T12's fix), built on first use.
-    fn milky_way_galaxy_29() -> &'static Galaxy {
-        static GALAXY: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
-        GALAXY.get_or_init(|| {
-            Galaxy::from_params_with_rules(
-                crate::rng::Seed::new(0x0926_0000),
-                GalaxyParams::milky_way_like(),
-                crate::galaxy::rules::GalaxyRules::every_29_hold(),
-            )
-            .expect("the fixture builds")
-        })
     }
 
     /// At least `n` of `layer`'s records, from the cells of a growing cube about `at`.
@@ -4134,8 +4111,8 @@ mod tests {
         faint_white_dwarfs: u64,
         /// Stars a detached partner's wind grew past their initial mass that outshine their bound:
         /// from generator version 27 a wide pair's star takes its partner's wind (P11.T12), which
-        /// the version's `Detached` verdict does not bound. Under 29's rules, whose `Detached`
-        /// takes the wind's reach, there are none (asserted).
+        /// version 28's `Detached` verdict did not bound. The `Detached` verdict takes the wind's
+        /// reach, and there are none (asserted).
         wind_fed: u64,
     }
 
@@ -4346,16 +4323,12 @@ mod tests {
     }
 
     /// The bound star by star holds for realised systems (R06.T8.g): 300 records of each layer
-    /// near the Sun and in the bulge, at two emitted times, under the version's rules and under
-    /// 29's, whose `Detached` takes the wind's reach (P11.T12's fix).
+    /// near the Sun and in the bulge, at two emitted times, `Detached` taking the wind's reach
+    /// (P11.T12's fix; at 27 and 28 bulge system 0x4200217600000090's 0.70 M☉ companion, grown
+    /// to 0.95 M☉, shone at M<sub>V</sub> 4.26 against its bound's 6.02).
     #[test]
     fn the_star_bound_holds_for_some_realised_systems() {
         let (all, _) = check_realised(milky_way_galaxy(), 300);
-        assert!(all.own > 3_000 && all.pairs.detached() > 50, "{all:?}");
-        // A wind-fed star past its bound is rare (one, bulge system 0x4200217600000090's 0.70 M☉
-        // companion grown to 0.95 M☉ at M_V 4.26 against its bound's 6.02, at 27).
-        assert!(all.wind_fed * 1_000 < all.own, "{all:?}");
-        let (all, _) = check_realised(milky_way_galaxy_29(), 300);
         assert!(all.own > 3_000 && all.pairs.detached() > 50, "{all:?}");
         assert_eq!(all.wind_fed, 0, "{all:?}");
     }
@@ -4368,13 +4341,13 @@ mod tests {
     /// tightest window the census asks. The figures, with the shares of plan 11's verdicts, are
     /// recorded in R06's Risks.
     ///
-    /// It runs under every 29 hold: from 27 the version's `Detached` leaves a wide pair's
-    /// wind-fed star its own bound, which a layer C companion on its core helium burning outshone
-    /// at 28 (M<sub>V</sub> 0.79 against 2.55), and 29's takes the wind's reach (P11.T12's fix).
+    /// From 27 a wide pair's star takes its partner's wind, and version 28's `Detached` left it its
+    /// own bound, which a layer C companion on its core helium burning outshone (M<sub>V</sub> 0.79
+    /// against 2.55); the `Detached` verdict takes the wind's reach (P11.T12's fix).
     #[test]
     #[ignore = "slow: generates 1.2 × 10⁶ systems, their pairs run through the binary engine"]
     fn the_star_bound_holds_for_realised_systems() {
-        let (all, per_layer) = check_realised(milky_way_galaxy_29(), 100_000);
+        let (all, per_layer) = check_realised(milky_way_galaxy(), 100_000);
         eprintln!("all: {all:?}");
         assert_eq!(all.wind_fed, 0, "{all:?}");
         for layer in [

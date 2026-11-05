@@ -68,8 +68,8 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 29 in force, for a test that asserts a 29 figure: the
-    /// version's rules from 29, the stellar holds ([`StellarRules::every_29_hold`], P11.T4's and
-    /// P11.T12's wind reach). The 29 bump deletes it with them.
+    /// version's rules from 29, the stellar holds ([`StellarRules::every_29_hold`], none left).
+    /// The 29 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_29_hold() -> Self {
