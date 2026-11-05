@@ -115,7 +115,7 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
-  it("reads and writes the edge bakes' stand-ins, last in the fields' order (R14.T3.c's edge stand-ins)", () => {
+  it("reads and writes the edge bakes' stand-ins, after the stand-ins' strides in the fields' order (R14.T3.c's edge stand-ins)", () => {
     const override = parseGeometryOverride("edgeStandIns=off,standInStrides=all");
     expect([
       override,
@@ -133,6 +133,21 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
   it("refuses edge stand-ins other than off, surveyed or masks (R14.T3.c's edge stand-ins)", () => {
     for (const text of ["edgeStandIns=all", "edgeStandIns=on", "edgeStandIns="]) {
       expect(() => parseGeometryOverride(text)).toThrow("edgeStandIns is off, surveyed or masks");
+    }
+  });
+
+  it("reads and writes the disc cells' way, last in the fields' order (plan R07)", () => {
+    const override = parseGeometryOverride("discCells=per-cell,standInStrides=off");
+    expect([override, geometryText(override), parseGeometryOverride("discCells=packed")]).toEqual([
+      { discCells: "per-cell", standInStrides: "off" },
+      "standInStrides=off,discCells=per-cell",
+      { discCells: "packed" },
+    ]);
+  });
+
+  it("refuses disc cells other than per-cell or packed (plan R07)", () => {
+    for (const text of ["discCells=pooled", "discCells=per-pixel", "discCells="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("discCells is per-cell or packed");
     }
   });
 

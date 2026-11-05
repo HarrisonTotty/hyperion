@@ -94,6 +94,7 @@ const LATER_FIELDS = [
   "standInStrides",
   "hiddenMarks",
   "edgeStandIns",
+  "discCells",
 ] as const;
 
 /** `value` as a mesh tolerance, two numbers of at least 0, px, or `null`. */
@@ -143,6 +144,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     standInStrides = "off",
     hiddenMarks = "drawn",
     edgeStandIns = "off",
+    discCells = "per-cell",
   } = value;
   const meshTolerancePx = meshToleranceOf(tolerance);
   if (
@@ -163,6 +165,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     (standInStrides !== "off" && standInStrides !== "own-grids" && standInStrides !== "all") ||
     (hiddenMarks !== "drawn" && hiddenMarks !== "culled") ||
     (edgeStandIns !== "off" && edgeStandIns !== "surveyed" && edgeStandIns !== "masks") ||
+    (discCells !== "per-cell" && discCells !== "packed") ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -191,6 +194,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     standInStrides,
     hiddenMarks,
     edgeStandIns,
+    discCells,
   };
 }
 
@@ -310,8 +314,9 @@ function settingsWords(settings: SpikeGeometryReport["settings"]): string {
     standInStrides,
     hiddenMarks,
     edgeStandIns,
+    discCells,
   } = settings;
-  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}, the camera's strides ${strides === "measured" ? "by measured error" : "off"}, occlusion ${occlusion === "hzb" ? "two-pass against the depth pyramid" : "off"}, the lit pass's interior patches shaded ${shading === "visibility" ? "by the visibility buffer" : "forward"}, the lit selection's budget ${terrainBudget === "triangles" ? "its patches and lit triangles" : "its patches"}, the stand-ins ${standInStrides === "all" ? "strided, on their own grids at the camera's cap and their masks by their bands" : standInStrides === "own-grids" ? "on their own grids at the camera's stride cap, their masks at stride 1" : "at stride 1"}, the overlay's marks the ground hides ${hiddenMarks === "culled" ? "culled" : "drawn"}, the edge bakes' stand-ins ${edgeStandIns === "masks" ? "on the cluster path where exact, and as level-1 masks across the survey's edge" : edgeStandIns === "surveyed" ? "on the cluster path where exact" : "by the lit mesh"}`;
+  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}, the camera's strides ${strides === "measured" ? "by measured error" : "off"}, occlusion ${occlusion === "hzb" ? "two-pass against the depth pyramid" : "off"}, the lit pass's interior patches shaded ${shading === "visibility" ? "by the visibility buffer" : "forward"}, the lit selection's budget ${terrainBudget === "triangles" ? "its patches and lit triangles" : "its patches"}, the stand-ins ${standInStrides === "all" ? "strided, on their own grids at the camera's cap and their masks by their bands" : standInStrides === "own-grids" ? "on their own grids at the camera's stride cap, their masks at stride 1" : "at stride 1"}, the overlay's marks the ground hides ${hiddenMarks === "culled" ? "culled" : "drawn"}, the edge bakes' stand-ins ${edgeStandIns === "masks" ? "on the cluster path where exact, and as level-1 masks across the survey's edge" : edgeStandIns === "surveyed" ? "on the cluster path where exact" : "by the lit mesh"}, the disc cells ${discCells === "packed" ? "packed" : "a cell an invocation"}`;
 }
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */

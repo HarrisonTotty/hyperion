@@ -274,6 +274,7 @@ const GEOMETRY_SETTINGS = {
   standInStrides: "off",
   hiddenMarks: "drawn",
   edgeStandIns: "off",
+  discCells: "packed",
 } as const;
 
 /** A smoke's report: 10 s of frames at 60 Hz from 1,000 ms, its trace in three windows. */

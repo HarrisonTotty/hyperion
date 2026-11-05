@@ -257,6 +257,15 @@ export interface GeometrySettings {
    * before, bit for bit.
    */
   readonly edgeStandIns: "off" | "surveyed" | "masks";
+  /**
+   * Plan R07's `disc cells` pass (the owner's Mac): `per-cell`, as before, shades each cell of a
+   * job's pixel in its own invocation (`shaders/bodyDiscCells.wgsl`), which leaves most of a
+   * workgroup idle beside the cells across the limb that shade nine points; `packed` shades each
+   * workgroup's points one an invocation over the list of them and sums them in each cell's and
+   * pixel's order (`shaders/bodyDiscCellsPacked.wgsl`), the same sums bit for bit. `packed` on both
+   * settings (a lean, 2026-11-05).
+   */
+  readonly discCells: "per-cell" | "packed";
 }
 
 /**
@@ -288,6 +297,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   standInStrides: "off",
   hiddenMarks: "drawn",
   edgeStandIns: "off",
+  discCells: "per-cell",
 };
 
 /**
@@ -470,6 +480,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       standInStrides: "all",
       hiddenMarks: "culled",
       edgeStandIns: "masks",
+      discCells: "packed",
     },
     decoration: true,
     scatterDensity: 1,
@@ -523,6 +534,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       standInStrides: "own-grids",
       hiddenMarks: "culled",
       edgeStandIns: "surveyed",
+      discCells: "packed",
     },
     decoration: false,
     scatterDensity: 0,

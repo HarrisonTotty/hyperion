@@ -151,6 +151,7 @@ import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
 import cubeTexelWgsl from "../shaders/cubeTexel.wgsl?raw";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import bodyDiscCellsWgsl from "../shaders/bodyDiscCells.wgsl?raw";
+import bodyDiscCellsPackedWgsl from "../shaders/bodyDiscCellsPacked.wgsl?raw";
 import bodyDiscDrawWgsl from "../shaders/bodyDiscDraw.wgsl?raw";
 import smoothMeshWgsl from "../shaders/smoothMesh.wgsl?raw";
 import smoothMeshClusterWgsl from "../shaders/smoothMeshCluster.wgsl?raw";
@@ -1626,6 +1627,48 @@ export const BODY_DISC_CELLS_AIR_KERNEL: KernelPair = {
 export const BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL: KernelPair = {
   name: "BODY DISC CELLS, emissive, with air",
   reference: withDiscEmissionAndAir(LIT_SOURCE + bodyDiscCellsWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/**
+ * The `disc cells` kernel packed (plan R07, the owner's Mac; `GeometrySettings.discCells`
+ * `packed`, `shaders/bodyDiscCellsPacked.wgsl`): {@link BODY_DISC_CELLS_KERNEL}'s jobs, workgroups
+ * and sums, each workgroup's points shaded one an invocation over its list of them rather than each
+ * cell's by its own invocation, which leaves most lanes idle beside the cells across the limb that
+ * shade nine. The same functions on the same values in the same order, so its sums are that
+ * kernel's, bit for bit, and either kernel may stand in for the other.
+ */
+export const BODY_DISC_CELLS_PACKED_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, packed",
+  reference: LIT_SOURCE + bodyDiscCellsPackedWgsl,
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** {@link BODY_DISC_CELLS_PACKED_KERNEL}'s emissive form (R08.T18.a), as the per-cell kernel has. */
+export const BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, packed, emissive",
+  reference: withDiscEmission(LIT_SOURCE + bodyDiscCellsPackedWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** {@link BODY_DISC_CELLS_PACKED_KERNEL}'s air form (R08.T16.b), as the per-cell kernel has. */
+export const BODY_DISC_CELLS_PACKED_AIR_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, packed, with air",
+  reference: withDiscAir(LIT_SOURCE + bodyDiscCellsPackedWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/**
+ * {@link BODY_DISC_CELLS_PACKED_KERNEL}'s form for emission and air together (R08.T18.b), as the
+ * per-cell kernel has.
+ */
+export const BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, packed, emissive, with air",
+  reference: withDiscEmissionAndAir(LIT_SOURCE + bodyDiscCellsPackedWgsl),
   subgroup: null,
   readback: "bit-exact",
 };

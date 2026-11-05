@@ -10190,3 +10190,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     again after `FIELD_RETRY_DELAY_MS`, doubling. The inspection run waits out `STARS` `PENDING`
     too (`starsPending`), since lighting no longer waits on the sky; the planet-viewer run's
     `warmedUp` (`skyAnswered`, R15.T6's, landed beside) already does.
+- **The disc cells packed** (2026-11-05, perf-body-shading, the owner's Mac; a lean).
+  - `GeometrySettings.discCells`: `per-cell` the way back (`GEOMETRY_BEFORE_R14`), `packed` on both
+    settings; `--geometry discCells=…`, the smoke's `geometry-discCells`, the Mac pair `disc-cells`.
+  - `BODY_DISC_CELLS_PACKED_KERNEL` and its three forms (`shaders/bodyDiscCellsPacked.wgsl`) take
+    the per-cell kernel's bindings, jobs and workgroups; their sums are its bits. The renderer
+    dispatches the per-cell plain kernel until the packed one is made; `prepareEmissive`,
+    `prepareAir` and `prepareEmissiveAir` take the way (`packed` unless told).
+  - Catalogue `PACKED_CELL_ENTRIES` (with twins), the smoke's part 24 (its lane's part 20).

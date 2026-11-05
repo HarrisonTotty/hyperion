@@ -63,6 +63,10 @@ import {
   BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_KERNEL,
   BODY_DISC_EMISSIVE_AIR_MATERIALS,
   BODY_DISC_EMISSIVE_MATERIALS,
   BODY_DISC_MATERIALS,
@@ -418,7 +422,8 @@ const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   // form on the cluster path (plan R14, R14.T4.a).
   { kind: "material", spec: SMOOTH_MESH_MATERIAL },
   { kind: "material", spec: SMOOTH_MESH_CLUSTER_MATERIAL },
-  // R07.T8.d's cell pass: the small discs' cells shaded in parallel for both regimes' draws.
+  // R07.T8.d's cell pass: the small discs' cells shaded in parallel for both regimes' draws; its
+  // packed kernel is `PACKED_CELL_ENTRIES`'.
   { kind: "compute", spec: BODY_DISC_CELLS_KERNEL },
 ];
 
@@ -473,6 +478,23 @@ export const DISC_EMISSIVE_AIR_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL },
   { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL },
 ];
+
+/**
+ * Plan R07's packed `disc cells` kernels (`GeometrySettings.discCells` `packed`), the plain one and
+ * R08.T18.a's emissive, R08.T16.b's air and R08.T18.b's emissive-with-air forms, each with its
+ * table-only twin (R08.T9.b's lever, `sourceTableEngine.ts`). The smoke page compiles them in part
+ * 20, alone: the per-cell kernels' parts 1, 9 and 16 had no room for them, nor had part 17.
+ */
+export const PACKED_CELL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  BODY_DISC_CELLS_PACKED_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+].flatMap((spec): ReadonlyArray<CatalogueEntry> => {
+  const twin = tableOnlyKernel(spec);
+  const own: CatalogueEntry = { kind: "compute", spec };
+  return twin === null ? [own] : [own, { kind: "compute", spec: twin }];
+});
 
 /**
  * The engine's ID target's own forms (plan R14, R14.T2.b; `idTarget.ts`): the writer into
@@ -538,6 +560,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...THERMAL_ENTRIES,
   ...DISC_AIR_ENTRIES,
   ...DISC_EMISSIVE_AIR_ENTRIES,
+  ...PACKED_CELL_ENTRIES,
   ...SKY_ENTRIES,
   ...TABLE_ONLY_ENTRIES,
   ...MARCH_TABLE_ONLY_ENTRIES,

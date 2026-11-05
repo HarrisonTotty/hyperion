@@ -23,6 +23,7 @@ import {
 } from "../camera/projection";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { IDENTITY_ROTATION } from "../coords/rotation";
+import { kernelBindings } from "../engine/webgpu/compute";
 import { packFrame } from "../engine/webgpu/uniforms";
 import type { DrawItem, TextureHandle } from "../engine/types";
 import type { PlacedLight } from "../lighting/hostLights";
@@ -31,6 +32,7 @@ import { AU_M } from "../scenes/kept";
 import type { ScreenRect } from "../wireframe/submit";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import {
+  CELL_INVOCATIONS,
   type DiscCellJobs,
   type DiscCellSet,
   type DiscRecord,
@@ -51,6 +53,7 @@ import {
 import { packClassMap } from "./discSurface";
 import {
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_PACKED_KERNEL,
   BODY_DISC_MATERIALS,
   type BodyFramePlan,
   cellWorkgroups,
@@ -830,6 +833,7 @@ describe("the cell pass for every record (R07.T8.e)", () => {
     ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "fragmentMain"],
     ["the smooth mesh", SMOOTH_MESH_MATERIAL.fragmentWgsl, "fragmentMain"],
     ["the disc cells kernel", BODY_DISC_CELLS_KERNEL.reference, "main"],
+    ["the packed disc cells kernel", BODY_DISC_CELLS_PACKED_KERNEL.reference, "main"],
   ])("reaches `shade` from one call site in %s's entry point", (_name, source, entry) => {
     expect(inlinedCopies(source, entry, "shade")).toBe(1);
   });
@@ -1472,6 +1476,44 @@ function expectedGroups(records: ReadonlyArray<DiscRecord>, cells: DiscCellJobs)
       ]);
     });
 }
+
+describe("the cell pass packed (plan R07, the owner's Mac; `GeometrySettings.discCells`)", () => {
+  it("declares the per-cell kernel's bindings, so that a dispatch binds either", () => {
+    expect([...kernelBindings(BODY_DISC_CELLS_PACKED_KERNEL.reference).entries()]).toEqual([
+      ...kernelBindings(BODY_DISC_CELLS_KERNEL.reference).entries(),
+    ]);
+  });
+
+  it("lists as many points a workgroup as its cells shade at most, nine a cell, within WebGPU's 16 KiB of workgroup storage", () => {
+    const source = BODY_DISC_CELLS_PACKED_KERNEL.reference;
+    const length = (name: string): number =>
+      Number(new RegExp(`var<workgroup> ${name} : array<[^,]+, (\\d+)>;`, "u").exec(source)?.[1]);
+    const points = length("points");
+    const firsts = length("first_point");
+    expect([points, firsts]).toEqual([9 * CELL_INVOCATIONS, CELL_INVOCATIONS + 1]);
+    // `CellSum` takes 32 bytes, a `vec4f` 16 and a `u32` 4.
+    expect(32 * CELL_INVOCATIONS + 4 * firsts + 16 * points).toBeLessThanOrEqual(16_384);
+  });
+
+  it("dispatches as the per-cell kernel does, the same grid and runs", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = planOf([3.5, 13]);
+    renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), FRAME);
+    renderer.dispose();
+    const packed = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    packed.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_PACKED_KERNEL), FRAME);
+    const [perCell, byPoints] = engine.dispatched.map((d) => [
+      d.workgroups,
+      Array.from(d.bindings.uniforms["cell_pass"] ?? []),
+    ]);
+    expect([engine.dispatched.map((d) => d.kernel), byPoints]).toEqual([
+      [BODY_DISC_CELLS_KERNEL.name, BODY_DISC_CELLS_PACKED_KERNEL.name],
+      perCell,
+    ]);
+    packed.dispose();
+  });
+});
 
 describe("the cell pass's workgroups (R07.T8.g)", () => {
   it("takes ⌊64 ÷ n²⌋ pixels of n × n cells a workgroup", () => {

@@ -45,6 +45,8 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
   const edgeText = parameters.get("geometry-edgeStandIns");
   const edgeStandIns =
     edgeText === "off" || edgeText === "surveyed" || edgeText === "masks" ? edgeText : undefined;
+  const cellsText = parameters.get("geometry-discCells");
+  const discCells = cellsText === "per-cell" || cellsText === "packed" ? cellsText : undefined;
   const rate = parameters.get("geometry-farCascadeRate");
   const farCascadeRate = rate === "1" ? 1 : rate === "2" ? 2 : rate === "4" ? 4 : undefined;
   const toleranceText = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(
@@ -76,5 +78,6 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(standInStrides === undefined ? {} : { standInStrides }),
     ...(hiddenMarks === undefined ? {} : { hiddenMarks }),
     ...(edgeStandIns === undefined ? {} : { edgeStandIns }),
+    ...(discCells === undefined ? {} : { discCells }),
   };
 }

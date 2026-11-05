@@ -43,6 +43,7 @@ import {
 import { type ClassMapTexels, classMapSurface, packClassMap } from "../view/bodies/discSurface";
 import {
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_PACKED_KERNEL,
   type BodyFramePlan,
   type LitBodyEngine,
   type LitBodyInput,
@@ -59,6 +60,7 @@ import {
 } from "../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
 import { rotation3FromRows } from "../view/coords/rotation";
+import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { BufferHandle, ComputeHandle, RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
@@ -187,9 +189,13 @@ function planOf(item: CellCase, sunDeg = 80): BodyFramePlan {
   );
 }
 
+/** The lit-body renderer's buffer of the `disc cells` pass's sums (`draw.ts`' resources). */
+const CELL_SUMS_BUFFER = "bodies:disc cell sums";
+
 /**
  * The renderer's engine, keeping the sums buffer each `disc cells` dispatch binds, so that the
- * sentinel draw can overwrite the sums the draws then read; every call is the engine's own.
+ * sentinel draw can overwrite the sums the draws then read, and making it readable; every call is
+ * the engine's own.
  */
 function keepingSums(engine: RenderEngine): {
   readonly engine: LitBodyEngine;
@@ -199,7 +205,14 @@ function keepingSums(engine: RenderEngine): {
   const kept: LitBodyEngine = {
     createMaterial: (...args) => engine.createMaterial(...args),
     createMesh: (...args) => engine.createMesh(...args),
-    createBuffer: (...args) => engine.createBuffer(...args),
+    // The sums read back too (plan R07's packed kernel against the per-cell one), which the
+    // renderer's own buffer, never read back, is not made for.
+    createBuffer: (spec) =>
+      engine.createBuffer(
+        spec.name === CELL_SUMS_BUFFER
+          ? { ...spec, usage: spec.usage | BUFFER_USAGE.COPY_SRC }
+          : spec,
+      ),
     createTexture: (...args) => engine.createTexture(...args),
     writeBuffer: (...args) => {
       engine.writeBuffer(...args);
@@ -542,21 +555,51 @@ export async function checkCellPassEveryRecord(
       ],
       PROVISIONAL_PHOTOMETRY.law,
     );
-    const kernel = await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
+    const [kernel, packedKernel] = await Promise.all([
+      engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
+      engine.createComputeAsync(BODY_DISC_CELLS_PACKED_KERNEL),
+    ]);
     const cases = casesOf(surfaceLightingTablesOf(tables), {
       surface: weights,
       texels: twoClass,
     });
     let pass = true;
+    let packedEqual = true;
     const results: string[] = [];
+    const packedResults: string[] = [];
     for (const item of cases) {
       const plan = planOf(item);
-      const draw = (by: DrawnBy, drawnPlan: BodyFramePlan) =>
-        drawPlan(engine, renderer, kept.sums, drawnPlan, item.viewport, kernel, by);
+      const draw = (by: DrawnBy, drawnPlan: BodyFramePlan, cells = kernel) =>
+        drawPlan(engine, renderer, kept.sums, drawnPlan, item.viewport, cells, by);
+      // The pass's sums as the draws found them, its whole buffer, where it dispatched.
+      const sumsNow = async (): Promise<Uint8Array | null> => {
+        const buffer = kept.sums();
+        return buffer === null ? null : new Uint8Array(await engine.readBuffer(buffer));
+      };
       // The harness reads its targets back in order; each draw takes a plan of its own, since a
       // plan's records are written once.
       // oxlint-disable-next-line no-await-in-loop
       const throughPass = await draw("pass", plan);
+      // oxlint-disable-next-line no-await-in-loop
+      const perCellSums = await sumsNow();
+      // The packed kernel's (`GeometrySettings.discCells`): its sums and its draws byte for byte
+      // the per-cell kernel's, the bytes past its jobs' sums left as the per-cell run left them.
+      // oxlint-disable-next-line no-await-in-loop
+      const packed = await draw("pass", planOf(item), packedKernel);
+      // oxlint-disable-next-line no-await-in-loop
+      const packedSums = await sumsNow();
+      const sumsEqual =
+        perCellSums !== null &&
+        packedSums !== null &&
+        perCellSums.length === packedSums.length &&
+        perCellSums.every((byte, i) => byte === packedSums[i]);
+      const drawsEqual =
+        packed.throughCells === throughPass.throughCells &&
+        bytesEqual(packed.bytes, throughPass.bytes);
+      packedEqual &&= sumsEqual && drawsEqual;
+      packedResults.push(
+        `${item.name}: sums ${String(sumsEqual)} (${String(perCellSums?.length ?? 0)} bytes), draws ${String(drawsEqual)}`,
+      );
       // oxlint-disable-next-line no-await-in-loop
       const inFragment = await draw("in-fragment", planOf(item));
       // oxlint-disable-next-line no-await-in-loop
@@ -574,6 +617,11 @@ export async function checkCellPassEveryRecord(
       pass,
       results.join("; "),
     );
+    checks.check(
+      "plan R07's packed disc cells (the owner's Mac): every plan's sums through the packed kernel equal the per-cell kernel's byte for byte, and so do its draws",
+      packedEqual,
+      packedResults.join("; "),
+    );
   } finally {
     renderer.dispose();
     tables?.dispose();
@@ -581,6 +629,13 @@ export async function checkCellPassEveryRecord(
       engine.releaseTexture(weights.weights);
     }
   }
+}
+
+/** Whether two read-back buffers hold the same bytes. */
+function bytesEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  return x.length === y.length && x.every((byte, i) => byte === y[i]);
 }
 
 /** The share of a frame's lit pixels the sources' table holds within 1/3 stop (R08.T9.b's lever). */

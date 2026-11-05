@@ -279,6 +279,8 @@ export interface GeometryOverride {
    * cluster path, or level-1 masks across the survey's edge too.
    */
   readonly edgeStandIns?: "off" | "surveyed" | "masks";
+  /** Plan R07's `disc cells` pass: a cell an invocation, or each workgroup's points packed. */
+  readonly discCells?: "per-cell" | "packed";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

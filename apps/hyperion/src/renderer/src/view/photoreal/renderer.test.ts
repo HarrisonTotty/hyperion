@@ -40,6 +40,10 @@ import {
   BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_KERNEL,
   type BodyFramePlan,
   DISC_CELLS_PASS,
   type LitBodyInput,
@@ -1644,18 +1648,20 @@ async function overlayDatums(
  * surface, and both deck marches' footprints in their thermal forms, for a self-luminous body over
  * a deck; its per-planet tables' four, and since
  * R08.T14.d.4 the sky's irradiance over the thick table; since R08.T9.b's lever the sources'
- * transmittance, which the lit passes read on both settings, and the `disc cells` kernels' four
+ * transmittance, which the lit passes read on both settings, and the `disc cells` kernels' eight
  * table-only twins, which the app's engine makes for a body of one band (`SourceTableEngine`), and
  * since R08.T8.e's table the thin read's marches' twenty-four table-only twins, made likewise;
  * since perf-thick-march the thick read's shared read's marches from the sources' table alone,
  * general and specialised, and its packed limb's twelve kernels, per step and from the table;
  * since plan R14's T4.a the cluster cull,
  * the mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d
- * the depth pyramid's, made with the renderer; and the sky bake's four. Each is a module constant,
+ * the depth pyramid's, made with the renderer; since perf-body-shading the `disc cells` kernel's
+ * four packed forms (`GeometrySettings.discCells`), its plain one made at the first frame with a
+ * disc; and the sky bake's four. Each is a module constant,
  * its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 111,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 119,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -1666,6 +1672,10 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
   SKY_VIEW_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
@@ -1717,6 +1727,10 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
     BODY_DISC_CELLS_EMISSIVE_KERNEL,
     BODY_DISC_CELLS_AIR_KERNEL,
     BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+    BODY_DISC_CELLS_PACKED_KERNEL,
+    BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+    BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+    BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
   ].flatMap((pair) => tableOnlyKernel(pair) ?? []),
   ...MARCH_TABLE_ONLY_KERNELS,
   RAY_MARCH_THICK_TABLE_KERNEL,
@@ -1909,9 +1923,9 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // (R08.T14.d.4), the thick read's six, made ahead; and the tables' five, the sources'
     // transmittance among them (R08.T9.b's lever). The thick pass makes
     // one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass its four
-    // marches, 27 in all, bounded however many bodies follow. All but fifty-one are made: the sky bake's four are the sky's, the `disc cells` kernels' four twins and the marches' twenty-four the app's engine's (this test's engine makes none), the march's fill
+    // marches, 27 in all, bounded however many bodies follow. All but fifty-eight are made: the sky bake's four are the sky's, the `disc cells` kernels' eight twins and the marches' twenty-four the app's engine's (this test's engine makes none), the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
-    // which a view takes only under a setting's `tiles` (R08.T11.d, R08.T8.d), the disc cells' emissive form a body's above the
+    // which a view takes only under a setting's `tiles` (R08.T11.d, R08.T8.d), the disc cells' emissive forms, per cell and packed, a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc
     // table, which none of these has (R08.T16.b), and their form for both and the per-frame
     // kernels' ten thermal forms (two over a deck, R08.T15.b.2) a glowing or self-luminous body's,
@@ -1931,7 +1945,7 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     const thickLimbMade = THICK_LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
     expect(thickLimbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
     const unmade =
-      47 +
+      54 +
       (leverOff((levers) => levers.marchCover === "tiles") ? 4 : -2) +
       (LIMB_KERNELS.length - limbMade) +
       (leverOff((levers) => levers.marchSourceTransmittance === "table") ? 2 : 0) +
@@ -2417,7 +2431,7 @@ describe("the photorealistic renderer's emissive cells (R08.T18.a)", () => {
     const renderer = new PhotorealRenderer(engine, "test view");
     await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
     const emissiveMade = (): number =>
-      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_EMISSIVE_KERNEL.name)
+      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL.name)
         .length;
     renderer.render(new RecordingView(), frameOfDiscs(smallDiscs()));
     expect(emissiveMade()).toBe(0);
@@ -2445,7 +2459,7 @@ describe("the photorealistic renderer's emissive cells (R08.T18.a)", () => {
         .slice(second)
         .filter((d) => d.pass === DISC_CELLS_PASS)
         .map((d) => d.kernel),
-    ).toEqual([BODY_DISC_CELLS_KERNEL.name, BODY_DISC_CELLS_EMISSIVE_KERNEL.name]);
+    ).toEqual([BODY_DISC_CELLS_PACKED_KERNEL.name, BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL.name]);
     renderer.dispose();
   });
 });
@@ -2468,7 +2482,7 @@ describe("the photorealistic renderer's emissive forms prepared ahead (R08.T18.a
         .slice(before)
         .filter((d) => d.pass === DISC_CELLS_PASS)
         .map((d) => d.kernel),
-    ).toEqual([BODY_DISC_CELLS_KERNEL.name, BODY_DISC_CELLS_EMISSIVE_KERNEL.name]);
+    ).toEqual([BODY_DISC_CELLS_KERNEL.name, BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL.name]);
     renderer.dispose();
   });
 });
@@ -2484,7 +2498,7 @@ describe("the photorealistic renderer's emissive cells after a device loss (R08.
     }
     const bodies = [small, { ...larger, thermal: surfaceTemperatureFieldOf(lavaWorldSurface()) }];
     const asked = (): number =>
-      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_EMISSIVE_KERNEL.name)
+      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL.name)
         .length;
     renderer.render(new RecordingView(), frameOfDiscs(bodies));
     await microtasks();
@@ -2495,6 +2509,43 @@ describe("the photorealistic renderer's emissive cells after a device loss (R08.
     renderer.render(new RecordingView(), frameOfDiscs(bodies));
     await microtasks();
     expect(asked()).toBe(2);
+    renderer.dispose();
+  });
+});
+
+describe("the photorealistic renderer's packed cells (plan R07, the owner's Mac)", () => {
+  it("shades the cells by the packed kernel once made, the per-cell kernel standing in until then, and by the per-cell kernel on the way back", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const kernels = (frame: PhotorealFrame): string[] => {
+      const before = engine.dispatched.length;
+      renderer.render(new RecordingView(), frame);
+      return engine.dispatched
+        .slice(before)
+        .filter((d) => d.pass === DISC_CELLS_PASS)
+        .map((d) => d.kernel);
+    };
+    const packed = frameOfDiscs(smallDiscs());
+    const perCell: PhotorealFrame = {
+      ...packed,
+      geometry: { ...SETTINGS.high.geometry, discCells: "per-cell" },
+    };
+    const first = kernels(packed);
+    await microtasks();
+    expect([
+      SETTINGS.high.geometry.discCells,
+      first,
+      kernels(packed),
+      kernels(perCell),
+      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_PACKED_KERNEL.name).length,
+    ]).toEqual([
+      "packed",
+      [BODY_DISC_CELLS_KERNEL.name],
+      [BODY_DISC_CELLS_PACKED_KERNEL.name],
+      [BODY_DISC_CELLS_KERNEL.name],
+      1,
+    ]);
     renderer.dispose();
   });
 });

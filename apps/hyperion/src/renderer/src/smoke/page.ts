@@ -67,6 +67,7 @@ import {
   THERMAL_ENTRIES,
   TABLE_ONLY_ENTRIES,
   MARCH_TABLE_ONLY_ENTRIES,
+  PACKED_CELL_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -321,6 +322,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * (2026-11-05). Part 18 stood at 272 s of its 360 s on a pod, part 22 at 239 s, the renderer's
  * preparation some 130 s of each: the frames by IDs through the renderer took part 23, alone, and
  * part 22 composes its frames as the renderer does (2026-11-06; parts 20 and 21 on their lane).
+ * Plan R07's packed `disc cells` kernels, every form with its table-only twin (some 63 s on a pod),
+ * took parts 9, 16 and 17 past their watchdogs under a pod's load (2026-11-05), so they took part
+ * 24, alone (their lane's part 20).
  */
 type PagePart =
   | 1
@@ -345,7 +349,8 @@ type PagePart =
   | 20
   | 21
   | 22
-  | 23;
+  | 23
+  | 24;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -399,6 +404,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 22;
     case "23":
       return 23;
+    case "24":
+      return 24;
     default:
       return null;
   }
@@ -455,7 +462,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 23 or all");
+    return failed("the part asked for is not 1 to 24 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -537,6 +544,7 @@ async function run(
       !DISC_EMISSIVE_AIR_ENTRIES.includes(entry) &&
       !TABLE_ONLY_ENTRIES.includes(entry) &&
       !MARCH_TABLE_ONLY_ENTRIES.includes(entry) &&
+      !PACKED_CELL_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
@@ -758,6 +766,11 @@ async function run(
   // the thin read's packed kernels: parts 9 and 10 hold their checks.
   await group(17, "T9.b catalogue: the thick read's march levers' kernels", () =>
     checkCatalogue(engine, status, ATMOSPHERE_THICK_LEVER_ENTRIES, checks),
+  );
+  // Plan R07's packed `disc cells` kernels, every form with its table-only twin, in part 24, alone:
+  // beside the per-cell kernels' they took parts 9, 16 and 17 past their watchdogs (2026-11-05).
+  await group(24, "T9.b catalogue: the packed disc cells' kernels", () =>
+    checkCatalogue(engine, status, PACKED_CELL_ENTRIES, checks),
   );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),

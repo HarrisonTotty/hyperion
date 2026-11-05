@@ -60,6 +60,10 @@ import {
   BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_KERNEL,
   type BodyFramePlan,
   type BodyLightSources,
   bodyLightSources,
@@ -435,15 +439,39 @@ function blueNoiseTexels(): Uint16Array {
   return blueNoiseHalves;
 }
 
-/** A form of the `disc cells` kernel: R08.T18.a's emissive, R08.T16.b's air, or R08.T18.b's both. */
-type CellForm = "emissive" | "air" | "emissiveAir";
+/**
+ * A form of the `disc cells` kernel: the plain one, R08.T18.a's emissive, R08.T16.b's air, or
+ * R08.T18.b's both.
+ */
+type CellForm = "plain" | "emissive" | "air" | "emissiveAir";
 
-/** Each form's kernel. */
-const CELL_FORM_KERNELS: Readonly<Record<CellForm, KernelPair>> = {
-  emissive: BODY_DISC_CELLS_EMISSIVE_KERNEL,
-  air: BODY_DISC_CELLS_AIR_KERNEL,
-  emissiveAir: BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+/** A way of the `disc cells` kernel (`GeometrySettings.discCells`): a cell an invocation, or packed. */
+type CellWay = GeometrySettings["discCells"];
+
+/**
+ * Each way's kernel of each form. The per-cell plain kernel is the renderer's own, made with its
+ * other pipelines (`Resources.discCells`); every other is made at the first frame that asks for it.
+ */
+const CELL_FORM_KERNELS: Readonly<Record<CellWay, Readonly<Record<CellForm, KernelPair>>>> = {
+  "per-cell": {
+    plain: BODY_DISC_CELLS_KERNEL,
+    emissive: BODY_DISC_CELLS_EMISSIVE_KERNEL,
+    air: BODY_DISC_CELLS_AIR_KERNEL,
+    emissiveAir: BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+  },
+  packed: {
+    plain: BODY_DISC_CELLS_PACKED_KERNEL,
+    emissive: BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+    air: BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+    emissiveAir: BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+  },
 };
+
+/**
+ * The way of the `disc cells` kernel whose forms {@link PhotorealRenderer.prepareEmissive} and its
+ * kin make where they are not told: both settings' (`GeometrySettings.discCells`).
+ */
+const PREPARED_CELL_WAY: CellWay = "packed";
 
 /**
  * A form of the `disc cells` kernel as one device's renderer asks for it: R08.T18.a's emissive,
@@ -457,16 +485,21 @@ interface FormCells {
   made: Promise<void>;
 }
 
-/** The form of the `disc cells` kernel a record is shaded by, or `null` for the plain kernel. */
-function cellFormOf(record: DiscRecord): CellForm | null {
+/** The form of the `disc cells` kernel a record is shaded by. */
+function cellFormOf(record: DiscRecord): CellForm {
   const emits = record.emission !== undefined;
   const aired = record.air !== undefined;
-  return emits && aired ? "emissiveAir" : aired ? "air" : emits ? "emissive" : null;
+  return emits && aired ? "emissiveAir" : aired ? "air" : emits ? "emissive" : "plain";
 }
 
-/** No form of the `disc cells` kernel asked yet. */
-function noFormCells(): Record<CellForm, FormCells | null> {
-  return { emissive: null, air: null, emissiveAir: null };
+/** No form of one way's `disc cells` kernel asked yet. */
+function noWayCells(): Record<CellForm, FormCells | null> {
+  return { plain: null, emissive: null, air: null, emissiveAir: null };
+}
+
+/** No form of the `disc cells` kernel asked yet, of either way. */
+function noFormCells(): Record<CellWay, Record<CellForm, FormCells | null>> {
+  return { "per-cell": noWayCells(), packed: noWayCells() };
 }
 
 /** The renderer's GPU objects on one device. */
@@ -660,13 +693,15 @@ export class PhotorealRenderer {
   #pyramid: DepthPyramid | null = null;
   #cut = false;
   /**
-   * The `disc cells` kernel's forms: its emissive form (R08.T18.a), made at the first frame with a
-   * record that carries its ground's emission, or at {@link PhotorealRenderer.prepareEmissive}, and
-   * its air form (R08.T16.b), at the first with a record that carries its air, or at
-   * {@link PhotorealRenderer.prepareAir}, and its form for both (R08.T18.b), at the first with a
-   * record that carries both, each on the generation it was asked on; `kernel` `null` until made.
+   * The `disc cells` kernel's forms of each way: its emissive form (R08.T18.a), made at the first
+   * frame with a record that carries its ground's emission, or at
+   * {@link PhotorealRenderer.prepareEmissive}, and its air form (R08.T16.b), at the first with a
+   * record that carries its air, or at {@link PhotorealRenderer.prepareAir}, and its form for both
+   * (R08.T18.b), at the first with a record that carries both; and the packed plain kernel, at the
+   * first frame whose geometry packs the cells (`discCells`); each on the generation it was asked
+   * on, `kernel` `null` until made. The per-cell plain kernel is `Resources.discCells`.
    */
-  #formCells: Record<CellForm, FormCells | null> = noFormCells();
+  #formCells: Record<CellWay, Record<CellForm, FormCells | null>> = noFormCells();
   /** Each resolve's draw with the view's IDs bound, by the draw (plan R14, R14.T2.d). */
   readonly #resolveDraws = new WeakMap<
     DrawItem,
@@ -1028,18 +1063,20 @@ export class PhotorealRenderer {
     });
     // The small discs' cells and the larger discs' limbs' and face bands', all at once, a dispatch
     // for each set of textures, before any draw reads their sums (R07.T8.d–g); in the frame the
-    // `discs` pass draws in, the scene target's.
+    // `discs` pass draws in, the scene target's. By the way the geometry asks (`discCells`): the
+    // packed plain kernel once made and the per-cell one until then, whose sums are its bits.
+    const way = geometry.discCells;
     this.#bodies.dispatchCells(
       plan,
-      resources.discCells,
+      (way === "packed" ? this.#cellsFor(plan, way, "plain") : null) ?? resources.discCells,
       {
         viewRotation,
         projection,
         size: { widthPx: viewport.widthPx, heightPx: viewport.heightPx },
       },
-      this.#cellsFor(plan, "emissive"),
-      this.#cellsFor(plan, "air"),
-      this.#cellsFor(plan, "emissiveAir"),
+      this.#cellsFor(plan, way, "emissive"),
+      this.#cellsFor(plan, way, "air"),
+      this.#cellsFor(plan, way, "emissiveAir"),
     );
     // The mesh bodies' figures, with depth, before the sequence, then the terrain of the bodies
     // handed over to it over them; no pass where there are none. On the high setting the terrain's
@@ -1500,79 +1537,93 @@ export class PhotorealRenderer {
   }
 
   /**
-   * A form of the `disc cells` kernel for a plan with a record that needs it (R08.T18.a's emission,
-   * R08.T16.b's air), or `null`: asked for at the first such plan, off the frame, as the renderer's
-   * other kernels are made, so that the frame never waits on its compile; until it is made those
-   * records take no cells and their draws sum their own. A failure is reported once and leaves them
-   * so.
+   * A way's form of the `disc cells` kernel for a plan with a record that needs it (R08.T18.a's
+   * emission, R08.T16.b's air; any record, for the packed plain kernel), or `null`: asked for at the
+   * first such plan, off the frame, as the renderer's other kernels are made, so that the frame
+   * never waits on its compile; until it is made those records take no cells and their draws sum
+   * their own, but the packed plain kernel's, which the per-cell kernel stands in for. A failure is
+   * reported once and leaves them so.
    */
-  #cellsFor(plan: BodyFramePlan, kind: CellForm): ComputeHandle | null {
-    const held = this.#formCells[kind];
+  #cellsFor(plan: BodyFramePlan, way: CellWay, kind: CellForm): ComputeHandle | null {
+    const held = this.#formCells[way][kind];
     if (held !== null && held.generation === this.#generation) {
       return held.kernel;
     }
     const needed = plan.discs.some((record) => cellFormOf(record) === kind);
     if (needed) {
-      this.#askCells(kind);
+      this.#askCells(way, kind);
     }
     return null;
   }
 
-  /** Asks for a form of the `disc cells` kernel on this generation's device. */
-  #askCells(kind: CellForm): FormCells {
+  /** Asks for a way's form of the `disc cells` kernel on this generation's device. */
+  #askCells(way: CellWay, kind: CellForm): FormCells {
     const making: FormCells = {
       generation: this.#generation,
       kernel: null,
       made: Promise.resolve(),
     };
-    making.made = this.#makeCells(kind, making);
-    this.#formCells[kind] = making;
+    making.made = this.#makeCells(way, kind, making);
+    this.#formCells[way][kind] = making;
     return making;
   }
 
-  /** A form's `disc cells` kernel as asked on this generation, asked now where it was not. */
-  #cellsMaking(kind: CellForm): FormCells {
-    const held = this.#formCells[kind];
-    return held !== null && held.generation === this.#generation ? held : this.#askCells(kind);
+  /** A way's form's `disc cells` kernel as asked on this generation, asked now where it was not. */
+  #cellsMaking(way: CellWay, kind: CellForm): FormCells {
+    const held = this.#formCells[way][kind];
+    return held !== null && held.generation === this.#generation ? held : this.#askCells(way, kind);
   }
 
   /**
    * Makes the lit bodies' emissive forms and the emissive `disc cells` kernel (R08.T18.a) ahead of
    * a body's first frame above the cut, as a timed run needs them made before its timed frames;
    * resolves once both are made, or could not be.
+   *
+   * @param way - The way of the `disc cells` kernel its frames take (`GeometrySettings.discCells`).
    */
-  async prepareEmissive(): Promise<void> {
-    await Promise.all([this.#bodies.prepareEmissive(), this.#cellsMaking("emissive").made]);
+  async prepareEmissive(way: CellWay = PREPARED_CELL_WAY): Promise<void> {
+    await Promise.all([this.#bodies.prepareEmissive(), this.#cellsMaking(way, "emissive").made]);
   }
 
   /**
    * Makes the lit bodies' air forms and the air `disc cells` kernel (R08.T16.b) ahead of a body's
    * first frame drawn by its disc table, as a timed run needs them made before its timed frames;
    * resolves once both are made, or could not be.
+   *
+   * @param way - The way of the `disc cells` kernel its frames take (`GeometrySettings.discCells`).
    */
-  async prepareAir(): Promise<void> {
-    await Promise.all([this.#bodies.prepareAir(), this.#cellsMaking("air").made]);
+  async prepareAir(way: CellWay = PREPARED_CELL_WAY): Promise<void> {
+    await Promise.all([this.#bodies.prepareAir(), this.#cellsMaking(way, "air").made]);
   }
 
   /**
    * Makes the lit bodies' forms for emission and air together and their `disc cells` kernel
    * (R08.T18.b) ahead of a glowing body's first frame drawn by its disc table; resolves once both are
    * made, or could not be.
+   *
+   * @param way - The way of the `disc cells` kernel its frames take (`GeometrySettings.discCells`).
    */
-  async prepareEmissiveAir(): Promise<void> {
-    await Promise.all([this.#bodies.prepareEmissiveAir(), this.#cellsMaking("emissiveAir").made]);
+  async prepareEmissiveAir(way: CellWay = PREPARED_CELL_WAY): Promise<void> {
+    await Promise.all([
+      this.#bodies.prepareEmissiveAir(),
+      this.#cellsMaking(way, "emissiveAir").made,
+    ]);
   }
 
   /**
-   * Makes a form's `disc cells` kernel into `making`; a failure is reported, a loss's not, and it
-   * never rejects.
+   * Makes a way's form's `disc cells` kernel into `making`; a failure is reported, a loss's not,
+   * and it never rejects.
    */
-  async #makeCells(kind: CellForm, making: { kernel: ComputeHandle | null }): Promise<void> {
+  async #makeCells(
+    way: CellWay,
+    kind: CellForm,
+    making: { kernel: ComputeHandle | null },
+  ): Promise<void> {
     try {
-      making.kernel = await this.#engine.createComputeAsync(CELL_FORM_KERNELS[kind]);
+      making.kernel = await this.#engine.createComputeAsync(CELL_FORM_KERNELS[way][kind]);
     } catch (error: unknown) {
       if (!lostDevice(error)) {
-        console.error(`the ${kind} disc cells of ${this.#name} could not be made:`, error);
+        console.error(`the ${way} ${kind} disc cells of ${this.#name} could not be made:`, error);
       }
     }
   }
