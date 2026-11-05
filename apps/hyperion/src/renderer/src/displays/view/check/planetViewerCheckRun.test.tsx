@@ -9,7 +9,9 @@ import {
   PrimaryDraws,
   elevationM,
   goalAltitudeM,
+  inputsCutPx,
   recordPlanetViewerCheck,
+  skyAnswered,
   SURFACE_HEIGHT_M,
   zoomStepsTo,
 } from "./planetViewerCheckRun";
@@ -35,6 +37,27 @@ describe("the planet viewer run's readings (plan R15, T6)", () => {
   });
 });
 
+/** An element laid out from `top` to `bottom`, CSS px. */
+function box(top: number, bottom: number): Pick<Element, "getBoundingClientRect"> {
+  return {
+    getBoundingClientRect: () =>
+      DOMRect.fromRect({ x: 0, y: top, width: 416, height: bottom - top }),
+  };
+}
+
+describe("the planet viewer run's wait for the server's warm-up", () => {
+  it("reads the sky unanswered while its STARS line reads PENDING", () => {
+    expect(skyAnswered("PENDING")).toBe(false);
+  });
+
+  it("reads it answered from its first reply on, or where the view asks no sky", () => {
+    expect([skyAnswered("V 10.2 mag CAM · BEYOND 250 ly: STREAMING"), skyAnswered(null)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+});
+
 describe("the planet viewer run's fit check", () => {
   it("reads how far the console's frame overflows the window, none where it fits", () => {
     expect([
@@ -42,6 +65,14 @@ describe("the planet viewer run's fit check", () => {
       consoleOverflowPx({ scrollHeight: 720, clientHeight: 720 }),
       consoleOverflowPx(null),
     ]).toEqual([40, 0, 0]);
+  });
+
+  it("reads how far the INPUTS panel's foot stands below its column's, none where it fits", () => {
+    expect([
+      inputsCutPx(box(67, 732), box(67, 666)),
+      inputsCutPx(box(67, 624), box(67, 666)),
+      inputsCutPx(null, box(67, 666)),
+    ]).toEqual([66, 0, 0]);
   });
 });
 

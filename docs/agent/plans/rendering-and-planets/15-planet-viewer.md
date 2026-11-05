@@ -233,3 +233,17 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
 - R15.T6 (lean, 2026-11-05): the inspection run's lit-body guard now counts the bodies pass's late
   raster (R14.T3.d). At the surface the guard is logged with what was drawn rather than failing the
   run, since close over a sea its materials may not be drawn; faults and lighting still fail it.
+- R15.T6 (built, the fold): `inputsLayout.ts` (`inputsLayout`, `FULL_MIN_HEIGHT_REM` 59,
+  `toggledInputsFold`), measured on `.planet-viewer__inputs`; below 59 rem one of `SHOWN`, `STAR`,
+  `ORBIT`, `PLANET`, `VOLATILES · RANK` is open, `STAR` at mount; folded groups summarise rows.
+- R15.T6 (built): `useEntryDraft`/`EntryRefusalContext` keep one entry refusal on the panel, and
+  `BodyField` takes `folded`. A server refusal reads `SMA REJECTED: <reason>` under its field, and
+  `GENERATE`'s outcome `see SMA` while that field stands open.
+- R15.T6 (built): the run captures `planet-viewer-inputs-*` (`PLANET_VIEWER_INPUTS_CAPTURES`) and
+  fails on `inputsCutPx`; the work area and `.planet-viewer` rows are held to the window.
+- R15.T6 (lean, 2026-11-05): the folded summaries are running text, extending the guide's
+  fixed-width exception; the full layout takes the summaries, the refusal wording and the one-refusal
+  rule too.
+- R15.T6 (built, infra): the run waits, within the draw's wait, for its sky's first reply
+  (`skyAnswered`) before the ground's, and goes on past it; no limit changed. `--sky-qos background`
+  would not help a pod (Linux's twins ignore it); the failure did not reproduce here (outbox).

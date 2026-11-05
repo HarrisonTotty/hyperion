@@ -114,6 +114,13 @@
 # captured once AUTO has settled as between-planet-viewer-orbit.png, then zoomed by the wheel to
 # 400 km above the ground as between-planet-viewer-low-orbit.png, then to 300 m above it with its look
 # tilted to the horizon as between-planet-viewer-surface.png, under target/views-check/planet-viewer/.
+# Between the orbit's and the low orbit's it captures the INPUTS column with each part that folds
+# open in turn and at its tallest, and after the surface's with a server's refusal of SMA (R15.T6's
+# fold), as between-planet-viewer-inputs-<shown|orbit|planet|volatiles|tallest|refused>.png (orbit
+# and planet where the compact layout folds them), and it fails where the column's foot is cut.
+# Before the ground's wait it waits, within the draw's, for the server's warm-up, its sky's first
+# reply, and goes on past it: on a cold server the galaxy's tables and the census's first step hold
+# every worker, and a first launch could outwait the ground's wait (R15.T6's finding).
 # One setting, high unless given; it exits 1 when a step does not take effect or a reading does not
 # come, the planet's ground is not modelled, or a fault line stands on a capture.
 #

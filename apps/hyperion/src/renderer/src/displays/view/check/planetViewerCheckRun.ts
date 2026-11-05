@@ -5,8 +5,16 @@
  * @remarks
  * 1. The first universe the server lists is opened on `GALAXY`, and the `PLANET VIEWER` shown.
  * 2. `GENERATE` shows the panel's inputs as they stand at mount, an Earth about a Sun, in `VIEW`'s
- *    `ORBIT` camera. Once it is drawn photorealistic, lit, its atmosphere and its ground surveyed,
- *    and `AUTO` settled, the page is captured as `planet-viewer-orbit`.
+ *    `ORBIT` camera. Once it is drawn photorealistic, lit and its atmosphere received, the run waits
+ *    for the server's warm-up, its sky's first reply ({@link skyAnswered}), within the draw's wait,
+ *    and goes on past it, so that the ground's wait starts once the server has built the galaxy's
+ *    tables and its census's first step, which on a cold server hold every worker (R15.T6's
+ *    finding: a first launch on a cold server could outwait the ground's wait). Once its
+ *    ground is surveyed and `AUTO` settled, the page is captured as `planet-viewer-orbit`. Then the
+ *    `INPUTS` column is captured with each part that folds open in turn, `SHOWN`, then `ORBIT` and
+ *    `PLANET` where the compact layout folds them, then the volatile ranks, and at its tallest, the
+ *    ranks open, with `SHOWN` where the layout lets it stand beside them, `SUN` `HELD` and a rank's
+ *    entry refused ({@link PLANET_VIEWER_INPUTS_CAPTURES}), and folded again (R15.T6's fold).
  * 3. The wheel zooms the camera to {@link LOW_ORBIT_HEIGHT_M} above the ground at its line of sight,
  *    which it looks down along at the centre, read on the lower plate as `SLANT RANGE FROM CAMERA`
  *    beside the ground's `ELEVATION`, from which the steps above the datum are worked out (the
@@ -15,12 +23,16 @@
  *    `AUTO` settled, the page is captured as `planet-viewer-low-orbit`.
  * 4. Zoomed again to {@link SURFACE_HEIGHT_M} above the ground, the look is tilted to the horizon
  *    under `R`, held on the view's canvas, and the page is captured as `planet-viewer-surface`.
+ * 5. Last, `SMA` is moved inside the star and `GENERATE` pressed, which the server refuses, so that
+ *    `SMA`'s reason stands under its field and `GENERATE`'s outcome names it, and with `SUN` `HELD`
+ *    and `LATITUDE`'s entry refused the column is captured as `planet-viewer-inputs-refused`.
  *
  * Each capture is taken twice: of the whole tab, and with `MAXIMIZE VIEW` on (`-maximized`), its
  * label block and panels hidden, so that the planet fills the view. Where the lower plate holds its
  * readout back for the room it is read under `MAXIMIZE VIEW` too. The run fails,
  * naming its step, where the server refuses what it asks, where a control does not take effect or
- * a reading does not come within its wait, where the tab overflows the window, where the primary's
+ * a reading does not come within its wait, where the tab overflows the window or the `INPUTS`
+ * column's foot is cut ({@link inputsCutPx}), where the primary's
  * label block shows a fault line or
  * `LIGHTING: NOT RECEIVED`, where a capture's frames drew no lit body larger than a point, where the
  * planet's ground is not modelled, or where it is stopped (`STOPPED`).
@@ -30,6 +42,7 @@ import type { RequestClient, UniverseInfo } from "@hyperion/protocol";
 import type { ViewsCheckApi } from "../../../../../preload/api";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
 import { ORBIT_ZOOM_FACTOR } from "../../../view/camera/orbit";
+import { SKY_PENDING } from "../../../view/sky/label";
 import { GENERATE_KEY } from "../../planet/PlanetInputsPanel";
 import { MAXIMIZE_KEY } from "../displayKeys";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
@@ -111,8 +124,24 @@ export const PLANET_VIEWER_CAPTURES = [
   "planet-viewer-surface",
 ] as const;
 
+/**
+ * The `INPUTS` column's captures (R15.T6's fold), of the whole tab, in the order the run takes
+ * them: after the orbit's, `SHOWN` open, `ORBIT` and `PLANET` open where the compact layout folds
+ * them (none in the full one), the volatile ranks open and the column's tallest state; after the
+ * surface's, a server's refusal of `SMA`.
+ */
+export const PLANET_VIEWER_INPUTS_CAPTURES = [
+  "planet-viewer-inputs-shown",
+  "planet-viewer-inputs-orbit",
+  "planet-viewer-inputs-planet",
+  "planet-viewer-inputs-volatiles",
+  "planet-viewer-inputs-tallest",
+  "planet-viewer-inputs-refused",
+] as const;
+
 /** One of the run's captures. */
-export type PlanetViewerCaptureLabel = (typeof PLANET_VIEWER_CAPTURES)[number];
+export type PlanetViewerCaptureLabel =
+  (typeof PLANET_VIEWER_CAPTURES)[number] | (typeof PLANET_VIEWER_INPUTS_CAPTURES)[number];
 
 /** A wheel's pixels in a zoom step (`ViewCanvas`'s `wheelSteps`, in pixels). */
 const WHEEL_PX_PER_STEP = 100;
@@ -167,6 +196,15 @@ export function zoomStepsTo(altitudeM: number, goalAltitudeMetres: number): numb
 }
 
 /**
+ * Whether the primary's `STARS` reading says its sky has answered: anything but `PENDING`, which
+ * stands from the sky's request until its first reply (`view/sky/label.ts`), a view that asks no
+ * sky included.
+ */
+export function skyAnswered(starsLine: string | null): boolean {
+  return starsLine !== SKY_PENDING;
+}
+
+/**
  * How far the console's frame overflows the window, CSS px, 0 where it fits or is not shown: the
  * guide's layout holds every display within the window, with no page scroll.
  */
@@ -175,6 +213,32 @@ export function consoleOverflowPx(
 ): number {
   return frame === null ? 0 : Math.max(frame.scrollHeight - frame.clientHeight, 0);
 }
+
+/**
+ * How far the `INPUTS` panel's foot stands below its column's, CSS px, 0 where it fits or either is
+ * not shown: the work area holds the column to the window and clips what passes it, so that a
+ * panel too tall is cut there (the guide's Accessibility: nothing cut at the floor).
+ */
+export function inputsCutPx(
+  panel: Pick<Element, "getBoundingClientRect"> | null,
+  column: Pick<Element, "getBoundingClientRect"> | null,
+): number {
+  return panel === null || column === null
+    ? 0
+    : Math.max(panel.getBoundingClientRect().bottom - column.getBoundingClientRect().bottom, 0);
+}
+
+/** An entry out of every rank's range, which the panel refuses under its field. */
+const REFUSED_RANK_ENTRY = "5";
+
+/**
+ * An `SMA` in range that the server refuses for the Sun at the panel's mount, AU: an orbit of
+ * 0.001 AU, whose periapsis lies inside the star (the viewer's `PeriapsisInsideStar`).
+ */
+const REFUSED_SMA_ENTRY = "0.001";
+
+/** A latitude out of `SUN`'s range, which the panel refuses under its field, °. */
+const REFUSED_LATITUDE_ENTRY = "95";
 
 /** The most of the primary's passes and materials a failure names. */
 const NAMED_DRAWS = 24;
@@ -258,6 +322,8 @@ async function viewPlanet(
 ): Promise<ReadonlyArray<PlanetViewerCaptureLabel>> {
   const { document, timing } = deps;
   const { stopped, wait, until, press, controls } = viewDriver(deps);
+  /** The captures taken so far, in order, each of the whole tab. */
+  const taken: PlanetViewerCaptureLabel[] = [];
   const drawn = viewDriver({ ...deps, timing: { ...timing, waitMs: timing.drawWaitMs } });
   const grounded = viewDriver({ ...deps, timing: { ...timing, waitMs: timing.groundWaitMs } });
   const plate = (): PrimaryPlate => {
@@ -318,6 +384,23 @@ async function viewPlanet(
       await settled(ev);
     };
     await settled(read());
+  };
+  /**
+   * Waits for the server's warm-up, its sky's first reply, until `deadlineMs`; past it the run goes
+   * on, saying so, for the ground's own wait to judge.
+   */
+  const warmedUp = async (deadlineMs: number): Promise<void> => {
+    if (skyAnswered(plate().line("STARS"))) {
+      return;
+    }
+    if (deps.nowMs() >= deadlineMs) {
+      console.warn(
+        `views check: the sky did not answer within ${String(timing.drawWaitMs / 1000)} s; the run goes on`,
+      );
+      return;
+    }
+    await wait(timing.settleStepMs);
+    await warmedUp(deadlineMs);
   };
   /** The ground at the line of sight once it reads, under `MAXIMIZE VIEW` where it is held back. */
   const groundRead = async (what: string): Promise<ReadonlyArray<string>> => {
@@ -396,6 +479,24 @@ async function viewPlanet(
       console.warn(`views check: ${why}`);
     }
   };
+  /** Fails where the tab overflows the window, or the `INPUTS` column's foot is cut, `what`. */
+  const fits = (what: string): void => {
+    const overflowPx = consoleOverflowPx(document.querySelector(".console"));
+    if (overflowPx > 0) {
+      throw new Error(
+        `views check: the PLANET VIEWER does not fit the window: it overflows by ${String(overflowPx)} px`,
+      );
+    }
+    const cutPx = inputsCutPx(
+      document.querySelector(".planet-inputs"),
+      document.querySelector(".planet-viewer__inputs"),
+    );
+    if (cutPx > 0) {
+      throw new Error(
+        `views check: the INPUTS column is cut ${what}: its foot stands ${String(Math.ceil(cutPx))} px below the column's`,
+      );
+    }
+  };
   /**
    * Shows the whole tab again, lets the terrain stream, `AUTO` settle and the frames come, checks
    * them and captures; then the same with `MAXIMIZE VIEW` on, and off again.
@@ -416,19 +517,82 @@ async function viewPlanet(
     // Captured before it is judged, so that a failed run leaves the picture of what failed.
     stopped();
     await deps.api.capture(label);
+    taken.push(label);
     shown(what, fromMs, litBody);
-    const overflowPx = consoleOverflowPx(document.querySelector(".console"));
-    if (overflowPx > 0) {
-      throw new Error(
-        `views check: the PLANET VIEWER does not fit the window: it overflows by ${String(overflowPx)} px`,
-      );
-    }
+    fits(what);
     await setMaximized(true);
     const maximizedFromMs = await framesDrawn();
     stopped();
     await deps.api.capture(`${label}-maximized`);
     shown(`${what} under MAXIMIZE VIEW`, maximizedFromMs, litBody);
     await setMaximized(false);
+  };
+
+  /** The `INPUTS` panel's button whose text ends with `name`, a disclosure's or `SUN`'s. */
+  const inputsButton = (name: string): HTMLButtonElement | null =>
+    [...document.querySelectorAll<HTMLButtonElement>(".planet-inputs button")].find((button) =>
+      button.textContent.trim().endsWith(name),
+    ) ?? null;
+  /** Opens or folds the `INPUTS` part `name` by its disclosure, as an operator does. */
+  const setPartOpen = async (name: string, open: boolean): Promise<void> => {
+    const expanded = (): boolean => inputsButton(name)?.getAttribute("aria-expanded") === "true";
+    if (expanded() === open) {
+      return;
+    }
+    await press(() => inputsButton(name), `INPUTS's ${name}`);
+    await until(`INPUTS's ${name} did not ${open ? "open" : "fold"}`, () => expanded() === open);
+  };
+  /** Holds `SUN`, or gives it back to its orbit, by its buttons. */
+  const setSunHeld = async (held: boolean): Promise<void> => {
+    const word = held ? "HELD" : "ORBITAL";
+    await press(() => inputsButton(word), `SUN's ${word}`);
+    await until(
+      `SUN's ${word} was not pressed`,
+      () => inputsButton(word)?.getAttribute("aria-pressed") === "true",
+    );
+  };
+  /** The `INPUTS` panel's field labelled `label`. */
+  const inputsField = (label: string): HTMLInputElement | null => {
+    const found = [...document.querySelectorAll<HTMLLabelElement>(".planet-inputs label")].find(
+      (each) => each.textContent === label,
+    );
+    const field = found === undefined ? null : document.getElementById(found.htmlFor);
+    return field instanceof HTMLInputElement ? field : null;
+  };
+  /** Types `text` in the field labelled `label` and enters it, or drops it, by its keys. */
+  const entered = (label: string, text: string | null): void => {
+    const field = inputsField(label);
+    if (field === null) {
+      throw new Error(`views check: INPUTS's ${label} field is not shown`);
+    }
+    stopped();
+    field.focus();
+    if (text === null) {
+      pressKey(field, "Escape");
+      field.blur();
+      return;
+    }
+    // As a keyboard types it: React reads the value through the input event.
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, text);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    pressKey(field, "Enter");
+  };
+  /** Captures the whole tab as `label` once the primary has drawn, and fails where INPUTS is cut. */
+  const captureInputs = async (label: PlanetViewerCaptureLabel, what: string): Promise<void> => {
+    await framesDrawn();
+    stopped();
+    await deps.api.capture(label);
+    taken.push(label);
+    fits(what);
+  };
+
+  /** Opens the group `part` where it has a disclosure, and captures the tab as `label`. */
+  const capturePart = async (part: string, label: PlanetViewerCaptureLabel): Promise<void> => {
+    if (inputsButton(part) === null) {
+      return;
+    }
+    await setPartOpen(part, true);
+    await captureInputs(label, `with ${part} open`);
   };
 
   // 1. The first universe opened on GALAXY, and the PLANET VIEWER shown.
@@ -477,8 +641,35 @@ async function viewPlanet(
       inspectionLighting(plate().statements) !== "pending" &&
       !plate().statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
   );
+  await warmedUp(deps.nowMs() + timing.drawWaitMs);
   await groundRead("from orbit");
   await capture("planet-viewer-orbit", "the planet from orbit", "required");
+
+  // 2b. The INPUTS column with SHOWN open, with the volatile ranks open, and at its tallest: the
+  // ranks open, SHOWN too where the layout lets both stand, SUN HELD and a rank's entry refused.
+  await setPartOpen("SHOWN", true);
+  await captureInputs("planet-viewer-inputs-shown", "with SHOWN open");
+  await setPartOpen("SHOWN", false);
+  // The full layout stands ORBIT and PLANET open, with no disclosure, in every capture.
+  await capturePart("ORBIT", "planet-viewer-inputs-orbit");
+  await capturePart("PLANET", "planet-viewer-inputs-planet");
+  await setPartOpen("VOLATILES · RANK", true);
+  await captureInputs("planet-viewer-inputs-volatiles", "with the volatile ranks open");
+  await setPartOpen("SHOWN", true);
+  if (inputsButton("VOLATILES · RANK")?.getAttribute("aria-expanded") !== "true") {
+    await setPartOpen("VOLATILES · RANK", true);
+  }
+  await setSunHeld(true);
+  entered("H2O", REFUSED_RANK_ENTRY);
+  await until(
+    "the H2O entry was not refused",
+    () => inputsField("H2O")?.getAttribute("aria-invalid") === "true",
+  );
+  await captureInputs("planet-viewer-inputs-tallest", "at its tallest");
+  entered("H2O", null);
+  await setSunHeld(false);
+  await setPartOpen("SHOWN", false);
+  await setPartOpen("VOLATILES · RANK", false);
 
   // 3. Down to low orbit, and captured.
   await zoomTo(LOW_ORBIT_HEIGHT_M, "in low orbit");
@@ -502,7 +693,25 @@ async function viewPlanet(
   // Close over the ground the guard's materials may not be drawn at all, over a sea above all:
   // there it is logged with what was drawn, and the capture judged by its faults and lighting.
   await capture("planet-viewer-surface", "the planet's surface", "logged");
-  return PLANET_VIEWER_CAPTURES;
+
+  // 5. A server's refusal of SMA, its reason under its field, with SUN HELD and LATITUDE refused.
+  if (inputsButton("ORBIT") !== null) {
+    await setPartOpen("ORBIT", true);
+  }
+  entered("SMA", REFUSED_SMA_ENTRY);
+  await press(generate, "GENERATE");
+  await until(
+    "the server did not refuse SMA",
+    () => inputsField("SMA")?.getAttribute("aria-invalid") === "true",
+  );
+  await setSunHeld(true);
+  entered("LATITUDE", REFUSED_LATITUDE_ENTRY);
+  await until(
+    "the LATITUDE entry was not refused",
+    () => inputsField("LATITUDE")?.getAttribute("aria-invalid") === "true",
+  );
+  await captureInputs("planet-viewer-inputs-refused", "with a server's refusal under SMA");
+  return taken;
 }
 
 /** What {@link recordPlanetViewerCheck} asks of the main process. */
