@@ -538,8 +538,9 @@ fn sky_tables_service(
 }
 
 /// The generator version from which the server's sky marches its sightlines through plan 09's
-/// features' gas (`FeatureGas`, P09.T40.a) beside the smooth field: 28 (train 27's lean,
-/// 2026-11-04).
+/// features' gas (`FeatureGas`, P09.T40.a) beside the smooth field: 29 (train 27's lean,
+/// 2026-11-04, at 28; retargeted by train 28, 2026-11-05, the gas's cost on a sky not yet cut to
+/// its limits).
 ///
 /// P09.T40.a's gate opened at 27, with P09.T2.c's field share: the range query serves the features'
 /// members and every row its origin, the extinction lines take the features' gas, and the sky's
@@ -549,7 +550,7 @@ fn sky_tables_service(
 /// smooth field alone until that cost is cut. Its tripwire,
 /// `the_sky_s_feature_gas_holds_until_its_version`, fails at the version.
 pub const SKY_FEATURE_GAS_FROM: hyperion_sim::GeneratorVersion =
-    hyperion_sim::GeneratorVersion::new(28);
+    hyperion_sim::GeneratorVersion::new(29);
 
 async fn healthz() -> &'static str {
     "ok"
