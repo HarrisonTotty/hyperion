@@ -44,7 +44,7 @@ fn poly(c: &[f64; 5], zeta: f64) -> f64 {
 /// assert!((solar.m_hef().value() - 1.995).abs() < 1e-12);
 /// assert!((solar.m_fgb().value() - 13.032).abs() < 1e-3);
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ZCoeffs {
     z: MetalFraction,
     zeta: f64,
@@ -67,6 +67,50 @@ pub struct ZCoeffs {
     /// Where Z falls among HPT's calibration metallicities, between which the giant radius laws
     /// (equations 46 and 74) are interpolated (galaxy-generation ruling 92).
     radius_in_z: RadiusInZ,
+    /// αR's power law (HPT equation 21a) at a66 and at a67, the ends of its range, which the main
+    /// sequence reads from a68 to a66 and above a67 ([`ZCoeffs::alpha_r_power_law_ends`]).
+    alpha_r_ends: [f64; 2],
+}
+
+/// Written by hand to leave out `alpha_r_ends`, which the other fields give, so that a track's
+/// `Debug` text, which the binary timelines' golden digest reads, is unchanged. The destructuring
+/// names every field, so that a new one cannot be left out of the print unnoticed.
+impl core::fmt::Debug for ZCoeffs {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let Self {
+            z,
+            zeta,
+            a,
+            b,
+            zams_l,
+            zams_r,
+            m_hook,
+            m_hef,
+            m_fgb,
+            giant_radius_scale,
+            agb_radius_scale,
+            hook_luminosity_scale,
+            degenerate_radius,
+            radius_in_z,
+            alpha_r_ends: _,
+        } = self;
+        f.debug_struct("ZCoeffs")
+            .field("z", z)
+            .field("zeta", zeta)
+            .field("a", a)
+            .field("b", b)
+            .field("zams_l", zams_l)
+            .field("zams_r", zams_r)
+            .field("m_hook", m_hook)
+            .field("m_hef", m_hef)
+            .field("m_fgb", m_fgb)
+            .field("giant_radius_scale", giant_radius_scale)
+            .field("agb_radius_scale", agb_radius_scale)
+            .field("hook_luminosity_scale", hook_luminosity_scale)
+            .field("degenerate_radius", degenerate_radius)
+            .field("radius_in_z", radius_in_z)
+            .finish()
+    }
 }
 
 impl ZCoeffs {
@@ -117,6 +161,7 @@ impl ZCoeffs {
             // computes it again, outside `sse`, with `powf` (P06.T13); once per Z, it costs nothing.
             degenerate_radius: 0.0258 * math::powf(1.0 + super::ms::hydrogen(z), 5.0 / 3.0),
             radius_in_z: RadiusInZ::new(z, zeta),
+            alpha_r_ends: [alpha_r_power_law(&a, a[66]), alpha_r_power_law(&a, a[67])],
         };
         // b46 = −b46 log₁₀(`M_HeF` ÷ `M_FGB`) needs the critical masses (Appendix, after b49).
         coeffs.b[46] = -coeffs.b[46] * math::log10(m_hef / m_fgb);
@@ -180,6 +225,15 @@ impl ZCoeffs {
     #[must_use]
     pub(crate) fn alpha_r_power_law(&self, m: f64) -> f64 {
         alpha_r_power_law(&self.a, m)
+    }
+
+    /// [`ZCoeffs::alpha_r_power_law`] at a66 and at a67, bit for bit, evaluated once: the main
+    /// sequence's αR reads the first from a68 to a66 and the second above a67 (HPT equation 21),
+    /// which was 30% of the repeated logarithms and exponentials of a layer-E fate
+    /// (perf-layer-e-fates).
+    #[must_use]
+    pub(crate) const fn alpha_r_power_law_ends(&self) -> [f64; 2] {
+        self.alpha_r_ends
     }
 
     /// The giant's radius scale A = min(b4 M^−b5, b6 M^−b7) of HPT equation 46.
@@ -567,6 +621,21 @@ mod tests {
 
     /// A law as the formula prints it.
     type Printed<'a> = Box<dyn Fn(f64) -> f64 + 'a>;
+
+    /// αR's ends are its power law at a66 and a67, bit for bit, at every metallicity, and stay out
+    /// of the coefficients' print, which a track's pinned print holds.
+    #[test]
+    fn the_alpha_r_ends_are_the_power_law_at_a66_and_a67() {
+        for z in z_sweep() {
+            let c = ZCoeffs::new(MetalFraction::new(z));
+            let [at_a66, at_a67] = c.alpha_r_power_law_ends();
+            assert_eq!(bits(at_a66), bits(c.alpha_r_power_law(c.a(66))), "Z = {z}");
+            assert_eq!(bits(at_a67), bits(c.alpha_r_power_law(c.a(67))), "Z = {z}");
+            let print = format!("{c:?}");
+            assert!(print.starts_with("ZCoeffs { z: "), "{print}");
+            assert!(print.ends_with(&format!("radius_in_z: {:?} }}", c.radius_in_z)));
+        }
+    }
 
     /// Masses from 0.05 to 200 M☉, denser within 10⁻⁶ of `crossing` on either side, and the
     /// crossing's neighbours to the ulp.

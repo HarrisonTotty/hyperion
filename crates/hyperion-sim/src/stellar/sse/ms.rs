@@ -271,11 +271,11 @@ fn alpha_r(m: f64, c: &ZCoeffs) -> f64 {
     } else if m < a68 {
         a63 + (a64 - a63) * (m - 0.65) / (a68 - 0.65)
     } else if m < a66 {
-        a64 + (c.alpha_r_power_law(a66) - a64) * (m - a68) / (a66 - a68)
+        a64 + (c.alpha_r_power_law_ends()[0] - a64) * (m - a68) / (a66 - a68)
     } else if m <= a67 {
         c.alpha_r_power_law(m)
     } else {
-        c.alpha_r_power_law(a67) + c.a(65) * (m - a67)
+        c.alpha_r_power_law_ends()[1] + c.a(65) * (m - a67)
     }
 }
 

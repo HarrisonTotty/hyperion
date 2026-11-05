@@ -261,11 +261,25 @@ pub(crate) fn small_envelope_mu(
 /// star whose luminosity the current mass does not move keeps at every mass.
 #[must_use]
 pub(crate) fn small_envelope_factor(luminosity: SolarLuminosities) -> f64 {
-    MU_CLAMP.1.min(
-        MU_CLAMP
-            .0
-            .max(math::powf_positive(luminosity.value() / MU_L0, MU_KAPPA)),
-    )
+    let q = luminosity.value() / MU_L0;
+    // The power's own check of its base, which the clamp's ends below no longer reach.
+    debug_assert!(
+        !q.is_infinite(),
+        "the small-envelope factor needs a finite luminosity, not {luminosity:?}"
+    );
+    // Where the clamp decides the factor the power is not taken: (L ÷ L₀)^κ is at most 1.1953
+    // from L ÷ L₀ = 0.7 and at least 5.063 up to 0.039, and `powf_positive` is within 2 × 10⁻¹³
+    // of it relatively here, so the clamp gives the same bits (perf-layer-e-fates: the factor was
+    // 6% of a layer-E fate's instructions).
+    if q >= MU_CLAMPED_LOW_FROM {
+        return MU_CLAMP.0;
+    }
+    if q > 0.0 && q <= MU_CLAMPED_HIGH_TO {
+        return MU_CLAMP.1;
+    }
+    MU_CLAMP
+        .1
+        .min(MU_CLAMP.0.max(math::powf_positive(q, MU_KAPPA)))
 }
 
 /// [`small_envelope_mu`] with its luminosity's `factor` ([`small_envelope_factor`]) given, bit for
@@ -334,6 +348,14 @@ const MU_KAPPA: f64 = -0.5;
 
 /// The clamp of HPT equation 97's luminosity factor, (min, max).
 const MU_CLAMP: (f64, f64) = (1.2, 5.0);
+
+/// L ÷ L₀ from which equation 97's factor is its least, [`MU_CLAMP`]'s 1.2: 0.7^−½ = 1.1952,
+/// 0.4% below it ([`small_envelope_factor`]).
+const MU_CLAMPED_LOW_FROM: f64 = 0.7;
+
+/// L ÷ L₀ up to which equation 97's factor is its greatest, [`MU_CLAMP`]'s 5: 0.039^−½ = 5.0637,
+/// 1.3% above it ([`small_envelope_factor`]).
+const MU_CLAMPED_HIGH_TO: f64 = 0.039;
 
 /// The Humphreys–Davidson limit as HPT write it: L > 6 × 10⁵ L☉ and 10⁻⁵ R L^½ > 1 (section 7.1,
 /// after Humphreys and Davidson 1994).
@@ -559,7 +581,7 @@ fn modern(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
 fn modern_limited(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
     let below_kink = |surface: &Surface| match regime {
         Regime::Evolved { agb } if beyond_humphreys_davidson(surface) => {
-            MODERN_LBV.max(hot_or_cool(surface, hurley_evolved(surface, eta, agb)))
+            MODERN_LBV.max(hot_or_cool(surface, || hurley_evolved(surface, eta, agb)))
         }
         Regime::Windless | Regime::MainSequence | Regime::Evolved { .. } | Regime::NakedHelium => {
             modern_below_kink(regime, surface, eta)
@@ -621,12 +643,12 @@ fn eddington_boosted(s: &Surface, recipe: impl Fn(&Surface) -> f64) -> f64 {
 fn modern_below_kink(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
     match regime {
         Regime::Windless => 0.0,
-        Regime::MainSequence => hot_or_cool(s, nieuwenhuijzen_de_jager(s)),
+        Regime::MainSequence => hot_or_cool(s, || nieuwenhuijzen_de_jager(s)),
         Regime::Evolved { agb } => {
             if beyond_humphreys_davidson(s) {
                 MODERN_LBV
             } else {
-                hot_or_cool(s, hurley_evolved(s, eta, agb))
+                hot_or_cool(s, || hurley_evolved(s, eta, agb))
             }
         }
         Regime::NakedHelium => reimers(s, eta).max(
@@ -716,19 +738,20 @@ fn hurley_lbv(s: &Surface) -> f64 {
 }
 
 /// The modern recipe's rate for a hydrogen-rich star inside the Humphreys–Davidson limit whose
-/// HPT rate is `cool`: `cool` up to 11,500 K, Vink's rate alone from 12,500 K, and between them
+/// HPT rate `cool` gives: `cool` up to 11,500 K, Vink's rate alone from 12,500 K, and between them
 /// (1 − w) × `cool` + w × Vink with w rising linearly in T from 0 to 1 across the band, both
-/// evaluated at the star's own state ([`HANDOVER_K`]).
+/// evaluated at the star's own state ([`HANDOVER_K`]). `cool` is taken only below 12,500 K, where
+/// it is read: a hot star's track pays for no HPT rate (perf-layer-e-fates).
 #[must_use]
-fn hot_or_cool(s: &Surface, cool: f64) -> f64 {
+fn hot_or_cool(s: &Surface, cool: impl FnOnce() -> f64) -> f64 {
     let (low, high) = HANDOVER_K;
     if s.t <= low {
-        cool
+        cool()
     } else if s.t >= high {
         vink(s)
     } else {
         let w = (s.t - low) / (high - low);
-        (1.0 - w) * cool + w * vink(s)
+        (1.0 - w) * cool() + w * vink(s)
     }
 }
 
@@ -1223,7 +1246,7 @@ mod tests {
         let s = surface(&main_sequence, 0.02);
         assert_same_bits(
             todays_rate(&main_sequence, 0.02),
-            hot_or_cool(&s, nieuwenhuijzen_de_jager(&s)),
+            hot_or_cool(&s, || nieuwenhuijzen_de_jager(&s)),
         );
     }
 
@@ -1373,7 +1396,7 @@ mod tests {
         assert!(eddington_factor(SolarLuminosities::new(s.l), SolarMasses::new(s.m)) < 0.7);
         assert_same_bits(
             todays_rate(&faint, 0.02),
-            hot_or_cool(&s, nieuwenhuijzen_de_jager(&s)),
+            hot_or_cool(&s, || nieuwenhuijzen_de_jager(&s)),
         );
     }
 
@@ -1486,9 +1509,11 @@ mod tests {
                 }
                 checked += 1;
                 let floor = |x: &Surface| {
-                    MODERN_LBV.max(hot_or_cool(x, hurley_evolved(x, ReimersEta::HURLEY, agb)))
+                    MODERN_LBV.max(hot_or_cool(x, || {
+                        hurley_evolved(x, ReimersEta::HURLEY, agb)
+                    }))
                 };
-                let side = hot_or_cool(&s, hurley_evolved(&s, ReimersEta::HURLEY, agb));
+                let side = hot_or_cool(&s, || hurley_evolved(&s, ReimersEta::HURLEY, agb));
                 let limited = limited_rate(state, z);
                 assert!(limited >= MODERN_LBV, "{state:?}: {limited:e}");
                 assert!(limited >= side, "{state:?}: {limited:e} < {side:e}");
@@ -1541,7 +1566,7 @@ mod tests {
             let s = surface(&state, 0.02);
             assert!(beyond_humphreys_davidson(&s), "{log_l}");
             assert_close(&format!("term at {log_l}"), hurley_lbv(&s), term, 1e-9);
-            let side = hot_or_cool(&s, hurley_evolved(&s, ReimersEta::HURLEY, false));
+            let side = hot_or_cool(&s, || hurley_evolved(&s, ReimersEta::HURLEY, false));
             assert_close(&format!("cool side at {log_l}"), side, cool, 1e-9);
             assert_close(
                 &format!("rate at {log_l}"),
@@ -1559,7 +1584,7 @@ mod tests {
         assert_same_bits(hurley_lbv(&s), 0.0);
         assert_same_bits(
             limited_rate(&line, 0.02),
-            hot_or_cool(&s, hurley_evolved(&s, ReimersEta::HURLEY, false)),
+            hot_or_cool(&s, || hurley_evolved(&s, ReimersEta::HURLEY, false)),
         );
     }
 
@@ -1607,6 +1632,39 @@ mod tests {
         0x3f2c_7f80_b1ae_4398,
     ];
 
+    /// Equation 97's factor is the clamped power, bit for bit, where the clamp is read without the
+    /// power: across both ends of the clamp and the shortcut's bounds, and over the luminosities
+    /// of stars.
+    #[test]
+    fn the_small_envelope_factor_is_the_clamped_power_bit_for_bit() {
+        let clamped = |l: f64| {
+            MU_CLAMP
+                .1
+                .min(MU_CLAMP.0.max(math::powf_positive(l / MU_L0, MU_KAPPA)))
+        };
+        let mut luminosities: Vec<f64> = (0..=20_000)
+            .map(|i| math::exp10(-4.0 + 12.0 * f64::from(i) / 20_000.0))
+            .collect();
+        for edge in [
+            MU_CLAMPED_LOW_FROM,
+            MU_CLAMPED_HIGH_TO,
+            1.0 / 1.44,
+            1.0 / 25.0,
+        ] {
+            let (mut below, mut above) = (edge * MU_L0, edge * MU_L0);
+            luminosities.push(below);
+            for _ in 0..64 {
+                below = below.next_down();
+                above = above.next_up();
+                luminosities.extend([below, above]);
+            }
+        }
+        for l in luminosities {
+            let factor = small_envelope_factor(SolarLuminosities::new(l));
+            assert_eq!(bits(factor), bits(clamped(l)), "L = {l:e} L☉");
+        }
+    }
+
     /// Where only Vink's fits act, the blends reproduce each fit at the edges of their bands.
     #[test]
     fn the_blends_meet_each_fit_at_the_edges_of_their_bands() {
@@ -1627,12 +1685,12 @@ mod tests {
         assert_close("25,000 K", vink(&at(mid)), blend, 1e-15);
         assert_same_bits(vink(&at(60_000.0)), VINK_HOT.rate(l, m, VINK_MAX_K, 1.0));
         let (low, high) = HANDOVER_K;
-        assert_same_bits(hot_or_cool(&at(low), 0.25), 0.25);
-        assert_same_bits(hot_or_cool(&at(high), 0.25), vink(&at(high)));
+        assert_same_bits(hot_or_cool(&at(low), || 0.25), 0.25);
+        assert_same_bits(hot_or_cool(&at(high), || 0.25), vink(&at(high)));
         let mid = f64::midpoint(low, high);
         assert_close(
             "12,000 K",
-            hot_or_cool(&at(mid), 0.25),
+            hot_or_cool(&at(mid), || 0.25),
             0.125 + 0.5 * vink(&at(mid)),
             1e-15,
         );

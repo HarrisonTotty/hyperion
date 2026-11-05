@@ -3098,3 +3098,13 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     each layer, the largest cells first); the bench's pool walks them.
   - _`hyperion-base`._ `running_sums` reserves its list: glibc's `realloc` serialised threads, so
     `PiecewiseLinear::new` per dead record stopped layer E scaling past eight threads.
+- **P12 perf, layer E's exact fates (lane `perf-layer-e-fates`, 2026-11-05, at 28; no output
+  moves).** `fate_of` is a serial chain of some 1,000 dependent evaluations whose inputs never
+  repeat (67,702 distinct (m, Z) in the bulge walk's layer E), so the exact cuts are small: about
+  4% of layer E's whole-cell cost.
+  - _Names._ `ZCoeffs::alpha_r_power_law_ends` (αR at a66 and a67, once a Z; `ZCoeffs`'s `Debug`
+    now by hand, its print unchanged) and `Builder::electron_capture_windows` (once a build).
+  - _The wind._ `hot_or_cool` takes its cool side as a closure, read only below 12,500 K;
+    `small_envelope_factor` returns the clamp's ends without the power where they decide it.
+  - _Not cut (lean, 2026-11-05)._ No memo of fates across records or calls (no input repeats, and
+    a hidden one would warm the cold benches); `table_fate`'s domain as it was.

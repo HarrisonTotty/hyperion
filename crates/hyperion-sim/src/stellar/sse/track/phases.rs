@@ -5,8 +5,8 @@ use crate::stellar::Phase;
 use crate::stellar::binary::core_endings::CoreEndingRules;
 use crate::stellar::premain::{self, Contraction, PROTOSTAR_YEARS, Protostar};
 use crate::stellar::remnant::collapse::{
-    CoreCollapse, ElectronCaptureWindows, IRON_CORE_MC_BAGB, OXYGEN_NEON_CAPTURE_MASS,
-    RemnantDraws, core_collapse, electron_capture_remnant,
+    CoreCollapse, IRON_CORE_MC_BAGB, OXYGEN_NEON_CAPTURE_MASS, RemnantDraws, core_collapse,
+    electron_capture_remnant,
 };
 use crate::stellar::remnant::structure::{
     DegenerateCore, OXYGEN_NEON_MC_BAGB, hurley_supernova_remnant, white_dwarf_kind,
@@ -1168,7 +1168,7 @@ impl Builder<'_> {
                 if makes_iron(m0 - ABOVE) || !makes_iron(m0 + width.value() + MARGIN) {
                     return false;
                 }
-                ElectronCaptureWindows::new(c)
+                self.electron_capture_windows()
                     .window(width)
                     .contains(SolarMasses::new(m0))
             }),

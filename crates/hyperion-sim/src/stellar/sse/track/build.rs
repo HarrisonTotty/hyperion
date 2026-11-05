@@ -23,7 +23,7 @@ use crate::rng::Mark;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::fates::STRIPPED_WINDOW;
 use crate::stellar::remnant::RemnantRecipe;
-use crate::stellar::remnant::collapse::RemnantDraws;
+use crate::stellar::remnant::collapse::{ElectronCaptureWindows, RemnantDraws};
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::{Composition, Phase, StarState};
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, Years};
@@ -305,6 +305,9 @@ pub(crate) struct Builder<'a> {
     companion_stripped: CompanionMark,
     pub(super) resolution: Resolution,
     pub(super) keep: Keep,
+    /// The electron-capture windows at the star's metallicity, found where the build first asks
+    /// for them ([`Builder::electron_capture_windows`]).
+    electron_capture_windows: OnceCell<ElectronCaptureWindows>,
 }
 
 /// A star's provisional companion-stripped mark as its track holds it.
@@ -349,7 +352,18 @@ impl<'a> Builder<'a> {
             companion_stripped: CompanionMark::Known(false),
             resolution,
             keep,
+            electron_capture_windows: OnceCell::new(),
         }
+    }
+
+    /// The electron-capture windows at the star's metallicity ([`ElectronCaptureWindows::new`]),
+    /// found once a build: each finding bisects `m_c_bagb` 56 times, and a star near the windows
+    /// asked for them at both values of its companion-stripped mark, which was 14% of the repeated
+    /// logarithms and exponentials of a layer-E fate (perf-layer-e-fates).
+    #[must_use]
+    pub(super) fn electron_capture_windows(&self) -> &ElectronCaptureWindows {
+        self.electron_capture_windows
+            .get_or_init(|| ElectronCaptureWindows::new(self.phys.coeffs))
     }
 
     /// This builder with the helium-excess correction `helium` in place of the one its options'
