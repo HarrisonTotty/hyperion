@@ -1263,9 +1263,10 @@ describe("each view's frame terrain through the session (R10.T16.c)", () => {
     h.session.noteView(INSTRUMENT, handing(5e6, { streamPriority: "secondary" }));
     await streamBakes(h, 2);
     const instrumentAfter = frameTerrainOf(h, INSTRUMENT, 16).draws(plan, [body]);
-    // Its patches by the survey's edge through the cluster path's buckets at stride 1: the blocks,
-    // the strips, and the may-discard blocks, strips, fin runs and head runs (R14.T1.g).
-    expect([primary.length, instrumentBefore.length, instrumentAfter.length]).toEqual([6, 0, 6]);
+    // Its patches by the survey's edge through the cluster path's buckets: the blocks and the
+    // strips at each of the camera's four strides (R14.T3.c, high's `strides` measured), and the
+    // may-discard blocks, strips, fin runs and head runs (R14.T1.g).
+    expect([primary.length, instrumentBefore.length, instrumentAfter.length]).toEqual([12, 0, 12]);
     // One pass draws both, each view through its own buffers.
     expect(instrumentAfter[0]?.storageBuffers?.["instances"]?.name).toBe(
       `terrain interior instances (${INSTRUMENT})`,
