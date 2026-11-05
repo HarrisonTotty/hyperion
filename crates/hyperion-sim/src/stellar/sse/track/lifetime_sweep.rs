@@ -84,10 +84,17 @@ fn the_lifetime_build_keeps_every_bit_over_the_sweep() {
     assert_eq!(digests, PINNED);
 }
 
-/// The sweep's digests at versions 24, 25, 26 and 27.
+/// The sweep's digests at versions 24, 25, 26 and 27: one digest, since every version takes the
+/// same stellar rules (`StellarRules::of_version` holds nothing below 27 since the 27 folds, and at
+/// 26 held nothing a single star's track reads). 26's and 27's are the bits first pinned: the 27
+/// folds moved no death age or fate of the sweep. 24's and 25's were pinned at
+/// `0xf005_6673_608f_0cb7` while those versions' rules still held the tracks' 26 holds (version
+/// 25's Humphreys–Davidson wind and P15.T7.b's helium table, which the ΔY = 0.04 composition
+/// reads); the 26 bump left them 26's, so the pin failed at 26 already, with 27's figures, and
+/// they are 27's.
 const PINNED: [u64; 4] = [
-    0xf005_6673_608f_0cb7,
-    0xf005_6673_608f_0cb7,
+    0x10a6_d6ad_cf73_892e,
+    0x10a6_d6ad_cf73_892e,
     0x10a6_d6ad_cf73_892e,
     0x10a6_d6ad_cf73_892e,
 ];
