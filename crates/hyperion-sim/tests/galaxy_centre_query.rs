@@ -29,7 +29,7 @@ use hyperion_sim::galaxy::query::{
     LayerCounts, LayerSet, PAD_SPEED, QuerySphere, RangeQuery, SystemHit, SystemSource,
     cells_in_sphere, kepler_pad_for, pad_for, range_query,
 };
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{Layer, MemberSlot, SystemIdKind};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
 use hyperion_sim::units::{GravitationalParameter, LightYears, Seconds};
@@ -126,11 +126,27 @@ fn source_hits(source: &CentreMemberSource<'_>, sphere: &QuerySphere) -> Vec<Sys
     hits
 }
 
+/// Whether `hit` is an entry of the centre's list's classes (P09.T36.a–b, P11.T8.f): a
+/// feature-level index past the black hole's, 0, and the `victims` after it.
+fn is_listed(hit: &SystemHit, victims: u16) -> bool {
+    let SystemIdKind::Centre(member) = hit.id().kind() else {
+        return false;
+    };
+    matches!(member.slot(), MemberSlot::FeatureLevel { index } if index > victims)
+}
+
 /// One brute-force comparison: every sphere of `spheres` (centre and radius, ly) at each of
 /// `times` (Julian years), queried through the source and found by scanning every member within
 /// `scan_radius` ly of the black hole. The caller chooses the spheres so close to the black hole
 /// that no member from beyond `scan_radius` can arrive by those times. Returns how many hits had
 /// started outside their sphere, which only the pads find.
+///
+/// From generator version 27 the source returns the centre's list's classes beside its cells and
+/// the black hole (P09.T36.a–b, P11.T8.f), whose entries the scan cannot place: an integration
+/// test reaches neither the list nor its draws. So the query's hits of the list are set aside by
+/// their indices ([`is_listed`]) and counted, and the rest are compared, as under 26's rules. The
+/// crate's own verification scans the list's entries against the query
+/// (`verification::recent_in_range`'s centre).
 fn compare_with_a_scan(
     source: &CentreMemberSource<'_>,
     spheres: &[([f64; 3], f64)],
@@ -139,6 +155,7 @@ fn compare_with_a_scan(
 ) -> usize {
     let galaxy = milky_way();
     let members = members_within(galaxy, source.placement(), scan_radius);
+    let victims = source.victims().count();
     println!(
         "{} members within {scan_radius} ly (the black hole included)",
         members.len()
@@ -153,7 +170,9 @@ fn compare_with_a_scan(
                 LightYears::ZERO,
             )
             .expect("a positive radius");
-            let found = source_hits(source, &sphere);
+            let (listed, found): (Vec<SystemHit>, Vec<SystemHit>) = source_hits(source, &sphere)
+                .into_iter()
+                .partition(|hit| is_listed(hit, victims));
             let want = scan(galaxy, &members, &sphere);
             for hit in &found {
                 assert!(
@@ -180,8 +199,10 @@ fn compare_with_a_scan(
                 })
                 .count();
             println!(
-                "{years_from_epoch:+} yr, {radius} ly about {centre:?}: {} hits",
-                found.len()
+                "{years_from_epoch:+} yr, {radius} ly about {centre:?}: {} hits, and {} of the \
+                 list",
+                found.len(),
+                listed.len()
             );
         }
     }
@@ -268,7 +289,9 @@ fn a_query_a_decade_either_way_finds_what_a_scan_of_the_inner_fifth_of_a_light_y
 /// the inner 2 ly, at the black hole, small and large, and off it, all within 1.4 ly of it, where
 /// no member from beyond 2 ly can arrive within a century (its speed would have to pass 1,800
 /// km/s, three times what the centre allows there). It places some 1.8 million members, most of
-/// the five minutes it takes.
+/// the five minutes it takes. At 27 the 0.3 ly sphere about the black hole at −100 yr returns
+/// 4 of the list's entries besides the 59,394 the scan finds, which the comparison sets aside
+/// ([`compare_with_a_scan`]).
 #[test]
 #[ignore = "slow: places some 1.8 million members, about five minutes"]
 fn a_query_a_century_either_way_finds_what_a_scan_of_the_inner_2_ly_finds() {
