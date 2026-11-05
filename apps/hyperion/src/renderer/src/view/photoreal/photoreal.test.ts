@@ -50,17 +50,21 @@ describe("photorealisticPasses", () => {
   );
 
   it.each(QUALITY_SETTINGS)(
-    "puts the visibility buffer's ID raster and resolve, built, in the bodies pass's place on %s (R14.T2.c to T2.e)",
+    "puts the visibility buffer's ID raster, the pyramid, its late raster and the resolve, built, in the bodies pass's place on %s (R14.T2.c to T2.e)",
     (setting) => {
       const passes = photorealisticPasses(setting).passes;
       const labels = passes.map((pass) => pass.label);
       const at = labels.indexOf("terrain id raster");
-      expect(passes.slice(at, at + 2)).toEqual([
+      expect(passes.slice(at, at + 4)).toEqual([
         { label: "terrain id raster", owner: "R14", built: true },
+        { label: "depth pyramid", owner: "R14", built: true },
+        { label: "terrain id raster late", owner: "R14", built: true },
         { label: "terrain resolve", owner: "R14", built: true },
       ]);
+      // Forward, the pyramid between the bodies pass and its late raster (R14.T3.d).
       expect(labels.indexOf("bodies")).toBeLessThan(at);
-      expect(at).toBeLessThan(labels.indexOf("discs"));
+      expect(labels.indexOf("depth pyramid")).toBeLessThan(labels.indexOf("bodies late"));
+      expect(labels.indexOf("bodies late")).toBeLessThan(labels.indexOf("discs"));
     },
   );
 

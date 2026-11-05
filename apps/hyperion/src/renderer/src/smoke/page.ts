@@ -8,7 +8,7 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in twenty-one parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * groups are in twenty-three parts, each a run of its own under the harness's watchdog (perf-smoke,
  * 2026-10-13), parts 2 to 6 and 8 to 14 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
  * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7, 15, 20
@@ -189,10 +189,12 @@ import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
 import { checkShadowCascades, checkSharedPass, checkVisibilityCascades } from "./sharedPass";
 import {
+  checkOcclusionByIds,
   checkStridesUnderCraft,
   checkTerrainFrame,
   checkTerrainFrameSymbology,
   checkVisibilityFrame,
+  checkVisibilityThroughRenderer,
 } from "./terrainFrame";
 import { checkWireframeTerrain } from "./wireframeTerrain";
 import { checkForcedLoss, checkOneLayerArrays, checkTargetsAsyncIndirectTiming } from "./work";
@@ -314,9 +316,36 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * and its symbology over the image, with R14.T3.d over the ridge and R14.T1.e's overlay depths
  * (some 180 s of it), took part 20, its relief settled again; and part 7 at 323 s, so R10.T16.b's
  * shared pass (157 s) took part 21.
+ * Part 15's ridge check by the visibility buffer with the two-pass occlusion (R14.T2.d), which
+ * streams the ridge's pass again and compiles the shading's forms, took part 22, alone
+ * (2026-11-05). Part 18 stood at 272 s of its 360 s on a pod, part 22 at 239 s, the renderer's
+ * preparation some 130 s of each: the frames by IDs through the renderer took part 23, alone, and
+ * part 22 composes its frames as the renderer does (2026-11-06; parts 20 and 21 on their lane).
  */
 type PagePart =
-  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21;
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12
+  | 13
+  | 14
+  | 15
+  | 16
+  | 17
+  | 18
+  | 19
+  | 20
+  | 21
+  | 22
+  | 23;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -366,6 +395,10 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 20;
     case "21":
       return 21;
+    case "22":
+      return 22;
+    case "23":
+      return 23;
     default:
       return null;
   }
@@ -745,6 +778,19 @@ async function run(
   await group(19, "R14.T2.d the cascades' frame by the visibility buffer", async () => {
     images = [...images, ...(await checkVisibilityCascades(engine, checks, captures))];
   });
+  // In part 22, alone: part 15's ridge by the visibility buffer with the two-pass occlusion (plan
+  // R14, R14.T2.d), its own pass streamed to the ridge, the shading's forms compiled at its first
+  // frame by IDs; beside part 15's frame check, at 317 s of its 360 s on a pod, it would pass its
+  // watchdog.
+  await group(22, "R14.T2.d the two-pass occlusion by the visibility buffer over a ridge", () =>
+    checkOcclusionByIds(engine, checks),
+  );
+  // In part 23, alone: the frames by the visibility buffer through the renderer, in one raster and
+  // with the two-pass occlusion (plan R14, R14.T2.d), its own pass streamed to the place and the
+  // graze; beside part 18's composed frames, both past 70% of their watchdog on a pod.
+  await group(23, "R14.T2.d the frame by the visibility buffer through the renderer", () =>
+    checkVisibilityThroughRenderer(engine, checks),
+  );
   await group(7, "R14.T1.b the cluster cull against its twin", () =>
     checkClusterCull(engine, checks),
   );

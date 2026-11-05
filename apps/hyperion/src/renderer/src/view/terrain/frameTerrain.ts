@@ -56,6 +56,9 @@ import type { DiscRecord } from "../bodies/discShading";
 import { discSurfaceLaws } from "../bodies/discSurface";
 import { rotationColumns } from "../bodies/smoothMesh";
 import type { FrameOcclusion } from "../clusters/hzb";
+import { withResolveFirst } from "../clusters/resolve";
+import { visibleConsumerRanges, withVisibleFirst } from "../clusters/visibility";
+import { MAX_LIST_ENTRIES } from "../clusters/buckets";
 import type { ProjectionCamera, Viewport } from "../camera/projection";
 import type { RenderStyle, ViewId } from "../camera/state";
 import { relativeToCamera } from "../coords/relative";
@@ -80,6 +83,7 @@ import type {
   TerrainView,
   TerrainViewFrame,
   TerrainViewFrameInput,
+  TerrainVisibility,
 } from "./terrainPass";
 import { contourInterval, heightAboveGroundM } from "./terrainWire";
 import { poseInterval, type PoseIntervals } from "./poseInterval";
@@ -230,6 +234,46 @@ export function morePressingAnnunciation(
   return a ?? b;
 }
 
+/** A body's terrain by the visibility buffer in a frame (`TerrainViewFrame.visibility`). */
+export interface BodyVisibility {
+  readonly body: BodyIdHex;
+  readonly by: TerrainVisibility;
+}
+
+/** A frame's terrain by the visibility buffer, with each body's first index of the index space. */
+export interface RangedVisibility {
+  readonly frame: FrameVisibility;
+  readonly firsts: ReadonlyMap<BodyIdHex, number>;
+}
+
+/**
+ * A frame's terrain by the visibility buffer from each body's in the frame's order (plan R14,
+ * R14.T2.d; `TerrainViewFrame.visibility`), with each body's first index of the view's index space:
+ * each body's range just after the one before (`visibleConsumerRanges`), its raster's IDs and its
+ * resolve moved to it, so that its resolve shades its own pixels alone, the first body's draws
+ * themselves; `null` for no body, or where the ranges together pass the space
+ * (`MAX_LIST_ENTRIES`), when the frame draws forward.
+ */
+export function rangedVisibility(bodies: ReadonlyArray<BodyVisibility>): RangedVisibility | null {
+  const total = bodies.reduce((sum, { by }) => sum + by.entries, 0);
+  if (bodies.length === 0 || total > MAX_LIST_ENTRIES) {
+    return null;
+  }
+  const ranges = visibleConsumerRanges(bodies.map(({ by }) => by.entries));
+  const raster: DrawItem[] = [];
+  const resolve: DrawItem[] = [];
+  const forward: DrawItem[] = [];
+  const firsts = new Map<BodyIdHex, number>();
+  bodies.forEach(({ body, by }, n) => {
+    const first = ranges[n]?.first ?? 0;
+    firsts.set(body, first);
+    raster.push(...by.raster.map((draw) => withVisibleFirst(draw, first)));
+    resolve.push(...by.resolve.map((draw) => withResolveFirst(draw, first)));
+    forward.push(...by.forward);
+  });
+  return { frame: { raster, resolve, forward }, firsts };
+}
+
 /** What a view's frame terrain reads of a body's pass (`TerrainPass`'s). */
 export interface FrameTerrainPass {
   /** Whether the view's frame may give the body's mask (`TerrainPass.maskReadyFor`). */
@@ -276,8 +320,11 @@ export const HIDING_CLEARANCE_M = 500;
 export interface FrameTerrainSource {
   /** View `view`'s draw of `body`'s terrain this frame (`TerrainSession.drawTerrain`). */
   drawTerrain(view: ViewId, body: BodyIdHex, input: TerrainViewFrameInput): TerrainViewFrame | null;
-  /** View `view`'s late draws of `body`'s terrain this frame (`TerrainSession.drawLateTerrain`). */
-  drawLateTerrain(view: ViewId, body: BodyIdHex): ReadonlyArray<DrawItem>;
+  /**
+   * View `view`'s late draws of `body`'s terrain this frame (`TerrainSession.drawLateTerrain`), by
+   * the ID form where `byIds`.
+   */
+  drawLateTerrain(view: ViewId, body: BodyIdHex, byIds: boolean): ReadonlyArray<DrawItem>;
   /** `body`'s GPU coverage mask, or `null` (`TerrainSession.coverageMask`). */
   coverageMask(body: BodyIdHex): TextureHandle | null;
   /** Whether `body`'s GPU coverage mask holds every cell surveyed (`TerrainSession.coverageWhole`). */
@@ -363,6 +410,9 @@ export interface LiveFrameTerrainInput {
   readonly nowMs: number;
 }
 
+/** No body's first index: a frame drawn forward. */
+const NO_FIRSTS: ReadonlyMap<BodyIdHex, number> = new Map();
+
 /**
  * One view's photorealistic frame's terrain (plan R10, R10.T16.c): the session's draws of each
  * body the frame's plan hands over, for this view, and its coverage masks (see the module's
@@ -376,6 +426,8 @@ export class LiveFrameTerrain implements FrameTerrain {
   #depth: DrawItem[] = [];
   #sceneDepth = false;
   #visibility: FrameVisibility | null = null;
+  /** Each body's first index of the view's index space, where the frame is by IDs (R14.T2.d). */
+  #firsts: ReadonlyMap<BodyIdHex, number> = NO_FIRSTS;
   #opaque: DrawItem[] = [];
   /** The bodies the last {@link LiveFrameTerrain.draws} drew with the two-pass occlusion. */
   #occluded: BodyIdHex[] = [];
@@ -468,16 +520,11 @@ export class LiveFrameTerrain implements FrameTerrain {
       this.#input;
     const byId = new Map(bodies.map((body) => [body.id, body]));
     const draws: DrawItem[] = [];
-    // The bodies whose terrain draws.
-    let drew = 0;
     const opaque: DrawItem[] = [];
     const depth: DrawItem[] = [];
-    // Every body's terrain by the visibility buffer, while each body drawn gives its own (R14.T2.c).
-    let visibility: { raster: DrawItem[]; resolve: DrawItem[]; forward: DrawItem[] } | null = {
-      raster: [],
-      resolve: [],
-      forward: [],
-    };
+    // Every body's terrain by the visibility buffer, while each body drawn gives its own (R14.T2.c),
+    // each later given a range of the view's index space of its own (R14.T2.d).
+    let visibility: BodyVisibility[] | null = [];
     // Whether every body drawn lets the symbology take the scene's depth (plan R14, R14.T1.e).
     let sceneDepth = true;
     let annunciation: TerrainAnnunciation | null = null;
@@ -538,13 +585,10 @@ export class LiveFrameTerrain implements FrameTerrain {
         continue;
       }
       decorated ||= frame.decorated;
-      drew += 1;
       draws.push(...frame.draws);
       opaque.push(...frame.draws.slice(0, frame.opaqueDraws));
       if (visibility !== null && frame.visibility !== null) {
-        visibility.raster.push(...frame.visibility.raster);
-        visibility.resolve.push(...frame.visibility.resolve);
-        visibility.forward.push(...frame.visibility.forward);
+        visibility.push({ body: record.body, by: frame.visibility });
       } else {
         visibility = null;
       }
@@ -589,10 +633,9 @@ export class LiveFrameTerrain implements FrameTerrain {
     this.#occluded = occluded;
     this.#depth = depth;
     this.#sceneDepth = sceneDepth && depth.length > 0;
-    // One body's terrain alone by IDs (a lean, 2026-11-05): each body's pass numbers its IDs from
-    // 0 in one view's ID target, so that a second body's resolve would shade the first's pixels
-    // until each body takes a range of the index space of its own.
-    this.#visibility = visibility !== null && drew === 1 ? visibility : null;
+    const ranged = visibility === null ? null : rangedVisibility(visibility);
+    this.#visibility = ranged?.frame ?? null;
+    this.#firsts = ranged?.firsts ?? NO_FIRSTS;
     this.#opaque = opaque;
     return draws;
   }
@@ -607,9 +650,10 @@ export class LiveFrameTerrain implements FrameTerrain {
 
   /**
    * The terrain the last {@link LiveFrameTerrain.draws} drew, by the visibility buffer (plan R14,
-   * R14.T2.c): the one body's ID raster's draws, resolve (T2.d) and forward draws, where one body's
-   * terrain drew and gives them (`TerrainViewFrame.visibility`); `null` otherwise: where it drew
-   * none, or more than one body (see `draws`).
+   * R14.T2.c): each body's ID raster's draws, resolves (T2.d) and forward draws, in its order, where
+   * every body whose terrain drew gives them (`TerrainViewFrame.visibility`), each in a range of
+   * the view's index space of its own ({@link rangedVisibility}); `null` otherwise: where it drew
+   * none, a body drew forward, or their ranges together pass the space.
    */
   visibility(): FrameVisibility | null {
     return this.#visibility;
@@ -618,13 +662,20 @@ export class LiveFrameTerrain implements FrameTerrain {
   /**
    * The late draws of each body the last {@link LiveFrameTerrain.draws} drew with the two-pass
    * occlusion (plan R14, R14.T3.d; `TerrainSession.drawLateTerrain`), in its order: its lit
-   * clusters the early pass did not draw and the view's pyramid does not refuse. Call it once, after
-   * the first raster and the pyramid's build; none without the occlusion.
+   * clusters the early pass did not draw and the view's pyramid does not refuse; where the frame is
+   * by the visibility buffer ({@link LiveFrameTerrain.visibility}), their opaque buckets' ID raster,
+   * each body's in its range (R14.T2.d), their may-discard buckets being among its forward draws.
+   * Call it once, after the first raster and the pyramid's build; none without the occlusion.
    */
   lateDraws(): ReadonlyArray<DrawItem> {
     const occluded = this.#occluded;
     this.#occluded = [];
-    return occluded.flatMap((body) => this.#source.drawLateTerrain(this.#input.view, body));
+    const byIds = this.#visibility !== null;
+    return occluded.flatMap((body) => {
+      const draws = this.#source.drawLateTerrain(this.#input.view, body, byIds);
+      const first = this.#firsts.get(body) ?? 0;
+      return first === 0 ? draws : draws.map((draw) => withVisibleFirst(draw, first));
+    });
   }
 
   /**

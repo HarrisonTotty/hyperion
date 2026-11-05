@@ -223,6 +223,14 @@ export class CountingRenderEngine implements RenderEngine {
   readonly textureSpecs: TextureSpec[] = [];
   /** Every frame submitted to a render target, first first (views record their own). */
   readonly targetFrames: FrameSubmission[] = [];
+  /**
+   * The frames of {@link CountingRenderEngine.targetFrames} that `renderTargets` drew after the
+   * first of their submission, which take no pass-time resolve of their own, as the engine chains
+   * them (plan R14): a target of several mips ends its submission.
+   */
+  chainedTargetFrames = 0;
+  /** Each render target's mips, by which `renderTargets` ends a submission. */
+  readonly #targetMips = new WeakMap<RenderTarget, number>();
   /** Every depth-layer target's render, first first (R10.T9.b). */
   readonly depthLayerRenders: RecordedDepthLayerRender[] = [];
   /** Every material asked of `createMaterialAsync`, first first, refused ones too (R10.T14.d). */
@@ -413,7 +421,7 @@ export class CountingRenderEngine implements RenderEngine {
     // A resize remakes the target's textures, as the adapter's does: new handles, same names.
     const handles = { colour, depth };
     const shared = spec.depthOf;
-    return {
+    const target: RenderTarget = {
       name: spec.name,
       get colour(): TextureHandle {
         return handles.colour;
@@ -433,6 +441,8 @@ export class CountingRenderEngine implements RenderEngine {
       },
       dispose: (): void => undefined,
     };
+    this.#targetMips.set(target, spec.mips);
+    return target;
   }
 
   /**
@@ -445,8 +455,13 @@ export class CountingRenderEngine implements RenderEngine {
    */
   /** Each target's own `render`, in order, as the engine's one submission draws them (plan R14). */
   renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    let first = true;
     for (const { target, frame } of renders) {
+      if (!first) {
+        this.chainedTargetFrames += 1;
+      }
       target.render(frame);
+      first = (this.#targetMips.get(target) ?? 1) > 1;
     }
   }
 

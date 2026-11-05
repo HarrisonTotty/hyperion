@@ -17,6 +17,7 @@ import {
   templateTriangle,
   visibleTemplate,
   VISIBILITY_IDS_TEXTURE,
+  withResolveFirst,
   withVisibilityIds,
 } from "./resolve";
 import resolveTerrainWgsl from "./resolveTerrain.wgsl?raw";
@@ -221,6 +222,31 @@ describe("the resolve's draw and frame (plan R14, R14.T2.d)", () => {
       normals: draw.textures.normals,
       [VISIBILITY_IDS_TEXTURE]: ids,
     });
+  });
+
+  it("shades a body's range from its first index, the range's length and grid kept, and leaves the first body's itself", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const capacities = CLUSTER.templates.map(() => 5);
+    const buckets = new ClusterBuckets(engine, "test", 7, CLUSTER.templates, capacities);
+    const draw = {
+      mesh: { kind: "mesh", name: "screen" },
+      material: { kind: "material", name: "resolve" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: { ...resolveUniforms(buckets, 8) },
+      textures: {},
+    } as const;
+    const moved = withResolveFirst(draw, 70_000);
+    expect([
+      withResolveFirst(draw, 0) === draw,
+      Array.from(moved.uniforms["resolveLists"] ?? []),
+      Array.from(resolveUniforms(buckets, 8, 70_000).resolveLists),
+      moved.uniforms["resolveTemplates0"] === draw.uniforms.resolveTemplates0,
+    ]).toEqual([
+      true,
+      [buckets.passEntries, 70_000, 7 * buckets.passEntries, 256],
+      [buckets.passEntries, 70_000, 7 * buckets.passEntries, 256],
+      true,
+    ]);
   });
 
   it("reads its contacts after the lights' rows, as the resolve frame holds them", () => {

@@ -86,9 +86,9 @@ export interface ResolveUniforms {
 }
 
 /**
- * The resolve's uniforms for `buckets` on a device of `subpixelBits` (`GpuCapabilities`'), terrain's
- * range of the index space from `first` (0 until a second consumer): each value an `f32` the engine
- * packs exactly below 2²⁴ (`MAX_LIST_ENTRIES`).
+ * The resolve's uniforms for `buckets` on a device of `subpixelBits` (`GpuCapabilities`'), its range
+ * of the index space from `first` (0, the frame's first body's, until {@link withResolveFirst}
+ * moves it): each value an `f32` the engine packs exactly below 2²⁴ (`MAX_LIST_ENTRIES`).
  */
 export function resolveUniforms(
   buckets: ClusterBuckets,
@@ -106,6 +106,25 @@ export function resolveUniforms(
     ),
     resolveTemplates0: Float32Array.of(at(0), at(1), at(2), at(3)),
     resolveTemplates1: Float32Array.of(at(4), at(5), at(6), at(7)),
+  };
+}
+
+/**
+ * `draw`, a resolve's, shading the range from `first` of the view's index space (plan R14,
+ * R14.T2.d): its `resolveLists` with `first` in place of its own, the range's length kept; `draw`
+ * itself where `first` is its own already, 0 for the frame's first body (`resolveUniforms`).
+ */
+export function withResolveFirst(draw: DrawItem, first: number): DrawItem {
+  const lists = draw.uniforms["resolveLists"];
+  if (lists === undefined || lists[1] === first) {
+    return draw;
+  }
+  return {
+    ...draw,
+    uniforms: {
+      ...draw.uniforms,
+      resolveLists: Float32Array.of(lists[0] ?? 0, first, lists[2] ?? 0, lists[3] ?? 0),
+    },
   };
 }
 

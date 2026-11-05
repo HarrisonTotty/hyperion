@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { CountingRenderEngine, fakeDevice } from "../../test/countingRenderEngine";
 import { ID_NONE } from "../engine/idTarget";
+import type { DrawItem } from "../engine/types";
 import { MAX_LIST_ENTRIES } from "./buckets";
 import { terrainClusterMesh } from "./templates";
 import {
@@ -17,8 +18,10 @@ import {
   unpackVisibilityId,
   VISIBILITY_TRIANGLE_BITS,
   VISIBILITY_TRIANGLES,
+  VISIBLE_FIRST_UNIFORM,
   VisibilityBuffer,
   visibleConsumerRanges,
+  withVisibleFirst,
 } from "./visibility";
 
 /** `terrainClusterId.wgsl`'s de-indexed ID of a vertex: its entry's index and its z's triangle. */
@@ -140,10 +143,45 @@ describe("the ID raster's de-indexed mesh (plan R14, R14.T2.c)", () => {
 
 describe("the views' visible-cluster index space (plan R14, R14.T2.c; Design note 9)", () => {
   it("gives terrain's lists, all its passes', the space's first range, from 0, for a later consumer's after it", () => {
-    expect(visibleConsumerRanges(70_000)).toEqual([
+    expect(visibleConsumerRanges([70_000])).toEqual([
       { consumer: "terrain", first: 0, entries: 70_000 },
     ]);
-    expect(() => visibleConsumerRanges(MAX_LIST_ENTRIES + 1)).toThrow(RangeError);
+    expect(() => visibleConsumerRanges([MAX_LIST_ENTRIES + 1])).toThrow(RangeError);
+  });
+
+  it("gives each body's terrain a range of its own, each just after the one before, within the space (R14.T2.d)", () => {
+    expect(visibleConsumerRanges([70_000, 50_000, 0, 10])).toEqual([
+      { consumer: "terrain", first: 0, entries: 70_000 },
+      { consumer: "terrain", first: 70_000, entries: 50_000 },
+      { consumer: "terrain", first: 120_000, entries: 0 },
+      { consumer: "terrain", first: 120_000, entries: 10 },
+    ]);
+    expect(visibleConsumerRanges([])).toEqual([]);
+    expect(visibleConsumerRanges([MAX_LIST_ENTRIES / 2, MAX_LIST_ENTRIES / 2]).at(-1)).toEqual({
+      consumer: "terrain",
+      first: MAX_LIST_ENTRIES / 2,
+      entries: MAX_LIST_ENTRIES / 2,
+    });
+    expect(() => visibleConsumerRanges([MAX_LIST_ENTRIES / 2, MAX_LIST_ENTRIES / 2 + 1])).toThrow(
+      RangeError,
+    );
+    expect(() => visibleConsumerRanges([1.5])).toThrow(RangeError);
+  });
+
+  it("moves an ID raster's draw to a range from its first index, and leaves the first body's itself", () => {
+    const draw: DrawItem = {
+      mesh: { kind: "mesh", name: "ids" },
+      material: { kind: "material", name: "ids" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: { clusterBase: Float32Array.of(4) },
+      textures: {},
+    };
+    const moved = withVisibleFirst(draw, 70_000);
+    expect([
+      withVisibleFirst(draw, 0) === draw,
+      Array.from(moved.uniforms[VISIBLE_FIRST_UNIFORM] ?? []),
+      Array.from(moved.uniforms["clusterBase"] ?? []),
+    ]).toEqual([true, [70_000], [4]]);
   });
 });
 

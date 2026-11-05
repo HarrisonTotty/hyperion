@@ -110,6 +110,7 @@ import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
 import terrainClusterWgsl from "./shaders/terrainCluster.wgsl?raw";
 import { type ResolveMaterial, VISIBILITY_IDS_TEXTURE } from "../clusters/resolve";
 import resolveTerrainWgsl from "../clusters/resolveTerrain.wgsl?raw";
+import { VISIBLE_FIRST_UNIFORM } from "../clusters/visibility";
 import terrainClusterIdWgsl from "./shaders/terrainClusterId.wgsl?raw";
 import terrainClusterIdDeindexedWgsl from "./shaders/terrainClusterIdDeindexed.wgsl?raw";
 import terrainClusterIdPrimitiveWgsl from "./shaders/terrainClusterIdPrimitive.wgsl?raw";
@@ -899,7 +900,11 @@ export function terrainClusterIdMaterialSpec(
     displayName: (primitive ? CLUSTER_ID_PRIMITIVE_DISPLAY_NAMES : CLUSTER_ID_DISPLAY_NAMES)[path],
     vertexWgsl: source,
     fragmentWgsl: source,
-    uniforms: [...LIT_DRAW_UNIFORMS, { name: "clusterBase", type: "u32" }],
+    uniforms: [
+      ...LIT_DRAW_UNIFORMS,
+      { name: "clusterBase", type: "u32" },
+      { name: VISIBLE_FIRST_UNIFORM, type: "u32" },
+    ],
     samplers: [],
     textures: [],
     cullMode: "back",

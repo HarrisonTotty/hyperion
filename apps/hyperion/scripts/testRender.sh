@@ -8,7 +8,7 @@
 #   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
 #                 [--drop-adapter-switches] [--captures=DIR] [--geometry=FIELD=VALUE[,...]]
 #
-# The page's groups are in twenty-one parts (`src/renderer/src/smoke/page.ts`), each a run of its
+# The page's groups are in twenty-three parts (`src/renderer/src/smoke/page.ts`), each a run of its
 # own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6 and
 # 8 to 14 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3 R08.T6.g and
 # R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's far limb, 5 R08.T6.f's
@@ -25,7 +25,9 @@
 # the datum and its symbology, part 21 the shared pass, part 16 R14.T3.c's ground under a grounded
 # craft, part 17 R08.T8.d's packed far
 # limb's kernels and their general forms' check, part 18 R14.T2's frame by the visibility buffer,
-# part 19 its frame under the high setting's cascades, and part 1 every other group.
+# part 19 its frame under the high setting's cascades, part 22 part 15's ridge by the visibility
+# buffer with the two-pass occlusion, part 23 R14.T2's frames by the visibility buffer through the
+# renderer, and part 1 every other group.
 # SwiftShader's GPU process and the twins together took some 940 CPU-seconds for the two variants
 # (measured 2026-10-13), so on a machine busy with other work, with about 4 cores left to the
 # smoke, a run of the whole page outlasted the 180 s watchdog however its work overlapped. Three
@@ -56,6 +58,9 @@
 # Part 15 still stood at 347 s and part 7 at 323 s of their 360 s on a pod, so the frame's
 # symbology took part 20 (about 180 s of part 15) and R10.T16's shared pass (157 s) part 21
 # (2026-11-06).
+# The ridge by the visibility buffer with the occlusion, which compiles the shading's forms, took
+# part 22; parts 18 and 22 stood at 272 s and 239 s, so the frames through the renderer took part 23
+# (2026-11-05; their lane's parts 20 and 21, renumbered when both lanes landed).
 # --part=N runs that part alone (every part by default).
 #
 # --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R08.T8.b's
@@ -111,7 +116,7 @@ geometry=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=[1-9] | --part=1[0-9] | --part=2[01]) parts+=("${arg#--part=}") ;;
+        --part=[1-9] | --part=1[0-9] | --part=2[0-3]) parts+=("${arg#--part=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
@@ -123,7 +128,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 ]]; then
-    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21)
+    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23)
 fi
 
 # Each run's outer limit, s: 120 s (`outer_margin_s`) over its watchdog (`src/smoke/result.ts`'s

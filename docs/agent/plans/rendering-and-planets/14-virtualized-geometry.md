@@ -1377,7 +1377,8 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
     frames T1.d adds to `--captures` the image within 1/3 stop of T2.a's, the rest listed; no change
     in the reference surface's pixels at the survey edge; the hand-over check
     (`--terrain --handover`) passes as before.
-  - _Built_ (r14-t2-visibility-buffer): records at the end of Risks.
+  - _Built_ (r14-t2-visibility-buffer; with the occlusion and two bodies,
+    `r14-visibility-occlusion`): records at the end of Risks.
 - **R14.T2.e The Mac's order, and the switch.** Size S.
   - `shading: "visibility"` on high once the owner's Mac and RTX runs are recorded; low stays
     `forward` until the owner's UHD 620 run of `just views-check --terrain --hidden --setting low`,
@@ -1497,8 +1498,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
   - _Acceptance:_ captures byte-identical with and without it, tie pixels listed (it reorders
     draws); clusters refused counted per pass; the frame's GPU time on the Mac and RTX recorded
     (pending).
-  - _Built_ (`r14-t3c-strides`; behind `occlusion`, off on both settings): records at the end of
-    Risks.
+  - _Built_ (`r14-t3c-strides`; behind `occlusion`, off on both settings; by the visibility buffer,
+    `r14-visibility-occlusion`): records at the end of Risks.
 - **R14.T3.e The triangle budget.** Size S to propose, M to build.
   - With strides, a frame's cost is its drawn triangles, not its patch count, so selection's budget
     (`maxPatches`, half the slots) may follow a triangle budget and the cache may grow without
@@ -1785,7 +1786,7 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     workers' count by performance cores.
   - R12: depend on R14 as built (R12.T0 reconciles R01–R11 today); hold `GeometrySettings` in
     R12.T0's inventory and `SettingSnapshot`; a `PASS_ROWS` row for each of R14's timed labels (the
-    cull, the compaction, the ID raster, the resolve, the pyramid, the stats reduction), since R12
+    cull, the compaction, the ID rasters, the resolve, the pyramid, the stats reduction), since R12
     Design note 4's test fails on a timed pass with no row; and `geometry-clusters` and
     `geometry-pages` in `MEMORY_ITEMS` (R12.T3).
   - R07: slots in `photorealisticPasses` (`photoreal/passes.ts`) for those passes, and T3.d's split
@@ -2514,6 +2515,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     adds a ridge check through the renderer, whose pyramid refuses clusters.
   - (`r14-t3d-occlusion`) Rule E: the pod did not measure `hzb` faster, so both settings stay
     `off`.
+  - (`r14-visibility-occlusion`) The visibility path takes the occlusion (R14.T2.d's records),
+    replacing "Not built: the visibility path"; the ridge check by IDs is part 22's.
 - **R14, the WGSL digest pins** (`tool-pin-digests`, 2026-11-03): `just pin-digests` rewrites the
   `<NAME>_DIGESTS` tables' hex strings in `discReflectance.test.ts` and `thickKernels.test.ts` from
   the kernels' sources, and `--check` only compares. Run it after moving a kernel, or after resolving
@@ -2632,6 +2635,38 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     (`just views-check --terrain --hidden --setting high --geometry shading=visibility`, then
     `shading=forward`, compared by `scripts/compareCaptures.mjs`); the `primitive_index` form on
     hardware with `primitive-index`; Windows.
+  - (`r14-visibility-occlusion`, lean 2026-11-05) By IDs with the two-pass occlusion, replacing
+    T2.c's lean of 2026-11-04 (the occlusion's frames forward): the early ID raster,
+    `depth pyramid`, the late cull, `terrain id raster late` (`VISIBILITY_LATE_RASTER_LABEL`,
+    between the pyramid and the resolve in `photorealisticPasses`, and in `TERRAIN_PASS_LABELS`)
+    into the same IDs loading them and the depth, then the one resolve, and forward both passes'
+    may-discard buckets. `TerrainPass.lateDrawFor(id, byIds)` and
+    `TerrainSession.drawLateTerrain(view, body, byIds)` give the late ID raster where `byIds`.
+  - (`r14-visibility-occlusion`) By IDs the pyramid holds the early opaque ID raster's depth alone
+    (the figures, the may-discard buckets and the edge patches draw after the resolve): exact, but
+    it refuses less than the forward path's.
+  - (`r14-visibility-occlusion`, lean 2026-11-05) Each body by IDs takes its own range, replacing
+    the one-body lean above: `visibleConsumerRanges(entries[])`, `TerrainVisibility.entries`,
+    `frameTerrain.ts`' `rangedVisibility`; the raster adds `visibleFirst` (`withVisibleFirst`), the
+    resolve its range's first (`withResolveFirst`); ranges past 2²⁴ in all draw forward. Each body
+    draws a full-screen resolve of its own in the one `terrain resolve` pass: n bodies, n
+    full-screen draws.
+  - (`r14-visibility-occlusion`) By IDs with the occlusion a view-frame resolves once more than
+    forward with it; `TIMING_FRAMES_IN_FLIGHT` stays 153, bloom's levels resolving once since its
+    chain's one submission (`CountingRenderEngine.chainedTargetFrames`). Counts unchanged: both
+    switches off on both settings.
+  - (`r14-visibility-occlusion`, lean 2026-11-06) Part 18 keeps the composed frame's checks; part
+    23 (`checkVisibilityThroughRenderer`) the renderer's frames by IDs over the place and at the 2°
+    graze, the occlusion off and on, each against the forward frame of its own occlusion; part 22
+    (`checkOcclusionByIds`) part 15's ridge by IDs with the occlusion, composed as the renderer
+    composes it (`drawnOccludedByIds`), since the renderer's preparation, some 130 s on a pod, held
+    most of parts 18 and 22 (272 s and 239 s of their 360 s). Its lane's parts 20 and 21 became 22
+    and 23 at landing (land-pod-r2), after the headroom lane's 20 and 21. R10.T16.c's hidden-marks
+    check rides part 23 with the renderer's frames.
+  - Pending (NOT RUN in a pod): TERRAIN TEST both on against forward with the occlusion on the RTX,
+    `just views-check --terrain --hidden --setting high` with
+    `--geometry shading=visibility,occlusion=hzb`, then `--geometry shading=forward,occlusion=hzb`,
+    compared by `scripts/compareCaptures.mjs`; the Mac's GPU times both on; Windows.
 - **R14.T2.e, the pod half** (`r14-t2-visibility-buffer`):
   - `TerrainViewFrame.opaqueDraws` and `FrameTerrain.opaqueDraws()`: the bodies pass draws the
     terrain that never discards, then the mesh bodies' figures, then the rest of the terrain; by

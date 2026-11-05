@@ -66,6 +66,7 @@ import { TERRAIN_CLUSTERS_PER_PAGE } from "../view/clusters/terrain";
 import { withVisibilityIds } from "../view/clusters/resolve";
 import {
   unpackVisibilityId,
+  VISIBILITY_LATE_RASTER_LABEL,
   VISIBILITY_RASTER_LABEL,
   VISIBILITY_RESOLVE_LABEL,
   VisibilityBuffer,
@@ -378,7 +379,7 @@ function sourceOf(pass: TerrainPass, mask: CoverageMask): FrameTerrainSource {
     },
     coverageMask: () => mask.texture,
     coverageWhole: () => mask.whole,
-    drawLateTerrain: (view) => pass.lateDrawFor(view),
+    drawLateTerrain: (view, _body, byIds) => pass.lateDrawFor(view, byIds),
     pass: () => pass,
   };
 }
@@ -921,19 +922,48 @@ interface CountedFrame {
 }
 
 /**
- * `of`'s view through the renderer in one raster and with the two-pass occlusion (plan R14,
- * R14.T3.d), from the same selection and residents, at `geometry` but its `occlusion`: with it, at
- * frames that each drop the view's visibility (held back, a cut) and at frames that keep it; each
- * the last of nine, the counters on, so that its counts are its own.
+ * A view's frames in one raster and with the two-pass occlusion (plan R14, R14.T3.d), where it drops
+ * the visibility and where it keeps it, and whether they were asked by the visibility buffer
+ * (R14.T2.d), which every frame then must be drawn by.
  */
-async function occlusionRun(
-  of: SceneOf,
-  geometry: GeometrySettings,
-): Promise<{
+interface OcclusionRun {
   readonly one: CountedFrame;
   readonly cut: CountedFrame;
   readonly kept: CountedFrame;
-}> {
+  readonly byIds: boolean;
+}
+
+/**
+ * Draws `of`'s view at `geometry`, at `nowMs` (now by default), until its frame is by the
+ * visibility buffer, its forms compiling meanwhile (plan R14, R14.T2.c), or
+ * {@link ID_FORM_TIMEOUT_MS} passes: its last frame, which says whether it is.
+ */
+async function untilByIds(
+  of: SceneOf,
+  geometry: GeometrySettings,
+  nowMs?: number,
+): Promise<SceneFrame> {
+  const started = performance.now();
+  let frame = await sceneFrame(of, geometry, true, nowMs);
+  while (!frame.byIds && performance.now() - started < ID_FORM_TIMEOUT_MS) {
+    // Its forms compile meanwhile, the frames drawn forward until they are made.
+    // oxlint-disable-next-line no-await-in-loop
+    await pause(50);
+    // Each frame is drawn after the pause that lets the forms compile.
+    // oxlint-disable-next-line no-await-in-loop
+    frame = await sceneFrame(of, geometry, true, nowMs);
+  }
+  return frame;
+}
+
+/**
+ * `of`'s view through the renderer in one raster and with the two-pass occlusion (plan R14,
+ * R14.T3.d), from the same selection and residents, at `geometry` but its `occlusion`, drawn
+ * forward: with it, at frames that each drop the view's visibility (held back, a cut) and at
+ * frames that keep it; each the last of nine, the counters on, so that its counts are its own. By
+ * the visibility buffer, {@link occlusionByIdsRun}.
+ */
+async function occlusionRun(of: SceneOf, geometry: GeometrySettings): Promise<OcclusionRun> {
   const { pass } = of;
   const counted = async (at: GeometrySettings, present: boolean): Promise<CountedFrame> => {
     let frame = await sceneFrame(of, at, present);
@@ -944,8 +974,8 @@ async function occlusionRun(
     }
     return { frame, stats: pass.clusterStats(VIEW) };
   };
-  const oneRaster: GeometrySettings = { ...geometry, occlusion: "off" };
-  const occluded: GeometrySettings = { ...geometry, occlusion: "hzb" };
+  const oneRaster: GeometrySettings = { ...geometry, shading: "forward", occlusion: "off" };
+  const occluded: GeometrySettings = { ...geometry, shading: "forward", occlusion: "hzb" };
   pass.measureClusters(true);
   try {
     pass.setGeometry(oneRaster);
@@ -953,7 +983,7 @@ async function occlusionRun(
     pass.setGeometry(occluded);
     const cut = await counted(occluded, false);
     const kept = await counted(occluded, true);
-    return { one, cut, kept };
+    return { one, cut, kept, byIds: false };
   } finally {
     pass.setGeometry(geometry);
     pass.measureClusters(false);
@@ -979,16 +1009,7 @@ async function visibilityRun(
     pass.setGeometry(forwardGeometry);
     const forward = await sceneFrame(of, forwardGeometry, true, at);
     pass.setGeometry(visibleGeometry);
-    let frame = await sceneFrame(of, visibleGeometry, true, at);
-    const started = performance.now();
-    while (!frame.byIds && performance.now() - started < ID_FORM_TIMEOUT_MS) {
-      // Its forms compile meanwhile, the frames drawn forward until they are made.
-      // oxlint-disable-next-line no-await-in-loop
-      await pause(50);
-      // Each frame is drawn after the pause that lets the forms compile.
-      // oxlint-disable-next-line no-await-in-loop
-      frame = await sceneFrame(of, visibleGeometry, true, at);
-    }
+    const frame = await untilByIds(of, visibleGeometry, at);
     return { forward, byIds: frame.byIds ? frame : null };
   } finally {
     pass.setGeometry(geometry);
@@ -998,15 +1019,16 @@ async function visibilityRun(
 /**
  * How {@link occlusionRun}'s frames with the occlusion compare with its one raster's (plan R14,
  * R14.T3.d): whether each one's colour differs at no pixel (no tie pixel) and its depth is the same
- * bytes, the held-back frames drawing a late raster; the clusters the pyramid refused at the frames
- * that keep the visibility; and the lit pass's clusters by pass.
+ * bytes, the held-back frames drawing a late raster, and, where the run shades by the visibility
+ * buffer, every frame by it (R14.T2.d); the clusters the pyramid refused at the frames that keep
+ * the visibility; and the lit pass's clusters by pass.
  */
-function occlusionSummary(run: Awaited<ReturnType<typeof occlusionRun>>): {
+function occlusionSummary(run: OcclusionRun): {
   readonly same: boolean;
   readonly refused: number | null;
   readonly text: string;
 } {
-  const { one, cut, kept } = run;
+  const { one, cut, kept, byIds } = run;
   const oneLit = litOf(one.stats, CLUSTER_LIT_PASS);
   const passes = (
     counted: CountedFrame,
@@ -1026,9 +1048,12 @@ function occlusionSummary(run: Awaited<ReturnType<typeof occlusionRun>>): {
   }));
   const [cutEarly, cutLate, cutRefused] = passes(cut);
   const [keptEarly, keptLate, refused] = passes(kept);
+  const framesByIds = [one, cut, kept].map(({ frame }) => frame.byIds);
   const same =
-    compared.every(({ ties, depth }) => ties.pixels === 0 && depth) && compared[0]?.late === true;
-  const text = `the lit pass's clusters ${String(oneLit)} in one raster; with the occlusion, the visibility dropped: ${String(cutEarly)} early, ${String(cutLate)} late, ${String(cutRefused)} refused; kept: ${String(keptEarly)} early, ${String(keptLate)} late, ${String(refused)} refused; ${compared
+    compared.every(({ ties, depth }) => ties.pixels === 0 && depth) &&
+    compared[0]?.late === true &&
+    framesByIds.every((each) => each === byIds);
+  const text = `${byIds ? `by IDs: ${framesByIds.map(String).join(", ")} in one raster, dropped and kept; ` : ""}the lit pass's clusters ${String(oneLit)} in one raster; with the occlusion, the visibility dropped: ${String(cutEarly)} early, ${String(cutLate)} late, ${String(cutRefused)} refused; kept: ${String(keptEarly)} early, ${String(keptLate)} late, ${String(refused)} refused; ${compared
     .map(
       ({ ties, depth, late }, n) =>
         `${n === 0 ? "dropped" : "kept"}: a late raster ${String(late)}, tie pixels ${String(ties.pixels)}, the largest difference ${ties.largest.toExponential(3)}, the depth the same bytes ${String(depth)}`,
@@ -2181,21 +2206,27 @@ export async function checkTerrainFrameSymbology(
   }
 }
 
+/** A part's own world (plan R14, R14.T2): part 15's frame check's, made again in a part of its own. */
+interface PartWorld {
+  readonly pool: HeightWorkerPool;
+  readonly mask: CoverageMask;
+  /** One lit pass on the low setting, its changes cut at their first draw, as part 15's are. */
+  readonly pass: TerrainPass;
+  /** Lets go of the pass, the workers and the mask. */
+  release(): void;
+}
+
 /**
- * Plan R14, R14.T2.c to T2.e's checks on the device (`R14.T2 the frame by the visibility buffer`),
- * in a part of their own: part 15's frame check's world, workers and coverage mask made again, and
- * one lit pass on the low setting over the place, its changes cut at their first draw, as that
- * check's are. Its frame by the visibility buffer, composed as the renderer draws it, against the
- * forward frame (T2.a's), from the same selection and residents, at stride 1; then through the
- * renderer at the low setting's geometry, over the place and at a 2° graze; and, over its pass,
- * R10.T16.c's marks a whole survey's ground hides, culled and drawn (`GeometrySettings.hiddenMarks`).
+ * Part 15's frame check's world, workers and coverage mask made again for a part of its own (plan
+ * R14, R14.T2): the Moon-like fixture's first survey, taken by a pool of two height workers, and one
+ * lit pass on the low setting over it, its bakes laid by `lay` (as baked where `null`), made once
+ * the field's levels are held, as the frame check's passes are.
  */
-export async function checkVisibilityFrame(
+async function partWorld(
   engine: RenderEngine,
-  checks: Checks,
-  captures = false,
-): Promise<CapturedImage[]> {
-  const images: CapturedImage[] = [];
+  name: string,
+  lay: ((bake: BakedPatch) => BakedPatch) | null = null,
+): Promise<PartWorld> {
   const field = moonLikeFixture("first");
   const pool = new HeightWorkerPool({
     workers: 2,
@@ -2205,17 +2236,18 @@ export async function checkVisibilityFrame(
       }),
   });
   const survey = new SurveyedCells();
-  const mask = new CoverageMask(engine, "visibility frame smoke: coverage mask");
+  const mask = new CoverageMask(engine, `${name}: coverage mask`);
   const offChange = pool.onFieldChange((change) => {
     survey.add(change);
     mask.survey(change);
   });
   let made: TerrainPass | null = null;
-  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
-  const photoreal = new PhotorealRenderer(engine, "visibility frame smoke");
-  const wireframe = new WireframeRenderer(engine);
-  const canvas = engine.createView(addCanvas(), "visibility frame smoke");
-  canvas.resize(VIEWPORT);
+  const release = (): void => {
+    made?.dispose();
+    offChange();
+    pool.terminate();
+    mask.release();
+  };
   try {
     field.blocks.forEach((block, n) => {
       if (n === 0) {
@@ -2231,39 +2263,64 @@ export async function checkVisibilityFrame(
     if (!held) {
       throw new Error("the workers did not take the fixture's blocks in time");
     }
-    // Made once the field's levels are held, as the frame check's passes are.
     const hold = new LaneHold();
-    const relief = new TerrainPass({
+    const pass = new TerrainPass({
       engine,
       setting: "low",
       terrain: { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES },
       geometry: smokeGeometry("low"),
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
       source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
-      createPool: (bake) => hold.wrap(pool.lane(bake)),
+      createPool: (bake) =>
+        hold.wrap(lay === null ? pool.lane(bake) : onTheDatumLane(pool.lane(bake), lay)),
       survey,
     });
-    made = relief;
-    relief.setReducedMotion(true);
-    laneHolds.set(relief, hold);
-    await relief.ready();
+    made = pass;
+    pass.setReducedMotion(true);
+    laneHolds.set(pass, hold);
+    await pass.ready();
+    return { pool, mask, pass, release };
+  } catch (error: unknown) {
+    release();
+    throw error;
+  }
+}
+
+/**
+ * Plan R14, R14.T2.c to T2.e's checks on the device (`R14.T2 the frame by the visibility buffer`),
+ * in a part of their own (part 18): part 15's frame check's world made again ({@link partWorld})
+ * over the place. Its frame by the visibility buffer, composed as the renderer draws it, against the
+ * forward frame (T2.a's), from the same selection and residents, at stride 1; and the resolve's
+ * place of each pixel against the rasteriser's. The renderer's own frames by IDs are
+ * {@link checkVisibilityThroughRenderer}'s (part 23).
+ */
+export async function checkVisibilityFrame(
+  engine: RenderEngine,
+  checks: Checks,
+  captures = false,
+): Promise<CapturedImage[]> {
+  const images: CapturedImage[] = [];
+  const world = await partWorld(engine, "visibility frame smoke");
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  try {
+    const { pool, mask, pass } = world;
     const pose = poseOver();
-    const withRelief = await settled(relief, pool, mask, pose);
+    const withRelief = await settled(pass, pool, mask, pose);
 
     // R14.T2.c: the lit pass's interior patches by the visibility buffer's ID raster, into the
     // scene's depth and an r32uint ID a pixel, then its edge patches forward over them, against the
     // forward pass's frame (T2.a's), from the same selection and residents, in one run; the ID form
     // asked at the first frame that shades by IDs, and compiled meanwhile.
-    relief.setGeometry(LOW_AT_STRIDE_1);
-    const forwardFrame = liveFrame(relief, mask, pose, performance.now());
+    pass.setGeometry(LOW_AT_STRIDE_1);
+    const forwardFrame = liveFrame(pass, mask, pose, performance.now());
     const forwardScene = await drawnScene(engine, pose, [
       ...renderer.meshDraws(forwardFrame.plan),
       ...forwardFrame.terrainDraws,
     ]);
-    relief.setGeometry({ ...LOW_AT_STRIDE_1, shading: "visibility" });
-    let idFrame = liveFrame(relief, mask, pose, performance.now());
+    pass.setGeometry({ ...LOW_AT_STRIDE_1, shading: "visibility" });
+    let idFrame = liveFrame(pass, mask, pose, performance.now());
     await until(() => {
-      idFrame = liveFrame(relief, mask, pose, performance.now());
+      idFrame = liveFrame(pass, mask, pose, performance.now());
       return idFrame.terrain.visibility() !== null;
     }, ID_FORM_TIMEOUT_MS);
     const byIds = idFrame.terrain.visibility();
@@ -2279,13 +2336,13 @@ export async function checkVisibilityFrame(
             pose,
             byIds,
             idFrame.terrain.opaqueDraws(),
-            relief.layout.vertexPath,
+            pass.layout.vertexPath,
           );
     const named =
       byIds === null || idScene?.ids === null || idScene === null
         ? null
         : await idsNamed(engine, byIds.raster, idScene.ids);
-    relief.setGeometry(LOW_AT_STRIDE_1);
+    pass.setGeometry(LOW_AT_STRIDE_1);
     const depthSame =
       idScene !== null && bytesDigest(idScene.depth) === bytesDigest(forwardScene.depth);
     const idPath = engine.capabilities.primitiveIndex ? "primitive_index" : "de-indexed";
@@ -2355,13 +2412,52 @@ export async function checkVisibilityFrame(
       withRelief.done && opaqueFirst.length > 0 && orderTies.pixels === 0 && orderDepth,
       `${String(opaqueFirst.length)} opaque terrain draws of ${String(forwardFrame.terrainDraws.length)}, then ${String(renderer.meshDraws(forwardFrame.plan).length)} figures; tie pixels ${String(orderTies.pixels)}, the largest difference ${orderTies.largest.toExponential(3)}; the depth ${orderDepth ? "the same bytes" : "differs"}; digests ${bytesDigest(forwardScene.colour)} in T2.a's order, ${bytesDigest(ordered.colour)} opaque first`,
     );
+  } finally {
+    renderer.dispose();
+    world.release();
+  }
+  return images;
+}
 
-    // R14.T2.d through the renderer, as `VIEW` draws at the low setting's geometry (its camera's
-    // strides among it), over the place and at a 2° graze from 10 km up, where the triangles graze:
-    // the frame by the visibility buffer, its ID raster, resolve and forward draws in the
-    // renderer's passes, against its forward frame: its bodies' pixels within ⅓ stop, at least 99.5%
-    // of them, its depth the same bytes.
-    await photoreal.prepare(VIEWPORT, "low", "eye", pose.camera);
+/**
+ * R14.T2.d through the renderer (`R14.T2.d the frame by the visibility buffer through the renderer`),
+ * in a part of its own (part 23, split from part 18, which stood at 272 s of its 360 s on a pod,
+ * 2026-11-05): part 15's frame check's world made again ({@link partWorld}), as `VIEW` draws at the
+ * low setting's geometry (its camera's strides among it), over the place and at a 2° graze from
+ * 10 km up, where the triangles graze: the frame by the visibility buffer, its ID raster, resolve
+ * and forward draws in the renderer's passes, against its forward frame, in one raster and with the
+ * two-pass occlusion (R14.T3.d), its late ID raster drawn into the same IDs before the one resolve:
+ * its bodies' pixels within ⅓ stop, at least 99.5% of them, its depth the same bytes; and, over
+ * its pass, R10.T16.c's marks a whole survey's ground hides, culled and drawn
+ * (`GeometrySettings.hiddenMarks`).
+ */
+export async function checkVisibilityThroughRenderer(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<void> {
+  const world = await partWorld(engine, "visibility through the renderer smoke");
+  let photoreal: PhotorealRenderer | null = null;
+  let wireframe: WireframeRenderer | null = null;
+  let canvas: RenderView | null = null;
+  try {
+    photoreal = new PhotorealRenderer(engine, "visibility through the renderer smoke");
+    wireframe = new WireframeRenderer(engine);
+    canvas = engine.createView(addCanvas(), "visibility through the renderer smoke");
+    canvas.resize(VIEWPORT);
+    const { pool, mask, pass } = world;
+    const pose = poseOver();
+    const withRelief = await settled(pass, pool, mask, pose);
+    // The shading's forms, asked as part 18 asks them, compile beside the renderer's pipelines,
+    // before any frame through it.
+    pass.setGeometry({ ...SETTINGS.low.geometry, shading: "visibility" });
+    await Promise.all([
+      until(
+        () => liveFrame(pass, mask, pose, performance.now()).terrain.visibility() !== null,
+        ID_FORM_TIMEOUT_MS,
+      ),
+      photoreal.prepare(VIEWPORT, "low", "eye", pose.camera),
+    ]);
+    pass.setGeometry(smokeGeometry("low"));
     const graze = grazingPose((2 * Math.PI) / 180, 10_000, (5 * Math.PI) / 180);
     for (const [name, view] of [
       ["over the place", pose],
@@ -2369,27 +2465,35 @@ export async function checkVisibilityFrame(
     ] as const) {
       // Each view streams the one pass and draws on the one canvas, so in turn.
       // oxlint-disable-next-line no-await-in-loop
-      const settledThere = view === pose ? withRelief : await settled(relief, pool, mask, view);
-      // The pass's frames by IDs over the view the pass has just settled on.
-      // oxlint-disable-next-line no-await-in-loop
-      const run = await visibilityRun(
-        { engine, photoreal, canvas, pass: relief, mask, view },
-        SETTINGS.low.geometry,
-      );
-      const runApart = run.byIds === null ? null : stopsApart(run.forward.colour, run.byIds.colour);
-      const runDepth =
-        run.byIds !== null && bytesDigest(run.byIds.depth) === bytesDigest(run.forward.depth);
-      checks.check(
-        `R14.T2.d through the renderer, ${name}, the frame by the visibility buffer draws the forward frame: at least 99.5% of its bodies' pixels within ⅓ stop, its depth byte for byte`,
-        settledThere.done &&
-          runApart !== null &&
-          runApart.terrain > 0 &&
-          runApart.within >= RESOLVE_WITHIN_SHARE * runApart.terrain &&
-          runDepth,
-        runApart === null
-          ? `the forms were not made in ${String(ID_FORM_TIMEOUT_MS)} ms`
-          : `settled ${String(settledThere.done)}; bodies ${String(runApart.terrain)} px: ${String(runApart.within)} within ⅓ stop (${((100 * runApart.within) / runApart.terrain).toFixed(3)}%), ${String(runApart.differing)} differing at all, the largest ${runApart.largestStops.toFixed(4)} stops; beyond ⅓ stop, forward → by IDs of the brightest: ${run.byIds === null ? "—" : beyondThirdStop(run.forward.colour, run.byIds.colour, VIEWPORT.widthPx)}; the depth ${runDepth ? "the same bytes" : "differs"}; digests ${bytesDigest(run.forward.colour)} forward, ${run.byIds === null ? "—" : bytesDigest(run.byIds.colour)} by IDs`,
-      );
+      const settledThere = view === pose ? withRelief : await settled(pass, pool, mask, view);
+      // The pass's frames by IDs over the view the pass has just settled on, in one raster and with
+      // the two-pass occlusion (R14.T3.d), each against the forward frame of its own occlusion.
+      for (const occlusion of ["off", "hzb"] as const) {
+        // Each run draws on the one canvas and reads back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const run = await visibilityRun(
+          { engine, photoreal, canvas, pass, mask, view },
+          { ...SETTINGS.low.geometry, occlusion },
+        );
+        const runApart =
+          run.byIds === null ? null : stopsApart(run.forward.colour, run.byIds.colour);
+        const runDepth =
+          run.byIds !== null && bytesDigest(run.byIds.depth) === bytesDigest(run.forward.depth);
+        const late = occlusion === "off" || (run.byIds?.late === true && run.forward.late);
+        const both = occlusion === "hzb" ? " with the two-pass occlusion," : "";
+        checks.check(
+          `R14.T2.d through the renderer, ${name},${both} the frame by the visibility buffer draws the forward frame: at least 99.5% of its bodies' pixels within ⅓ stop, its depth byte for byte`,
+          settledThere.done &&
+            runApart !== null &&
+            runApart.terrain > 0 &&
+            runApart.within >= RESOLVE_WITHIN_SHARE * runApart.terrain &&
+            runDepth &&
+            late,
+          runApart === null
+            ? `the forms were not made in ${String(ID_FORM_TIMEOUT_MS)} ms`
+            : `settled ${String(settledThere.done)}; ${occlusion === "hzb" ? `a late raster forward ${String(run.forward.late)}, by IDs ${String(run.byIds?.late)}; ` : ""}bodies ${String(runApart.terrain)} px: ${String(runApart.within)} within ⅓ stop (${((100 * runApart.within) / runApart.terrain).toFixed(3)}%), ${String(runApart.differing)} differing at all, the largest ${runApart.largestStops.toFixed(4)} stops; beyond ⅓ stop, forward → by IDs of the brightest: ${run.byIds === null ? "—" : beyondThirdStop(run.forward.colour, run.byIds.colour, VIEWPORT.widthPx)}; the depth ${runDepth ? "the same bytes" : "differs"}; digests ${bytesDigest(run.forward.colour)} forward, ${run.byIds === null ? "—" : bytesDigest(run.byIds.colour)} by IDs`,
+        );
+      }
     }
 
     // The marks a whole survey's ground hides (R10.T16.c; perf-ground-gpu's
@@ -2417,9 +2521,9 @@ export async function checkVisibilityFrame(
     };
     // At stride 1, as part 15's marks are drawn, whose frames hold still; drawn, culled and drawn
     // again, so that a frame still moving between them, whose two drawn frames differ, is told apart.
-    relief.setGeometry(LOW_AT_STRIDE_1);
-    const farSettled = await settled(relief, pool, mask, pose);
-    const of = { engine, photoreal, canvas, pass: relief, mask, view: pose };
+    pass.setGeometry(LOW_AT_STRIDE_1);
+    const farSettled = await settled(pass, pool, mask, pose);
+    const of = { engine, photoreal, canvas, pass, mask, view: pose };
     const drawnFar = await hiddenMarksFrame(of, wireframe, farList, "drawn");
     const culledFar = await hiddenMarksFrame(of, wireframe, farList, "culled");
     const drawnAgain = await hiddenMarksFrame(of, wireframe, farList, "drawn");
@@ -2436,16 +2540,188 @@ export async function checkVisibilityFrame(
       `settled ${String(farSettled.done)}; handed over ${String(culledFar.handedOver)}; culled: depth tested ${String(culledFar.depthTested)}, marked ${String(culledFar.marked)} px; drawn: depth tested ${String(drawnFar.depthTested)}, marked ${String(drawnFar.marked)} px; digests ${drawnFar.digest} drawn, ${culledFar.digest} culled, ${drawnAgain.digest} drawn again`,
     );
   } finally {
-    canvas.dispose();
-    wireframe.dispose();
-    photoreal.dispose();
-    renderer.dispose();
-    made?.dispose();
-    offChange();
-    pool.terminate();
-    mask.release();
+    canvas?.dispose();
+    wireframe?.dispose();
+    photoreal?.dispose();
+    world.release();
   }
-  return images;
+}
+
+/**
+ * A frame drawn as the renderer draws it by the visibility buffer with the two-pass occlusion (plan
+ * R14, R14.T2.d and T3.d): `visibility`'s early ID raster into a visibility target drawn with the
+ * scene's depth, `pyramid` built from that depth, then `late()`'s ID raster into the same IDs,
+ * loading them and the depth, then the resolve's pass, loading the scene's colour and depth: its
+ * resolve over the IDs, then `figures`, then its forward draws; read back, with whether a late
+ * raster drew.
+ */
+async function drawnOccludedByIds(
+  engine: RenderEngine,
+  pose: Pose,
+  figures: ReadonlyArray<DrawItem>,
+  visibility: FrameVisibility,
+  pyramid: DepthPyramid,
+  late: () => ReadonlyArray<DrawItem>,
+): Promise<SceneFrame> {
+  const target = createSceneTarget(engine, "smoke occluded frame by IDs", VIEWPORT);
+  let buffer: VisibilityBuffer | null = null;
+  try {
+    buffer = new VisibilityBuffer(engine, "smoke occluded frame by IDs", target, VIEWPORT);
+    const depth = target.depth;
+    if (depth === null) {
+      throw new Error("the scene target has no depth");
+    }
+    const frame = poseFrame(pose);
+    // The sky's pass clears the scene's colour and depth before the raster, as the renderer's does.
+    target.render({ ...frame, label: PHOTOREAL_PASS_LABELS.bodies, draws: [] });
+    buffer.target.render({ ...frame, label: VISIBILITY_RASTER_LABEL, draws: visibility.raster });
+    pyramid.build(depth, pyramidProjectionOf(pose.camera.fovXRad, VIEWPORT));
+    const lateDraws = late();
+    if (lateDraws.length > 0) {
+      buffer.target.render({
+        ...frame,
+        label: VISIBILITY_LATE_RASTER_LABEL,
+        draws: lateDraws,
+        colourLoad: "load",
+      });
+    }
+    const ids = buffer.ids;
+    target.render({
+      ...frame,
+      label: VISIBILITY_RESOLVE_LABEL,
+      draws: [
+        ...visibility.resolve.map((draw) => withVisibilityIds(draw, ids)),
+        ...figures,
+        ...visibility.forward,
+      ],
+      colourLoad: "load",
+    });
+    const [colour, depthBytes] = await Promise.all([
+      engine.readTexture(target.colour),
+      engine.readTexture(depth),
+    ]);
+    return {
+      colour: halfTexels(colour),
+      depth: new Float32Array(depthBytes),
+      late: lateDraws.length > 0,
+      byIds: true,
+    };
+  } finally {
+    buffer?.dispose();
+    target.dispose();
+  }
+}
+
+/**
+ * `pass`'s view `pose` by the visibility buffer in one ID raster and with the two-pass occlusion
+ * (plan R14, R14.T2.d), each frame composed as the renderer composes it ({@link drawnByIds},
+ * {@link drawnOccludedByIds}), from the same selection and residents, at the low setting's
+ * geometry: in one raster, then with the occlusion at frames that each drop the view's visibility
+ * and at frames that keep it; each the last of nine, the counters on, its forms made first. A frame
+ * the pass gives no visibility for is drawn forward and says so.
+ */
+async function occlusionByIdsRun(
+  engine: RenderEngine,
+  figures: LitBodyRenderer,
+  pass: TerrainPass,
+  mask: CoverageMask,
+  pose: Pose,
+): Promise<OcclusionRun> {
+  const geometry: GeometrySettings = { ...SETTINGS.low.geometry, shading: "visibility" };
+  const kernel = await engine.createComputeAsync(DEPTH_PYRAMID_KERNEL);
+  const pyramid = new DepthPyramid(engine, kernel, "occlusion by IDs smoke");
+  const frameAt = async (occlusion: FrameOcclusion | null): Promise<SceneFrame> => {
+    const frame = liveFrame(pass, mask, pose, performance.now(), [], occlusion ?? undefined);
+    const visibility = frame.terrain.visibility();
+    const meshes = figures.meshDraws(frame.plan);
+    if (visibility === null) {
+      const forward = await drawnScene(engine, pose, [...meshes, ...frame.terrainDraws]);
+      return { colour: forward.colour, depth: forward.depth, late: false, byIds: false };
+    }
+    if (occlusion === null) {
+      const scene = await drawnByIds(engine, pose, meshes, visibility);
+      return { colour: scene.colour, depth: scene.depth, late: false, byIds: true };
+    }
+    return drawnOccludedByIds(engine, pose, meshes, visibility, pyramid, () =>
+      frame.terrain.lateDraws(),
+    );
+  };
+  const counted = async (cut: boolean | null): Promise<CountedFrame> => {
+    const occlusionOf = (): FrameOcclusion | null =>
+      cut === null ? null : { pyramid, fresh: pyramid.begin(VIEWPORT, cut) };
+    let frame = await frameAt(occlusionOf());
+    for (let round = 0; round < 8; round += 1) {
+      // Each frame reads the counters that some frames before it answered: the last of nine.
+      // oxlint-disable-next-line no-await-in-loop
+      frame = await frameAt(occlusionOf());
+    }
+    return { frame, stats: pass.clusterStats(VIEW) };
+  };
+  pass.measureClusters(true);
+  try {
+    pass.setGeometry({ ...geometry, occlusion: "off" });
+    // The shading's forms compile at the first frame that asks them, drawn forward meanwhile.
+    await until(
+      () => liveFrame(pass, mask, pose, performance.now()).terrain.visibility() !== null,
+      ID_FORM_TIMEOUT_MS,
+    );
+    const one = await counted(null);
+    pass.setGeometry({ ...geometry, occlusion: "hzb" });
+    const cut = await counted(true);
+    const kept = await counted(false);
+    return { one, cut, kept, byIds: true };
+  } finally {
+    pyramid.dispose();
+    engine.releaseCompute(kernel);
+    pass.measureClusters(false);
+    pass.setGeometry(LOW_AT_STRIDE_1);
+  }
+}
+
+/**
+ * Part 15's ridge check by the visibility buffer with the two-pass occlusion, both on (plan R14,
+ * R14.T2.d; `R14.T2.d the two-pass occlusion by the visibility buffer over a ridge`), in a part of
+ * its own (part 22): part 15's world made again ({@link partWorld}) and its ridge's pass on the low
+ * setting (`ridged`), seen from 10 km up at 2° as part 15 sees it, streamed until nothing stands in;
+ * then by IDs in one raster and with the occlusion, where it drops the visibility and where it keeps
+ * it, byte for byte, each frame composed as the renderer composes it, whose own frames with both on
+ * are part 23's ({@link checkVisibilityThroughRenderer}): the renderer's preparation took this part
+ * to 239 s of its 360 s on a pod (2026-11-05).
+ */
+export async function checkOcclusionByIds(engine: RenderEngine, checks: Checks): Promise<void> {
+  // Part 15's ridge across the view, its crest 11.7 km nearer than the datum along row 23.
+  const graze = grazingPose((2 * Math.PI) / 180, 10_000, (5 * Math.PI) / 180);
+  const ridgeEdge = [8, 32, 56].map((x) => datumOnRay(graze, x + 0.5, GRAZE_ROW + 0.5));
+  const edgeMiddle = ridgeEdge[1];
+  if (edgeMiddle === undefined) {
+    throw new Error("the edge has three points");
+  }
+  const world = await partWorld(
+    engine,
+    "occlusion by IDs smoke",
+    ridged(graze, add(graze.cameraM, edgeMiddle)),
+  );
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  try {
+    const { pool, mask, pass } = world;
+    const ridgeNear = ridgeEdge.flatMap((p) => [
+      add(graze.cameraM, p),
+      add(graze.cameraM, scale(p, 1 - RIDGE_LEAD_M / norm(p))),
+    ]);
+    const ridgeSettled = await settled(pass, pool, mask, graze, ridgeNear);
+    const ridgeStreamed = await settled(pass, pool, mask, graze, null, [], RIDGE_STREAM_MS);
+    const overRidge = occlusionSummary(
+      await occlusionByIdsRun(engine, renderer, pass, mask, graze),
+    );
+    checks.check(
+      "R14.T2.d over a ridge the two-pass occlusion by the visibility buffer, composed as the renderer composes it, refuses the clusters the ridge hides and draws its one ID raster's frame, its colour and depth byte for byte, where it drops the visibility and where it keeps it",
+      ridgeSettled.done && overRidge.same && overRidge.refused !== null && overRidge.refused > 0,
+      `settled ${String(ridgeSettled.done)}, streamed on: ${ridgeStreamed.state}; ${overRidge.text}`,
+    );
+  } finally {
+    renderer.dispose();
+    world.release();
+  }
 }
 
 /**

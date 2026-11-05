@@ -3054,14 +3054,35 @@ describe("the lit pass by the visibility buffer's ID raster (plan R14, R14.T2.c)
     ]);
   });
 
-  it("draws forward a frame with the two-pass occlusion, which the visibility buffer does not yet take (a lean)", async () => {
+  it("with the two-pass occlusion rasterises the early pass's opaque buckets, then at its late draws by IDs the late pass's, the one resolve over both (R14.T2.d)", async () => {
     const made = await byIds(await clusteredPass());
     made.pass.setGeometry({ ...VISIBILITY, occlusion: "hzb" });
-    const frame = made.pass.drawFor(PRIMARY, {
-      ...frameOf(NEAR, true),
-      occlusion: { pyramid: pyramidOf(made), fresh: true },
-    });
-    expect([frame.visibility, frame.draws.length > 0]).toEqual([null, true]);
+    const occlusion = { pyramid: pyramidOf(made), fresh: true };
+    const frame = made.pass.drawFor(PRIMARY, { ...frameOf(NEAR, true), occlusion });
+    const late = made.pass.lateDrawFor(PRIMARY, true);
+    const raster = frame.visibility?.raster ?? [];
+    const buckets = TERRAIN_CLUSTER_MESH.templates.length;
+    const entries = PASS_ENTRIES(made);
+    // A frame drawn forward asks the late pass's lit draws, as without the visibility buffer.
+    made.pass.drawFor(PRIMARY, { ...frameOf(NEAR, true), occlusion });
+    const litLate = made.pass.lateDrawFor(PRIMARY);
+    const path = made.pass.layout.vertexPath;
+    expect([
+      raster.length > 0,
+      late.map((draw) => [draw.mesh.name, draw.material.name]),
+      late.map((draw) => draw.indirect?.offsetBytes),
+      late.map((draw) => draw.uniforms["clusterBase"]?.[0]),
+      frame.visibility?.resolve[0]?.uniforms["resolveLists"]?.[2],
+      litLate.map((draw) => draw.material.name),
+    ]).toEqual([
+      true,
+      raster.map((draw) => [draw.mesh.name, draw.material.name]),
+      raster.map((draw) => (draw.indirect?.offsetBytes ?? 0) + buckets * BUCKET_ARGS_BYTES),
+      raster.map((draw) => (draw.uniforms["clusterBase"]?.[0] ?? 0) + entries),
+      7 * entries,
+      litLate.map(() => `terrain-lit-cluster-${path}-still`),
+    ]);
+    expect(litLate.length).toBe(late.length);
   });
 
   it("asks its ID form again after a restore, its first frame by IDs a fresh pass's (Design note 16)", async () => {

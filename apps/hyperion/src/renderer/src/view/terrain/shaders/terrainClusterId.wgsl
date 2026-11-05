@@ -23,6 +23,9 @@ struct Draw {
   atlas : vec4f,
   // The bucket's first entry in the lists (`clusters/buckets.ts`' `clusterBase`).
   clusterBase : u32,
+  // The first index of the body's range of the view's index space, 0 for the frame's first body
+  // (`clusters/visibility.ts`' `VISIBLE_FIRST_UNIFORM`, plan R14, R14.T2.d).
+  visibleFirst : u32,
 }
 
 @group(1) @binding(0) var<uniform> draw : Draw;
@@ -42,7 +45,8 @@ struct TerrainIdVertex {
 }
 
 // The vertex `local` of the bucket entry `entry` of the draw: its clip position, as the lit cluster
-// form's `vertexMain` places it, and its visible-cluster index, the entry's index in the lists. Its
+// form's `vertexMain` places it, and its visible-cluster index, the entry's index in the lists past
+// its body's range's first index. Its
 // `local.z` holds its lit-mesh code below DEINDEXED_TRIANGLE_STEP, and a de-indexed mesh's triangle
 // above it, which the code's decode drops.
 struct TerrainIdPlace {
@@ -52,8 +56,8 @@ struct TerrainIdPlace {
 }
 
 fn terrain_id_place(local : vec3f, entry : u32) -> TerrainIdPlace {
-  let visible = draw.clusterBase + entry;
-  let item = cluster_lists[visible];
+  let listed = draw.clusterBase + entry;
+  let item = cluster_lists[listed];
   let instance = item >> 8u;
   let packed = u32(local.z + 0.5);
   let grid = terrain_cluster_grid(
@@ -62,7 +66,7 @@ fn terrain_id_place(local : vec3f, entry : u32) -> TerrainIdPlace {
   let placed = stride_place(grid, instance);
   var out : TerrainIdPlace;
   out.clip = frame.clipProjection * frame.viewRotation * vec4f(placed.fromCameraM, 1.0);
-  out.visible = visible;
+  out.visible = draw.visibleFirst + listed;
   out.packed = packed;
   return out;
 }

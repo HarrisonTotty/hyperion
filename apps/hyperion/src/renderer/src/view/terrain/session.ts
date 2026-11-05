@@ -1300,12 +1300,15 @@ export class TerrainSession {
    * `lateDrawFor`, where the frame's {@link TerrainSession.drawTerrain} took the two-pass
    * occlusion's early pass; none where no pass draws the body, or once the session is disposed.
    * Call it after the view's first raster and its pyramid's build.
+   *
+   * @param byIds - Whether the frame draws the body's terrain by the visibility buffer (plan R14,
+   *   R14.T2.d): then the late pass's ID raster (`TerrainPass.lateDrawFor`).
    */
-  drawLateTerrain(view: ViewId, body: BodyIdHex): ReadonlyArray<DrawItem> {
+  drawLateTerrain(view: ViewId, body: BodyIdHex, byIds = false): ReadonlyArray<DrawItem> {
     if (this.#disposed) {
       return [];
     }
-    return this.#passes.get(body)?.lateDrawFor(view) ?? [];
+    return this.#passes.get(body)?.lateDrawFor(view, byIds) ?? [];
   }
 
   /** `body`'s wireframe pass (R10.T11), from its first hand-over in a wireframe view, or `null`. */

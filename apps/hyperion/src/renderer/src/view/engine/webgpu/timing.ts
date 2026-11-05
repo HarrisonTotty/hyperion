@@ -50,7 +50,9 @@ export const PASSES_PER_FRAME = 64;
  * the terrain's late raster (plan R14, R14.T3.d), so its heaviest frame, a photorealistic primary
  * with two photorealistic instruments, 51; this holds three such frames (R07.T19,
  * decision-r07-t19 item 1: 64, or three such frames if more). The pairs are made as they are
- * needed, 2 KiB each.
+ * needed, 2 KiB each. Since then the bloom chain resolves once, its levels one submission (plan
+ * R14), and a frame by the visibility buffer with the two-pass occlusion one render more than with
+ * the occlusion drawn forward (R14.T2.d), both within these counts.
  */
 export const TIMING_FRAMES_IN_FLIGHT = 153;
 

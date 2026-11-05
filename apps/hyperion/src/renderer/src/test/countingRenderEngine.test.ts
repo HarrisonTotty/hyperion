@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { AllocationEvent } from "../view/engine/memory";
-import type { DepthLayerPass, WgslMaterialSpec } from "../view/engine/types";
+import type {
+  DepthLayerPass,
+  FrameSubmission,
+  RenderTargetSpec,
+  WgslMaterialSpec,
+} from "../view/engine/types";
 import { countingRenderEngine } from "./countingRenderEngine";
 
 /** The cascades' set: four 2,048² layers under `shadows`. */
@@ -113,5 +118,45 @@ describe("the counting engine's kernels (R01.T15)", () => {
     expect(() => {
       engine.releaseCompute(kernel);
     }).toThrow(/was released/u);
+  });
+});
+
+/** A chained render's target of `mips` mips. */
+function chainedSpec(name: string, mips: number): RenderTargetSpec {
+  return {
+    name,
+    size: { widthPx: 8, heightPx: 8 },
+    format: "rgba16float",
+    mips,
+    depth: false,
+    category: "render-targets",
+  };
+}
+
+describe("the counting engine's chained renders (plan R14)", () => {
+  const frame: FrameSubmission = {
+    label: "a level",
+    viewRotation: new Float32Array(16),
+    projection: new Float32Array(16),
+    draws: [],
+    postProcesses: [],
+  };
+
+  it("counts a chain's frames after the first of its submission, as the engine resolves them, a target of several mips ending it", async () => {
+    const engine = await countingRenderEngine();
+    const [a, b, c] = ["a", "b", "c"].map((name) =>
+      engine.createRenderTarget(chainedSpec(name, 1)),
+    );
+    const mipped = engine.createRenderTarget(chainedSpec("mipped", 4));
+    if (a === undefined || b === undefined || c === undefined) {
+      throw new Error("three targets are made");
+    }
+    engine.renderTargets([a, b, c].map((target) => ({ target, frame })));
+    const plain = engine.chainedTargetFrames;
+    engine.renderTargets([mipped, a].map((target) => ({ target, frame })));
+    const afterMips = engine.chainedTargetFrames - plain;
+    engine.renderTargets([a, mipped, b].map((target) => ({ target, frame })));
+    expect([plain, afterMips, engine.chainedTargetFrames - plain - afterMips]).toEqual([2, 0, 1]);
+    expect(engine.targetFrames).toHaveLength(8);
   });
 });

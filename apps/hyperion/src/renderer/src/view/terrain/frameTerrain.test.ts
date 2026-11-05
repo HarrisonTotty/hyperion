@@ -35,6 +35,9 @@ import { type DiscRecord, discReflectance } from "../bodies/discShading";
 import { discSurfaceLaws } from "../bodies/discSurface";
 import { rotationColumns } from "../bodies/smoothMesh";
 import type { CameraPose } from "../camera/pose";
+import { MAX_LIST_ENTRIES } from "../clusters/buckets";
+import type { FrameOcclusion } from "../clusters/hzb";
+import { VISIBLE_FIRST_UNIFORM } from "../clusters/visibility";
 import type { ProjectionCamera } from "../camera/projection";
 import { IDENTITY_QUATERNION, lookAlong, rotationRows } from "../camera/quaternion";
 import { viewId } from "../camera/state";
@@ -860,14 +863,26 @@ describe("a view's frame terrain by the visibility buffer (plan R14, R14.T2.c)",
   /** A draw of a part of the visibility buffer's frame, by its name. */
   const part = (name: string): DrawItem => ({ ...DRAW, material: { kind: "material", name } });
 
+  /** A resolve's draw, by its name, its range from 0 of `entries` (`resolveUniforms`). */
+  const resolvePart = (name: string, entries: number): DrawItem => ({
+    ...part(name),
+    uniforms: { resolveLists: Float32Array.of(7, 0, entries, 16) },
+  });
+
   /**
    * Two bodies handed over, the second {@link OTHER_BODY}, each drawn by `visibility` of its own
-   * (`null` for none); their order in the frame, as the source drew them.
+   * (`null` for none), with `occlusion` where given; their order in the frame, as the source drew
+   * them, and each late draw asked, its body and whether by IDs, each answered with a draw named so.
    */
   function twoBodies(
     near: TerrainViewFrame["visibility"],
     other: TerrainViewFrame["visibility"],
-  ): { readonly terrain: LiveFrameTerrain; readonly order: () => string[] } {
+    occlusion?: FrameOcclusion,
+  ): {
+    readonly terrain: LiveFrameTerrain;
+    readonly order: () => string[];
+    readonly late: Array<readonly [string, boolean]>;
+  } {
     const nearBody = bodyAt(3 * A);
     const otherBody = bodyAt(5 * A, { id: OTHER_BODY, centreM: vec3(2.5 * A, 0, -5 * A) });
     const plan = planLitBodies(
@@ -878,6 +893,7 @@ describe("a view's frame terrain by the visibility buffer (plan R14, R14.T2.c)",
     );
     const { source } = fakeSource({ visibility: near });
     const drawn: string[] = [];
+    const late: Array<readonly [string, boolean]> = [];
     const both: ViewTerrainSource = {
       ...source,
       pass: () => source.pass(BODY),
@@ -886,39 +902,107 @@ describe("a view's frame terrain by the visibility buffer (plan R14, R14.T2.c)",
         const frame = source.drawTerrain(view, BODY, input);
         return body === OTHER_BODY && frame !== null ? { ...frame, visibility: other } : frame;
       },
+      drawLateTerrain: (_view, body, byIds) => {
+        late.push([body, byIds]);
+        return [part(`${body} late`)];
+      },
     };
     const terrain = frameTerrain(both);
-    terrain.draws(plan, [nearBody, otherBody]);
-    return { terrain, order: () => drawn };
+    terrain.draws(plan, [nearBody, otherBody], occlusion);
+    return { terrain, order: () => drawn, late };
   }
 
-  it("gives the one body's ID raster's draws, its resolve and its forward draws (R14.T2.d)", () => {
+  it("gives the one body's ID raster's draws, its resolve and its forward draws, themselves (R14.T2.d)", () => {
     const { plan, body } = handed();
     const near = {
       raster: [part("near raster")],
-      resolve: [part("near resolve")],
+      resolve: [resolvePart("near resolve", 70_000)],
       forward: [part("near forward")],
+      entries: 70_000,
     };
     const terrain = frameTerrain(fakeSource({ visibility: near }).source);
     terrain.draws(plan, [body]);
-    expect(terrain.visibility()).toEqual(near);
+    const frame = terrain.visibility();
+    expect([frame?.raster[0], frame?.resolve[0], frame?.forward]).toEqual([
+      near.raster[0],
+      near.resolve[0],
+      near.forward,
+    ]);
+    expect([frame?.raster[0] === near.raster[0], frame?.resolve[0] === near.resolve[0]]).toEqual([
+      true,
+      true,
+    ]);
   });
 
-  it("gives none where two bodies draw terrain, each numbering its IDs from 0 (a lean)", () => {
+  it("gives each of two bodies its own range of the view's index space, the second's just after the first's (R14.T2.d)", () => {
     const near = {
       raster: [part("near raster")],
-      resolve: [part("near resolve")],
+      resolve: [resolvePart("near resolve", 70_000)],
       forward: [part("near forward")],
+      entries: 70_000,
     };
-    const { terrain, order } = twoBodies(near, { ...near, raster: [part("other raster")] });
-    expect([order().toSorted(), terrain.visibility()]).toEqual([
-      [BODY, OTHER_BODY].toSorted(),
-      null,
+    const other = {
+      raster: [part("other raster")],
+      resolve: [resolvePart("other resolve", 50_000)],
+      forward: [part("other forward")],
+      entries: 50_000,
+    };
+    const { terrain, order } = twoBodies(near, other);
+    const [first, second] = order()[0] === BODY ? [near, other] : [other, near];
+    const frame = terrain.visibility();
+    expect([
+      frame?.raster.map((draw) => draw.uniforms[VISIBLE_FIRST_UNIFORM]?.[0] ?? 0),
+      frame?.resolve.map((draw) => Array.from(draw.uniforms["resolveLists"] ?? [])),
+      frame?.forward,
+      frame?.raster[0] === first.raster[0],
+    ]).toEqual([
+      [0, first.entries],
+      [
+        [7, 0, first.entries, 16],
+        [7, first.entries, second.entries, 16],
+      ],
+      [...first.forward, ...second.forward],
+      true,
+    ]);
+  });
+
+  it("gives none where the two bodies' ranges together pass the view's index space", () => {
+    const half = {
+      raster: [part("raster")],
+      resolve: [resolvePart("resolve", MAX_LIST_ENTRIES / 2 + 1)],
+      forward: [],
+      entries: MAX_LIST_ENTRIES / 2 + 1,
+    };
+    expect(twoBodies(half, half).terrain.visibility()).toBeNull();
+  });
+
+  it("asks each body's late raster by IDs where the frame is by IDs, the second's in its range, and forward where it is not (R14.T2.d)", () => {
+    const occlusion = { pyramid: { builds: 0, frame: null }, fresh: true };
+    const near = { raster: [], resolve: [], forward: [], entries: 70_000 };
+    const byIds = twoBodies(near, near, occlusion);
+    const draws = byIds.terrain.lateDraws();
+    const forward = twoBodies(near, null, occlusion);
+    const forwardDraws = forward.terrain.lateDraws();
+    expect([
+      byIds.late.map(([, ids]) => ids),
+      draws.map((draw) => draw.uniforms[VISIBLE_FIRST_UNIFORM]?.[0] ?? 0),
+      forward.late.map(([, ids]) => ids),
+      forwardDraws.map((draw) => draw.uniforms[VISIBLE_FIRST_UNIFORM]?.[0] ?? 0),
+    ]).toEqual([
+      [true, true],
+      [0, 70_000],
+      [false, false],
+      [0, 0],
     ]);
   });
 
   it("gives none where any body it drew draws forward", () => {
-    const near = { raster: [part("near raster")], resolve: [], forward: [part("near forward")] };
+    const near = {
+      raster: [part("near raster")],
+      resolve: [],
+      forward: [part("near forward")],
+      entries: 70_000,
+    };
     expect([
       twoBodies(near, null).terrain.visibility(),
       twoBodies(null, near).terrain.visibility(),
@@ -952,7 +1036,8 @@ describe("a view's frame terrain by the visibility buffer (plan R14, R14.T2.c)",
   it("gives none where it drew nothing, and none before its draws", () => {
     const { plan, body } = handed();
     const empty = frameTerrain(
-      fakeSource({ draws: [], visibility: { raster: [], resolve: [], forward: [] } }).source,
+      fakeSource({ draws: [], visibility: { raster: [], resolve: [], forward: [], entries: 0 } })
+        .source,
     );
     const before = empty.visibility();
     empty.draws(plan, [body]);

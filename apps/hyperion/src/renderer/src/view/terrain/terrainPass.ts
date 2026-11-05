@@ -743,9 +743,9 @@ export interface TerrainViewFrame {
   readonly overlayDepth: TerrainOverlayDepth | null;
   /**
    * Its lit terrain by the visibility buffer (plan R14, R14.T2.c; `GeometrySettings.shading`
-   * `visibility`), where the lit pass draws through the cluster path, the frame has no two-pass
-   * occlusion and the ID form is made; `null` otherwise, when {@link TerrainViewFrame.draws} draws
-   * it forward.
+   * `visibility`), where the lit pass draws through the cluster path and the ID form is made, with
+   * the two-pass occlusion or without (R14.T3.d); `null` otherwise, when
+   * {@link TerrainViewFrame.draws} draws it forward.
    */
   readonly visibility: TerrainVisibility | null;
   /**
@@ -774,6 +774,12 @@ export interface TerrainOverlayDepth {
  * after the resolve shades its pixels, the draws the bodies pass draws forward over them,
  * depth-tested against the raster's depth: the may-discard buckets by the fin form, which keep the
  * survey's `discard`, and the edge patches' lit mesh.
+ *
+ * @remarks
+ * With the two-pass occlusion (plan R14, R14.T3.d) the raster is the early pass's opaque buckets,
+ * the late pass's are {@link TerrainPass.lateDrawFor}'s by IDs, drawn into the same IDs after the
+ * pyramid's build, and the forward draws hold both passes' may-discard buckets; the one resolve
+ * shades both rasters' pixels, since the late pass's entries lie in the pass's range too.
  */
 export interface TerrainVisibility {
   readonly raster: ReadonlyArray<DrawItem>;
@@ -783,6 +789,12 @@ export interface TerrainVisibility {
    */
   readonly resolve: ReadonlyArray<DrawItem>;
   readonly forward: ReadonlyArray<DrawItem>;
+  /**
+   * The entries of its range of the view's index space, every pass's of its lists, numbered from 0
+   * in its raster's IDs and its resolve's uniforms, which its frame moves to the range it gives the
+   * body (`clusters/visibility.ts`' `visibleConsumerRanges`).
+   */
+  readonly entries: number;
 }
 
 /** The survey a pass's selection reads, with a count of its changes (R10.T16.b). */
@@ -5013,31 +5025,6 @@ export class TerrainPass {
       clusters !== null && litBase !== null
         ? TERRAIN_CLUSTER_MESH.templates.filter((t) => !t.mayDiscard && t.stride <= cap).length
         : draws.filter((draw) => draw.mesh === resources.interiorMesh).length;
-    // The same lit triangles by the visibility buffer (plan R14, R14.T2.c), where the geometry
-    // shades by it and its form is made, and the frame has no two-pass occlusion, which this path
-    // does not yet take (a lean, 2026-11-04): the ID raster of the opaque buckets, by its own mesh
-    // on its path, then forward the may-discard buckets and the edge patches.
-    const idBase = clusters?.idBase ?? null;
-    const resolveDraw = clusters?.resolveDraw ?? null;
-    const idMesh =
-      device.idRaster?.primitive === true ? (clusters?.mesh ?? null) : resources.clusterIdMesh;
-    const visibility: TerrainVisibility | null =
-      this.#geometry.shading === "visibility" &&
-      input.occlusion === undefined &&
-      clusters !== null &&
-      litBase !== null &&
-      idBase !== null &&
-      resolveDraw !== null &&
-      idMesh !== null
-        ? {
-            raster: clusters.buckets.drawItems(CLUSTER_LIT_PASS, idMesh, idBase, cap, null),
-            resolve: [resolveDraw],
-            forward: [
-              ...clusters.buckets.drawItems(CLUSTER_LIT_PASS, clusters.mesh, null, cap, finLitBase),
-              ...edge,
-            ],
-          }
-        : null;
     const cast =
       draws.length > 0 && live !== null
         ? this.#drawCasters(device, state, input, live, clusters)
@@ -5049,6 +5036,40 @@ export class TerrainPass {
     if (clusters !== null && alone && !culled) {
       this.#cullClusters(device, state, clusters, input, null);
     }
+    // The same lit triangles by the visibility buffer (plan R14, R14.T2.c), where the geometry
+    // shades by it and its form is made: the ID raster of the opaque buckets, by its own mesh on its
+    // path, then forward the may-discard buckets and the edge patches; with the two-pass occlusion
+    // (R14.T3.d), whose late pass the cull has just left, the early pass's raster, and forward the
+    // late pass's may-discard buckets too, which its late cull fills before the resolve's pass.
+    const idBase = clusters?.idBase ?? null;
+    const resolveDraw = clusters?.resolveDraw ?? null;
+    const idMesh = clusters === null ? null : this.#idMeshOf(device, clusters);
+    const visibility: TerrainVisibility | null =
+      this.#geometry.shading === "visibility" &&
+      clusters !== null &&
+      litBase !== null &&
+      idBase !== null &&
+      resolveDraw !== null &&
+      idMesh !== null
+        ? {
+            raster: clusters.buckets.drawItems(CLUSTER_LIT_PASS, idMesh, idBase, cap, null),
+            resolve: [resolveDraw],
+            forward: [
+              ...clusters.buckets.drawItems(CLUSTER_LIT_PASS, clusters.mesh, null, cap, finLitBase),
+              ...(latePassOf(state) === null
+                ? []
+                : clusters.buckets.drawItems(
+                    CLUSTER_LIT_LATE_PASS,
+                    clusters.mesh,
+                    null,
+                    cap,
+                    finLitBase,
+                  )),
+              ...edge,
+            ],
+            entries: clusters.buckets.passes * clusters.buckets.passEntries,
+          }
+        : null;
     // The overlay's depth: on the cluster path its own pass's clusters, and by the redraw with the
     // lit pass's, the interior patches' drawn triangles with their own depth (plan R14, R14.T2.a).
     const overlayBase = clusters?.overlayBase ?? null;
@@ -5141,6 +5162,7 @@ export class TerrainPass {
               raster: visibility.raster.map(still),
               resolve: visibility.resolve.map(still),
               forward: visibility.forward.map(still),
+              entries: visibility.entries,
             },
       opaqueDraws,
       lit: litBase !== null || wireLit,
@@ -6478,8 +6500,14 @@ export class TerrainPass {
    * their draws, in the lit pass's order, which the renderer draws after the first raster, loading
    * its colour and depth; none otherwise. Call it once a view-frame, after the pyramid's build and
    * before the view's next {@link TerrainPass.drawFor}.
+   *
+   * @param byIds - Whether the frame draws the view's terrain by the visibility buffer, which its
+   *   frame's {@link TerrainViewFrame.visibility} offered (plan R14, R14.T2.d): then its draws are
+   *   the late pass's opaque buckets by the ID form, which the renderer draws into the view's IDs
+   *   after the first raster, loading them and its depth, the late pass's may-discard buckets being
+   *   among that frame's forward draws; none where the ID form is not made.
    */
-  lateDrawFor(id: TerrainViewId): ReadonlyArray<DrawItem> {
+  lateDrawFor(id: TerrainViewId, byIds = false): ReadonlyArray<DrawItem> {
     const state = this.#views.get(id);
     const late = state?.late ?? null;
     if (state === undefined || late === null) {
@@ -6490,7 +6518,7 @@ export class TerrainPass {
       return NO_DRAWS;
     }
     try {
-      return this.#drawLate(state, late);
+      return this.#drawLate(state, late, byIds);
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {
         return NO_DRAWS;
@@ -6499,8 +6527,11 @@ export class TerrainPass {
     }
   }
 
-  /** {@link TerrainPass.lateDrawFor}'s dispatches and draws of view `state`'s late pass `late`. */
-  #drawLate(state: ViewState, late: LatePass): ReadonlyArray<DrawItem> {
+  /**
+   * {@link TerrainPass.lateDrawFor}'s dispatches and draws of view `state`'s late pass `late`, by
+   * the ID form where `byIds`.
+   */
+  #drawLate(state: ViewState, late: LatePass, byIds: boolean): ReadonlyArray<DrawItem> {
     const held = state.clusters;
     const { clusters } = late;
     const { buckets } = clusters;
@@ -6547,15 +6578,33 @@ export class TerrainPass {
     state.occlusionBuilds = late.occlusion.pyramid.builds;
     state.lastLate = true;
     this.#sampleClusters(state, buckets, (late.params.overWord ?? 0) > 0);
-    const draws = buckets.drawItems(
-      CLUSTER_LIT_LATE_PASS,
-      clusters.mesh,
-      litBase,
-      late.cap,
-      clusters.finLitBase,
-    );
+    let draws: ReadonlyArray<DrawItem>;
+    if (byIds) {
+      const idMesh = this.#idMeshOf(late.device, clusters);
+      draws =
+        idMesh === null || clusters.idBase === null
+          ? NO_DRAWS
+          : buckets.drawItems(CLUSTER_LIT_LATE_PASS, idMesh, clusters.idBase, late.cap, null);
+    } else {
+      draws = buckets.drawItems(
+        CLUSTER_LIT_LATE_PASS,
+        clusters.mesh,
+        litBase,
+        late.cap,
+        clusters.finLitBase,
+      );
+    }
     // By the still forms where the frame's early draws took them (R10.T16.i).
     return state.lateStill ? draws.map((draw) => stillDrawOf(late.device, draw)) : draws;
+  }
+
+  /**
+   * The mesh `device`'s ID raster draws `clusters`' buckets by (plan R14, R14.T2.c; Design note 6):
+   * the cluster mesh on the `primitive_index` path, else its de-indexed form, `null` where it is not
+   * made.
+   */
+  #idMeshOf(device: Device, clusters: ClusterPath): MeshHandle | null {
+    return device.idRaster?.primitive === true ? clusters.mesh : device.resources.clusterIdMesh;
   }
 
   /**

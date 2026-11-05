@@ -21,16 +21,19 @@
  *   vertex either way.
  * - **One index space a view, shared** (Design note 9; lean, 2026-11-04): the visible-cluster index
  *   is a bucket entry's index in its consumer's lists, its draw's `clusterBase` plus its instance,
- *   each consumer's lists a range of the space: terrain's whole lists buffer first, from 0, all its
- *   passes' (the lit pass's from `CLUSTER_LIT_PASS × passEntries`). An entry is the one `u32` its
- *   lists hold, (instance << 8) | cluster, so that a consumer is its range rather than a word of its
- *   entry, and an entry's template is its bucket's, found from its index (`resolve.ts`). A resolve
- *   pass a consumer class refuses the IDs outside its range, and a later consumer (T5.e) takes the
- *   range after the last, a pass and not a format.
+ *   past its range's first index ({@link VISIBLE_FIRST_UNIFORM}), each consumer's lists a range of
+ *   the space: each body's terrain's whole lists buffer, all its passes' (the lit pass's from
+ *   `CLUSTER_LIT_PASS × passEntries`), the first from 0 and each other after the one before
+ *   (R14.T2.d; {@link visibleConsumerRanges}). An entry is the one `u32` its lists hold,
+ *   (instance << 8) | cluster, so that a consumer is its range rather than a word of its entry, and
+ *   an entry's template is its bucket's, found from its index (`resolve.ts`). A resolve refuses the
+ *   IDs outside its range, so that each body's shades its own pixels alone, and a later consumer
+ *   (T5.e) takes the range after the last, a pass and not a format.
  */
 
 import { ID_NONE } from "../engine/idTarget";
 import type {
+  DrawItem,
   MeshSpec,
   RenderEngine,
   RenderTarget,
@@ -47,6 +50,13 @@ export { ID_NONE } from "../engine/idTarget";
  * visibility target with the scene's depth, after the bodies pass's figures.
  */
 export const VISIBILITY_RASTER_LABEL = "terrain id raster";
+
+/**
+ * The late ID raster's pass label (plan R14, R14.T2.d with R14.T3.d): the two-pass occlusion's late
+ * pass's opaque buckets into the same IDs after the depth pyramid's build, loading them and the
+ * scene's depth, before the resolve.
+ */
+export const VISIBILITY_LATE_RASTER_LABEL = "terrain id raster late";
 
 /**
  * The resolve's pass label (plan R14, R14.T2.d): each consumer class's full-screen resolve into the
@@ -97,6 +107,22 @@ export function unpackVisibilityId(
   return { visible: id >>> VISIBILITY_TRIANGLE_BITS, triangle: id & (VISIBILITY_TRIANGLES - 1) };
 }
 
+/**
+ * The `Draw` uniform an ID raster's draw adds its range's first index from (`terrainClusterId.wgsl`'s
+ * `visibleFirst`): absent, 0, the first body's (see the module's remarks).
+ */
+export const VISIBLE_FIRST_UNIFORM = "visibleFirst";
+
+/**
+ * `draw`, an ID raster's, writing the IDs of the range from `first` of the view's index space
+ * (plan R14, R14.T2.d): `draw` itself at 0, the range of the frame's first body.
+ */
+export function withVisibleFirst(draw: DrawItem, first: number): DrawItem {
+  return first === 0
+    ? draw
+    : { ...draw, uniforms: { ...draw.uniforms, [VISIBLE_FIRST_UNIFORM]: Float32Array.of(first) } };
+}
+
 /** A consumer class of the visibility buffer: terrain alone until T5.e's meshes. */
 export type VisibleConsumer = "terrain";
 
@@ -110,22 +136,28 @@ export interface VisibleConsumerRange {
 }
 
 /**
- * A view's index space for terrain's lists of `terrainEntries` entries, all its passes': terrain's
- * range, from 0.
+ * A view's index space for the terrain of a frame's bodies, the lists of each of `terrainEntries`
+ * entries, all its passes': each body's range in its order, the first from 0 and each other just
+ * after the one before (plan R14, R14.T2.d), so that two bodies' IDs never meet.
  *
- * @throws RangeError for a space past {@link MAX_LIST_ENTRIES}.
+ * @throws RangeError for a count that is no whole number of entries, or a space past
+ *   {@link MAX_LIST_ENTRIES}, where the frame draws its terrain forward instead.
  */
-export function visibleConsumerRanges(terrainEntries: number): ReadonlyArray<VisibleConsumerRange> {
-  if (
-    !Number.isInteger(terrainEntries) ||
-    terrainEntries < 0 ||
-    terrainEntries > MAX_LIST_ENTRIES
-  ) {
-    throw new RangeError(
-      `${String(terrainEntries)} entries do not fit the visible-cluster index space`,
-    );
+export function visibleConsumerRanges(
+  terrainEntries: ReadonlyArray<number>,
+): ReadonlyArray<VisibleConsumerRange> {
+  const ranges: VisibleConsumerRange[] = [];
+  let first = 0;
+  for (const entries of terrainEntries) {
+    if (!Number.isInteger(entries) || entries < 0 || first + entries > MAX_LIST_ENTRIES) {
+      throw new RangeError(
+        `${String(entries)} entries from ${String(first)} do not fit the visible-cluster index space`,
+      );
+    }
+    ranges.push({ consumer: "terrain", first, entries });
+    first += entries;
   }
-  return [{ consumer: "terrain", first: 0, entries: terrainEntries }];
+  return ranges;
 }
 
 /** A cluster mesh and its templates, as `templates.ts` makes them. */

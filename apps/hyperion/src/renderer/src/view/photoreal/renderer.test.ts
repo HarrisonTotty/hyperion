@@ -1,6 +1,10 @@
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
 import { VISIBILITY_IDS_TEXTURE } from "../clusters/resolve";
-import { VISIBILITY_RASTER_LABEL, VISIBILITY_RESOLVE_LABEL } from "../clusters/visibility";
+import {
+  VISIBILITY_LATE_RASTER_LABEL,
+  VISIBILITY_RASTER_LABEL,
+  VISIBILITY_RESOLVE_LABEL,
+} from "../clusters/visibility";
 import {
   DEPTH_PYRAMID_KERNEL,
   DEPTH_PYRAMID_LABEL,
@@ -677,6 +681,47 @@ describe("the photorealistic renderer", () => {
       engine.targetFrames.slice(from).filter((f) => f.label.startsWith("bodies")).length,
       engine.dispatched.slice(dispatched).some((d) => d.pass === DEPTH_PYRAMID_LABEL),
     ]).toEqual([[true, false, true, true, false, undefined], 1, false]);
+    renderer.dispose();
+  });
+
+  it("by the visibility buffer with the two-pass occlusion, draws the ID raster, the pyramid of its depth, the late raster into the same IDs, then the one resolve (R14.T2.d)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const raster = drawOfName("id raster");
+    const lateRaster = drawOfName("late id raster");
+    const terrain: FrameTerrain = {
+      ...byIdsTerrain(),
+      visibility: () => ({ raster: [raster], resolve: [drawOfName("resolve")], forward: [] }),
+      lateDraws: () => [lateRaster],
+    };
+    const geometry = { ...BY_IDS, occlusion: "hzb" as const };
+    const from = engine.targetFrames.length;
+    const dispatched = engine.dispatched.length;
+    renderer.render(new RecordingView(), { ...frameWith([]), geometry, terrain });
+    const frames = engine.targetFrames.slice(from);
+    const at = (label: string): number => frames.findIndex((f) => f.label === label);
+    const pyramid = engine.dispatched
+      .slice(dispatched)
+      .filter((d) => d.pass === DEPTH_PYRAMID_LABEL)
+      .map((d) => d.framesBefore - from);
+    const late = frames[at(VISIBILITY_LATE_RASTER_LABEL)];
+    expect([
+      [at(VISIBILITY_RASTER_LABEL) + 1, at(VISIBILITY_RESOLVE_LABEL) - 1],
+      new Set(pyramid),
+      [late?.colourLoad, late?.draws],
+      frames[at(VISIBILITY_RASTER_LABEL)]?.colourLoad,
+      frames.filter((f) => f.label.startsWith("bodies")).length,
+      pyramid.length,
+    ]).toEqual([
+      [at(VISIBILITY_LATE_RASTER_LABEL), at(VISIBILITY_LATE_RASTER_LABEL)],
+      new Set([at(VISIBILITY_RASTER_LABEL) + 1]),
+      ["load", [lateRaster]],
+      undefined,
+      0,
+      pyramidLevels(VIEWPORT).length,
+    ]);
     renderer.dispose();
   });
 
@@ -2583,7 +2628,7 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
   });
 
   it("keeps three frames of a photorealistic primary and two instruments in the timer's resolves", async () => {
-    // Each render resolves its own pass times; a dispatch's wait for the next render's.
+    // Each submission resolves its own pass times; a dispatch's wait for the next render's.
     const engine = await countingRenderEngine();
     const views = [
       { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
@@ -2607,8 +2652,11 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
         overlay,
       });
     }
+    // A chain's later frames ride its first's resolve, bloom's levels among them (plan R14).
     const resolves =
-      engine.targetFrames.length + drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+      engine.targetFrames.length -
+      engine.chainedTargetFrames +
+      drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
     expect(engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS)).toHaveLength(3);
     expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
     for (const view of drawn) {
@@ -2641,8 +2689,11 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
         overlay,
       });
     }
+    // A chain's later frames ride its first's resolve, bloom's levels among them (plan R14).
     const resolves =
-      engine.targetFrames.length + drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+      engine.targetFrames.length -
+      engine.chainedTargetFrames +
+      drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
     expect(engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS)).toHaveLength(6);
     expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
     for (const view of drawn) {
@@ -2688,10 +2739,73 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
         terrain,
       });
     }
+    // A chain's later frames ride its first's resolve, bloom's levels among them (plan R14).
     const resolves =
-      engine.targetFrames.length + drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+      engine.targetFrames.length -
+      engine.chainedTargetFrames +
+      drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
     expect(
       engine.targetFrames.filter((f) => f.label === PHOTOREAL_PASS_LABELS.bodiesLate),
+    ).toHaveLength(3);
+    expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
+    for (const view of drawn) {
+      view.renderer.dispose();
+    }
+  });
+
+  it("keeps three frames of three views in the timer's resolves by the visibility buffer with the two-pass occlusion (R14.T2.d)", async () => {
+    // Its ID raster, late raster and resolve in the bodies pass's place: one render more.
+    const engine = await countingRenderEngine();
+    const views = [
+      { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
+      { name: "instrument 1", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+      { name: "instrument 2", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+    ];
+    const camera = frameWith([]).camera;
+    const drawn = await Promise.all(
+      views.map(async ({ name, viewport, role }) => {
+        const renderer = new PhotorealRenderer(engine, name);
+        await renderer.prepare(viewport, "high", role, camera);
+        return { viewport, role, renderer, canvas: new RecordingView() };
+      }),
+    );
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("early")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [drawOfName("late id raster")],
+      visibility: () => ({
+        raster: [drawOfName("id raster")],
+        resolve: [drawOfName("resolve")],
+        forward: [],
+      }),
+      opaqueDraws: () => [],
+    };
+    const geometry = {
+      ...SETTINGS.high.geometry,
+      shading: "visibility" as const,
+      occlusion: "hzb" as const,
+    };
+    const overlay = (): FrameSubmission => SYMBOLOGY;
+    for (const view of drawn) {
+      view.renderer.render(view.canvas, {
+        ...frameOfDiscs(smallDiscs(view.viewport), view.viewport),
+        role: view.role,
+        meter: view.role === "eye" ? "average" : null,
+        overlay,
+        geometry,
+        terrain,
+      });
+    }
+    // A chain's later frames ride its first's resolve, bloom's levels among them (plan R14).
+    const resolves =
+      engine.targetFrames.length -
+      engine.chainedTargetFrames +
+      drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+    expect(
+      engine.targetFrames.filter((f) => f.label === VISIBILITY_LATE_RASTER_LABEL),
     ).toHaveLength(3);
     expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
     for (const view of drawn) {

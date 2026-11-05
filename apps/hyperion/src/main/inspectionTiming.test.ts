@@ -680,7 +680,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     );
   });
 
-  it("counts the terrain's two rasters, its pyramid, its cluster dispatches and the visibility buffer's raster and resolve in its share (plan R14, R14.T3.d, T2.c and T2.d)", () => {
+  it("counts the terrain's two rasters, its pyramid, its cluster dispatches and the visibility buffer's rasters and resolve in its share (plan R14, R14.T3.d, T2.c and T2.d)", () => {
     expect(
       [
         "bodies",
@@ -693,6 +693,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
         "terrain shadows #4",
         "symbology",
         "terrain id raster",
+        "terrain id raster late",
         "terrain resolve #2",
         "bodies 2",
         "discs",
@@ -700,6 +701,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
         "terrain resolver",
       ].map((label) => TERRAIN_PASS_LABELS.test(label)),
     ).toEqual([
+      true,
       true,
       true,
       true,

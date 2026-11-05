@@ -9,8 +9,8 @@
  * alone into the engine's layers, which the terrain's draws read); mesh bodies (opaque, depth);
  * R10's terrain; or, by plan R14's visibility buffer (R14.T2.c to T2.e), in the bodies pass's place,
  * the terrain's ID raster and the resolve's pass, the figures after its shading; with plan R14's
- * two-pass occlusion (R14.T3.d) the depth pyramid of that raster and
- * the terrain's clusters it leaves to a second; host discs, disc bodies and point bodies in one painter order (Design note 2);
+ * two-pass occlusion (R14.T3.d) the depth pyramid of the first raster and the terrain's clusters it
+ * leaves to a second, by IDs before the resolve (R14.T2.d); host discs, disc bodies and point bodies in one painter order (Design note 2);
  * R08's atmosphere, each body's composite over everything drawn before it (R08.T10.b); R11's
  * rings, clouds and oceans; the histogram; bloom of the light above the
  * display's range; the tone-mapping pass; the symbology cased over the result. A style owns no
@@ -30,7 +30,11 @@ import {
 import { ATMOSPHERE_TABLES_PASS } from "../atmosphere/tables";
 import { DISC_CELLS_PASS } from "../bodies/draw";
 import { DEPTH_PYRAMID_LABEL } from "../clusters/hzb";
-import { VISIBILITY_RASTER_LABEL, VISIBILITY_RESOLVE_LABEL } from "../clusters/visibility";
+import {
+  VISIBILITY_LATE_RASTER_LABEL,
+  VISIBILITY_RASTER_LABEL,
+  VISIBILITY_RESOLVE_LABEL,
+} from "../clusters/visibility";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { BLOOM_PASS } from "../post/bloomChain";
@@ -141,12 +145,14 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       slot(TERRAIN_PASS_LABEL, "R10", true),
       // By the visibility buffer, in the bodies pass's place (plan R14, R14.T2.c to T2.e): the
       // terrain's ID raster, then the resolve's pass, which draws the mesh bodies' figures and the
-      // rest of the terrain after its shading.
+      // rest of the terrain after its shading. The two-pass occlusion's pyramid of the first raster,
+      // the bodies' or the IDs', then the second (R14.T3.d): by IDs into the same IDs before the
+      // resolve (R14.T2.d), else the bodies' late pass. The cull's late pass before it takes the
+      // terrain cull's label.
       slot(VISIBILITY_RASTER_LABEL, "R14", true),
-      slot(VISIBILITY_RESOLVE_LABEL, "R14", true),
-      // The two-pass occlusion's pyramid of the bodies' first raster, then the second (R14.T3.d);
-      // the cull's late pass between them takes the terrain cull's label.
       slot(DEPTH_PYRAMID_LABEL, "R14", true),
+      slot(VISIBILITY_LATE_RASTER_LABEL, "R14", true),
+      slot(VISIBILITY_RESOLVE_LABEL, "R14", true),
       own(PHOTOREAL_PASS_LABELS.bodiesLate),
       own(PHOTOREAL_PASS_LABELS.discs),
       // Each body's air over everything opaque drawn before it (R08.T10.b).

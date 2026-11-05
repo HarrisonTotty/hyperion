@@ -963,14 +963,14 @@ export interface InspectionTimingInput {
  * The pass labels whose passes draw the terrain (`photoreal/passes.ts`' order): the bodies pass,
  * which draws the mesh bodies' figures and the terrain handed over after them, and its late raster
  * with the depth pyramid it is culled against (plan R14, R14.T3.d); by the visibility buffer, the
- * terrain's ID raster and the resolve's pass in the bodies pass's place (R14.T2.c to T2.e); the
- * cluster path's cull and
- * compaction, early and late under one label each; the shadow cascades' caster passes; and the
+ * terrain's ID raster, its late raster and the resolve's pass in the bodies pass's place (R14.T2.c
+ * to T2.e); the cluster path's cull and compaction, early and late under one label each; the
+ * shadow cascades' caster passes; and the
  * symbology's canvas pass, which draws the terrain's depth before its marks; each numbered from the
  * second where a frame repeats it. The renderer's labels, repeated here across the bundles.
  */
 export const TERRAIN_PASS_LABELS =
-  /^(?:bodies(?: late)?|depth pyramid|terrain (?:id raster|resolve)|terrain cluster (?:cull|compact)|terrain shadows|symbology)(?: #\d+)?$/u;
+  /^(?:bodies(?: late)?|depth pyramid|terrain (?:id raster(?: late)?|resolve)|terrain cluster (?:cull|compact)|terrain shadows|symbology)(?: #\d+)?$/u;
 
 /** One window's figures from the renderer's record and its trace. */
 function windowResults(

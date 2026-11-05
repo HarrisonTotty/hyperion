@@ -92,7 +92,8 @@ import type {
 } from "./terrainPass";
 import { type HorizonLayerSetting, PALETTE_NONE, type TerrainLayers } from "./workers/messages";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "./workers/pool";
-import { SETTINGS, type TerrainSettings } from "../quality/qualitySetting";
+import { type GeometrySettings, SETTINGS, type TerrainSettings } from "../quality/qualitySetting";
+import type { DrawItem } from "../engine/types";
 import { terrainSlotLayout } from "./slotLayout";
 
 const UNIVERSE: UniverseIdHex = "000000000000002a";
@@ -170,6 +171,7 @@ async function harness(
   lookaheadClockMs?: () => number,
   handoverAtCells?: boolean,
   litTerrain?: TerrainSettings,
+  geometry?: GeometrySettings,
 ): Promise<Harness> {
   const hook = renderHook(() => useServerLink(), { wrapper: ServerLinkHarness });
   act(() => {
@@ -194,6 +196,7 @@ async function harness(
     ...(lookaheadClockMs === undefined ? {} : { lookaheadClockMs }),
     ...(handoverAtCells === undefined ? {} : { handoverAtCells }),
     ...(litTerrain === undefined ? {} : { litTerrain }),
+    ...(geometry === undefined ? {} : { geometry }),
   });
   return {
     socket: () => FakeWebSocket.latest(),
@@ -1277,6 +1280,11 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
   });
 });
 
+/** The materials of `draws`, each once, in their order. */
+function materialsOf(draws: ReadonlyArray<DrawItem>): string[] {
+  return [...new Set(draws.map((draw) => draw.material.name))];
+}
+
 describe("each view's frame terrain through the session (R10.T16.c)", () => {
   it("draws a body's terrain in the view that hands it over, and in another only once it hands it over too", async () => {
     const h = await harness();
@@ -1307,6 +1315,29 @@ describe("each view's frame terrain through the session (R10.T16.c)", () => {
     const afterBakes = frameTerrainOf(h, PRIMARY).surveyCoverage(MOON);
     expect(h.session.coverageMask(MOON)).not.toBeNull();
     expect([beforeBakes, afterBakes]).toEqual([null, h.session.coverageMask(MOON)]);
+  });
+
+  it("gives a frame by the visibility buffer with the two-pass occlusion its body's late ID raster, and its late lit draws asked forward (plan R14, R14.T2.d)", async () => {
+    const both = { ...SETTINGS.high.geometry, shading: "visibility", occlusion: "hzb" } as const;
+    const h = await harness("high", undefined, undefined, undefined, undefined, both);
+    await handedOver(h);
+    await streamBakes(h, 4);
+    const { plan, body } = moonPlan();
+    const occlusion = { pyramid: { builds: 0, frame: null }, fresh: true };
+    // The first frame asks the shading's forms, made meanwhile.
+    frameTerrainOf(h, PRIMARY).draws(plan, [body], occlusion);
+    await settle();
+    const byIds = frameTerrainOf(h, PRIMARY);
+    byIds.draws(plan, [body], occlusion);
+    const late = materialsOf(byIds.lateDraws());
+    frameTerrainOf(h, PRIMARY).draws(plan, [body], occlusion);
+    const forward = materialsOf(h.session.drawLateTerrain(PRIMARY, MOON, false));
+    expect([byIds.visibility() !== null, late, forward.includes(late[0] ?? "")]).toEqual([
+      true,
+      ["terrain-id-cluster-baked-offsets-still"],
+      false,
+    ]);
+    expect(forward).toContain("terrain-lit-cluster-baked-offsets-still");
   });
 
   it("gives the terrain's depth for the symbology of each body it draws", async () => {

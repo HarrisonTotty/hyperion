@@ -132,6 +132,7 @@ import { type OverlayHider, overlayHidersOf, surveyedDatumsOf } from "./overlay"
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 import { withVisibilityIds } from "../clusters/resolve";
 import {
+  VISIBILITY_LATE_RASTER_LABEL,
   VISIBILITY_RASTER_LABEL,
   VISIBILITY_RESOLVE_LABEL,
   VisibilityBuffer,
@@ -1049,8 +1050,8 @@ export class PhotorealRenderer {
     const figures = this.#bodies.meshDraws(plan);
     const terrainDraws = frame.terrain?.draws(plan, bodies, occlusion ?? undefined) ?? [];
     // The terrain by the visibility buffer where every body it draws gives it (plan R14, R14.T2.c
-    // and T2.d), a frame with the two-pass occlusion drawing forward.
-    const byIds = occlusion === null ? (frame.terrain?.visibility() ?? null) : null;
+    // and T2.d), with the two-pass occlusion or without (R14.T3.d).
+    const byIds = frame.terrain?.visibility() ?? null;
     const opaque = frame.terrain?.opaqueDraws() ?? [];
     // Opaque first (plan R14, R14.T2.e): the terrain that never discards, then the figures, which
     // may, then the rest of the terrain; by the visibility buffer, the raster is that opaque pass.
@@ -1071,6 +1072,19 @@ export class PhotorealRenderer {
           colourLoad: "load",
         });
       }
+      // With the two-pass occlusion, the terrain's clusters that raster's pyramid does not refuse,
+      // over it.
+      const late = this.#pyramidThenLateDraws(resources, frame, occlusion);
+      if (late.length > 0) {
+        resources.target.render({
+          label: PHOTOREAL_PASS_LABELS.bodiesLate,
+          viewRotation,
+          projection,
+          draws: late,
+          postProcesses: [],
+          colourLoad: "load",
+        });
+      }
     } else {
       const visibility = (resources.visibility ??= new VisibilityBuffer(
         this.#engine,
@@ -1085,6 +1099,19 @@ export class PhotorealRenderer {
         draws: byIds.raster,
         postProcesses: [],
       });
+      // With the two-pass occlusion, the late pass's opaque clusters that the raster's pyramid does
+      // not refuse, into the same IDs, loading them and the depth; the one resolve shades both.
+      const late = this.#pyramidThenLateDraws(resources, frame, occlusion);
+      if (late.length > 0) {
+        visibility.target.render({
+          label: VISIBILITY_LATE_RASTER_LABEL,
+          viewRotation,
+          projection,
+          draws: late,
+          postProcesses: [],
+          colourLoad: "load",
+        });
+      }
       resources.target.render({
         label: VISIBILITY_RESOLVE_LABEL,
         viewRotation,
@@ -1097,23 +1124,6 @@ export class PhotorealRenderer {
         postProcesses: [],
         colourLoad: "load",
       });
-    }
-    // With the two-pass occlusion (plan R14, R14.T3.d), the pyramid of that raster's depth, then
-    // the terrain's clusters it left that the pyramid does not refuse, over it.
-    const drawnDepth = resources.target.depth;
-    if (occlusion !== null && drawnDepth !== null && frame.terrain !== undefined) {
-      occlusion.pyramid.build(drawnDepth, pyramidProjectionOf(camera.fovXRad, viewport));
-      const late = frame.terrain.lateDraws();
-      if (late.length > 0) {
-        resources.target.render({
-          label: PHOTOREAL_PASS_LABELS.bodiesLate,
-          viewRotation,
-          projection,
-          draws: late,
-          postProcesses: [],
-          colourLoad: "load",
-        });
-      }
     }
     resources.target.render({
       label: PHOTOREAL_PASS_LABELS.discs,
@@ -1285,6 +1295,25 @@ export class PhotorealRenderer {
     const cut = this.#cut || frame.present === false;
     this.#cut = false;
     return { pyramid, fresh: pyramid.begin(resources.size, cut) };
+  }
+
+  /**
+   * With the frame's two-pass occlusion (plan R14, R14.T3.d), the view's pyramid built from the
+   * scene's depth as its first raster left it, then the terrain's late draws
+   * (`FrameTerrain.lateDraws`): by the visibility buffer, the late pass's ID raster; none without
+   * the occlusion.
+   */
+  #pyramidThenLateDraws(
+    resources: Resources,
+    frame: PhotorealFrame,
+    occlusion: (FrameOcclusion & { readonly pyramid: DepthPyramid }) | null,
+  ): ReadonlyArray<DrawItem> {
+    const depth = resources.target.depth;
+    if (occlusion === null || depth === null || frame.terrain === undefined) {
+      return [];
+    }
+    occlusion.pyramid.build(depth, pyramidProjectionOf(frame.camera.fovXRad, frame.viewport));
+    return frame.terrain.lateDraws();
   }
 
   /**

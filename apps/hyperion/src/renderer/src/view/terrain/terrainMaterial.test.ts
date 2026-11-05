@@ -1936,7 +1936,7 @@ describe("the visibility buffer's ID raster (plan R14, R14.T2.c)", () => {
     }
   });
 
-  it("takes the lit material's own draw fields, with the bucket's list base after them", () => {
+  it("takes the lit material's own draw fields, with the bucket's list base and its body's first index after them", () => {
     expect(
       terrainClusterIdMaterialSpec("face-differences", false).uniforms.map((u) => u.name),
     ).toEqual([
@@ -1944,7 +1944,18 @@ describe("the visibility buffer's ID raster (plan R14, R14.T2.c)", () => {
         .uniforms.slice(0, 3)
         .map((u) => u.name),
       "clusterBase",
+      "visibleFirst",
     ]);
+  });
+
+  it("numbers each body's IDs from its range's first index, reading its own lists from 0 (R14.T2.d)", () => {
+    for (const primitive of [false, true]) {
+      const source = terrainClusterIdMaterialSpec("baked-offsets", primitive).vertexWgsl;
+      expect([
+        source.includes("let item = cluster_lists[listed];"),
+        source.includes("out.visible = draw.visibleFirst + listed;"),
+      ]).toEqual([true, true]);
+    }
   });
 });
 
