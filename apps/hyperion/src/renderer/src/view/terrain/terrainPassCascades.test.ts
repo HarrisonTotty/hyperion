@@ -68,6 +68,7 @@ import {
   edgeBandIndex,
   edgeBandMOfHalf,
   INSTANCE_FINEST,
+  INSTANCE_SUB_GRID_STRIDES,
   NO_STRIDE_BAND,
   NO_STRIDE_SCALE,
   type StrideScale,
@@ -1934,14 +1935,18 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
   /** The strides under the patches' budget alone (R14.T3.e). */
   const PATCHED: GeometrySettings = { ...STRIDED, terrainBudget: "patches" };
 
-  /** A clustered pass whose bakes carry `errors`, streamed with `grounded`'s contacts. */
+  /**
+   * A clustered pass of `setting`, high's by default, whose bakes carry `errors`, streamed with
+   * `grounded`'s contacts.
+   */
   async function measuredPass(
     errors: Float16Array | null = ERRORS,
     grounded: ReadonlyArray<GroundContact> = [],
+    setting: "high" | "low" = "high",
   ): Promise<Made> {
-    const made = await litPass("high");
+    const made = await litPass(setting);
     made.pass.setReducedMotion(true);
-    made.pass.setGeometry(STRIDED);
+    made.pass.setGeometry(setting === "high" ? STRIDED : SETTINGS.low.geometry);
     made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
     made.lane().clusterErrors = errors;
     for (let n = 0; n < 24; n += 1) {
@@ -1970,8 +1975,9 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
     }));
   }
 
-  it("gives a sub-patch stand-in on the cluster path no bands, so that its camera passes draw it at stride 1", async () => {
+  it("gives a sub-patch stand-in on the cluster path no bands where the stand-ins' strides are off, so that its camera passes draw it at stride 1", async () => {
     const made = await measuredPass();
+    made.pass.setGeometry({ ...STRIDED, standInStrides: "off" });
     nearerUnbaked(made);
     const per = INSTANCE_RECORD_BYTES / 4;
     const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
@@ -1985,6 +1991,85 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
       subPatches.every(({ none }) => none),
       records.some(({ subPatch, none }) => !subPatch && !none),
     ]).toEqual([true, true, true]);
+  });
+
+  it("gives each stand-in's mask its slot's patch's scale where the stand-ins' strides are all, its holds' shares none, and none where they are own-grids or off, and marks none for the camera passes' cap (R14.T3.c's stand-ins)", async () => {
+    const masksOf = async (
+      standInStrides: GeometrySettings["standInStrides"],
+    ): Promise<
+      Array<{ readonly scaled: boolean; readonly marked: boolean; readonly shares: number }>
+    > => {
+      const made = await measuredPass();
+      made.pass.setGeometry({ ...STRIDED, standInStrides });
+      nearerUnbaked(made);
+      const per = INSTANCE_RECORD_BYTES / 4;
+      const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+      return stridesOf(made).flatMap(({ strideScale, quadrant }, k) =>
+        ((words[k * per + INSTANCE_SUB_PATCH_WORD] ?? 0) & TERRAIN_SUB_PATCH_MASK) === 0
+          ? []
+          : [
+              {
+                scaled: strideScale.perErrorM > 0,
+                marked: (quadrant & INSTANCE_SUB_GRID_STRIDES) !== 0,
+                shares: words[k * per + 14] ?? 0,
+              },
+            ],
+      );
+    };
+    const all = await masksOf("all");
+    const ownGrids = await masksOf("own-grids");
+    const off = await masksOf("off");
+    expect([
+      all.length > 0 &&
+        all.every(({ scaled, marked, shares }) => scaled && !marked && shares === 0),
+      ownGrids.length > 0 && off.length > 0,
+      [...ownGrids, ...off].every(({ scaled, marked }) => !scaled && !marked),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("marks each of low's stand-ins, each on its own grid with no masks there, for the camera passes' cap where the stand-ins' strides are not off, with no scale, but one whose hold or fade sets its edges' k (R14.T3.c's stand-ins)", async () => {
+    const lowStandInsOf = async (
+      standInStrides: GeometrySettings["standInStrides"],
+    ): Promise<
+      Array<{
+        readonly mask: boolean;
+        readonly marked: boolean;
+        readonly scaled: boolean;
+        readonly held: boolean;
+      }>
+    > => {
+      const made = await measuredPass(ERRORS, [], "low");
+      made.pass.setGeometry({ ...SETTINGS.low.geometry, standInStrides });
+      nearerUnbaked(made);
+      const per = INSTANCE_RECORD_BYTES / 4;
+      const words = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+      return stridesOf(made).flatMap(({ strideScale, quadrant }, k) => {
+        const subWord = words[k * per + INSTANCE_SUB_PATCH_WORD] ?? 0;
+        return subWord === 0
+          ? []
+          : [
+              {
+                mask: (subWord & TERRAIN_SUB_PATCH_MASK) !== 0,
+                marked: (quadrant & INSTANCE_SUB_GRID_STRIDES) !== 0,
+                scaled: strideScale.perErrorM > 0,
+                held:
+                  ((quadrant >>> 2) & 0xffff) !== 0 ||
+                  (words[k * per + 9] ?? 0) !== 0 ||
+                  (words[k * per + 10] ?? 0) !== 0,
+              },
+            ];
+      });
+    };
+    const all = await lowStandInsOf("all");
+    const ownGrids = await lowStandInsOf("own-grids");
+    const off = await lowStandInsOf("off");
+    expect([
+      all.length > 0 && ownGrids.length > 0 && off.length > 0,
+      [...all, ...ownGrids].some(({ held }) => !held),
+      [...all, ...ownGrids, ...off].some(({ mask, scaled }) => mask || scaled),
+      [...all, ...ownGrids].every(({ marked, held }) => marked === !held),
+      off.some(({ marked }) => marked),
+    ]).toEqual([true, true, false, true, false]);
   });
 
   /** Each measured interior record's slot, its holds at k = 0 and its onsets' shares word. */

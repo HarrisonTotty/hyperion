@@ -218,6 +218,22 @@ export interface GeometrySettings {
    * view's τ′ (`clusters/overCount.ts`; research-leans-42).
    */
   readonly terrainBudget: "patches" | "triangles";
+  /**
+   * R14.T3.c's stand-ins. `own-grids` draws each sub-patch stand-in on its own grid over its baked
+   * ancestor's triangles (`terrainPatch.wgsl`'s `sourceGridOf`: more than `TERRAIN_MASK_LEVELS`
+   * below it, or any where the masks are not drawn, as on low, which has no cluster casters) at the
+   * camera passes' cap up to 2^levels, wherever it is, but where a hold or a fade sets its edges'
+   * k: each stride's triangle lies in one of the ancestor's, so that it draws the surface stride 1
+   * draws but for the CDLOD morph's k between its vertices (`clusters/strides.ts`'
+   * `INSTANCE_SUB_GRID_STRIDES`). `all` strides the masks too, a stand-in one to three levels down
+   * drawn by its ancestor's own blocks (Design note 19): at that ancestor's scale, as a patch whose
+   * edges are its set's sides (`clusters/strides.ts`' remarks). The triangle budget reckons both as
+   * T3.e does. `own-grids` on both settings, where its acceptance passed: on high, which draws its
+   * stand-ins as masks, `all` failed the seamless probe's moves (a mask's vertex moved 4.8 px in a
+   * frame as the slewed τ′'s scale swept its band, against 1 px), and low draws no mask. `off`, as before: every stand-in at stride 1. Read
+   * where the strides are on.
+   */
+  readonly standInStrides: "off" | "own-grids" | "all";
 }
 
 /**
@@ -246,6 +262,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   occlusion: "off",
   shading: "forward",
   terrainBudget: "patches",
+  standInStrides: "off",
 };
 
 /**
@@ -425,6 +442,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       occlusion: "off",
       shading: "forward",
       terrainBudget: "triangles",
+      standInStrides: "own-grids",
     },
     decoration: true,
     scatterDensity: 1,
@@ -475,6 +493,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       occlusion: "off",
       shading: "forward",
       terrainBudget: "triangles",
+      standInStrides: "own-grids",
     },
     decoration: false,
     scatterDensity: 0,

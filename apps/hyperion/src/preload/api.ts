@@ -262,6 +262,11 @@ export interface GeometryOverride {
   readonly shading?: "forward" | "visibility";
   /** R14.T3.e: the lit pass's selection budget, its patches alone or its lit triangles too. */
   readonly terrainBudget?: "patches" | "triangles";
+  /**
+   * R14.T3.c's stand-ins: every sub-patch stand-in at stride 1, those on their own grids at the
+   * camera's cap, or the masks strided too.
+   */
+  readonly standInStrides?: "off" | "own-grids" | "all";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

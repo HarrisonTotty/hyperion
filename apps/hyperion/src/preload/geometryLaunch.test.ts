@@ -77,6 +77,27 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
+  it("reads and writes the stand-ins' strides, last in the fields' order (R14.T3.c's stand-ins)", () => {
+    const override = parseGeometryOverride("standInStrides=off,terrainBudget=patches");
+    expect([
+      override,
+      geometryText(override),
+      parseGeometryOverride("standInStrides=own-grids"),
+      parseGeometryOverride("standInStrides=all"),
+    ]).toEqual([
+      { standInStrides: "off", terrainBudget: "patches" },
+      "terrainBudget=patches,standInStrides=off",
+      { standInStrides: "own-grids" },
+      { standInStrides: "all" },
+    ]);
+  });
+
+  it("refuses stand-ins' strides other than off, own-grids or all (R14.T3.c's stand-ins)", () => {
+    for (const text of ["standInStrides=masks", "standInStrides=deep", "standInStrides="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("standInStrides is off, own-grids or all");
+    }
+  });
+
   it("refuses an occlusion other than off or hzb (R14.T3.d)", () => {
     for (const text of ["occlusion=none", "occlusion=on", "occlusion="]) {
       expect(() => parseGeometryOverride(text)).toThrow("occlusion is off or hzb");

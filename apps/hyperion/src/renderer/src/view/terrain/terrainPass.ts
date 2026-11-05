@@ -4653,6 +4653,9 @@ export class TerrainPass {
         device.clusterShadowMaterial !== null);
     // The camera's strides (plan R14, R14.T3.c): each patch's scale and its edges' shared bands.
     const strides = this.#stridesOn() && this.#litClustersReady(device, state, forms);
+    // The stand-ins' strides (`GeometrySettings.standInStrides`): those on their own grids at the
+    // camera passes' cap, and the masks by their slot's patch's scale (`#sharedStridesOf`).
+    const subGridStrides = strides && this.#geometry.standInStrides !== "off";
     // The class sets a lit pass's patches take (lane fix-coast-class-map), none on another shading.
     const classSets = lit ? input.classSets : undefined;
     const patchM = finestPatchSizeM(this.#planet);
@@ -4724,9 +4727,15 @@ export class TerrainPass {
         });
         // Every measured patch takes its scale, whichever path draws it, and its edges' bands shared
         // with the patches beside, so that a vertex it shares is placed alike; a camera pass draws
-        // the forced region's at stride 1. A sub-patch stand-in takes none: its edges are not its
-        // slot's patch's, so it draws at stride 1.
-        const scale = strides ? (state.strideScales[n] ?? NO_STRIDE_SCALE) : NO_STRIDE_SCALE;
+        // the forced region's at stride 1. A sub-patch stand-in's edges are not its slot's patch's:
+        // a mask takes that patch's scale where `standInStrides` is `all`, its set's sides in its
+        // edges' place (`clusters/strides.ts`), else none, at stride 1; and one on its own grid
+        // none, drawn at the camera passes' cap where `standInStrides` is not `off`, its triangles
+        // nesting in its slot's patch's (`INSTANCE_SUB_GRID_STRIDES`), but where a hold or a fade
+        // sets its edges' k apart from its CDLOD k, which a stride would spread inwards.
+        const ownGrid = within !== null && !masked;
+        const scale =
+          strides && !ownGrid ? (state.strideScales[n] ?? NO_STRIDE_SCALE) : NO_STRIDE_SCALE;
         const at = strides ? (state.strideAt[n] ?? -1) : -1;
         const edgeBands = at < 0 ? NO_STRIDE_EDGE_BANDS : state.strideEdges.edgesOf(at);
         const holdFades = at < 0 ? 0 : (state.strideHoldWords[n] ?? 0);
@@ -4759,6 +4768,13 @@ export class TerrainPass {
           finest,
           edgeBands,
           holdFades,
+          subGridStrides &&
+            inner &&
+            ownGrid &&
+            !finest &&
+            instanceHolds === 0 &&
+            edgeFades === 0 &&
+            cornerFades === 0,
         );
         if (classSets !== undefined) {
           // The ancestor of the field's cells' level: the patch itself at that level, none coarser.
@@ -5957,11 +5973,12 @@ export class TerrainPass {
    * ViewState.bandTauPx}, Design note 3's reached at most {@link BAND_SLEW_PER_STEP} a step, as the
    * morph bands are, so that a jump of the budget's τ′ re-morphs no stride at once; lean,
    * 2026-11-04) over its viewport's px per radian, W ÷ (2 tan(fov_h ÷
-   * 2)) as `screenSpaceErrorPx` takes it, none for a sub-patch or an unmeasured bake; and its
-   * patches' edges' shared bands over them, the area each draws at the level it draws it, beside a
-   * patch that is not measured the larger of its own need and its level's largest error's
-   * (`StrideEdges`); and the onsets of its holds at k = 0 (`holds`, the draw set's), faded
-   * (`StrideHoldFades`).
+   * 2)) as `screenSpaceErrorPx` takes it, none for an unmeasured bake, nor for a sub-patch but where
+   * the stand-ins' masks stride (`GeometrySettings.standInStrides` `all`), when it takes its slot's
+   * patch's, a mask's (`#write`); and its patches' edges' shared bands over them, the area each
+   * draws at the level it draws it, beside a patch that is not measured (a sub-patch among them)
+   * the larger of its own need and its level's largest error's (`StrideEdges`); and the onsets of
+   * its whole patches' holds at k = 0 (`holds`, the draw set's), faded (`StrideHoldFades`).
    */
   #sharedStridesOf(
     device: Device,
@@ -5976,6 +5993,7 @@ export class TerrainPass {
     const toleranceRad = (state.bandTauPx ?? state.targetTauPx ?? 0) / pxPerRad;
     const scales = state.strideScales;
     scales.length = drawSet.count;
+    const masks = this.#geometry.standInStrides === "all";
     const patches: StrideEdgePatch[] = [];
     const largest = new Map<number, [number, number, number]>();
     for (let n = 0; n < drawSet.count; n += 1) {
@@ -5989,18 +6007,22 @@ export class TerrainPass {
       const errors = device.residents.get(drawn.keyString)?.strideErrors ?? null;
       const level = patch.key.level;
       const scale =
-        within === null && errors !== null
+        (within === null || masks) && errors !== null
           ? patchStrideScale(this.#planet, level, toleranceRad)
           : null;
       scales[n] = scale;
       state.strideAt[n] = patches.length;
+      // A sub-patch shares no edge with the patches beside it, as one unmeasured.
+      const measured = within === null ? scale : null;
       patches.push({
         key: within ?? patch.key,
         level,
         measured:
-          scale === null || errors === null ? null : { scale, clusterErrors: errors.clusterErrors },
+          measured === null || errors === null
+            ? null
+            : { scale: measured, clusterErrors: errors.clusterErrors },
       });
-      if (scale !== null && errors !== null) {
+      if (measured !== null && errors !== null) {
         const most = largest.get(level) ?? [0, 0, 0];
         errors.largestM.forEach((e, l) => {
           most[l] = Math.max(most[l] ?? 0, e);
@@ -6014,7 +6036,7 @@ export class TerrainPass {
       const at = state.strideAt[n] ?? -1;
       const drawn = drawSet.patches[n];
       state.strideHoldWords[n] =
-        at < 0 || drawn === undefined || scales[n] === null
+        at < 0 || drawn === undefined || drawn.within !== null || scales[n] === null
           ? 0
           : state.strideHoldFades.fade(
               drawn.keyString,

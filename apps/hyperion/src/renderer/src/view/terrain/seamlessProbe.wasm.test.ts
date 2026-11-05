@@ -29,13 +29,19 @@ import {
   pyramidProjectionOf,
 } from "../clusters/hzb";
 import { CLUSTER_RECORD_BYTES, type ClusterRecord } from "../clusters/record";
-import { TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
+import {
+  TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_SUB_PATCH_MASK,
+  terrainMaskCluster,
+} from "../clusters/terrain";
 import {
   clusterStrideBandsM,
   EDGE_BANDS,
   edgeBandMOfHalf,
   INSTANCE_FINEST,
+  INSTANCE_SUB_GRID_STRIDES,
   largestStrideErrorsM,
+  maskStripBlock,
   NO_STRIDE_BAND,
   STRIDE_BAND_FRACTION,
   type StrideBandsM,
@@ -187,6 +193,10 @@ import type { WorkerLike } from "./workers/pool";
  *   lit cache's bytes (`TerrainSessionOptions.litTerrain`), its slots and so `maxPatches` with
  *   them; and `SEAM_BUDGET` (`patches` or `triangles`) is the passes'
  *   `GeometrySettings.terrainBudget`, the setting's unset.
+ * - `SEAM_STAND_INS` (`off`, `own-grids` or `all`; R14.T3.c's stand-ins): the passes'
+ *   `GeometrySettings.standInStrides`, the setting's unset. Where the masks stride, the strides'
+ *   measure takes each stand-in's mask's blocks as a whole patch's, its slot's patch's grid, by the
+ *   mask's bands.
  */
 const SLOW = import.meta.env["HYPERION_SLOW_TESTS"] === "1";
 
@@ -253,6 +263,11 @@ const COUNT_STRIDE = Math.max(1, Math.round(numberKnob("SEAM_COUNT_STRIDE", 4)))
 const CACHE_SCALE = Math.max(0.1, numberKnob("SEAM_CACHE_SCALE", 1));
 const BUDGET_KNOB = knob("SEAM_BUDGET");
 const BUDGET = BUDGET_KNOB === "patches" || BUDGET_KNOB === "triangles" ? BUDGET_KNOB : null;
+const STAND_INS_KNOB = knob("SEAM_STAND_INS");
+const STAND_INS =
+  STAND_INS_KNOB === "off" || STAND_INS_KNOB === "own-grids" || STAND_INS_KNOB === "all"
+    ? STAND_INS_KNOB
+    : null;
 
 /** The settings the slow run plays: `SEAM_SETTING`'s alone, or both. */
 function settingsPlayed(): QualitySetting[] {
@@ -590,6 +605,8 @@ interface DrawnInstance {
   readonly words: string;
   /** A sub-patch's levels below its slot's patch and its part (i, j) there; 0 for the whole. */
   readonly levels: number;
+  /** Its sub-patch word (word 8), bit 31 a stand-in's mask's (`TERRAIN_SUB_PATCH_MASK`). */
+  readonly subWord: number;
   readonly partI: number;
   readonly partJ: number;
   readonly startM: number;
@@ -668,6 +685,7 @@ function instancesOf(
         slot: word(3),
         words: SURFACE_WORDS.map(word).join(),
         levels,
+        subWord: part,
         partI,
         partJ,
         startM: f[base + 4] ?? 0,
@@ -1027,17 +1045,21 @@ const BLOCK_TRIANGLES = 128;
  * whole run's do.
  */
 class StrideFrames {
+  /** Each bake's instances of the frame before, by their sub-patch words: 0 its whole patch's. */
   readonly #before = new WeakMap<
     BakedPatch,
-    {
-      readonly strides: Uint8Array;
-      readonly strideScale: StrideScale;
-      readonly edgeBandsM: Float64Array;
-      readonly quadrantWord: number;
-      readonly holdFadesWord: number;
-      /** The frame that drew it, its number from the script's start. */
-      readonly frame: number;
-    }
+    Map<
+      number,
+      {
+        readonly strides: Uint8Array;
+        readonly strideScale: StrideScale;
+        readonly edgeBandsM: Float64Array;
+        readonly quadrantWord: number;
+        readonly holdFadesWord: number;
+        /** The frame that drew it, its number from the script's start. */
+        readonly frame: number;
+      }
+    >
   >();
   readonly frames: StrideFrame[] = [];
 
@@ -1082,9 +1104,14 @@ class StrideFrames {
     let litTriangles = 0;
     let litTrianglesAtStride1 = 0;
     for (const inst of drawn.values()) {
-      if (inst.levels !== 0 || inst.held.bake.clusterErrors === undefined) {
+      // A stand-in's mask draws its slot's patch's own blocks of its set, on that patch's grid.
+      const masked = inst.onPath && (inst.subWord & TERRAIN_SUB_PATCH_MASK) !== 0;
+      if ((inst.levels !== 0 && !masked) || inst.held.bake.clusterErrors === undefined) {
         continue;
       }
+      const grid: DrawnInstance = masked
+        ? { ...inst, area: inst.held.key, levels: 0, partI: 0, partJ: 0 }
+        : inst;
       const { slot } = inst;
       const origin = inst.held.bake.originM;
       const own = inst.held.bake.clusterErrors;
@@ -1103,7 +1130,7 @@ class StrideFrames {
       });
       for (let block = 0; block < 64; block += 1) {
         const sphere = records.sphere(slot, block);
-        if (sphere === null) {
+        if (sphere === null || terrainMaskCluster(inst.subWord, block) === "none") {
           strides[block] = 1;
           continue;
         }
@@ -1125,6 +1152,7 @@ class StrideFrames {
             edgeBandsM: inst.edgeBandsM,
             quadrantWord: inst.quadrantWord,
             holdFadesWord: inst.holdFadesWord,
+            subWord: inst.subWord,
           },
           { records: recordOf, clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE },
           centre,
@@ -1136,9 +1164,11 @@ class StrideFrames {
         }
         const up = spheroidNormal(
           figure,
-          vertexDir(inst.area, 8 * (block % 8) + 4, 8 * Math.floor(block / 8) + 4),
+          vertexDir(grid.area, 8 * (block % 8) + 4, 8 * Math.floor(block / 8) + 4),
         );
-        if (onScreen(cam, centre, vec3(up[0], up[1], up[2]))) {
+        // The lit triangles of whole patches alone, as T3.a's share counted them; a mask's are the
+        // budget's counts' (`BudgetFrames`).
+        if (!masked && onScreen(cam, centre, vec3(up[0], up[1], up[2]))) {
           litTriangles += BLOCK_TRIANGLES / (1 << level) ** 2;
           litTrianglesAtStride1 += BLOCK_TRIANGLES;
           const statedM = selectionErrorM(planet, inst.held.key.level);
@@ -1147,7 +1177,13 @@ class StrideFrames {
           litTrianglesOwn += BLOCK_TRIANGLES / (1 << bareLevel(statedM, ownErrors, nearestM)) ** 2;
           litTrianglesPatch +=
             BLOCK_TRIANGLES / (1 << bareLevel(statedM, patchErrors, nearestM)) ** 2;
-          const shared = clusterStrideBandsM(inst.strideScale, own, inst.edgeBandsM, block);
+          const shared = clusterStrideBandsM(
+            inst.strideScale,
+            own,
+            inst.edgeBandsM,
+            block,
+            inst.subWord,
+          );
           let sharedLevel = 0;
           while (sharedLevel < 3) {
             const band = shared[sharedLevel] ?? NO_STRIDE_BAND;
@@ -1159,8 +1195,13 @@ class StrideFrames {
           litTrianglesShared += BLOCK_TRIANGLES / (1 << sharedLevel) ** 2;
         }
       }
-      const was = this.#before.get(inst.held.bake);
-      this.#before.set(inst.held.bake, {
+      let instances = this.#before.get(inst.held.bake);
+      if (instances === undefined) {
+        instances = new Map();
+        this.#before.set(inst.held.bake, instances);
+      }
+      const was = instances.get(inst.subWord);
+      instances.set(inst.subWord, {
         strides,
         strideScale: inst.strideScale,
         edgeBandsM: inst.edgeBandsM,
@@ -1192,8 +1233,8 @@ class StrideFrames {
           0,
         );
       const place = (x: number, y: number): number[] => {
-        const [h, k] = surfaces.vertex(inst, x, y);
-        const p = surfacePoint(figure, vertexDir(inst.area, x, y), h);
+        const [h, k] = surfaces.vertex(grid, x, y);
+        const p = surfacePoint(figure, vertexDir(grid.area, x, y), h);
         return [p[0], p[1], p[2], k];
       };
       // Each frame's surface by its own holds and their onsets' shares.
@@ -1212,7 +1253,7 @@ class StrideFrames {
             level,
             state.quadrantWord,
             state.holdFadesWord,
-            vertexStrideBandM(state.strideScale, own, state.edgeBandsM, x, y, level),
+            vertexStrideBandM(state.strideScale, own, state.edgeBandsM, x, y, level, inst.subWord),
             d,
           );
         };
@@ -1228,7 +1269,10 @@ class StrideFrames {
           (block % 8 === 7 ? 2 : 0) |
           (block < 8 ? 4 : 0) |
           (block >= 56 ? 8 : 0);
-        if (sNow === sThen && !bandsMoved && (blockEdges & heldMoved) === 0) {
+        if (
+          (sNow === sThen && !bandsMoved && (blockEdges & heldMoved) === 0) ||
+          terrainMaskCluster(inst.subWord, block) === "none"
+        ) {
           continue;
         }
         measured += 1;
@@ -1277,7 +1321,7 @@ class StrideFrames {
             const now = surface(morphedNow, nowFactor, sNow, lx, ly);
             const then = surface(morphedThen, thenFactor, sThen, lx, ly);
             const rel = sub(vec3(now[0] ?? 0, now[1] ?? 0, now[2] ?? 0), cam.positionM);
-            const dir = vertexDir(inst.area, bx + lx, by + ly);
+            const dir = vertexDir(grid.area, bx + lx, by + ly);
             const up = spheroidNormal(figure, dir);
             if (!onScreen(cam, rel, vec3(up[0], up[1], up[2]))) {
               continue;
@@ -1299,11 +1343,19 @@ class StrideFrames {
               }): number =>
                 level >= 3
                   ? NO_STRIDE_BAND
-                  : vertexStrideBandM(state.strideScale, own, state.edgeBandsM, x, y, level);
+                  : vertexStrideBandM(
+                      state.strideScale,
+                      own,
+                      state.edgeBandsM,
+                      x,
+                      y,
+                      level,
+                      inst.subWord,
+                    );
               worst = {
                 tS,
                 movePx: movedPx,
-                patch: patchKeyString(inst.held.key),
+                patch: patchKeyString(inst.area),
                 block,
                 x,
                 y,
@@ -1516,6 +1568,15 @@ interface BudgetFrame {
   readonly litTrianglesAtStride1: number;
   readonly litAtStride1Only: number;
   /**
+   * `litAtStride1Only` by why each instance draws at stride 1: a stand-in's mask one to three levels
+   * down, with no scale (`masks`), a stand-in's own grid on the path, not at the cap (`ownGrid`;
+   * low's every stand-in, which has no masks), the lit mesh's whole grid of a whole patch
+   * (`litMesh`) and of a stand-in (`litMeshStandIns`, an edge bake's), the forced region
+   * (`forced`), a whole patch or a mask whose heights fade, kept whole (`fading`), and one with no
+   * measured errors or scale (`unscaled`).
+   */
+  readonly atStride1By: StrideOneCauses;
+  /**
    * The primary view's lit triangles as the triangle budget reckoned its last selection
    * (`Selection.litTriangles`), `NaN` without a budget.
    */
@@ -1532,6 +1593,28 @@ interface BudgetFrame {
   readonly stepMs: number;
   readonly drawMs: number;
 }
+
+/** A frame's lit triangles at stride 1 alone, by cause ({@link BudgetFrame.atStride1By}). */
+interface StrideOneCauses {
+  readonly masks: number;
+  readonly ownGrid: number;
+  readonly litMesh: number;
+  readonly litMeshStandIns: number;
+  readonly forced: number;
+  readonly fading: number;
+  readonly unscaled: number;
+}
+
+/** {@link StrideOneCauses}' causes, in their order. */
+const STRIDE_ONE_CAUSES = [
+  "masks",
+  "ownGrid",
+  "litMesh",
+  "litMeshStandIns",
+  "forced",
+  "fading",
+  "unscaled",
+] as const;
 
 /** A lit-mesh template's triangles a skirt strip at stride 1 (`clusters/templates.ts`): 16 ÷ s at s. */
 const STRIP_TRIANGLES = 16;
@@ -1576,7 +1659,7 @@ class BudgetFrames {
     drawn: ReadonlyMap<string, DrawnInstance>,
     figures: Omit<
       BudgetFrame,
-      "altitudeM" | "litTriangles" | "litTrianglesAtStride1" | "litAtStride1Only"
+      "altitudeM" | "litTriangles" | "litTrianglesAtStride1" | "litAtStride1Only" | "atStride1By"
     >,
   ): void {
     const { figure } = planet;
@@ -1584,18 +1667,46 @@ class BudgetFrames {
     let litTriangles = 0;
     let litTrianglesAtStride1 = 0;
     let litAtStride1Only = 0;
+    const causes = {
+      masks: 0,
+      ownGrid: 0,
+      litMesh: 0,
+      litMeshStandIns: 0,
+      forced: 0,
+      fading: 0,
+      unscaled: 0,
+    };
     for (const inst of drawn.values()) {
       const { slot } = inst;
       const origin = inst.held.bake.originM;
       const own = inst.held.bake.clusterErrors;
-      const masked = inst.onPath && inst.levels >= 1 && inst.levels <= 3;
+      // A stand-in's mask of its slot's patch's own blocks (bit 31), or a sub-patch on its own grid
+      // over its slot's patch's triangles, a mask's levels or deeper (`sourceGridOf`): low draws no
+      // mask, having no cluster casters (`TerrainPass`' masks).
+      const masked = inst.onPath && (inst.subWord & TERRAIN_SUB_PATCH_MASK) !== 0;
+      const ownGrid = inst.levels > 0 && !masked;
       const side = inst.levels <= 3 ? 8 >> inst.levels : 1;
       const b0x =
         inst.levels <= 3 ? inst.partI * side : Math.floor((8 * inst.partI) / 2 ** inst.levels);
       const b0y =
         inst.levels <= 3 ? inst.partJ * side : Math.floor((8 * inst.partJ) / 2 ** inst.levels);
+      // A record whose heights fade is kept whole by the cull, at stride 1.
+      const fading = inst.rebakeFade > 0;
+      // A mask by its bands where it has its slot's patch's scale (`GeometrySettings.standInStrides`).
       const strided =
-        inst.onPath && inst.levels === 0 && own !== undefined && inst.strideScale.perErrorM > 0;
+        inst.onPath &&
+        (inst.levels === 0 || masked) &&
+        own !== undefined &&
+        inst.strideScale.perErrorM > 0 &&
+        !fading;
+      // A stand-in on its own grid at the camera passes' cap up to its levels, wherever it is.
+      const ownGridLevel =
+        inst.onPath &&
+        ownGrid &&
+        (inst.quadrantWord & INSTANCE_SUB_GRID_STRIDES) !== 0 &&
+        (inst.quadrantWord & INSTANCE_FINEST) === 0
+          ? Math.min(3, inst.levels)
+          : 0;
       const recordOf = (_page: number, c: number): ClusterRecord =>
         c < 64
           ? {
@@ -1619,7 +1730,7 @@ class BudgetFrames {
               material: 0,
             };
       // The clusters it draws: a whole patch's 64 blocks and 32 strips, a mask's own blocks and its
-      // strips along its set's sides, or the one block of a deeper sub-patch's area.
+      // strips along its set's sides; a sub-patch on its own grid is seen by its area's blocks.
       const clusters: number[] = [];
       for (let by = b0y; by < b0y + side; by += 1) {
         for (let bx = b0x; bx < b0x + side; bx += 1) {
@@ -1641,7 +1752,11 @@ class BudgetFrames {
       let instanceTriangles = 0;
       let instanceAtStride1 = 0;
       for (const c of clusters) {
-        const sphere = records.sphere(slot, c);
+        // A mask's strip hangs from its block at its set's side, and takes its stride at that
+        // block's sphere, as the cull does (`cull.ts`' `strideRecordOf`).
+        const block = maskStripBlock(inst.subWord, c);
+        const at = block < 0 ? c : block;
+        const sphere = records.sphere(slot, at);
         if (sphere === null) {
           continue;
         }
@@ -1650,7 +1765,8 @@ class BudgetFrames {
           origin.y + sphere.centreM.y - cam.positionM.y,
           origin.z + sphere.centreM.z - cam.positionM.z,
         );
-        const place = c < 64 ? { x: 8 * (c % 8) + 4, y: 8 * Math.floor(c / 8) + 4 } : stripOf(c);
+        const place =
+          at < 64 ? { x: 8 * (at % 8) + 4, y: 8 * Math.floor(at / 8) + 4 } : stripOf(at);
         const up = spheroidNormal(figure, vertexDir(inst.held.key, place.x, place.y));
         if (!onScreen(cam, centre, vec3(up[0], up[1], up[2]))) {
           continue;
@@ -1677,6 +1793,7 @@ class BudgetFrames {
                 edgeBandsM: inst.edgeBandsM,
                 quadrantWord: inst.quadrantWord,
                 holdFadesWord: inst.holdFadesWord,
+                subWord: inst.subWord,
               },
               { records: recordOf, clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE },
               centre,
@@ -1686,16 +1803,35 @@ class BudgetFrames {
           c < 64 ? BLOCK_TRIANGLES / (1 << level) ** 2 : STRIP_TRIANGLES / (1 << level);
         instanceAtStride1 += c < 64 ? BLOCK_TRIANGLES : STRIP_TRIANGLES;
       }
-      if (!inst.onPath || inst.levels > 3) {
-        // The lit mesh, or a deeper sub-patch's own grid, whole wherever any of it is on screen.
-        const whole = 64 * BLOCK_TRIANGLES + 32 * STRIP_TRIANGLES;
-        instanceTriangles = seenBlocks > 0 ? whole : 0;
-        instanceAtStride1 = instanceTriangles;
+      if (!inst.onPath || ownGrid) {
+        // The lit mesh, or a sub-patch's own grid, whole wherever any of it is on screen, at the
+        // cap up to its levels where it takes it.
+        const seen = seenBlocks > 0;
+        const l = ownGridLevel;
+        instanceTriangles = seen
+          ? 64 * (BLOCK_TRIANGLES / 4 ** l) + 32 * (STRIP_TRIANGLES / 2 ** l)
+          : 0;
+        instanceAtStride1 = seen ? 64 * BLOCK_TRIANGLES + 32 * STRIP_TRIANGLES : 0;
       }
       litTriangles += instanceTriangles;
       litTrianglesAtStride1 += instanceAtStride1;
-      if (!strided || (inst.quadrantWord & INSTANCE_FINEST) !== 0) {
+      if ((!strided && ownGridLevel === 0) || (inst.quadrantWord & INSTANCE_FINEST) !== 0) {
         litAtStride1Only += instanceTriangles;
+        const cause: keyof StrideOneCauses =
+          (inst.quadrantWord & INSTANCE_FINEST) !== 0
+            ? "forced"
+            : !inst.onPath
+              ? inst.levels > 0
+                ? "litMeshStandIns"
+                : "litMesh"
+              : fading && !ownGrid
+                ? "fading"
+                : masked
+                  ? "masks"
+                  : ownGrid
+                    ? "ownGrid"
+                    : "unscaled";
+        causes[cause] += instanceTriangles;
       }
     }
     const r = norm(cam.positionM);
@@ -1709,6 +1845,7 @@ class BudgetFrames {
       litTriangles,
       litTrianglesAtStride1,
       litAtStride1Only,
+      atStride1By: causes,
     });
   }
 }
@@ -1782,6 +1919,9 @@ function budgetSummaryOf(frames: ReadonlyArray<BudgetFrame>): Record<string, unk
             litTriangles: pick((f) => f.litTriangles),
             litTrianglesAtStride1: pick((f) => f.litTrianglesAtStride1),
             litAtStride1Only: pick((f) => f.litAtStride1Only),
+            atStride1By: Object.fromEntries(
+              STRIDE_ONE_CAUSES.map((cause) => [cause, pick((f) => f.atStride1By[cause])]),
+            ),
             litShare: at1 > 0 ? lit / at1 : null,
             reckonedTriangles: reckoned.length === 0 ? null : pick((f) => f.reckonedTriangles),
             // The most the drawn passed the reckoned in a frame, and the frames it did.
@@ -2474,13 +2614,14 @@ async function play(options: ProbeOptions): Promise<Played> {
     ...(LOOKAHEAD ? { lookaheadClockMs: () => Date.now() } : {}),
     morphInMs: MORPH_MS,
     ...budgetHoldKnob(),
-    ...(strideWindow === null && BUDGET === null
+    ...(strideWindow === null && BUDGET === null && STAND_INS === null
       ? {}
       : {
           geometry: {
             ...SETTINGS[setting].geometry,
             ...(strideWindow === null ? {} : { strides: "measured" }),
             ...(BUDGET === null ? {} : { terrainBudget: BUDGET }),
+            ...(STAND_INS === null ? {} : { standInStrides: STAND_INS }),
           },
         }),
     ...(CACHE_SCALE === 1
@@ -3180,6 +3321,7 @@ const PLAY_KNOBS = JSON.stringify({
   budgetHold: knob("SEAM_BUDGET_HOLD") ?? null,
   draftShare: DRAFT_SHARE,
   lookahead: LOOKAHEAD,
+  standIns: STAND_INS,
 });
 
 /** A segment's figures as `scripts/seamSegments.mjs` keeps them. */

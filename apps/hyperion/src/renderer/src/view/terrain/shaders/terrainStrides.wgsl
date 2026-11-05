@@ -142,10 +142,67 @@ fn stride_side_band(a : f32, b : f32) -> f32 {
   return select(-1.0, min(a, b), a > 0.0 && b > 0.0);
 }
 
+// `clusters/terrain.ts`' TERRAIN_SUB_PATCH_MASK: a sub-patch word's bit of a stand-in's mask.
+const STRIDE_SUB_PATCH_MASK : u32 = 0x80000000u;
+
+// The first block and the last of the set of blocks a mask of sub-patch word `sub` draws, (bx0,
+// by0, bx1, by1) (`strides.ts`' `maskSetOf`).
+fn stride_mask_set(sub : u32) -> vec4u {
+  let side = 8u >> (sub & 31u);
+  let b0 = vec2u((sub >> 5u) & 0x1fffu, (sub >> 18u) & 0x1fffu) * side;
+  return vec4u(b0, b0 + vec2u(side - 1u));
+}
+
+// The band of block (bx, by) of `inst`'s mask, its set's first and last blocks `blocks`
+// (`stride_mask_set`), as the vertices inside it take it (`strides.ts`' `maskBlockVertexBandM`):
+// `stride_block_band`'s, of the blocks on its sides in its set alone. (`set` is WGSL's reserved.)
+fn stride_mask_block_band(inst : Instance, blocks : vec4u, bx : u32, by : u32, level : u32) -> f32 {
+  let block = 8u * by + bx;
+  var band = stride_need(inst, block, level);
+  if (band <= 0.0) {
+    return -1.0;
+  }
+  if (bx > blocks.x) {
+    band = stride_part(band, stride_need(inst, block - 1u, level));
+  }
+  if (bx < blocks.z) {
+    band = stride_part(band, stride_need(inst, block + 1u, level));
+  }
+  if (by > blocks.y) {
+    band = stride_part(band, stride_need(inst, block - 8u, level));
+  }
+  if (by < blocks.w) {
+    band = stride_part(band, stride_need(inst, block + 8u, level));
+  }
+  return band;
+}
+
+// The band of grid vertex (x, y) of `inst`'s mask at morph level `level` (`strides.ts`'
+// `maskVertexBandM`): on its set's side its one block's there, else as a patch's inside it.
+fn stride_mask_band(inst : Instance, x : u32, y : u32, level : u32) -> f32 {
+  let blocks = stride_mask_set(inst.sub.x);
+  let bx = min(x / 8u, blocks.z);
+  let by = min(y / 8u, blocks.w);
+  let band = stride_mask_block_band(inst, blocks, bx, by, level);
+  if (x == 8u * blocks.x || x == 8u * blocks.z + 8u || y == 8u * blocks.y || y == 8u * blocks.w + 8u) {
+    return band;
+  }
+  if (x % 8u == 0u) {
+    return stride_side_band(band, stride_mask_block_band(inst, blocks, bx - 1u, by, level));
+  }
+  if (y % 8u == 0u) {
+    return stride_side_band(band, stride_mask_block_band(inst, blocks, bx, by - 1u, level));
+  }
+  return band;
+}
+
 // The band of `inst`'s grid vertex (x, y) at morph level `level` (`strides.ts`' `vertexStrideBandM`):
 // on a patch's edge its shared band there, on a block's side the smaller of its two blocks' bands,
-// else its block's.
+// else its block's; of a stand-in's mask, its set's sides in its edges' place (`stride_mask_band`).
 fn stride_band(inst : Instance, x : u32, y : u32, level : u32) -> f32 {
+  if ((inst.sub.x & STRIDE_SUB_PATCH_MASK) != 0u) {
+    return stride_mask_band(inst, x, y, level);
+  }
   if (x == 0u || x == 64u || y == 0u || y == 64u) {
     let edge = select(select(select(3u, 2u, y == 0u), 1u, x == 64u), 0u, x == 0u);
     return stride_edge_band(inst, edge, min(select(x, y, edge < 2u) / 8u, 7u), level);
@@ -230,8 +287,8 @@ fn stride_node(
 }
 
 // Where vertex `grid` of `instance` stands under the stride morph: `lit_place`'s, moved (see the
-// module's head). A sub-patch, a material without the morph and an instance without bands keep
-// `lit_place`'s.
+// module's head). A sub-patch on its own grid (not a mask), a material without the morph and an
+// instance without bands keep `lit_place`'s.
 fn stride_place(grid : vec3f, instance : u32) -> LitPlace {
   var own = lit_place(grid, instance);
   if (!STRIDE_MORPH) {
@@ -241,7 +298,8 @@ fn stride_place(grid : vec3f, instance : u32) -> LitPlace {
   let x = u32(grid.x);
   let y = u32(grid.y);
   let level = stride_morph_level(x, y);
-  if (inst.strides.y <= 0.0 || (inst.sub.x & 31u) != 0u || level >= STRIDE_MORPH_LEVELS) {
+  let ownGrid = (inst.sub.x & 31u) != 0u && (inst.sub.x & STRIDE_SUB_PATCH_MASK) == 0u;
+  if (inst.strides.y <= 0.0 || ownGrid || level >= STRIDE_MORPH_LEVELS) {
     return own;
   }
   let k0 = stride_factor(inst, level, x, y, own.vertex.fromCameraM);

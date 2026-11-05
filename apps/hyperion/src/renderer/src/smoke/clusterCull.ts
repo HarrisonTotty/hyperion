@@ -52,6 +52,7 @@ import {
 } from "../view/clusters/compact";
 import {
   CLUSTER_CULL_KERNEL,
+  CULL_INPUT_WHOLE,
   cullMarksTwin,
   cullOverTwin,
   cullTwin,
@@ -80,6 +81,7 @@ import {
   edgeBandHalf,
   heldEdgeBandsM,
   INSTANCE_FINEST,
+  INSTANCE_SUB_GRID_STRIDES,
   NO_STRIDE_BAND,
   NO_STRIDE_SCALE,
   type StrideScale,
@@ -92,6 +94,11 @@ import { frustumOf } from "../view/terrain/cull";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { BufferHandle, ComputeHandle, RenderEngine } from "../view/engine/types";
 import type { Checks } from "./harness";
+
+/** Whether the check's instance `n` is a sub-patch on its own grid (R14.T3.c's stand-ins). */
+function smokeOwnGrid(n: number): boolean {
+  return n % 7 !== 3 && n % 11 === 6;
+}
 
 /**
  * The check's instances, pages, clusters a page and passes: four cascades, a camera, and the lit
@@ -323,7 +330,9 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       // The edges' bands as the record holds them and the kernel reads them back.
       edgeBandsM: heldEdgeBandsM(bandsM),
       // Every fifth instance at stride 1 (the forced region's), every third's edges at most at 4.
-      // Every seventh a mask one to three levels down at a random part.
+      // Every seventh a mask one to three levels down at a random part; of the rest every eleventh
+      // a sub-patch on its own grid four to six down, kept whole and at its camera passes' cap
+      // (R14.T3.c's stand-ins).
       subWord:
         n % 7 === 3
           ? (TERRAIN_SUB_PATCH_MASK |
@@ -333,9 +342,17 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
                 Math.floor(nextStride() * 2 ** (1 + (n % 3))),
               )) >>>
             0
-          : 0,
+          : smokeOwnGrid(n)
+            ? subPatchWord(
+                4 + (n % 3),
+                Math.floor(nextStride() * 2 ** (4 + (n % 3))),
+                Math.floor(nextStride() * 2 ** (4 + (n % 3))),
+              )
+            : 0,
+      whole: smokeOwnGrid(n),
       quadrantWord:
         (n % 5 === 0 ? INSTANCE_FINEST : 0) |
+        (smokeOwnGrid(n) ? INSTANCE_SUB_GRID_STRIDES : 0) |
         (n % 3 === 0 ? Math.floor(nextStride() * 16) << 2 : 0),
       // Every fourth's edges fading in or out at random, each byte 0 or 1 to 255.
       holdFadesWord:
@@ -468,7 +485,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       for (let h = 0; h < EDGE_BANDS; h += 1) {
         words.setUint16(bytes * n + 80 + 2 * h, edgeBandHalf(instance.bandsM[h] ?? -1), true);
       }
-      inputs[2 * n] = instance.passMask;
+      inputs[2 * n] = (instance.passMask | (instance.whole ? CULL_INPUT_WHOLE : 0)) >>> 0;
       inputs[2 * n + 1] = new Uint32Array(Float32Array.of(instance.unitM).buffer)[0] ?? 0;
     });
     const passBytes = new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES);
@@ -604,13 +621,26 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       return (
         instance !== undefined &&
         (((instance.quadrantWord & INSTANCE_FINEST) !== 0 && level > 0) ||
-          (instance.strideScale.perErrorM <= 0 && level > 0))
+          (instance.strideScale.perErrorM <= 0 && !instance.whole && level > 0))
       );
     }).length;
     checks.check(
       "R14.T3.c a camera pass's strides on the device are its twin's: every stride of both shapes taken, none past an instance held at stride 1 or of no bands",
       missing === 0 && extra === 0 && taken.size === 8 && held === 0,
       `the striding pass's ${String(strided.length)} entries at templates ${[...taken].toSorted((a, b) => a - b).join(", ")} of terrain's 8 strided ones, ${String(held)} past their instances' hold; the lit pass's marks at ${[...ordered.strides].toSorted((a, b) => a - b).join(", ")}; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
+    );
+    // The sub-patches on their own grids (R14.T3.c's stand-ins): every block and strip of each in
+    // the striding pass at its cap, stride 8, whatever its distance, but the forced region's at 1.
+    const ownGrid = strided.filter(([, entry]) => smokeOwnGrid(Math.floor(entry / 256)));
+    const offCap = ownGrid.filter(([t, entry]) => {
+      const finest =
+        ((instances[Math.floor(entry / 256)]?.quadrantWord ?? 0) & INSTANCE_FINEST) !== 0;
+      return t % 4 !== (finest ? 0 : 3);
+    }).length;
+    checks.check(
+      "R14.T3.c's stand-ins: a camera pass draws each block and strip of a sub-patch on its own grid at its cap on the device, as its twin does, and the forced region's at stride 1",
+      missing === 0 && extra === 0 && ownGrid.some(([t]) => t % 4 === 3) && offCap === 0,
+      `${String(ownGrid.length)} of the striding pass's entries of sub-patches on their own grids, ${String(offCap)} at another stride; ${String(missing)} the exact twin keeps missing, ${String(extra)} past the widened twin`,
     );
     // The strides drawn past τ′ (R14.T3.e), each pass's word past its buckets, as the compaction
     // left them, between its twin's over the exact and the doubly widened tests' clusters.

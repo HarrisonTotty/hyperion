@@ -37,7 +37,8 @@ const TERRAIN_MIXES : bool = true;
 // `strides` are its stride scale at its view's τ′ (plan R14, R14.T3.c; `terrainStrides.wgsl`): E_L ÷
 // τ′_rad, m, then 1 ÷ τ′_rad, at or below 0 for none; `holdFades` its holds' onsets' shares a byte
 // an edge in `EDGES`' order (uniforms.ts' `InstanceRecords.push`); and bit 18 of `parentQuadrant` holds its
-// camera passes at stride 1 (uniforms.ts' `INSTANCE_FINEST`). `cells` are its class sets' (lane
+// camera passes at stride 1 (uniforms.ts' `INSTANCE_FINEST`), bit 19 takes a sub-patch's at their
+// cap (`INSTANCE_SUB_GRID_STRIDES`), both the cull's alone. `cells` are its class sets' (lane
 // fix-coast-class-map; uniforms.ts' `InstanceRecords.setCells`): x the slot of its ancestor of the
 // field's cells' level, L − 6, whose class weights it fades to near the hand-over range, or
 // NO_PARENT_SLOT for none; y its place in that ancestor (`cellAncestorPlace`); z the fade, an f32's

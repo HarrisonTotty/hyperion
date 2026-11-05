@@ -81,13 +81,21 @@
 //   (terrain's `Instance.strides`, words 12 and 13, read where an instance has 16 words or more),
 //   and the shared bands of its patch's edges along it (`Instance.edgeBands`, words 20 to 67, half
 //   floats of kilometres, where it has 68 or more), a strip's edge's along its block, so that every
-//   vertex the stride drops is wholly moved by the stride morph
-//   (`terrainStrides.wgsl`); s = 1 where the instance's quadrant word has bit 18 (the forced
-//   region's) and where it is kept whole (its heights fade from another surface, which its records'
-//   spheres do not bound, so that its vertices may stand nearer than its spheres), and at most 4 for
-//   a block or a strip on an edge whose coarse–fine hold at k = 0 is set (bits 2 to 5 of that word:
-//   a finer patch touches it), whose level-2 vertices stay, or fading in or out (its byte of the
-//   instance's shares word, `Instance.holdFades`, word 14, not 0), whose level-2 vertices move.
+//   vertex the stride drops is wholly moved by the stride morph (`terrainStrides.wgsl`); a
+//   stand-in's mask's (its sub-patch word's bit 31) under its slot's patch's scale, its set's
+//   sides in its edges' place, its blocks sharing its set's needs alone and each strip its block's
+//   at the side it hangs from (`mask_bands`), by that block's record, whose sphere holds the
+//   side's vertices, not its own on the patch's edge; s = 1 where the instance's quadrant word has
+//   bit 18 (the forced region's) and where it is kept whole (its heights fade from another surface,
+//   which its records' spheres do not bound, so that its vertices may stand nearer than its
+//   spheres), and at most 4 for a block or a strip on an edge whose coarse–fine hold at k = 0 is set
+//   (bits 2 to 5 of that word: a finer patch touches it), whose level-2 vertices stay, or fading in
+//   or out (its byte of the instance's shares word, `Instance.holdFades`, word 14, not 0), whose
+//   level-2 vertices move. A block or strip of an instance whose quadrant word has bit 19 (a sub-patch on
+//   its own grid over its page's triangles, `strides.ts`' INSTANCE_SUB_GRID_STRIDES), kept whole
+//   or not, takes the pass's cap up to its sub-patch word's levels wherever it is: each of that
+//   stride's triangles lies in one of its page's, so that it draws the surface its stride-1
+//   triangles do.
 // - _Strides past τ′_ (T3.e; `clusters/overCount.ts`): where `shapes.w` is not 0, each cluster a
 //   camera pass draws at a stride above 1 whose own need at it, (E_L + e_s) ÷ τ_rad under its
 //   instance's scale (τ the slewed tolerance its stride was chosen at), lies beyond its sphere's
@@ -160,10 +168,12 @@ const CLUSTER_FLAG_MAY_DISCARD : u32 = 32u;
 const CLUSTER_FLAG_MEASURED : u32 = 64u;
 const NO_DISCARD_TEMPLATE : u32 = 0xffu;
 const STRIDE_LEVELS : u32 = 4u;
-// `strides.ts`' STRIDE_BAND_FRACTION, and the quadrant word's bit by which a camera pass draws an
-// instance at stride 1 (uniforms.ts' `INSTANCE_FINEST`).
+// `strides.ts`' STRIDE_BAND_FRACTION, the quadrant word's bit by which a camera pass draws an
+// instance at stride 1 (uniforms.ts' `INSTANCE_FINEST`), and its bit by which it draws a sub-patch
+// on its own grid at its cap (`INSTANCE_SUB_GRID_STRIDES`).
 const STRIDE_BAND_FRACTION : f32 = 0.002;
 const INSTANCE_FINEST : u32 = 0x40000u;
+const INSTANCE_SUB_GRID_STRIDES : u32 = 0x80000u;
 // The threads of a workgroup, each taking every 64th cluster of its instance's page.
 const CULL_GROUP : u32 = 64u;
 // The `f32` allowance: per metre of the camera-relative lengths a test forms (some sixteen ulps,
@@ -416,10 +426,14 @@ fn edge_bands(base : u32, edge : u32, t : u32) -> vec3f {
 
 // The bands of cluster `c` of the instance whose words begin at `base`, of page `page`, under
 // `scale` (`strides.ts`' `clusterStrideBandsM`): the largest band of the vertices it drops; none
-// for no scale.
-fn cluster_bands(scale : vec2f, page : u32, c : u32, base : u32) -> vec3f {
+// for no scale; a mask's (sub-patch word `sub`), its set's sides in its edges' place
+// (`mask_bands`).
+fn cluster_bands(scale : vec2f, page : u32, c : u32, base : u32, sub : u32) -> vec3f {
   if (scale.y <= 0.0 || c >= 96u || c >= params.counts.z) {
     return vec3f(-1.0);
+  }
+  if ((sub & SUB_PATCH_MASK) != 0u) {
+    return mask_bands(scale, page, c, sub);
   }
   if (c >= 64u) {
     // Strip m of edge e (`gpu/resources.ts`' numbering, anticlockwise) lies along one block.
@@ -488,6 +502,66 @@ fn mask_cluster(sub : u32, c : u32) -> u32 {
   return 0u;
 }
 
+// The block of its set a stand-in's mask's strip `c` (64 to 95) of sub-patch word `sub` hangs
+// from (`strides.ts`' `maskStripBlock`): strip m of its set's side e, anticlockwise as
+// `terrain_mask_edge_vertex` lays it, at that side's m-th block; NO_SIDE_BLOCK for any other.
+const NO_SIDE_BLOCK : u32 = 0xffffffffu;
+
+fn mask_side_block(sub : u32, c : u32) -> u32 {
+  let side = 8u >> (sub & 31u);
+  let m = (c - 64u) % 8u;
+  if ((sub & SUB_PATCH_MASK) == 0u || c < 64u || c >= 96u || m >= side) {
+    return NO_SIDE_BLOCK;
+  }
+  let b0 = vec2u((sub >> 5u) & 0x1fffu, (sub >> 18u) & 0x1fffu) * side;
+  let last = side - 1u;
+  var b = b0;
+  switch (c - 64u) / 8u {
+    case 0u: {
+      b = b0 + vec2u(m, 0u);
+    }
+    case 1u: {
+      b = b0 + vec2u(last, m);
+    }
+    case 2u: {
+      b = b0 + vec2u(last - m, last);
+    }
+    default: {
+      b = b0 + vec2u(0u, last - m);
+    }
+  }
+  return b.y * 8u + b.x;
+}
+
+// The bands of cluster `c` (below 96) of a stand-in's mask of sub-patch word `sub`, of page
+// `page`, under `scale` (`strides.ts`' `maskClusterBandsM`): a block of its set its own need's
+// shared with those of its set's blocks on its sides; strip m of its set's side e, anticlockwise
+// as `terrain_mask_edge_vertex` lays it, its block's there; none for any other.
+fn mask_bands(scale : vec2f, page : u32, c : u32, sub : u32) -> vec3f {
+  let side = 8u >> (sub & 31u);
+  let b0 = vec2i(vec2u((sub >> 5u) & 0x1fffu, (sub >> 18u) & 0x1fffu) * side);
+  let hi = b0 + vec2i(i32(side) - 1);
+  let block = select(c, mask_side_block(sub, c), c >= 64u);
+  let b = vec2i(i32(block % 8u), i32(block / 8u));
+  if (block >= 64u || any(b < b0) || any(b > hi)) {
+    return vec3f(-1.0);
+  }
+  var bands = block_needs(scale, page, block);
+  if (b.x > b0.x) {
+    bands = shared_bands(bands, block_needs(scale, page, block - 1u));
+  }
+  if (b.x < hi.x) {
+    bands = shared_bands(bands, block_needs(scale, page, block + 1u));
+  }
+  if (b.y > b0.y) {
+    bands = shared_bands(bands, block_needs(scale, page, block - 8u));
+  }
+  if (b.y < hi.y) {
+    bands = shared_bands(bands, block_needs(scale, page, block + 8u));
+  }
+  return bands;
+}
+
 // The edges whose hold at k = 0 fades in or out by an instance's shares word (`strides.ts`'
 // `strideFadingEdges`): those whose byte is not 0.
 fn fading_edges(hold_fades : u32) -> u32 {
@@ -519,6 +593,17 @@ fn camera_stride_level(cull_pass : CullPass, record : ClusterRecord, bands : vec
     level = l;
   }
   return level;
+}
+
+// A camera pass's stride's level for a block or strip of a sub-patch on its own grid (see the
+// module's head; `cull.ts`' `cameraPassStrideLevel`), `shape` its record's, `quadrant` and `sub`
+// its instance's quadrant and sub-patch words: the pass's cap up to the sub-patch's levels; 0 in
+// the forced region and for any other shape.
+fn sub_grid_stride_level(cull_pass : CullPass, shape : u32, quadrant : u32, sub : u32) -> u32 {
+  if ((quadrant & INSTANCE_FINEST) != 0u || shape > 1u) {
+    return 0u;
+  }
+  return min(min(cull_pass.header.y, STRIDE_LEVELS - 1u), sub & 31u);
 }
 
 // Whether a camera pass draws a strided record at stride level `level` past its τ′ (see the
@@ -630,10 +715,19 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
       parent_centre = origin + page_to_instance(lod.xyz);
       parent_radius = lod.w;
     }
-    // The camera passes' bands, alike in each.
+    // The camera passes' bands, alike in each, and the record they take the stride by, at its
+    // sphere: a mask's strip's its block's at its set's side, whose sphere holds the side's
+    // vertices and whose errors bound them (`mask_side_block`).
     var bands = vec3f(-1.0);
     if (!dag && !whole && scale.y > 0.0) {
-      bands = cluster_bands(scale, page, c, base);
+      bands = cluster_bands(scale, page, c, base, sub_word);
+    }
+    var stride_record = record;
+    var stride_centre = centre;
+    let side_block = mask_side_block(sub_word, c);
+    if (side_block != NO_SIDE_BLOCK) {
+      stride_record = records[page * clusters + side_block];
+      stride_centre = origin + page_to_instance(stride_record.centre);
     }
     for (var p = 0u; p < pass_count; p = p + 1u) {
       let cull_pass = passes[p];
@@ -647,10 +741,12 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
       var over = false;
       if (cull_pass.header.x == PASS_CASCADE) {
         level = stride_level(cull_pass, unit);
+      } else if (cull_pass.header.y > 0u && (quadrant & INSTANCE_SUB_GRID_STRIDES) != 0u) {
+        level = sub_grid_stride_level(cull_pass, shape, quadrant, sub_word);
       } else if (cull_pass.header.y > 0u && !whole) {
-        let distance = group_distance(centre, record.radius);
-        level = camera_stride_level(cull_pass, record, bands, quadrant, hold_fades, distance);
-        over = drawn_over(cull_pass, record, scale, level, distance);
+        let distance = group_distance(stride_centre, stride_record.radius);
+        level = camera_stride_level(cull_pass, stride_record, bands, quadrant, hold_fades, distance);
+        over = drawn_over(cull_pass, stride_record, scale, level, distance);
       }
       let t = template_of(cull_pass, shape, record.flags, level);
       let mark = instance * clusters + c;

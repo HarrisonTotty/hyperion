@@ -23,6 +23,7 @@ import {
   testPlanetVersion,
 } from "../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
+import type { Vec3 } from "../../geometry/vec3";
 import { seededRandom } from "../../test/seededRandom";
 import { gpuPlacement } from "../../test/strideOracle";
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
@@ -44,6 +45,8 @@ import {
   stridePlace,
   vertexStrideBandM,
 } from "./strides";
+import { TERRAIN_SUB_PATCH_MASK, terrainMaskCluster } from "./terrain";
+import { subPatchWord } from "../terrain/gpu/uniforms";
 
 function wasmBytes(): Uint8Array {
   const comma = wasmDataUrl.indexOf(",");
@@ -163,13 +166,48 @@ function lit(field: FixtureField, key: PatchKey): BakedPatch {
   return reply.bake;
 }
 
+/**
+ * The masks each patch's blocks are drawn as too (plan R14, Design note 19; R14.T3.c's stand-ins):
+ * one level down at each of its four parts, two down at four parts and three down at four.
+ */
+const MASKS: ReadonlyArray<number> = [
+  [1, 0, 0],
+  [1, 1, 0],
+  [1, 0, 1],
+  [1, 1, 1],
+  [2, 0, 0],
+  [2, 1, 2],
+  [2, 3, 1],
+  [2, 2, 3],
+  [3, 0, 0],
+  [3, 3, 4],
+  [3, 7, 2],
+  [3, 5, 7],
+].map(([levels = 1, i = 0, j = 0]) => (TERRAIN_SUB_PATCH_MASK | subPatchWord(levels, i, j)) >>> 0);
+
+/**
+ * Sub-patches on their own grids each patch is drawn as too, (levels, i, j) (R14.T3.c's stand-ins):
+ * one level down, a mask's levels where the masks are not drawn (low's), and four, stride 8's.
+ */
+const OWN_GRIDS: ReadonlyArray<readonly [number, number, number]> = [
+  [1, 1, 0],
+  [2, 2, 3],
+  [4, 9, 6],
+];
+
+/**
+ * The largest share of τ′ an own grid's strided surface may stray from its stride-1 surface: the
+ * CDLOD k's alone, 1.4 × 10⁻⁶ and 1.0 × 10⁻⁷ on the two worlds' bakes (2026-11-05).
+ */
+const OWN_GRID_SHARE = 1e-4;
+
 /** The view's px per radian: 1,920 px across 60°, and its τ′ at 1 px. */
 const PX_PER_RAD = 1920 / (2 * Math.tan(Math.PI / 6));
 const TOLERANCE_RAD = 1 / PX_PER_RAD;
 
 describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c)", () => {
   it.each(WORLDS)(
-    "draw every block of $name's patches within τ′ of the stated error at its every vertex's distance",
+    "draw every block of $name's patches within τ′ of the stated error at its every vertex's distance, and of their stand-ins' masks by their sets' bands",
     { timeout: 120_000 },
     (world) => {
       const figure: BodyFigure | null = fields.figure(world.field.body);
@@ -183,8 +221,9 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
       const stated = planetGeometry(figure, levelTables.get(world.field.body) ?? null);
       const bakes = world.keys.map((key) => lit(world.field, key));
       const random = seededRandom(0x3c7 + world.keys.length);
-      let strided = 0;
-      let worst = 0;
+      // The blocks drawn at a stride above 1, and the drawn error's largest share of τ′.
+      const whole = { strided: 0, worst: 0 };
+      const masks = { strided: 0, worst: 0 };
       for (const bake of bakes) {
         const place = gpuPlacement({ ...bake, figure });
         if (bake.clusterErrors === undefined) {
@@ -228,82 +267,178 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
             const p = place(x, y, 0, k);
             return [p.x, p.y, p.z];
           };
-          const factor = (
-            x: number,
-            y: number,
-            morphLevel: number,
-            values: ReadonlyArray<number>,
-          ): number =>
-            strideMorphFactor(
-              vertexStrideBandM(scale, clusterErrors, edgeBandsM, x, y, morphLevel),
-              distanceOf(values),
-            );
-          const morphed = new Map<number, number[]>();
-          const at = (x: number, y: number): number[] => {
-            let held = morphed.get(65 * y + x);
-            if (held === undefined) {
-              held = stridePlace(x, y, own, factor);
-              morphed.set(65 * y + x, held);
-            }
-            return held;
-          };
-          for (let block = 0; block < 64; block += 1) {
-            const bx = 8 * (block % 8);
-            const by = 8 * Math.floor(block / 8);
-            // The block's sphere about its own vertices, which holds every morphed one.
-            const vertices: number[][] = [];
-            for (let ly = 0; ly <= 8; ly += 1) {
-              for (let lx = 0; lx <= 8; lx += 1) {
-                vertices.push(own(bx + lx, by + ly));
+          // The whole patch, and each of its masks (R14.T3.c's stand-ins) by its set's bands.
+          for (const subWord of [0, ...MASKS]) {
+            const factor = (
+              x: number,
+              y: number,
+              morphLevel: number,
+              values: ReadonlyArray<number>,
+            ): number =>
+              strideMorphFactor(
+                vertexStrideBandM(scale, clusterErrors, edgeBandsM, x, y, morphLevel, subWord),
+                distanceOf(values),
+              );
+            const morphed = new Map<number, number[]>();
+            const at = (x: number, y: number): number[] => {
+              let held = morphed.get(65 * y + x);
+              if (held === undefined) {
+                held = stridePlace(x, y, own, factor);
+                morphed.set(65 * y + x, held);
               }
-            }
-            const centre = [0, 1, 2].map(
-              (c) => vertices.reduce((sum, p) => sum + (p[c] ?? 0), 0) / vertices.length,
-            );
-            const radius = Math.max(
-              ...vertices.map((p) =>
-                Math.hypot(
-                  (p[0] ?? 0) - (centre[0] ?? 0),
-                  (p[1] ?? 0) - (centre[1] ?? 0),
-                  (p[2] ?? 0) - (centre[2] ?? 0),
+              return held;
+            };
+            const kind = subWord === 0 ? whole : masks;
+            for (let block = 0; block < 64; block += 1) {
+              if (terrainMaskCluster(subWord, block) === "none") {
+                continue;
+              }
+              const bx = 8 * (block % 8);
+              const by = 8 * Math.floor(block / 8);
+              // The block's sphere about its own vertices, which holds every morphed one.
+              const vertices: number[][] = [];
+              for (let ly = 0; ly <= 8; ly += 1) {
+                for (let lx = 0; lx <= 8; lx += 1) {
+                  vertices.push(own(bx + lx, by + ly));
+                }
+              }
+              const centre = [0, 1, 2].map(
+                (c) => vertices.reduce((sum, p) => sum + (p[c] ?? 0), 0) / vertices.length,
+              );
+              const radius = Math.max(
+                ...vertices.map((p) =>
+                  Math.hypot(
+                    (p[0] ?? 0) - (centre[0] ?? 0),
+                    (p[1] ?? 0) - (centre[1] ?? 0),
+                    (p[2] ?? 0) - (centre[2] ?? 0),
+                  ),
                 ),
-              ),
-            );
-            const bands = clusterStrideBandsM(scale, clusterErrors, edgeBandsM, block);
-            const s = 1 << cameraStrideLevel(bands, 3, Math.max(0, distanceOf(centre) - radius));
-            strided += s > 1 ? 1 : 0;
-            for (let ly = 0; ly <= 8; ly += 1) {
-              for (let lx = 0; lx <= 8; lx += 1) {
-                const qx = Math.min(8 - s, Math.floor(lx / s) * s);
-                const qy = Math.min(8 - s, Math.floor(ly / s) * s);
-                const fx = (lx - qx) / s;
-                const fy = (ly - qy) / s;
-                const p0 = at(bx + qx, by + qy);
-                const p2 = at(bx + qx + s, by + qy + s);
-                const p1 = fx >= fy ? at(bx + qx + s, by + qy) : at(bx + qx, by + qy + s);
-                const w0 = 1 - Math.max(fx, fy);
-                const w1 = Math.abs(fx - fy);
-                const w2 = Math.min(fx, fy);
-                const drawn = [0, 1, 2].map(
-                  (c) => w0 * (p0[c] ?? 0) + w1 * (p1[c] ?? 0) + w2 * (p2[c] ?? 0),
-                );
-                const stride1 = own(bx + lx, by + ly);
-                const deviationM = Math.hypot(
-                  (drawn[0] ?? 0) - (stride1[0] ?? 0),
-                  (drawn[1] ?? 0) - (stride1[1] ?? 0),
-                  (drawn[2] ?? 0) - (stride1[2] ?? 0),
-                );
-                worst = Math.max(
-                  worst,
-                  (statedM + deviationM) / (TOLERANCE_RAD * distanceOf(stride1)),
-                );
+              );
+              const bands = clusterStrideBandsM(scale, clusterErrors, edgeBandsM, block, subWord);
+              const s = 1 << cameraStrideLevel(bands, 3, Math.max(0, distanceOf(centre) - radius));
+              kind.strided += s > 1 ? 1 : 0;
+              for (let ly = 0; ly <= 8; ly += 1) {
+                for (let lx = 0; lx <= 8; lx += 1) {
+                  const qx = Math.min(8 - s, Math.floor(lx / s) * s);
+                  const qy = Math.min(8 - s, Math.floor(ly / s) * s);
+                  const fx = (lx - qx) / s;
+                  const fy = (ly - qy) / s;
+                  const p0 = at(bx + qx, by + qy);
+                  const p2 = at(bx + qx + s, by + qy + s);
+                  const p1 = fx >= fy ? at(bx + qx + s, by + qy) : at(bx + qx, by + qy + s);
+                  const w0 = 1 - Math.max(fx, fy);
+                  const w1 = Math.abs(fx - fy);
+                  const w2 = Math.min(fx, fy);
+                  const drawn = [0, 1, 2].map(
+                    (c) => w0 * (p0[c] ?? 0) + w1 * (p1[c] ?? 0) + w2 * (p2[c] ?? 0),
+                  );
+                  const stride1 = own(bx + lx, by + ly);
+                  const deviationM = Math.hypot(
+                    (drawn[0] ?? 0) - (stride1[0] ?? 0),
+                    (drawn[1] ?? 0) - (stride1[1] ?? 0),
+                    (drawn[2] ?? 0) - (stride1[2] ?? 0),
+                  );
+                  kind.worst = Math.max(
+                    kind.worst,
+                    (statedM + deviationM) / (TOLERANCE_RAD * distanceOf(stride1)),
+                  );
+                }
               }
             }
           }
         }
       }
-      expect(strided).toBeGreaterThan(100);
-      expect(worst).toBeLessThanOrEqual(1);
+      expect([whole.strided > 100, masks.strided > 50]).toEqual([true, true]);
+      expect(whole.worst).toBeLessThanOrEqual(1);
+      expect(masks.worst).toBeLessThanOrEqual(1);
+    },
+  );
+
+  it.each(WORLDS)(
+    "draw a sub-patch of $name's patches on its own grid at stride 2^levels up to 8 as at stride 1, but for the CDLOD k between its vertices (R14.T3.c's stand-ins)",
+    { timeout: 120_000 },
+    (world) => {
+      const figure: BodyFigure | null = fields.figure(world.field.body);
+      if (figure === null) {
+        throw new Error(`the module holds no datum of ${world.name}`);
+      }
+      const stated = planetGeometry(figure, levelTables.get(world.field.body) ?? null);
+      const random = seededRandom(0x5b9 + world.keys.length);
+      // The largest distance of the drawn surface from stride 1's, a share of τ′ at the vertex.
+      let worst = 0;
+      for (const key of world.keys) {
+        const bake = lit(world.field, key);
+        const place = gpuPlacement({ ...bake, figure });
+        const level = key.level;
+        const morphEndM = selectionErrorM(stated, level - 1) * PX_PER_RAD;
+        const ownM = selectionErrorM(stated, level) * PX_PER_RAD;
+        const morphStartM = ownM + MORPH_START_FRACTION * (morphEndM - ownM);
+        for (const [levels, i, j] of OWN_GRIDS) {
+          // Its grid vertex (x, y) at (part × 64 + (x, y)) ÷ 2^levels of the patch's grid, on the
+          // patch's triangle there, each corner at the vertex's own k (`surfacePointAt`).
+          const stride = 2 ** Math.min(3, levels);
+          for (let n = 0; n < 4; n += 1) {
+            const r =
+              n % 2 === 0
+                ? morphStartM * 0.05 * 40 ** random()
+                : morphStartM + (morphEndM - morphStartM) * (1.2 * random() - 0.1);
+            const [u, v, w] = [random() - 0.5, random() - 0.5, random() - 0.5];
+            const len = Math.hypot(u, v, w);
+            const camera = { x: (r * u) / len, y: (r * v) / len, z: (r * w) / len };
+            const distanceOf = (p: Vec3): number =>
+              Math.hypot(p.x - camera.x, p.y - camera.y, p.z - camera.z);
+            const vertex = (x: number, y: number): Vec3 => {
+              const gx = (i * 64 + x) / 2 ** levels;
+              const gy = (j * 64 + y) / 2 ** levels;
+              const qx = Math.min(63, Math.floor(gx));
+              const qy = Math.min(63, Math.floor(gy));
+              const fx = gx - qx;
+              const fy = gy - qy;
+              const corners: ReadonlyArray<readonly [number, number, number]> = [
+                [qx, qy, 1 - Math.max(fx, fy)],
+                fx >= fy ? [qx + 1, qy, fx - fy] : [qx, qy + 1, fy - fx],
+                [qx + 1, qy + 1, Math.min(fx, fy)],
+              ];
+              const at = (k: number): Vec3 =>
+                corners.reduce(
+                  (sum, [cx, cy, weight]) => {
+                    const p = place(cx, cy, 0, k);
+                    return {
+                      x: sum.x + weight * p.x,
+                      y: sum.y + weight * p.y,
+                      z: sum.z + weight * p.z,
+                    };
+                  },
+                  { x: 0, y: 0, z: 0 },
+                );
+              const d = distanceOf(at(0));
+              return at(Math.min(1, Math.max(0, (d - morphStartM) / (morphEndM - morphStartM))));
+            };
+            for (let y = 0; y <= 64; y += 1) {
+              for (let x = 0; x <= 64; x += 1) {
+                const qx = Math.min(64 - stride, Math.floor(x / stride) * stride);
+                const qy = Math.min(64 - stride, Math.floor(y / stride) * stride);
+                const fx = (x - qx) / stride;
+                const fy = (y - qy) / stride;
+                const p0 = vertex(qx, qy);
+                const p2 = vertex(qx + stride, qy + stride);
+                const p1 = fx >= fy ? vertex(qx + stride, qy) : vertex(qx, qy + stride);
+                const w0 = 1 - Math.max(fx, fy);
+                const w1 = Math.abs(fx - fy);
+                const w2 = Math.min(fx, fy);
+                const one = vertex(x, y);
+                const deviationM = Math.hypot(
+                  w0 * p0.x + w1 * p1.x + w2 * p2.x - one.x,
+                  w0 * p0.y + w1 * p1.y + w2 * p2.y - one.y,
+                  w0 * p0.z + w1 * p1.z + w2 * p2.z - one.z,
+                );
+                worst = Math.max(worst, deviationM / (TOLERANCE_RAD * distanceOf(one)));
+              }
+            }
+          }
+        }
+      }
+      expect(worst).toBeLessThanOrEqual(OWN_GRID_SHARE);
     },
   );
 });

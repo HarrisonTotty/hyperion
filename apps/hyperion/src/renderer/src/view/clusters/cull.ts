@@ -34,6 +34,8 @@ import {
   cameraStrideLevel,
   clusterStrideBandsM,
   INSTANCE_FINEST,
+  INSTANCE_SUB_GRID_STRIDES,
+  maskStripBlock,
   NO_STRIDE_EDGE_BANDS,
   type StrideEdgeBandsM,
   strideFadingEdges,
@@ -135,8 +137,9 @@ export interface CullInstance {
   readonly edgeBandsM?: StrideEdgeBandsM;
   /**
    * Its instance record's quadrant word (terrain's `parentQuadrant`): its coarse–fine holds at
-   * k = 0 in bits 2 to 5, a camera pass's stride at most 4 on those edges, and bit 18
-   * (`INSTANCE_FINEST`), stride 1 (T3.c); absent, 0.
+   * k = 0 in bits 2 to 5, a camera pass's stride at most 4 on those edges, bit 18
+   * (`INSTANCE_FINEST`), stride 1 (T3.c), and bit 19 (`INSTANCE_SUB_GRID_STRIDES`), a sub-patch on
+   * its own grid at the pass's cap; absent, 0.
    */
   readonly quadrantWord?: number;
   /**
@@ -487,11 +490,13 @@ function blockErrorsOf(
 
 /**
  * A camera pass's stride's level for `record`, cluster `cluster` of `instance` at `centreM`,
- * camera-relative (`camera_stride_level`; plan R14, R14.T3.c): 0 for an instance with no scale, held
- * at stride 1 or kept whole (its heights fading from another surface, which its spheres do not
- * bound), else `cameraStrideLevel` at the sphere's nearest point of its shared bands
- * (`clusterStrideBandsM`, its page's records' measured errors under its scale and its edges' bands),
- * up to the pass's cap and to 2 on an edge a finer patch touches or whose hold fades in or out.
+ * camera-relative (`camera_stride_level`; plan R14, R14.T3.c): for a block or strip of a sub-patch
+ * on its own grid ({@link INSTANCE_SUB_GRID_STRIDES}), the pass's cap up to its levels, wherever it
+ * is; else 0 for an instance with no scale, held at stride 1 or kept whole (its heights fading from
+ * another surface, which its spheres do not bound), else `cameraStrideLevel` at the sphere's
+ * nearest point of its shared bands (`clusterStrideBandsM`, its page's records' measured errors
+ * under its scale and its edges' bands), up to the pass's cap and to 2 on an edge a finer patch
+ * touches or whose hold fades in or out.
  */
 export function cameraPassStrideLevel(
   pass: CameraCullPass,
@@ -503,6 +508,13 @@ export function cameraPassStrideLevel(
 ): number {
   const quadrant = instance.quadrantWord ?? 0;
   const scale = instance.strideScale;
+  if (
+    (quadrant & INSTANCE_SUB_GRID_STRIDES) !== 0 &&
+    (quadrant & INSTANCE_FINEST) === 0 &&
+    (record.shape === "terrain-block" || record.shape === "terrain-skirt")
+  ) {
+    return Math.min(Math.log2(pass.strideCap), STRIDES.length - 1, (instance.subWord ?? 0) & 31);
+  }
   if (
     scale === undefined ||
     !(scale.perErrorM > 0) ||
@@ -518,11 +530,14 @@ export function cameraPassStrideLevel(
   if ((edges & held) !== 0) {
     cap = Math.min(cap, 2);
   }
+  // A mask's strip takes its block's bands at its set's side (`maskStripBlock`).
+  const sideBlock = maskStripBlock(instance.subWord ?? 0, cluster);
   const bands = clusterStrideBandsM(
     scale,
-    blockErrorsOf(input, instance.page, cluster),
+    blockErrorsOf(input, instance.page, sideBlock < 0 ? cluster : sideBlock),
     instance.edgeBandsM ?? NO_STRIDE_EDGE_BANDS,
     cluster,
+    instance.subWord ?? 0,
   );
   return cameraStrideLevel(bands, cap, distance(centreM, record.radiusM));
 }
@@ -582,7 +597,13 @@ export function cullOverTwin(
   const marks = ordered === null ? null : cullMarksTwin(input, slackScale, occlusion);
   eachCluster(input, (n, instance, cluster, record, centre) => {
     input.passes.forEach((pass, p) => {
-      if (pass?.kind !== "camera" || pass.strideCap <= 1 || instance.whole === true) {
+      // A sub-patch on its own grid at the cap is not counted, as the kernel's `over` is not.
+      if (
+        pass?.kind !== "camera" ||
+        pass.strideCap <= 1 ||
+        instance.whole === true ||
+        ((instance.quadrantWord ?? 0) & INSTANCE_SUB_GRID_STRIDES) !== 0
+      ) {
         return;
       }
       const drawn =
@@ -591,14 +612,15 @@ export function cullOverTwin(
           : pass.order === "appended" &&
             recordKept(input, pass, p, instance, cluster, record, centre, slackScale) &&
             templateOf(record, cluster, pass, instance, input, centre) < input.templates;
+      const at = strideRecordOf(input, instance, cluster, record, centre);
       if (
         drawn &&
         drawnPastTolerance(
           pass,
-          record,
+          at.record,
           instance,
-          centre,
-          cameraPassStrideLevel(pass, record, cluster, instance, input, centre),
+          at.centreM,
+          cameraPassStrideLevel(pass, at.record, cluster, instance, input, at.centreM),
         )
       ) {
         note(p);
@@ -606,6 +628,35 @@ export function cullOverTwin(
     });
   });
   return counts;
+}
+
+/**
+ * The record a camera pass takes `cluster`'s stride by, at its sphere at `centreM` (`clusterCull
+ * .wgsl`'s `stride_record`): its own, but for a stand-in's mask's strip, which hangs from its set's
+ * side, not from its record's edge: its block's there ({@link maskStripBlock}), whose sphere holds
+ * the side's vertices and whose errors bound them.
+ */
+function strideRecordOf(
+  input: Pick<CullTwinInput, "records" | "rotationColumns">,
+  instance: CullInstance,
+  cluster: number,
+  record: ClusterRecord,
+  centreM: Vec3,
+): { readonly record: ClusterRecord; readonly centreM: Vec3 } {
+  const block = maskStripBlock(instance.subWord ?? 0, cluster);
+  if (block < 0) {
+    return { record, centreM };
+  }
+  const side = input.records(instance.page, block);
+  const offset = turned(input.rotationColumns, side.centreM);
+  return {
+    record: side,
+    centreM: {
+      x: instance.originM.x + offset.x,
+      y: instance.originM.y + offset.y,
+      z: instance.originM.z + offset.z,
+    },
+  };
 }
 
 /**
@@ -629,11 +680,12 @@ function templateOf(
     return discarding;
   }
   const shape = code - (input.firstShape ?? 0);
+  const at = strideRecordOf(input, instance, cluster, record, centreM);
   const level =
     record.mode === "dag"
       ? 0
       : pass.kind === "camera"
-        ? cameraPassStrideLevel(pass, record, cluster, instance, input, centreM)
+        ? cameraPassStrideLevel(pass, at.record, cluster, instance, input, at.centreM)
         : strideLevel(pass, instance.unitM);
   return shape < 0 ? Infinity : shape * STRIDES.length + level;
 }

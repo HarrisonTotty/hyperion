@@ -42,6 +42,17 @@
  *   but not the vertices inside it: held, they would all move at once as the finer patch left, so
  *   there they move at their block's other parts' band and the block's mesh mixes its strides, as
  *   under the ruling.
+ * - **Masks** (R14.T3.c's stand-ins; `GeometrySettings.standInStrides`): a stand-in's mask of its
+ *   slot's patch's own blocks (Design note 19) takes that patch's scale, and its set's sides take
+ *   its edges' place. No block beside the set is drawn there, and the patches beside it place no
+ *   vertex alike with it, the skirts covering what lies between, as at every edge where two
+ *   levels meet; so a block's band shares the needs of its set's blocks alone, a vertex on the
+ *   set's side takes its one block's band, and strip m of side e, which hangs from that block's
+ *   side, takes the block's bands and its stride at the block's sphere, which holds the side's
+ *   vertices, not at its record's, which lies on the patch's edge. Each vertex the mask draws, its
+ *   strips' among them, is then placed by one band whatever cluster draws it, and each cluster's
+ *   band is at least the band of every vertex it drops, as on a whole patch. The edge bands and
+ *   holds are none of the mask's.
  * - **The records.** The blocks' errors reach the vertex stage in their slot's record and the
  *   edges' bands in the instance's, as half floats of kilometres rounded up
  *   ({@link edgeBandHalf}).
@@ -71,6 +82,7 @@
 
 import type { PlanetGeometry } from "../terrain/planet";
 import { selectionErrorM } from "../terrain/select";
+import { TERRAIN_SUB_PATCH_MASK } from "./terrain";
 
 /**
  * β, a stride's band's width over its start: a vertex dropped at stride 2s morphs over the
@@ -94,6 +106,20 @@ export const STRIDE_MORPH_LEVELS = 3;
  * vertices still take the stride morph, held at each contact as the CDLOD morph is.
  */
 export const INSTANCE_FINEST = 1 << 18;
+
+/**
+ * Bit 19 of the quadrant word: every camera pass draws the sub-patch stand-in's clusters at its
+ * cap, up to 2^levels, whatever their distance (plan R14, R14.T3.c's stand-ins;
+ * `GeometrySettings.standInStrides`). A stand-in drawn on its own grid over its slot's patch's
+ * triangles (`terrainPatch.wgsl`'s `sourceGridOf`, levels below the patch) draws that patch's
+ * surface, every one of its vertices on it: at a stride 2^l, l up to its levels, each of its
+ * stride's quads lies in one of the patch's, split on the same (0, 0)–(1, 1) diagonal, so that each
+ * triangle lies in one of the patch's triangles, where the surface is affine and the stride's
+ * triangle draws it as the stride-1 triangles do. Only the CDLOD morph's k, which the vertices hold
+ * at their own distances, is not affine; it moves no vertex on its own. Never with
+ * {@link INSTANCE_FINEST}, which holds stride 1.
+ */
+export const INSTANCE_SUB_GRID_STRIDES = 1 << 19;
 
 /** A patch's or an edge's three bands, m: towards strides 2, 4 and 8. */
 export type StrideBandsM = readonly [two: number, four: number, eight: number];
@@ -280,10 +306,112 @@ function blockVertexBandM(
 }
 
 /**
+ * A stand-in's mask's set of its page's blocks (plan R14, Design note 19; `terrain.ts`'
+ * `terrainMaskCluster`): its first block (bx0, by0) and its side, in blocks.
+ */
+interface MaskSet {
+  readonly bx0: number;
+  readonly by0: number;
+  readonly side: number;
+}
+
+/** The mask's set of sub-patch word `subWord`, or `null` for a word that is not a mask's. */
+function maskSetOf(subWord: number): MaskSet | null {
+  if ((subWord & TERRAIN_SUB_PATCH_MASK) === 0) {
+    return null;
+  }
+  const side = 8 >> (subWord & 31);
+  return { bx0: ((subWord >>> 5) & 0x1fff) * side, by0: ((subWord >>> 18) & 0x1fff) * side, side };
+}
+
+/** Whether block (bx, by) is of mask set `set`. */
+function inMaskSet(set: MaskSet, bx: number, by: number): boolean {
+  return bx >= set.bx0 && bx < set.bx0 + set.side && by >= set.by0 && by < set.by0 + set.side;
+}
+
+/** The blocks on block (bx, by)'s four sides that are of `set`. */
+function maskNeighbours(set: MaskSet, bx: number, by: number): number[] {
+  const out: number[] = [];
+  for (const [nx, ny] of [
+    [bx - 1, by],
+    [bx + 1, by],
+    [bx, by - 1],
+    [bx, by + 1],
+  ] as const) {
+    if (inMaskSet(set, nx, ny)) {
+      out.push(8 * ny + nx);
+    }
+  }
+  return out;
+}
+
+/**
+ * A mask's block (bx, by)'s band as the vertices inside it take it, m (see the module's remarks'
+ * masks): {@link blockVertexBandM}'s, of the blocks on its sides in its set alone.
+ */
+function maskBlockVertexBandM(
+  scale: StrideScale,
+  clusterErrors: ArrayLike<number>,
+  set: MaskSet,
+  bx: number,
+  by: number,
+  level: number,
+): number {
+  const need = (block: number): number =>
+    strideNeedM(scale, blockErrorM(clusterErrors, block, level));
+  const own = need(8 * by + bx);
+  if (!(own > 0)) {
+    return NO_STRIDE_BAND;
+  }
+  return maskNeighbours(set, bx, by).reduce((band, block) => {
+    const part = need(block);
+    return part > 0 ? Math.max(band, part) : band;
+  }, own);
+}
+
+/**
+ * The band, m, of grid vertex (x, y) of mask `set` at morph level `level` (below 3; see the
+ * module's remarks' masks): on the set's side its one block's there, else as a patch's inside it.
+ */
+function maskVertexBandM(
+  scale: StrideScale,
+  clusterErrors: ArrayLike<number>,
+  set: MaskSet,
+  x: number,
+  y: number,
+  level: number,
+): number {
+  const band = (bx: number, by: number): number =>
+    maskBlockVertexBandM(scale, clusterErrors, set, bx, by, level);
+  const last = set.side - 1;
+  const bx = Math.min(Math.floor(x / 8), set.bx0 + last);
+  const by = Math.min(Math.floor(y / 8), set.by0 + last);
+  const x0 = 8 * set.bx0;
+  const y0 = 8 * set.by0;
+  if (x === x0 || x === x0 + 8 * set.side || y === y0 || y === y0 + 8 * set.side) {
+    return band(bx, by);
+  }
+  const side = (ax: number, ay: number): number => {
+    const a = band(ax, ay);
+    const b = band(bx, by);
+    return a > 0 && b > 0 ? Math.min(a, b) : NO_STRIDE_BAND;
+  };
+  if (x % 8 === 0) {
+    return side(bx - 1, by);
+  }
+  if (y % 8 === 0) {
+    return side(bx, by - 1);
+  }
+  return band(bx, by);
+}
+
+/**
  * The band, m, of a patch's grid vertex (x, y) at morph level `level` (below 3; see the module's
  * remarks): on a patch's edge (not a corner, which is level 3) its edge's shared band there; on a
  * block's side the smaller of its two blocks' bands as their vertices take them, none where either
- * block's need is; else its block's (`terrainStrides.wgsl`'s `stride_band`).
+ * block's need is; else its block's (`terrainStrides.wgsl`'s `stride_band`). Of a stand-in's mask
+ * (`subWord`'s, `TERRAIN_SUB_PATCH_MASK`), its set's sides take its edges' place (see the module's
+ * remarks' masks).
  */
 export function vertexStrideBandM(
   scale: StrideScale,
@@ -292,7 +420,12 @@ export function vertexStrideBandM(
   x: number,
   y: number,
   level: number,
+  subWord = 0,
 ): number {
+  const set = maskSetOf(subWord);
+  if (set !== null) {
+    return maskVertexBandM(scale, clusterErrors, set, x, y, level);
+  }
   if (x === 0 || x === 64 || y === 0 || y === 64) {
     const edge = x === 0 ? 0 : x === 64 ? 1 : y === 0 ? 2 : 3;
     const t = Math.floor((edge < 2 ? y : x) / 8);
@@ -317,18 +450,76 @@ export function vertexStrideBandM(
 }
 
 /**
+ * The block of its set a stand-in's mask's strip `cluster` (64 to 95) hangs from (see the module's
+ * remarks' masks): strip m of its set's side e, anticlockwise as `terrain_mask_edge_vertex` lays
+ * it, at that side's m-th block; −1 for a cluster that is not one of its strips, or a word not a
+ * mask's (`clusterCull.wgsl`'s `mask_side_block`).
+ */
+export function maskStripBlock(subWord: number, cluster: number): number {
+  const set = maskSetOf(subWord);
+  const m = (cluster - 64) % 8;
+  if (set === null || cluster < 64 || cluster >= 96 || m >= set.side) {
+    return -1;
+  }
+  const last = set.side - 1;
+  const sides = [
+    [set.bx0 + m, set.by0],
+    [set.bx0 + last, set.by0 + m],
+    [set.bx0 + last - m, set.by0 + last],
+    [set.bx0, set.by0 + last - m],
+  ] as const;
+  const [bx, by] = sides[Math.floor((cluster - 64) / 8)] ?? [-1, -1];
+  return 8 * by + bx;
+}
+
+/**
+ * A mask's cluster `cluster`'s bands, m (see the module's remarks' masks): a block of its set its
+ * own need's and its set's blocks' on its sides; a strip its block's at the side it hangs from
+ * ({@link maskStripBlock}); none for any other.
+ */
+function maskClusterBandsM(
+  scale: StrideScale,
+  clusterErrors: ArrayLike<number>,
+  set: MaskSet,
+  subWord: number,
+  cluster: number,
+): StrideBandsM {
+  const block = cluster >= 64 ? maskStripBlock(subWord, cluster) : cluster;
+  const bx = block % 8;
+  const by = Math.floor(block / 8);
+  if (block < 0 || block >= 64 || !inMaskSet(set, bx, by)) {
+    return NO_STRIDE_BANDS;
+  }
+  const need = (at: number): StrideBandsM => [
+    strideNeedM(scale, blockErrorM(clusterErrors, at, 0)),
+    strideNeedM(scale, blockErrorM(clusterErrors, at, 1)),
+    strideNeedM(scale, blockErrorM(clusterErrors, at, 2)),
+  ];
+  return maskNeighbours(set, bx, by).reduce(
+    (bands, at) => sharedStrideBandsM(bands, need(at)),
+    need(block),
+  );
+}
+
+/**
  * Cluster `cluster`'s bands, m, towards strides 2, 4 and 8 (see the module's remarks): the largest
  * band of the vertices it drops, none where any is none. A block's own need, its neighbours' on its
  * sides within the patch, and its patch's edges' shared bands along it; a strip's edge's shared
  * bands along its block (strip m of edge e, anticlockwise in `gpu/resources.ts`' numbering); none
- * for a fin or head run, drawn at stride 1 (`clusterCull.wgsl`'s `cluster_bands`).
+ * for a fin or head run, drawn at stride 1 (`clusterCull.wgsl`'s `cluster_bands`). Of a stand-in's
+ * mask (`subWord`'s, `TERRAIN_SUB_PATCH_MASK`), its set's sides take its edges' place.
  */
 export function clusterStrideBandsM(
   scale: StrideScale,
   clusterErrors: ArrayLike<number>,
   edgeBandsM: StrideEdgeBandsM,
   cluster: number,
+  subWord = 0,
 ): StrideBandsM {
+  const set = maskSetOf(subWord);
+  if (set !== null) {
+    return maskClusterBandsM(scale, clusterErrors, set, subWord, cluster);
+  }
   const edgeBands = (edge: number, t: number): StrideBandsM => [
     edgeBandsM[edgeBandIndex(edge, t, 0)] ?? NO_STRIDE_BAND,
     edgeBandsM[edgeBandIndex(edge, t, 1)] ?? NO_STRIDE_BAND,

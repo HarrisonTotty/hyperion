@@ -20,6 +20,7 @@ import {
   EDGE_BANDS,
   edgeBandHalf,
   INSTANCE_FINEST,
+  INSTANCE_SUB_GRID_STRIDES,
   NO_STRIDE_EDGE_BANDS,
   NO_STRIDE_SCALE,
   type StrideEdgeBandsM,
@@ -68,7 +69,8 @@ export const SLOT_RECORD_BYTES = 496;
  *                           // to, or NO_PARENT_SLOT (R10.T8.b, T8.c; decision-r10-t8a §1)
  *   parentQuadrant : u32,   // bits 0 and 1 the patch's quadrant in its parent (i & 1, j & 1);
  *                           // bits 2 to 17 its morph holds at its coarse–fine edges and corners
- *                           // (`coarseFineHolds.ts`; R10.T8.c); bit 18 `INSTANCE_FINEST`
+ *                           // (`coarseFineHolds.ts`; R10.T8.c); bit 18 `INSTANCE_FINEST`,
+ *                           // bit 19 `INSTANCE_SUB_GRID_STRIDES`
  *   sub : vec4u,            // x the sub-patch it draws of its slot's patch, or 0 for the whole
  *                           // patch ({@link subPatchWord}); y its edges' fades and z its corners',
  *                           // a byte each; w its own fade, its rebake's and the slot it fades
@@ -539,8 +541,11 @@ export class InstanceRecords {
    * @param edgeBandsM - Its edges' shared stride bands, metres (`strideEdges.ts`), none by default.
    * @param strideHoldFades - Its holds' onsets' shares of the stride morph a byte an edge, `EDGES`'
    * order (`clusters/strides.ts`' `strideFactor`), 0 for none.
-   * @throws RangeError past {@link capacity}, or for a slot, parent slot, quadrant, holds,
-   * sub-patch word or fades word that is not a whole number in its range.
+   * @param subGridStrides - Whether every camera pass draws it, a sub-patch on its own grid, at its
+   * cap (`clusters/strides.ts`' `INSTANCE_SUB_GRID_STRIDES`); never with `finest`.
+   * @throws RangeError past {@link capacity}, for a slot, parent slot, quadrant, holds, sub-patch
+   * word or fades word that is not a whole number in its range, or for `finest` with
+   * `subGridStrides`.
    */
   push(
     slot: number,
@@ -558,6 +563,7 @@ export class InstanceRecords {
     finest = false,
     edgeBandsM: StrideEdgeBandsM = NO_STRIDE_EDGE_BANDS,
     strideHoldFades = 0,
+    subGridStrides = false,
   ): void {
     this.pushXyz(
       slot,
@@ -577,6 +583,7 @@ export class InstanceRecords {
       finest,
       edgeBandsM,
       strideHoldFades,
+      subGridStrides,
     );
   }
 
@@ -599,6 +606,7 @@ export class InstanceRecords {
     finest = false,
     edgeBandsM: StrideEdgeBandsM = NO_STRIDE_EDGE_BANDS,
     strideHoldFades = 0,
+    subGridStrides = false,
   ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
@@ -618,6 +626,9 @@ export class InstanceRecords {
     if (!Number.isInteger(sub) || sub < 0 || sub > 0xffff_ffff) {
       throw new RangeError(`sub-patch word ${sub} is not a u32`);
     }
+    if (finest && subGridStrides) {
+      throw new RangeError("an instance held at stride 1 takes no sub-grid strides");
+    }
     for (const word of [edgeFades, cornerFades, fades, strideHoldFades]) {
       if (!Number.isInteger(word) || word < 0 || word > 0xffff_ffff) {
         throw new RangeError(`fades word ${word} is not a u32`);
@@ -632,7 +643,11 @@ export class InstanceRecords {
     this.#f32[base + 5] = morphEndM;
     this.#u32[base + 6] = parentSlot;
     this.#u32[base + 7] =
-      (quadrant | (holds << QUADRANT_BITS) | (finest ? INSTANCE_FINEST : 0)) >>> 0;
+      (quadrant |
+        (holds << QUADRANT_BITS) |
+        (finest ? INSTANCE_FINEST : 0) |
+        (subGridStrides ? INSTANCE_SUB_GRID_STRIDES : 0)) >>>
+      0;
     this.#u32[base + 8] = sub;
     this.#u32[base + 9] = edgeFades;
     this.#u32[base + 10] = cornerFades;

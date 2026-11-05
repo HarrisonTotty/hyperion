@@ -994,6 +994,7 @@ through `lit_place`.
     | `strides`         | `measured` (after T3.c)                                                    | `measured`                                                                 | Drawn error within τ′; stride 1 in the forced region   |
     | `occlusion`       | `hzb` (after T3.d)                                                         | `hzb` (after T3.d; the UHD 620's run may turn it off)                      | Exact                                                  |
     | `terrainBudget`   | `triangles` (T3.e)                                                         | `triangles` (T3.e)                                                         | Held stride-1 frame's triangles; ⌊slots ÷ 2⌋ patches   |
+    | `standInStrides`  | `own-grids` (T3.c's stand-ins; `all` failed the probe's moves)             | `own-grids` (low draws no masks)                                           | Drawn error within τ′; `off` the way back              |
     | `pageBytes`       | 128 MiB                                                                    | 32 MiB                                                                     | Within the memory ceilings                             |
     | `meshTolerancePx` | camera 1, wireframe occluder half the stroke width (lean)                  | camera 2, the same occluder rule (lean)                                    | A mesh's DAG cut within τ; hidden-line removal holds   |
     | `farCascadeRate`  | 4 (lean, T6.b)                                                             | 4 (no cascades on low)                                                     | Far cascades' edges within a texel; 1 the way back     |
@@ -1470,8 +1471,9 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
     sky shows through the drawn surface in test-render's terrain frames); lit triangles as T3.a
     predicts, within 10%; no mark's visibility changes in R10.T16's frame group (T1.e's); the Mac's
     fps (pending).
-  - _Built_ (`r14-t3c-strides`; behind `strides`, off on both settings): records at the end of
-    Risks.
+  - _Built_ (`r14-t3c-strides`; behind `strides`, `measured` on both): records at the end of
+    Risks. Its stand-ins' strides (`r14-t3e-triangle-budget`; behind `standInStrides`, `own-grids`
+    on both): records at the end of Risks.
 - **R14.T3.d Two-pass occlusion.** Size M.
   - `DepthPyramid` and the two-pass cull of Design note 4 per view, in both the forward and the
     visibility paths. `occlusion: "hzb"`.
@@ -2345,9 +2347,10 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     level-0 vertices wholly (k = 1); each contact caps k as the CDLOD morph does.
   - Not the plan's "stride ≤ 2 beside an edge patch": edge patches take their own bands and morph on
     every path, their may-discard clusters at stride 1. Sub-patch stand-ins and unmeasured bakes
-    take no scale, so their vertices never move, and their neighbours' edges the level's largest
-    e_s: the two part by at most that e_s under τ′, over the skirts. A record kept whole as its
-    heights fade draws at stride 1 in camera passes, its vertices still morphed.
+    take no scale (but masks under `standInStrides: all`, below), so their vertices never move, and
+    their neighbours' edges the level's largest e_s: the two part by at most that e_s under τ′,
+    over the skirts. A record kept whole as its heights fade draws at stride 1 in camera passes,
+    its vertices still morphed.
   - Not the ruling's per-instance `f16` buffer: the edges' bands are in the instance record and the
     blocks' errors in the slot record, so the lit vertex stage keeps its 6 storage bindings.
     `INSTANCE_RECORD_BYTES` is 272 (32 → 272 B, after lane fix-coast-class-map's `cells`, words 16
@@ -2672,9 +2675,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - And: the drawn at most the reckoned on the probe.
   - And, on high, the strides on first, and the casters counted.
   - For the probe: `TerrainSessionOptions.litTerrain`, `TerrainPass.usedSlots`, and
-    `SEAM_COUNTS`, `SEAM_COUNT_STRIDE`, `SEAM_CACHE_SCALE`, `SEAM_STRIDE_MOVES=0`, `SEAM_BUDGET`.
-  - Not built: strides for sub-patch stand-ins (most of a strided frame's lit triangles); a budget
-    of GPU time.
+    `SEAM_COUNTS`, `SEAM_COUNT_STRIDE`, `SEAM_CACHE_SCALE`, `SEAM_BUDGET`.
+  - Not built: a budget of GPU time. The stand-ins' strides: below.
   - Pending: the owner's Mac (`views-check --terrain --hidden --setting high|low`, on high with
     `--geometry strides=measured,terrainBudget=triangles` and without) and RTX runs; Windows NOT RUN.
 - **The Mac batch** (lane tool-mac-profile, 2026-11-05): in `apps/hyperion`,
@@ -2689,3 +2691,22 @@ pages are assets and presentation; collision never reads them. No domain tag is 
 - (lean, 2026-11-05) The batch places the ship with the clock paused (`--rate 0`) and holds each
   setting's warm-up connection open (`src/main/holdingRelay.ts`) until its sky's final reply, so
   that each measured launch's sky is the server's kept reply and the server is quiet beside it.
+- **R14.T3.c's stand-ins** (`r14-t3e-triangle-budget`, the follow-up to T3.c; lean 2026-11-05; the
+  counts and the acceptance in the lane's outbox):
+  - `GeometrySettings.standInStrides` (`off` | `own-grids` | `all`; `--geometry standInStrides=`;
+    results files without it read `off`): `own-grids` on both; `off` the way back, bit for bit.
+  - `own-grids`: a stand-in on its own grid takes the camera passes' cap up to 2^levels
+    (`INSTANCE_SUB_GRID_STRIDES`, bit 19, never with bit 18), but one whose hold or fade sets its
+    edges' k: exact on its slot's patch's triangles but for k (`strides.wasm.test.ts`, 10⁻⁴ τ′).
+  - Not Design note 3's distance test for own grids, nor T3.e's count past τ′ of them.
+  - Low draws no masks (no cluster casters): its every stand-in is an own grid, so `own-grids` is
+    low's lever. The probe had counted them as masks (2,304, not 8,704 at stride 1); it now reads
+    bit 31. T3.e's budget reckons one a level down at 2,304, as it now draws but held or faded.
+  - `all` also strides masks, at their slot's patch's scale, their set's sides in their edges'
+    place (`clusters/strides.ts`' remarks); a strip takes its block's stride, at its sphere (not
+    Design note 19's stride-1 strip). Not on by default: it failed high's probe moves.
+  - Probe knob `SEAM_STAND_INS`; `BudgetFrame.atStride1By` gains `ownGrid` and `litMeshStandIns`.
+  - Not built: an edge bake's stand-ins on the cluster path, the lit mesh's whole grids, most of
+    what still draws at stride 1 on both: their masks need fins and heads cut to the set (T1.g's).
+  - Pending: the owner's Mac (`views-check --terrain --hidden --setting low`, with and without
+    `--geometry standInStrides=off`) and RTX runs; Windows NOT RUN.

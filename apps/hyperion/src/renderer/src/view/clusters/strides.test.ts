@@ -17,8 +17,11 @@ import {
   edgeBandMOfHalf,
   heldEdgeBandsM,
   INSTANCE_FINEST,
+  INSTANCE_SUB_GRID_STRIDES,
   largestStrideErrorsM,
+  maskStripBlock,
   NO_STRIDE_BAND,
+  NO_STRIDE_EDGE_BANDS,
   NO_STRIDE_SCALE,
   patchStrideScale,
   sharedStrideBandsM,
@@ -38,6 +41,8 @@ import {
   type StrideScale,
   vertexStrideBandM,
 } from "./strides";
+import { TERRAIN_SUB_PATCH_MASK } from "./terrain";
+import { subPatchWord } from "../terrain/gpu/uniforms";
 
 /**
  * A synthetic stretch of one cube face for the stride morph's twin: a heightfield on a lattice of
@@ -542,6 +547,117 @@ describe("the cull's camera strides", () => {
     ]).toEqual([11, 40, NO_STRIDE_BAND]);
   });
 
+  /**
+   * A mask's blocks (R14.T3.c's stand-ins): every block's needs 12, 14 and 16 at {@link SCALE} but
+   * block 3's 50, block 5's 14 and block 12's 16, of a mask one level down at part (1, 0), its set
+   * blocks 4 to 7 of rows 0 to 3.
+   */
+  const MASK_ERRORS = new Float16Array(4 * 64);
+  for (let block = 0; block < 64; block += 1) {
+    MASK_ERRORS.set([0, 1, 2, 3], 4 * block);
+  }
+  MASK_ERRORS.set([0, 20, 20, 20], 4 * 3);
+  MASK_ERRORS.set([0, 2, 2, 2], 4 * 5);
+  MASK_ERRORS.set([0, 3, 3, 3], 4 * 12);
+  const MASK = (TERRAIN_SUB_PATCH_MASK | subPatchWord(1, 1, 0)) >>> 0;
+
+  it("gives a mask's block the largest need of it and of its set's blocks on its sides alone, its set's sides in its edges' place", () => {
+    expect([
+      clusterStrideBandsM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 4, MASK),
+      clusterStrideBandsM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 4),
+      clusterStrideBandsM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 3, MASK),
+      clusterStrideBandsM(NO_STRIDE_SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 4, MASK),
+    ]).toEqual([[16, 16, 16], NONE3, NONE3, NONE3]);
+  });
+
+  it("gives a mask's strip m of its set's side e its block's bands there, and none past its set's side", () => {
+    expect([
+      clusterStrideBandsM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 64, MASK),
+      clusterStrideBandsM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 64 + 8 + 1, MASK),
+      clusterStrideBandsM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 64 + 16 + 3, MASK),
+      clusterStrideBandsM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 64 + 24 + 3, MASK),
+      clusterStrideBandsM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 64 + 4, MASK),
+    ]).toEqual([
+      // Block 4 at side 0's start; block 15 (7, 1) at side 1's second; blocks 28 (4, 3) and 4 (4, 0)
+      // at the last of sides 2 and 3, anticlockwise.
+      [16, 16, 16],
+      [12, 14, 16],
+      [12, 14, 16],
+      [16, 16, 16],
+      NONE3,
+    ]);
+  });
+
+  it("gives a vertex on a mask's set's side its one block's band there, and one inside the set a patch's of its set's blocks", () => {
+    expect([
+      vertexStrideBandM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 32, 3, 0, MASK),
+      vertexStrideBandM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 64, 3, 0, MASK),
+      vertexStrideBandM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 35, 0, 0, MASK),
+      vertexStrideBandM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 33, 3, 0, MASK),
+      vertexStrideBandM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 40, 3, 0, MASK),
+      vertexStrideBandM(SCALE, MASK_ERRORS, NO_STRIDE_EDGE_BANDS, 32, 3, 0),
+    ]).toEqual([16, 12, 16, 16, 14, 50]);
+  });
+
+  it("bands every cluster of a random mask at least as far as every vertex it drops is banded, a strip as the vertices of its block's side, and none where one is none (R14.T3.c's stand-ins)", () => {
+    const random = seededRandom(0x3a5c);
+    let checked = 0;
+    const short: string[] = [];
+    for (let n = 0; n < 60; n += 1) {
+      const levels = 1 + (n % 3);
+      const parts = 2 ** levels;
+      const subWord =
+        (TERRAIN_SUB_PATCH_MASK |
+          subPatchWord(levels, Math.floor(random() * parts), Math.floor(random() * parts))) >>>
+        0;
+      const errors = new Float16Array(4 * 64);
+      for (let block = 0; block < 64; block += 1) {
+        const two = random() < 0.1 ? Number.POSITIVE_INFINITY : 0.25 + 2 * random();
+        const four = two * (1.2 + random());
+        errors.set([two / 2, two, four, four * (1.2 + random())], 4 * block);
+      }
+      for (let cluster = 0; cluster < 96; cluster += 1) {
+        const block = cluster < 64 ? cluster : maskStripBlock(subWord, cluster);
+        const clusterBands = clusterStrideBandsM(
+          SCALE,
+          errors,
+          NO_STRIDE_EDGE_BANDS,
+          cluster,
+          subWord,
+        );
+        if (block < 0 || clusterBands.every((band) => !(band > 0))) {
+          continue;
+        }
+        const x0 = 8 * (block % 8);
+        const y0 = 8 * Math.floor(block / 8);
+        // A block's 9 × 9 vertices; a strip's along its block's side, as it hangs from it.
+        const side = Math.floor((cluster - 64) / 8);
+        const vertices: Array<readonly [number, number]> = [];
+        for (let k = 0; k <= 8; k += 1) {
+          for (let j = 0; j <= 8; j += 1) {
+            const onSide = [k === 0, j === 8, k === 8, j === 0][side] ?? true;
+            if (cluster < 64 || onSide) {
+              vertices.push([x0 + j, y0 + k]);
+            }
+          }
+        }
+        for (const [x, y] of vertices) {
+          const level = strideMorphLevel(x, y);
+          const band = clusterBands[level] ?? NO_STRIDE_BAND;
+          if (level >= 3 || !(band > 0)) {
+            continue;
+          }
+          checked += 1;
+          const own = vertexStrideBandM(SCALE, errors, NO_STRIDE_EDGE_BANDS, x, y, level, subWord);
+          if (!(own > 0 && own <= band)) {
+            short.push(`${String(subWord)} ${String(cluster)} (${String(x)}, ${String(y)})`);
+          }
+        }
+      }
+    }
+    expect([checked > 10_000, short]).toEqual([true, []]);
+  });
+
   it("holds an edge's band in a half float of kilometres rounded up, none and +∞ as they are", () => {
     const random = seededRandom(0xed6e);
     for (let n = 0; n < 2_000; n += 1) {
@@ -749,7 +865,7 @@ describe("a patch's measured errors", () => {
 });
 
 describe("the strides' WGSL constants", () => {
-  it("are the twin's: the band, the morph's levels and nodes, and the forced region's bit", () => {
+  it("are the twin's: the band, the morph's levels and nodes, the forced region's bit, the own grids' and a mask's", () => {
     for (const source of [terrainStridesWgsl, clusterCullWgsl]) {
       expect(source).toContain(
         `const STRIDE_BAND_FRACTION : f32 = ${String(STRIDE_BAND_FRACTION)};`,
@@ -761,6 +877,12 @@ describe("the strides' WGSL constants", () => {
     expect(terrainStridesWgsl).toContain(`const STRIDE_NODES : u32 = ${String(STRIDE_NODES)}u;`);
     expect(clusterCullWgsl).toContain(
       `const INSTANCE_FINEST : u32 = 0x${INSTANCE_FINEST.toString(16)}u;`,
+    );
+    expect(clusterCullWgsl).toContain(
+      `const INSTANCE_SUB_GRID_STRIDES : u32 = 0x${INSTANCE_SUB_GRID_STRIDES.toString(16)}u;`,
+    );
+    expect(terrainStridesWgsl).toContain(
+      `const STRIDE_SUB_PATCH_MASK : u32 = 0x${TERRAIN_SUB_PATCH_MASK.toString(16)}u;`,
     );
   });
 });

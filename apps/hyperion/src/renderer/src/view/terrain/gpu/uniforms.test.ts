@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import vertexGolden from "../../../../../../../../crates/hyperion-surface/tests/golden/vertex_f32.golden?raw";
 import { vec3 } from "../../../geometry/vec3";
+import { INSTANCE_FINEST, INSTANCE_SUB_GRID_STRIDES } from "../../clusters/strides";
 import { TERRAIN_SUB_PATCH_MASK } from "../../clusters/terrain";
 import { MAX_MORPH_HOLDS } from "../coarseFineHolds";
 import type { Face, PatchKey } from "../patchKey";
@@ -337,6 +338,40 @@ describe("an instance record's camera strides (plan R14, R14.T3.c)", () => {
     );
     const u = new Uint32Array(records.buffer);
     expect([u[14], u[WORDS + 14]]).toEqual([0, (255 << 8) | 7]);
+  });
+
+  it("marks a sub-patch on its own grid for the camera passes' cap in the quadrant word's bit 19, beside its holds, and refuses it in the forced region (R14.T3.c's stand-ins)", () => {
+    const records = new InstanceRecords(2);
+    const push = (finest: boolean, subGrid: boolean): void => {
+      records.push(
+        2,
+        vec3(0, 0, 0),
+        0,
+        1,
+        NO_PARENT_SLOT,
+        3,
+        5,
+        subPatchWord(4, 1, 2),
+        0,
+        0,
+        0,
+        undefined,
+        finest,
+        undefined,
+        0,
+        subGrid,
+      );
+    };
+    push(false, true);
+    push(true, false);
+    const u = new Uint32Array(records.buffer);
+    expect([u[7], u[WORDS + 7]]).toEqual([
+      (3 | (5 << 2) | INSTANCE_SUB_GRID_STRIDES) >>> 0,
+      (3 | (5 << 2) | INSTANCE_FINEST) >>> 0,
+    ]);
+    expect(() => {
+      push(true, true);
+    }).toThrow(RangeError);
   });
 });
 

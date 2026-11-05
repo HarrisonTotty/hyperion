@@ -53,6 +53,7 @@ import {
   EDGE_BANDS,
   edgeBandIndex,
   INSTANCE_FINEST,
+  INSTANCE_SUB_GRID_STRIDES,
   NO_STRIDE_BAND,
   NO_STRIDE_SCALE,
   type StrideScale,
@@ -414,6 +415,19 @@ function heldEdge(edge: number): number {
   return 1 << (2 + edge);
 }
 
+/**
+ * An instance kept whole that is a sub-patch on its own grid `levels` below its page's patch, at
+ * its camera passes' cap (R14.T3.c's stand-ins), with `extra` over it.
+ */
+function ownGrid(levels: number, extra: Partial<CullInstance> = {}): Partial<CullInstance> {
+  return {
+    quadrantWord: INSTANCE_SUB_GRID_STRIDES,
+    subWord: subPatchWord(levels, 1, 2),
+    whole: true,
+    ...extra,
+  };
+}
+
 describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
   it("keeps a sphere inside a cascade's box, or touching it, and refuses one wholly outside it across or beyond", () => {
     const pass = cascade();
@@ -698,6 +712,60 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
       cameraStride(PAGE_BLOCK, 1_000, { strideScale: NO_STRIDE_SCALE }),
       cameraStride(PAGE_BLOCK, 1_000, { strideScale: SCALE, whole: true }),
     ]).toEqual([1, 2, 1, 1]);
+  });
+
+  it("draws a sub-patch on its own grid with the quadrant word's bit 19 at the pass's cap up to its levels, kept whole or not, near or far, and with bit 18 at stride 1 (R14.T3.c's stand-ins)", () => {
+    const strip = { ...record(Z, 1, "terrain-skirt"), templateRef: 3 << 16 };
+    expect([
+      cameraStride(PAGE_BLOCK, 1, ownGrid(5)),
+      cameraStride(PAGE_BLOCK, 1_000, ownGrid(4)),
+      cameraStride(PAGE_BLOCK, 1, ownGrid(4), 2),
+      cameraStride(PAGE_BLOCK, 1, ownGrid(4, { whole: false })),
+      cameraStride(PAGE_BLOCK, 1, ownGrid(2)),
+      cameraStride(strip, 1, ownGrid(6), 8, 64 + 8 * 3 + 7),
+      cameraStride(
+        PAGE_BLOCK,
+        1,
+        ownGrid(5, { quadrantWord: INSTANCE_SUB_GRID_STRIDES | INSTANCE_FINEST }),
+      ),
+      cameraStride(PAGE_BLOCK, 1, ownGrid(5, { quadrantWord: 0 })),
+    ]).toEqual([8, 8, 2, 8, 4, 8, 1, 1]);
+  });
+
+  it("strides a stand-in's mask's strip by its block's bands at its set's side, at that block's sphere and not its record's on the patch's edge (R14.T3.c's stand-ins)", () => {
+    // A mask one level down at part (1, 0), its set blocks 4 to 7 of rows 0 to 3: strip 0 of side
+    // 0 hangs from block 4.
+    const mask = (TERRAIN_SUB_PATCH_MASK | subPatchWord(1, 1, 0)) >>> 0;
+    const strip = { ...PAGE_BLOCK, shape: "terrain-skirt", templateRef: 0 } as const;
+    const stride = (stripM: number, blockM: number): number => {
+      const buckets = cullTwin({
+        instances: [
+          {
+            originM: { x: 0, y: 0, z: 0 },
+            page: 0,
+            passMask: 0b1,
+            unitM: 1,
+            strideScale: SCALE,
+            subWord: mask,
+          },
+        ],
+        records: (_page, c) =>
+          c === 64
+            ? { ...strip, centreM: { x: 0, y: 0, z: -stripM } }
+            : c === 4
+              ? { ...PAGE_BLOCK, centreM: { x: 0, y: 0, z: -blockM } }
+              : { ...PAGE_BLOCK, radiusM: -1 },
+        clustersPerPage: 116,
+        rotationColumns: [X, Y, Z],
+        passes: [{ ...CAMERA, strideCap: 8 }],
+        places: [{ bucketBase: 0, listBase: 0 }],
+        templates: 8,
+        viewAxis: { x: 0, y: 0, z: -1 },
+      });
+      const entry = [...buckets.entries()].find(([, entries]) => entries.includes(64));
+      return entry === undefined ? 0 : strideOf(entry[0]);
+    };
+    expect([stride(1_000, 50), stride(50, 1_000), stride(1_000, 1_000)]).toEqual([1, 8, 8]);
   });
 
   /**
