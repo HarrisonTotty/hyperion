@@ -89,13 +89,26 @@ function texelBackgroundCdM2(luminanceCdM2: number | undefined): number {
     : 0;
 }
 
+/**
+ * Each band's darkest texel background, found once a band: a band's texels are set as its reply is
+ * decoded and never after, and the label asks at every render of every view's block (lane
+ * perf-render-thread-2).
+ */
+const DARKEST_BY_BAND = new WeakMap<SkyBand, number>();
+
 /** The least of a band's texel backgrounds, cd/m²: a black sky's 0 for a band of no texels. */
 function darkestBackgroundCdM2(band: SkyBand): number {
+  const kept = DARKEST_BY_BAND.get(band);
+  if (kept !== undefined) {
+    return kept;
+  }
   let darkest = Number.POSITIVE_INFINITY;
   for (let texel = 0; texel < band.count; texel += 1) {
     darkest = Math.min(darkest, texelBackgroundCdM2(band.luminanceCdM2[texel]));
   }
-  return Number.isFinite(darkest) ? darkest : 0;
+  const found = Number.isFinite(darkest) ? darkest : 0;
+  DARKEST_BY_BAND.set(band, found);
+  return found;
 }
 
 /** What a view's request is made from. */

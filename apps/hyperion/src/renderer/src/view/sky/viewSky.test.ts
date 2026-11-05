@@ -382,6 +382,26 @@ describe("viewSkyLabelV", () => {
     ).toEqual(exposures.map(() => 0));
   });
 
+  it("states its band's darkest texel's limit asked again, and another band's its own (lane perf-render-thread-2)", () => {
+    const texels = 6 * FACE * FACE;
+    const sky = cameraSky((texel) => skyOf(21.26 + (2.74 * texel) / texels));
+    const darkerBand = Float32Array.from(sky.band.luminanceCdM2, (luminance, texel) =>
+      texel === 7 ? Math.fround(skyOf(25.25)) : luminance,
+    );
+    const darker: SkyModel = { ...sky, band: { ...sky.band, luminanceCdM2: darkerBand } };
+    const limitOver = (backgroundCdM2: number): number =>
+      Math.min(
+        sky.response.cut_v,
+        cameraLimitV(DEFAULT_VIEW_CAMERA, shownTriple(DEFAULT_EXPOSURE), 60, backgroundCdM2),
+      );
+    const darkest = Math.min(...sky.band.luminanceCdM2);
+    expect([
+      viewSkyLabelV(sky, "camera", DEFAULT_EXPOSURE, 60) - limitOver(darkest),
+      viewSkyLabelV(sky, "camera", DEFAULT_EXPOSURE, 60) - limitOver(darkest),
+      viewSkyLabelV(darker, "camera", DEFAULT_EXPOSURE, 60) - limitOver(Math.fround(skyOf(25.25))),
+    ]).toEqual([0, 0, 0]);
+  });
+
   it("states a camera's limit at the default MAN exposure, V 10.06 at 60° under μ 24", () => {
     const label = viewSkyLabelV(
       cameraSky(() => MU_24_CD_M2),
