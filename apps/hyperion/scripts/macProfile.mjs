@@ -2,9 +2,10 @@
 // one command, which a stop does not lose. It builds the client and a release server, starts the
 // server, places the ship at body 41ffecb200000002.0400 with the scene's clock paused, warms each
 // setting's sky, then runs `viewsCheck.sh --inspection --timing --hidden --hyperion-gpu-timing` over
-// the matrix (each setting at DPR 1 and 2; each lever pair at high as A B A B; the shading pair at
-// both ratios; then the counted runs), then the height-worker sweep (`workerSweep.mjs`), and writes
-// one summary. Run it by hand on a quiet machine; not part of `ci`.
+// the matrix (each setting at DPR 1 and 2; each lever pair at high as A B A B; the shading pairs,
+// alone and with the occlusion, at both ratios; then the counted runs), then the height-worker
+// sweep (`workerSweep.mjs`), and writes one summary. Run it by hand on a quiet machine; not part of
+// `ci`.
 //
 //   node --no-warnings scripts/macProfile.mjs --machine <text> [--body <id>] [--out <dir>]
 //       [--load-bound <n>] [--settings high,low|none] [--dprs 1,2] [--levers <names>|all|none] [--pair-setting high]
@@ -35,25 +36,28 @@
 // server logs that sky's final reply. Every measured launch's sky is then answered from the kept
 // reply, and the server is quiet beside its windows; run.json counts the skies each run computed.
 // Before each run the batch waits, never stopping, until no sky is in flight and the 1-minute load is
-// under --load-bound (default 4), saying every minute what it waits on. The server's kept skies are
-// in its memory, so a resumed batch warms them again.
+// under --load-bound (default 4), saying every minute what it waits on. The server keeps its final
+// skies under its --data-dir (R06.T11.n), the batch's `server-data/`, so a resumed batch's warm-ups
+// find them there. Its sky's later jobs run at `--sky-qos utility`: on macOS the default,
+// `background`, puts them on the efficiency cores, and the warm-ups wait for the final reply. The
+// measured runs read the kept skies, so the class moves no figure.
 //
 // Each run's sample, before and after: the 1-minute load, the server's `ps` %CPU and CPU time (the
 // summary gives its mean over the run) and `pmset -g therm` on macOS. The sweep's runs are sampled
 // too, without the server, which is stopped first: each descent starts its own. --levers takes the
 // names of `MAC_PROFILE_LEVERS` (limb-rays, march-sources, lit-per-fragment, composite-per-pixel,
-// occlusion, strides, far-cascades, shading); --settings none and --levers none drop those runs.
+// occlusion, strides, far-cascades, shading, shading-occlusion); --settings none and --levers none
+// drop those runs.
 // --software (Linux only) runs every launch on SwiftShader, as a pod's dry run does; --port is the
 // batch's server's (7880 by default, apart from a developer's server and the descent spike's).
 //
 // The counted runs (R14.T2.e) come after the pairs, apart from them so that the count costs their
 // times nothing: each setting of --settings its own way, and each side of the pairs that split a
-// pass (occlusion and shading) at the pair setting where --levers holds them, all at DPR 1 with
-// `--count-gpu-calls`, which counts every render pass's attachments and the bytes a tile-based GPU
-// loads and stores for them. The summary gives their bytes by pass beside those pairs' deltas, and
-// every window's atmosphere read
-// (thin, thick, deck, beneath a deck, or a thermal form), from the kernels its frames dispatched.
-// --no-count drops the counted runs.
+// pass (occlusion, shading and both together) at the pair setting where --levers holds them, all at
+// DPR 1 with `--count-gpu-calls`, which counts every render pass's attachments and the bytes a
+// tile-based GPU loads and stores for them. The summary gives their bytes by pass beside those
+// pairs' deltas, and every window's atmosphere read (thin, thick, deck, beneath a deck, or a
+// thermal form), from the kernels its frames dispatched. --no-count drops the counted runs.
 import { spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
@@ -411,7 +415,16 @@ function optionsOf(args, profile) {
 async function startServer(binary, out, port, profile) {
   const log = createWriteStream(join(out, "server.log"), { flags: "a" });
   log.write(`--- the batch's server, started ${new Date().toISOString()}\n`);
-  const child = start(binary, ["--port", String(port), "--data-dir", join(out, "server-data")], {
+  // A sky's census after its first reply on the performance cores: see the header's sky.
+  const args = [
+    "--port",
+    String(port),
+    "--data-dir",
+    join(out, "server-data"),
+    "--sky-qos",
+    "utility",
+  ];
+  const child = start(binary, args, {
     cwd: repo,
     env: { ...process.env, NO_COLOR: "1" },
     stdio: ["ignore", "pipe", "pipe"],

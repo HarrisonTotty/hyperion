@@ -2666,7 +2666,9 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Pending (NOT RUN in a pod): TERRAIN TEST both on against forward with the occlusion on the RTX,
     `just views-check --terrain --hidden --setting high` with
     `--geometry shading=visibility,occlusion=hzb`, then `--geometry shading=forward,occlusion=hzb`,
-    compared by `scripts/compareCaptures.mjs`; the Mac's GPU times both on; Windows.
+    compared by `scripts/compareCaptures.mjs`; the Mac's pair, in `apps/hyperion`,
+    `node --no-warnings scripts/macProfile.mjs --machine <text> --levers shading-occlusion`;
+    Windows.
 - **R14.T2.e, the pod half** (`r14-t2-visibility-buffer`):
   - `TerrainViewFrame.opaqueDraws` and `FrameTerrain.opaqueDraws()`: the bodies pass draws the
     terrain that never discards, then the mesh bodies' figures, then the rest of the terrain; by
@@ -2817,7 +2819,7 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   run a setting, since every setting's own way is forward without the pyramid and splits no pass
   (Design note 7); counted at DPR 1 only; a read-only aspect is loaded, not stored.
 - **fix-test-render-headroom** (2026-11-06):
-  - test-render has 21 parts. Part 15 keeps R10.T16's frame with relief and the levers' frames on it
+  - test-render has 21 parts (23 with r14-visibility-occlusion's 22 and 23). Part 15 keeps R10.T16's frame with relief and the levers' frames on it
     (`checkTerrainFrame`, with its captures); part 20, `R10.T16 the frame's symbology`
     (`checkTerrainFrameSymbology`), its relief settled again, holds the datum check, the marks and
     lines over the image, the grazing and ridge checks, R14.T3.d over a ridge and R14.T1.e; part 21
@@ -2825,3 +2827,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - `view/engine/wgslParse.test.ts` parses and validates every shipped module with naga (`naga-wasm`
     30.2.0, naga 30.0.1): a module the engine makes outside `WGSL_CATALOGUE` joins its `MODULES`.
   - `testRender.sh` launches with `--disable-gpu-watchdog` (`gpu_watchdog_switches`).
+- (`r14-visibility-occlusion`, lean 2026-11-05) The `shading-occlusion` pair, both levers together:
+  A `shading=forward,occlusion=off`, B `shading=visibility,occlusion=hzb`, at DPR 1 and 2, its
+  sides counted as occlusion's and shading's: 56 runs in all. The batch's server takes
+  `--sky-qos utility` (research-next-work-40), so that the warm-ups' skies finish on macOS's
+  performance cores; its kept skies persist under its `--data-dir`.

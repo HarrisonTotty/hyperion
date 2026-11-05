@@ -57,7 +57,9 @@ export interface MacProfileLever {
 /**
  * The lever pairs, each A the setting's own way unless it names one and B the lever, with the
  * switches `viewsCheck.sh` takes. Shading names both sides (main's ask, 2026-11-05): forward is
- * R14.T2.a's, against which T2.e's acceptance reads the visibility buffer at both ratios.
+ * R14.T2.a's, against which T2.e's acceptance reads the visibility buffer at both ratios; and
+ * shading with the occlusion, which neither pair draws together (R14.T2.d), names both levers on
+ * both sides, at both ratios as shading's, its sides counted as theirs.
  */
 export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
   {
@@ -122,6 +124,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
       "R14.T2.e, the terrain's shading: forward, T2.a's (A), against the visibility buffer (B)",
     a: ["--geometry", "shading=forward"],
     b: ["--geometry", "shading=visibility"],
+    ratios: [1, 2],
+    countSides: true,
+  },
+  {
+    name: "shading-occlusion",
+    decides:
+      "R14.T2.d, the visibility buffer with the occlusion: forward with no occlusion (A) against both on (B)",
+    a: ["--geometry", "shading=forward,occlusion=off"],
+    b: ["--geometry", "shading=visibility,occlusion=hzb"],
     ratios: [1, 2],
     countSides: true,
   },

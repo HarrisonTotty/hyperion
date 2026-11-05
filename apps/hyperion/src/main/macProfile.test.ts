@@ -122,9 +122,9 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, seven pairs at DPR 1 and the shading pair at 1 and 2, four runs each; then
-    // two counted settings and the occlusion and shading pairs' two counted sides each.
-    expect(matrix).toHaveLength(4 + 7 * 4 + 2 * 4 + 2 + 2 * 2);
+    // Four own runs, seven pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
+    // then two counted settings and the occlusion's and both shading pairs' two counted sides each.
+    expect(matrix).toHaveLength(4 + 7 * 4 + 2 * 2 * 4 + 2 + 3 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -149,6 +149,17 @@ describe("the Mac batch's matrix", () => {
       "--geometry",
       "shading=visibility",
     ]);
+    // The visibility buffer with the occlusion, which neither pair draws (R14.T2.d).
+    expect(args("shading-occlusion-high-dpr1-a1")).toEqual([
+      "--geometry",
+      "shading=forward,occlusion=off",
+    ]);
+    expect(args("shading-occlusion-high-dpr2-b2")).toEqual([
+      "--device-pixel-ratio",
+      "2",
+      "--geometry",
+      "shading=visibility,occlusion=hzb",
+    ]);
   });
 
   it("makes the dry run's two runs, the levers in their own order whatever the order given", () => {
@@ -168,7 +179,7 @@ describe("the Mac batch's matrix", () => {
   it("counts each setting's own way and each side of a pass-splitting pair last, at DPR 1, apart from the pairs (R14.T2.e)", () => {
     const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
     const counted = matrix.filter(isCounted);
-    expect(matrix.slice(-6)).toEqual(counted);
+    expect(matrix.slice(-8)).toEqual(counted);
     expect(counted.map((run) => [run.id, run.setting, run.ratio, run.args, run.place])).toEqual([
       ["counted-high-dpr1", "high", 1, ["--count-gpu-calls"], { kind: "counted" }],
       ["counted-low-dpr1", "low", 1, ["--count-gpu-calls"], { kind: "counted" }],
@@ -199,6 +210,20 @@ describe("the Mac batch's matrix", () => {
         1,
         ["--count-gpu-calls", "--geometry", "shading=visibility"],
         { kind: "counted side", lever: "shading", side: "b" },
+      ],
+      [
+        "counted-shading-occlusion-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "shading=forward,occlusion=off"],
+        { kind: "counted side", lever: "shading-occlusion", side: "a" },
+      ],
+      [
+        "counted-shading-occlusion-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "shading=visibility,occlusion=hzb"],
+        { kind: "counted side", lever: "shading-occlusion", side: "b" },
       ],
     ]);
     expect(macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, counted: false }).some(isCounted)).toBe(
@@ -351,7 +376,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 46 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 56 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(
@@ -367,6 +392,7 @@ describe("a lever's pair", () => {
     expect(text).toContain("| orbit | 2, 2 | 42.0 | 52.0 | +10.0 | +23.8% | 23.8 | 19.2 |");
     expect(text).toContain("| orbit | march | 13.0 | 21.0 | +8.0 |");
     expect(text).toContain("### shading, high at DPR 2: R14.T2.e");
+    expect(text).toContain("### shading-occlusion, high at DPR 2: R14.T2.d");
     expect(text).toContain("No counted run of the pair is kept.");
     // A timing file before version 7 holds no reads.
     expect(text).toContain("| orbit | not recorded | not recorded |");
