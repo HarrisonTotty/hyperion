@@ -17,18 +17,24 @@ use crate::planetary::derive::photometry::area_mix::{
 };
 use crate::substance::thermal::{RegolithInertiaRules, with_regolith_inertia};
 
-/// The records whose state the pore gas flips over the census, by ID in the census's order: none
-/// (the census at the tip, 2026-11-01). With the outer system's ice on every water-ice lid, nine
-/// N₂ airs at or under the 100 Pa line on icy worlds at 35–52 K went `Airless`, their lids' Γ
-/// taken from about 56 to 3–5 J m⁻² K⁻¹ s^−½ and their coldest zones 5–23 K colder under their
-/// N₂'s cold trap; a lid under an air (`hooks::surface::lid_air`) now keeps P14.T49.j's form.
-const FLIPS: [&str; 0] = [];
+/// The records whose state the pore gas flips over the census, by ID in the census's order: one
+/// from generator version 28, the sample's moon 41ffecb1ffc00007.0d01, `Tenuous` at 0.49 Pa with
+/// the pore gas held and a `Snowball` at 101 Pa in force, its coldest zone 34.6 → 45.8 K and its
+/// N₂ at its ice's saturation in both. P14.T9.d's placement margin moves its planet, 0d00, about
+/// the pair 3 of 41ffecb1ffc00007, from 28; an N₂ ice world at 46 K, it lies at the jump that
+/// P14.T51.l's secant root also finds there (`SECANT_OTHER_CROSSINGS`). To 27 none (the census at
+/// the tip, 2026-11-01). With the outer system's ice on every water-ice lid, nine N₂ airs at or
+/// under the 100 Pa line on icy worlds at 35–52 K went `Airless`, their lids' Γ taken from about
+/// 56 to 3–5 J m⁻² K⁻¹ s^−½ and their coldest zones 5–23 K colder under their N₂'s cold trap; a
+/// lid under an air (`hooks::surface::lid_air`) now keeps P14.T49.j's form.
+const FLIPS: [&str; 1] = ["41ffecb1ffc00007.0d01"];
 
-/// How many of the census's bodies the pore gas moves: 1,721 of 6,303 at generator version 27,
-/// 1,621 of them airless and 1 tenuous, over 27's census of 344 bodies fewer (its galaxy's sample
-/// and golden systems; 1,723 of 6,647 at 26, 2026-11-01, 1,622 airless and 1 tenuous; 1,729 of
-/// 6,664 at 25, 1,730 at 24).
-const MOVED: usize = 1_721;
+/// How many of the census's bodies the pore gas moves: 1,722 of 6,232 at generator version 28,
+/// 1,622 of them airless and 1 tenuous, over 28's census of 71 bodies fewer than 27's (its
+/// evaporation and placement margin); 1,721 of 6,303 at 27, 1,621 airless and 1 tenuous, over
+/// 27's census of 344 bodies fewer (its galaxy's sample and golden systems; 1,723 of 6,647 at 26,
+/// 2026-11-01, 1,622 airless and 1 tenuous; 1,729 of 6,664 at 25, 1,730 at 24).
+const MOVED: usize = 1_722;
 
 /// The census's two walks, one body each in the same order: the pore gas held, and in force.
 struct Census {
