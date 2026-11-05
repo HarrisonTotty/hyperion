@@ -10,14 +10,18 @@ Three sets, found from the code's graph (`rust_graph.py`) and run in this order:
    union of them: that union (`with_every_N_hold`, `GalaxyRules::every_N_hold`,
    `StellarRules::every_N_hold`) or one of the switches the planetary union sets (each `with_*`
    function its body calls). Its restated tests, its censuses and its "held only until the N bump"
-   tests among them.
+   tests among them. With them, every test whose own code (its body and the test code it calls)
+   names one of version N's gates, the constants that are N (`const X: GeneratorVersion =
+   GeneratorVersion::new(N)`, each `*_VERSION` and `*_FROM`), or the version itself: a gate no
+   union switches, such as the surface crate's `REFINED_CORNERS_FROM`, and each gate's tripwire.
 2. censuses: every slow test (`#[ignore = "slow: ..."]`) whose name says `census` and whose code
    reaches any version's union or switch, less those of 1.
 3. touched: with `--since REV`, the ordinary tests (not ignored) of the crates that `REV..HEAD`
    changes, the round's new commits.
 
 A reach here follows calls alone (functions, methods and imports; not types, impls, macros or
-globs) and never passes through another union or switch. The graph's own reach (`tests_reaching`)
+globs) and never passes through another union or switch; a gate's, through test code alone, since
+every generation reads its rules' gates. The graph's own reach (`tests_reaching`)
 over-approximates through types and globs: each switch's local `Restore` reaches every other
 switch by its name, and a `use super::*` every item of the module it imports, which together reach
 most of the sim's tests.
@@ -102,15 +106,74 @@ def unions_and_switches(graph: rust_graph.Graph) -> Tuple[Dict[int, Set[str]], D
     return unions, switches
 
 
+class Names:
+    """Whether an item's own tokens name another item: each switch defines a local `Restore`, which
+    belongs to the switch's node, so that any other `Restore` in its file resolves to the switch."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.files: Dict[str, Dict[str, Set[str]]] = {}
+
+    def names(self, source: str, target: str) -> bool:
+        path, _, ident = source.partition("#")
+        if ident.startswith("use:"):
+            return True
+        if path not in self.files:
+            text = (self.root / path).read_text(encoding="utf-8", errors="replace")
+            self.files[path] = {i: {v for _, v in t} for i, t in rust_graph.item_tokens(text).items()}
+        name = re.search(r"(\w+)$", target)
+        return name is None or name.group(1) in self.files[path].get(ident, {name.group(1)})
+
+
 def reaching(graph: rust_graph.Graph, reverse: Dict[str, Set[str]], starts: Set[str],
-             blocked: Set[str]) -> Set[str]:
-    """The nodes whose calls reach one of `starts`, through no node of `blocked` but those."""
+             blocked: Set[str], names: Names) -> Set[str]:
+    """The nodes whose calls reach one of `starts`, through no node of `blocked` but those; a start
+    is reached only from code that names it."""
     seen = set(starts)
     todo = list(starts)
     while todo:
         node = todo.pop()
         for source in reverse.get(node, ()):
-            if source not in seen and source not in blocked and CALL.search(source):
+            if source not in seen and source not in blocked and CALL.search(source) \
+                    and (node not in starts or names.names(source, node)):
+                seen.add(source)
+                todo.append(source)
+    return seen
+
+
+def version_gates(root: Path, graph: rust_graph.Graph, version: int) -> Tuple[Set[str], Set[str]]:
+    """Version `version`'s gates (the constants that are it) with the test code whose own tokens name
+    the version itself; and the nodes of test code, through which alone a gate is reached."""
+    literal = ["GeneratorVersion", "::", "new", "(", str(version), ")"]
+    quick = re.compile(rf"GeneratorVersion\s*::\s*new\s*\(\s*{version}\s*\)")
+    test_files = set().union(*(unit.test_files for unit in graph.units.values()))
+    tests: Set[str] = set()
+    starts: Set[str] = set()
+    for path, facts in graph.rs.items():
+        kinds = {item[0]: (item[1], bool(item[5])) for item in facts.items}
+        in_test = path in test_files
+        tests |= {rust_graph.item_node(path, ident) for ident, (_, test) in kinds.items() if test or in_test}
+        text = (root / path).read_text(encoding="utf-8", errors="replace")
+        if not quick.search(text):
+            continue
+        for ident, tokens in rust_graph.item_tokens(text).items():
+            values = [v for _, v in tokens]
+            if not any(values[i:i + len(literal)] == literal for i in range(len(values) - len(literal) + 1)):
+                continue
+            kind, test = kinds.get(ident, ("", False))
+            if kind in ("const", "static") or test or in_test:
+                starts.add(rust_graph.item_node(path, ident))
+    return starts, tests
+
+
+def reaching_in_tests(reverse: Dict[str, Set[str]], starts: Set[str], tests: Set[str]) -> Set[str]:
+    """The nodes whose calls reach one of `starts` through imports and test code alone."""
+    seen = set(starts)
+    todo = list(starts)
+    while todo:
+        node = todo.pop()
+        for source in reverse.get(node, ()):
+            if source not in seen and CALL.search(source) and ("#use:" in source or source in tests):
                 seen.add(source)
                 todo.append(source)
     return seen
@@ -147,8 +210,10 @@ def choose(root: Path, graph: rust_graph.Graph, version: Optional[int]
             reverse.setdefault(target, set()).add(source)
     every = set().union(*unions.values(), *switches.values())
     mine = unions[version] | switches[version]
-    held_nodes = reaching(graph, reverse, mine, every - mine)
-    any_nodes = reaching(graph, reverse, every, set())
+    names = Names(root)
+    held_nodes = reaching(graph, reverse, mine, every - mine, names)
+    held_nodes |= reaching_in_tests(reverse, *version_gates(root, graph, version))
+    any_nodes = reaching(graph, reverse, every, set(), names)
     held: List[Tuple[str, str]] = []
     censuses: List[Tuple[str, str]] = []
     texts: Dict[str, str] = {}
