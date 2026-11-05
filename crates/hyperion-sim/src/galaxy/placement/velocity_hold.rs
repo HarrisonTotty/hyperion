@@ -514,11 +514,16 @@ pub(super) fn exempt_classes_padded(galaxy: &Galaxy) -> Vec<(ClassKey, Layer)> {
 /// `no_record_reaches_its_layers_pad_speed`: 10⁵ members of each class with weight in layer D or
 /// E, at the Sun-like point, in the bulge and 200 ly from the centre, each below its layer's pad
 /// speed, through `epoch_velocity` (whose debug assertion, P08.T17's, holds every draw), only the
-/// exempt classes beyond the local escape speed, and every other class's below `PAD_SPEED`.
+/// exempt classes beyond the local escape speed, and every other class's below `PAD_SPEED`. On
+/// wasm32-wasip1, which has no threads, 10⁴ members of each.
 #[test]
-#[ignore = "slow: 10⁵ members of each displaced class at three places"]
+#[ignore = "slow: 10⁵ members of each displaced class at three places (10⁴ on wasm)"]
 fn no_record_reaches_its_layers_pad_speed() {
-    const MEMBERS: u32 = 100_000;
+    const MEMBERS: u32 = if cfg!(target_family = "wasm") {
+        10_000
+    } else {
+        100_000
+    };
     let galaxy = moving();
     let fields = galaxy
         .fields()
@@ -534,46 +539,45 @@ fn no_record_reaches_its_layers_pad_speed() {
         }
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let workers = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
-    let checked: u64 = std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..workers)
-            .map(|_| {
-                scope.spawn(|| {
-                    let mut checked = 0_u64;
-                    loop {
-                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(&(class, band, at)) = work.get(i) else {
-                            return checked;
-                        };
-                        let key = fields.class(class).key();
-                        let exempt = is_exempt(key);
-                        let p = PointLy::from(&at);
-                        let escape = galaxy
-                            .potential()
-                            .escape_speed(
-                                LightYears::new(math::hypot(p.x, p.y)),
-                                LightYears::new(p.z),
-                            )
-                            .map_or(f64::INFINITY, KilometresPerSecond::value);
-                        for record in members(galaxy, (class, band), &at, &[], (MEMBERS, 0)) {
-                            let v = epoch_velocity(galaxy, &record);
-                            let speed = v.speed().value() / 1_000.0;
-                            let pad = pad_speed(record.layer()).value();
-                            assert!(speed < pad, "{key:?}");
-                            if !exempt {
-                                assert!(speed < PAD_SPEED.value(), "{key:?}");
-                                assert!(speed < escape, "{key:?} beyond the escape speed");
-                            }
-                            checked += 1;
-                        }
-                    }
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("a worker"))
-            .sum()
-    });
+    let worker = || {
+        let mut checked = 0_u64;
+        loop {
+            let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(&(class, band, at)) = work.get(i) else {
+                return checked;
+            };
+            let key = fields.class(class).key();
+            let exempt = is_exempt(key);
+            let p = PointLy::from(&at);
+            let escape = galaxy
+                .potential()
+                .escape_speed(LightYears::new(math::hypot(p.x, p.y)), LightYears::new(p.z))
+                .map_or(f64::INFINITY, KilometresPerSecond::value);
+            for record in members(galaxy, (class, band), &at, &[], (MEMBERS, 0)) {
+                let v = epoch_velocity(galaxy, &record);
+                let speed = v.speed().value() / 1_000.0;
+                let pad = pad_speed(record.layer()).value();
+                assert!(speed < pad, "{key:?}");
+                if !exempt {
+                    assert!(speed < PAD_SPEED.value(), "{key:?}");
+                    assert!(speed < escape, "{key:?} beyond the escape speed");
+                }
+                checked += 1;
+            }
+        }
+    };
+    // wasm32-wasip1 has no threads, so there the work runs in turn on this one.
+    let checked: u64 = if cfg!(target_family = "wasm") {
+        worker()
+    } else {
+        let workers = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..workers).map(|_| scope.spawn(worker)).collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("a worker"))
+                .sum()
+        })
+    };
     println!("{checked} members checked");
 }
