@@ -260,9 +260,12 @@ fn records_about(galaxy: &Galaxy, layer: Layer, at: [f64; 3], n: usize) -> Vec<S
     unreachable!("the shells grow without end")
 }
 
-/// The merger products pinned by `tests/sky_census.rs` (R06.T16.b), each brighter than the
-/// envelope at its primary's own mass and age: two first-giant-branch stars and one on the main
-/// sequence, near the Sun.
+/// The merger products pinned by `tests/sky_census.rs` (R06.T16.b), near the Sun: two giants, one
+/// on its first giant branch and one burning helium, and one on the main sequence. Each was
+/// brighter than the envelope at its primary's own mass and age; from generator version 27, whose
+/// envelope is built at the tracks' helium excesses too (R06.T16.a's helium nodes, refitted at 27),
+/// the main sequence's merger still is, at M<sub>V</sub> 1.98 against 3.98, and the two giants lie
+/// within it.
 const PINNED_MERGERS: [u64; 3] = [
     0x21fe_5648_7ff0_0001,
     0x4204_6c99_ff00_000a,
@@ -397,8 +400,8 @@ fn envelope_bounds_pair_states() {
     }
     pinned.report("the pinned mergers");
     assert_eq!(
-        pinned.beyond_m1, 6,
-        "each pinned merger, at both times, beyond the bound at m₁"
+        pinned.beyond_m1, 2,
+        "the main sequence's pinned merger, at both times, beyond the bound at m₁"
     );
     violations.append(&mut pinned.violations);
     eprintln!(
