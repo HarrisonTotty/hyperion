@@ -4,6 +4,7 @@
 //! test of life and death over random systems and times.
 
 use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::galaxy::displaced::PlacementClass;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, SystemOrigin, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::{Galaxy, Population};
@@ -453,10 +454,22 @@ fn sample_records(galaxy: &Galaxy, seed: u64, n: usize) -> Vec<SystemRecord> {
 /// [`star_count`](hyperion_sim::stellar::multiplicity::SystemHierarchy::star_count), but a single
 /// star with one is not drawn multiple, and a dropped brown dwarf is not a dropped companion. Its
 /// rate, `substellar_companion_probability`, is the substellar module's to test.
+///
+/// From generator version 27 a dead record of layers D and E is drawn by its fate as well as by
+/// the model (plan 08, P08.T12.c): a displaced class's member is single by construction
+/// ([`grid_multiplicity`]: a runaway or a walkaway, or a remnant its kick carried from its birth
+/// site, travels alone), and a retained remnant, kicked below a quarter of the circular speed, is
+/// more often a primary a companion stripped, whose low kick keeps the companion. So the count is
+/// the living records' (every record of layers A to C, and the living of D and E), whose draw is
+/// the model's alone, and the displaced are held single. Counted against the model, the slow
+/// sample's dead put it at 5,545 multiples of 10,002 against 6,046.1 expected (z = −11.2): its 742
+/// displaced, single, against 629.5, and its 2,101 retained, all of layer E, 1,962 multiple
+/// against 1,826.8 (z = +8.9); its 7,159 living drew 3,583 against 3,589.9 (2026-11-05).
 fn check_multiple_share(seed: u64, n: usize) {
     let galaxy = milky_way();
     let model = MultiplicityModel::default_v1();
     let (mut multiples, mut expected, mut variance) = (0_u32, 0.0, 0.0);
+    let (mut living, mut retained, mut displaced) = (0_u32, 0_u32, 0_u32);
     let records = sample_records(&galaxy, seed, n);
     for record in &records {
         let stars = SystemStars::generate(&galaxy, record);
@@ -466,16 +479,37 @@ fn check_multiple_share(seed: u64, n: usize) {
             .iter()
             .filter(|s| s.kind() == SlotKind::Star)
             .count();
+        match record.placement_class() {
+            PlacementClass::Alive => living += 1,
+            PlacementClass::Retained { .. } => {
+                retained += 1;
+                continue;
+            }
+            PlacementClass::Displaced { .. } => {
+                assert!(
+                    grid_multiplicity(record) == MultiplicityContext::ForcedSingle
+                        && h.stars().len() == 1
+                        && h.dropped_companions() == 0,
+                    "{:?}: a displaced system with companions",
+                    record.id()
+                );
+                displaced += 1;
+                continue;
+            }
+        }
         multiples += u32::from(stellar > 1 || h.dropped_companions() > 0);
         let p = model.drawn_multiple_fraction(record.primary_initial_mass());
         expected += p;
         variance += p * (1.0 - p);
     }
     let z = (f64::from(multiples) - expected) / variance.sqrt();
+    println!(
+        "{multiples} multiple systems of {living} living against {expected:.1} expected (z = \
+         {z:.2}); {retained} retained remnants, {displaced} displaced systems single"
+    );
     assert!(
         z.abs() < 3.29,
-        "{multiples} multiple systems of {} against {expected:.1} expected (z = {z:.2})",
-        records.len()
+        "{multiples} multiple systems of {living} against {expected:.1} expected (z = {z:.2})"
     );
 }
 
