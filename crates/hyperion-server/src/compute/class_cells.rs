@@ -9,10 +9,21 @@
 //! cells are made ahead of its hits by its jobs, several at once
 //! ([`served_range_query`](super::served_range_query)); a cell is otherwise made by the job whose
 //! query first reads it. A cell evicted is made again, and changes no answer.
+//!
+//! A placed class's cell keeps at most the places a quarter of the budget holds
+//! ([`SharedClassCellCache::most_kept_places`]): a denser one holds only its count, and each query
+//! reads its places again as it walks it, rather than making it whole. A cold range query at the
+//! black hole made the eight stellar merger cells there whole, 557 MiB each, beside the slow
+//! accreting white dwarfs' eight of 93 MiB, and the server peaked at 5.40–5.55 GiB; with every cell
+//! past the whole budget read as the query walks it, at 0.94–0.99 GiB, the cells of 8 to 32 MiB
+//! about the centre made side by side by its jobs; past a quarter, at 329–331 MiB, the answer the
+//! same throughout (a 0.78 ly sphere from layer D, two or three runs each; pod, 32 vCPU, release,
+//! 2026-11-05; `tests/centre_memory.rs`; the mergers' balance, part 3).
 
 use std::cell::RefCell;
 use std::sync::Arc;
 
+use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
 #[cfg(doc)]
 use hyperion_sim::galaxy::catalogue_classes::CachedClassSource;
@@ -39,6 +50,8 @@ impl HeapBytes for ClassCellSystems {
 #[derive(Debug)]
 pub struct SharedClassCellCache {
     cells: SharedByteLru<(GalaxyKey, CatalogueCellKey), ClassCellSystems>,
+    /// The most places a placed class's cell keeps: as many as a quarter of the budget holds.
+    most_places: u32,
 }
 
 impl SharedClassCellCache {
@@ -47,9 +60,21 @@ impl SharedClassCellCache {
     /// A budget of zero caches nothing: every cell is made, lent and dropped.
     #[must_use]
     pub fn new(budget_bytes: usize) -> Self {
+        let places = budget_bytes / 4 / size_of::<(u32, GalacticPosition)>();
         Self {
             cells: SharedByteLru::new(budget_bytes),
+            most_places: u32::try_from(places).unwrap_or(u32::MAX),
         }
+    }
+
+    /// The most places a placed class's cell it keeps holds: as many as a quarter of the budget
+    /// holds, 48 B each, 174,762 at the server's 32 MiB. A denser cell keeps none, and each query
+    /// reads them again as it walks the cell: a cell past a quarter would evict most of what the
+    /// cache holds, and one past the whole budget was made whole and dropped, as the eight of 557
+    /// MiB about the black hole were (module documentation).
+    #[must_use]
+    pub fn most_kept_places(&self) -> u32 {
+        self.most_places
     }
 
     /// The sim's [`CatalogueClassCellCache`] over this cache, for the galaxy `galaxy` names.
@@ -103,6 +128,7 @@ impl SharedClassCellCache {
         );
         let making = Making {
             made: RefCell::new(Vec::with_capacity(MADE_CHUNK_CELLS)),
+            most_places: self.most_places,
         };
         let source = CatalogueClassSource::new().with_cells(&making);
         for chunk in cells.chunks(MADE_CHUNK_CELLS) {
@@ -123,6 +149,8 @@ impl SharedClassCellCache {
 struct Making {
     /// The cells made and not yet stored.
     made: RefCell<Vec<(CatalogueCellKey, Arc<ClassCellSystems>)>>,
+    /// The cache's most kept places, so that a cell made ahead is the one its hits would make.
+    most_places: u32,
 }
 
 impl CatalogueClassCellCache for Making {
@@ -135,6 +163,10 @@ impl CatalogueClassCellCache for Making {
         let systems = Arc::new(make());
         self.made.borrow_mut().push((key, Arc::clone(&systems)));
         systems
+    }
+
+    fn most_kept_places(&self) -> u32 {
+        self.most_places
     }
 }
 
@@ -173,6 +205,11 @@ impl CatalogueClassCellCache for ClassCellHandle<'_> {
         // meanwhile is the same cell, and either is lent right.
         let _ = self.cache.cells.insert(entry_key, Arc::clone(&systems));
         systems
+    }
+
+    /// As many as the whole budget holds ([`SharedClassCellCache::most_kept_places`]).
+    fn most_kept_places(&self) -> u32 {
+        self.cache.most_places
     }
 }
 
@@ -305,5 +342,18 @@ mod tests {
                     unreachable!("never made")
                 }),
         );
+    }
+
+    /// A placed class's cell keeps at most the places a quarter of the budget holds, 48 B each:
+    /// 174,762 at the server's 32 MiB, none at a budget of nothing (the mergers' balance, part 3).
+    #[test]
+    fn a_cell_keeps_at_most_the_places_its_budget_holds() {
+        assert_eq!(size_of::<(u32, GalacticPosition)>(), 48);
+        let budget = crate::config::DEFAULT_CLASS_CELL_CACHE_MIB << 20;
+        let cache = SharedClassCellCache::new(budget);
+        assert_eq!(cache.most_kept_places(), 174_762);
+        let key = GalaxyKey::new(9, hyperion_sim::GENERATOR_VERSION);
+        assert_eq!(cache.handle(key).most_kept_places(), 174_762);
+        assert_eq!(SharedClassCellCache::new(0).most_kept_places(), 0);
     }
 }

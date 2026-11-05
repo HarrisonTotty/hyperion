@@ -198,7 +198,10 @@ pub const DEFAULT_CLUSTER_MODEL_CACHE_MIB: usize = 64;
 /// read first and other classes' members ([`ClassCellSystems`]), charged their buffers. A cold
 /// Sun-like 50 ly query under 27's rules reads 8,720 class cells, 1.45 MB (measured 2026-11-01 on
 /// the server's tests' galaxy, pod), so this holds some twenty such neighbourhoods' cells, and a
-/// query within the classes' 4,096 ly reach of another shares most of them.
+/// query within the classes' 4,096 ly reach of another shares most of them. A placed class's cell
+/// keeps at most the places a quarter of the budget holds, 174,762 here: a denser one keeps none,
+/// and a query reads its places again as it walks it, so that a query at the galactic centre makes
+/// no cell of 557 MiB (the mergers' balance, part 3). A larger budget keeps denser cells.
 ///
 /// [`ClassCellSystems`]: hyperion_sim::galaxy::catalogue_classes::ClassCellSystems
 pub const DEFAULT_CLASS_CELL_CACHE_MIB: usize = 32;

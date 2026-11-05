@@ -3131,3 +3131,12 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Leans (2026-11-05)._ The mergers implement no `ClassProcess::event_time`: rule 10 asks its
     classes to keep their events in their cells' boxes, and a merger's host moves within
     `LIFETIME_REACH` of its cell (rule 5), so the merger scans read and cut the time themselves.
+- **P09.T40 memory, the dense class cells at the galactic centre (lane `perf-mergers-walk-balance`,
+  part 3, 2026-11-05, at 28; no output moves).**
+  - _Names (sim)._ `ClassCellSystems::streams_places` and the provided
+    `CatalogueClassCellCache::most_kept_places` (default `MAX_KEPT_PLACES` = 2¹⁸; 0 for
+    `NoClassCellCache`): a placed class's cell of more candidates keeps no place, and the hits and
+    the shells' hosts read its places again, in index order, as they walk it.
+  - _Lean (2026-11-05)._ Streaming, the server's cache keeping as many places a cell as a quarter
+    of its budget holds (174,762 at 32 MiB): past a quarter a cell evicts most of the cache, and the
+    cells of 8–32 MiB about the centre, made side by side, held 0.6 GB more at the peak.

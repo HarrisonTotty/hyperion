@@ -42,6 +42,6 @@ pub use self::ids::{BuildCatalogueCellKeyError, CatalogueCellKey};
 pub use self::registry::{ALL_CLASSES, ClassId, FEATURE_LEVEL_LIST_ORDER};
 pub use self::source::{
     CachedClassSource, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems,
-    NoClassCellCache,
+    MAX_KEPT_PLACES, NoClassCellCache,
 };
 pub use self::system::{CatalogueMotion, CatalogueSystem, system_of, system_of_record};

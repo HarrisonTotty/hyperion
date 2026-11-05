@@ -47,7 +47,10 @@
 //! **The class-cell cache** (P09.T40). What a hit is made from in each cell, the places read first
 //! and the other classes' members ([`ClassCellSystems`]), is epoch state, so a caller may keep it
 //! between queries ([`CatalogueClassCellCache`]; [`CatalogueClassSource::with_cells`]). A warm
-//! query then draws only the candidates whose place its sphere can reach. Without a cache
+//! query then draws only the candidates whose place its sphere can reach. A placed class's cell of
+//! more candidates than its cache keeps places ([`CatalogueClassCellCache::most_kept_places`])
+//! keeps none, and each query reads them again as it walks the cell, so that none is held whole
+//! (the mergers' balance, part 3). Without a cache
 //! ([`NoClassCellCache`]) every cell's systems are made for the query and dropped. Each cell is a
 //! pure function of the galaxy and its key, so a server may make a query's cells
 //! ([`CatalogueClassSource::cells_read`]) on several threads before it asks for the hits
@@ -349,6 +352,30 @@ impl<L: ClassLookup> SystemSource for CachedClassSource<'_, L> {
     }
 }
 
+/// The most places a placed class's cell keeps by default, 2¹⁸ (12 MiB of places): what
+/// [`CatalogueClassCellCache::most_kept_places`] gives for a cache that says no other. A denser
+/// cell keeps none, and a query reads its places again, each first from its candidate's own stream,
+/// as it walks the cell ([`ClassCellSystems::streams_places`]), so that it is never held whole.
+///
+/// The eight stellar merger cells that meet at the galactic centre each draw some 12.2 million
+/// candidates, 557 MiB of places a cell, and the slow accreting white dwarfs' eight there 2.0
+/// million, 93 MiB. Kept whole, a cold range query at the black hole held them at once and the
+/// server's resident set peaked at 5.40–5.55 GiB; with a cell of more than 2¹⁸ streamed, at
+/// 322–336 MiB, the answer the same (a 0.78 ly sphere from layer D, the Milky Way-like seed
+/// `0x0926_0000`, two or three runs each; pod, 32 vCPU, release, 2026-11-05; the server's
+/// `tests/centre_memory.rs`; the mergers' balance, part 3). The server's cache keeps as many as a
+/// quarter of its budget holds.
+pub const MAX_KEPT_PLACES: u32 = 1 << 18;
+
+/// What a placed class's cell holds of its places read first.
+#[derive(Debug, Clone, PartialEq)]
+enum Places {
+    /// Every candidate's place, with its index, in index order.
+    Kept(Vec<(u32, GalacticPosition)>),
+    /// None: a query reads them again as it walks the cell.
+    Streamed,
+}
+
 /// What the range query keeps of one class cell between queries (P09.T40): its candidate count,
 /// each place a class reads first (the grid's rule 11) with its candidate's index, and every
 /// member of every entry of a class that reads none, in index and member order.
@@ -356,11 +383,13 @@ impl<L: ClassLookup> SystemSource for CachedClassSource<'_, L> {
 /// It is epoch state alone, a pure function of the galaxy and the cell, so a cache that lends it
 /// changes no hit. A place is a few bytes and costs a stream's first three words, where a
 /// candidate built costs its whole draw, so a placed class keeps its places and builds only the
-/// candidates a query's sphere can reach.
+/// candidates a query's sphere can reach; a cell of more candidates than its cache keeps places
+/// ([`CatalogueClassCellCache::most_kept_places`]) keeps none, and its places are read again as a
+/// query walks it, in the same order, bit for bit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassCellSystems {
     candidates: u32,
-    places: Vec<(u32, GalacticPosition)>,
+    places: Places,
     members: Vec<CatalogueSystem>,
 }
 
@@ -371,10 +400,56 @@ impl ClassCellSystems {
         self.candidates
     }
 
-    /// The places read first, each with its candidate's index, in index order.
+    /// The places read first that it keeps, each with its candidate's index, in index order: none
+    /// for a cell that [`streams_places`](Self::streams_places), whose places only a query's walk
+    /// reads ([`each_place`](Self::each_place)).
+    #[cfg(test)]
     #[must_use]
-    pub fn places(&self) -> &[(u32, GalacticPosition)] {
-        &self.places
+    pub(crate) fn places(&self) -> &[(u32, GalacticPosition)] {
+        match &self.places {
+            Places::Kept(places) => places,
+            Places::Streamed => &[],
+        }
+    }
+
+    /// Whether its places are read again as a query walks it, not kept: a placed class's cell of
+    /// more candidates than its cache keeps places.
+    #[must_use]
+    pub const fn streams_places(&self) -> bool {
+        matches!(self.places, Places::Streamed)
+    }
+
+    /// Gives `visit` each place of cell `key` of `process`'s class read first, with its
+    /// candidate's index, in index order: the kept places, or for a cell that streams its places
+    /// each read again from its candidate's own stream (rule 11), the same places in the same
+    /// order, bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// If the cell streams its places and `process` reads none first, which a cell it made never
+    /// does.
+    fn each_place<P: ClassProcess>(
+        &self,
+        galaxy: &Galaxy,
+        process: &P,
+        key: CatalogueCellKey,
+        mut visit: impl FnMut(u32, GalacticPosition),
+    ) {
+        if let Places::Kept(places) = &self.places {
+            for &(index, place) in places {
+                visit(index, place);
+            }
+            return;
+        }
+        for index in 0..self.candidates {
+            let id = key
+                .candidate_id(index, 0)
+                .expect("a cell's count is held under 2^24, so its candidates have IDs");
+            let place = process
+                .epoch_place(galaxy, &key, id)
+                .expect("a cell that streams its places is a placed class's (rule 11)");
+            visit(index, place);
+        }
     }
 
     /// The members of the entries of the candidates that read no place, in index and member
@@ -388,15 +463,32 @@ impl ClassCellSystems {
     /// it.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        self.places.capacity() * size_of::<(u32, GalacticPosition)>()
+        let places = match &self.places {
+            Places::Kept(places) => places.capacity(),
+            Places::Streamed => 0,
+        };
+        places * size_of::<(u32, GalacticPosition)>()
             + self.members.capacity() * size_of::<CatalogueSystem>()
     }
 
     /// The systems of cell `key` of `process`'s class (module documentation, "Hits"): one bound
     /// for the cell, as [`occupied_cells`](super::occupied_cells) takes it, and each entry kept
-    /// under it ([`entry_systems_in`]), as its members' resolves would keep it.
+    /// under it ([`entry_systems_in`]), as its members' resolves would keep it; a placed class's
+    /// places kept up to [`MAX_KEPT_PLACES`] of them, as a cache that says no other keeps them.
+    #[cfg(test)]
     #[must_use]
     fn of<P: ClassProcess>(galaxy: &Galaxy, process: &P, key: CatalogueCellKey) -> Self {
+        Self::of_keeping(galaxy, process, key, MAX_KEPT_PLACES)
+    }
+
+    /// [`of`](Self::of), a placed class's places kept up to `most` of them, and none past it.
+    #[must_use]
+    fn of_keeping<P: ClassProcess>(
+        galaxy: &Galaxy,
+        process: &P,
+        key: CatalogueCellKey,
+        most: u32,
+    ) -> Self {
         assert_eq!(
             key.class(),
             process.class(),
@@ -404,6 +496,13 @@ impl ClassCellSystems {
         );
         let bound = process.bound(galaxy, &key);
         let candidates = candidate_count(galaxy.seed(), &key, bound);
+        if process.reads_place_first() && candidates > most {
+            return Self {
+                candidates,
+                places: Places::Streamed,
+                members: Vec::new(),
+            };
+        }
         // A placed class reads a place for every candidate (rule 11), so its places are reserved
         // exactly. Grown by doubling, a stellar-merger cell about the centre's 12.2 million places
         // (557 MiB) reached a 768 MiB buffer before being shrunk, past what wasm32's 4 GiB had left
@@ -422,7 +521,8 @@ impl ClassCellSystems {
                 .candidate_id(index, 0)
                 .expect("a cell's count is held under 2^24, so its candidates have IDs");
             let place = process.epoch_place(galaxy, &key, id);
-            debug_assert_eq!(
+            // Checked in release too: a cell kept and one streamed must read the same places.
+            assert_eq!(
                 place.is_some(),
                 process.reads_place_first(),
                 "a class reads every candidate's place first or none (rule 11)"
@@ -436,7 +536,7 @@ impl ClassCellSystems {
         members.shrink_to_fit();
         Self {
             candidates,
-            places,
+            places: Places::Kept(places),
             members,
         }
     }
@@ -458,6 +558,15 @@ pub trait CatalogueClassCellCache {
         key: CatalogueCellKey,
         make: &mut dyn FnMut() -> ClassCellSystems,
     ) -> Arc<ClassCellSystems>;
+
+    /// The most places a placed class's cell it is lent keeps ([`ClassCellSystems`]): a denser
+    /// cell keeps none, and a query reads them again as it walks it, with the same answer. By
+    /// default [`MAX_KEPT_PLACES`]; a cache that keeps nothing keeps no place, since each cell is
+    /// made for one walk, and a byte-bounded cache as many as its budget can hold (the mergers'
+    /// balance, part 3).
+    fn most_kept_places(&self) -> u32 {
+        MAX_KEPT_PLACES
+    }
 }
 
 /// The cache that keeps nothing: every lookup makes its cell's systems.
@@ -472,6 +581,11 @@ impl CatalogueClassCellCache for NoClassCellCache {
         make: &mut dyn FnMut() -> ClassCellSystems,
     ) -> Arc<ClassCellSystems> {
         Arc::new(make())
+    }
+
+    /// None: each cell is made for one walk and dropped, so its places are read as it walks.
+    fn most_kept_places(&self) -> u32 {
+        0
     }
 }
 
@@ -731,11 +845,11 @@ impl ClassVisitor for Hits<'_> {
         let reach = place_reach(sphere);
         for key in hit_cells(process, sphere) {
             let systems = cells.systems(galaxy, key, &mut || {
-                ClassCellSystems::of(galaxy, process, key)
+                ClassCellSystems::of_keeping(galaxy, process, key, cells.most_kept_places())
             });
-            for &(index, place) in systems.places() {
+            systems.each_place(galaxy, process, key, |index, place| {
                 if LightYears::from(sphere.centre().distance_to(&place)).value() > reach.value() {
-                    continue;
+                    return;
                 }
                 let id = key
                     .candidate_id(index, 0)
@@ -748,7 +862,7 @@ impl ClassVisitor for Hits<'_> {
                     );
                     push_hit(&system, sphere, layers, out);
                 }
-            }
+            });
             for system in systems.members() {
                 push_hit(system, sphere, layers, out);
             }
@@ -828,13 +942,13 @@ impl ClassVisitor for ShellHosts<'_> {
                 continue;
             }
             let systems = cells.systems(galaxy, key, &mut || {
-                ClassCellSystems::of(galaxy, process, key)
+                ClassCellSystems::of_keeping(galaxy, process, key, cells.most_kept_places())
             });
-            for &(index, place) in systems.places() {
+            systems.each_place(galaxy, process, key, |index, place| {
                 let d = LightYears::from(sphere.centre().distance_to(&place)).value();
                 // Its hosts stay within `drift` of the place, so none from here meets the shell.
                 if d > reach.value() || d + drift < inner.value() {
-                    continue;
+                    return;
                 }
                 let id = key
                     .candidate_id(index, 0)
@@ -842,7 +956,7 @@ impl ClassVisitor for ShellHosts<'_> {
                 for system in entry_systems(galaxy, process, id) {
                     offer(&system);
                 }
-            }
+            });
             for system in systems.members() {
                 offer(system);
             }
@@ -965,7 +1079,7 @@ impl ClassVisitor for ReadAhead<'_> {
         } = self;
         for &key in keys {
             drop(cells.systems(galaxy, key, &mut || {
-                ClassCellSystems::of(galaxy, process, key)
+                ClassCellSystems::of_keeping(galaxy, process, key, cells.most_kept_places())
             }));
         }
     }

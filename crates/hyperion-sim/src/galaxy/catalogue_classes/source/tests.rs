@@ -706,6 +706,156 @@ fn the_place_read_first_changes_no_hit() {
     );
 }
 
+/// A class-cell cache that makes every cell afresh, a placed class's places kept up to `.0` of them
+/// and past it read again as the hits walk the cell.
+struct KeepingUpTo(u32);
+
+impl CatalogueClassCellCache for KeepingUpTo {
+    fn systems(
+        &self,
+        _galaxy: &Galaxy,
+        _key: CatalogueCellKey,
+        make: &mut dyn FnMut() -> ClassCellSystems,
+    ) -> Arc<ClassCellSystems> {
+        Arc::new(make())
+    }
+
+    fn most_kept_places(&self) -> u32 {
+        self.0
+    }
+}
+
+/// The systems of class cell `key` made afresh, a placed class's places kept up to `most`.
+struct MadeKeeping<'a> {
+    galaxy: &'a Galaxy,
+    key: CatalogueCellKey,
+    most: u32,
+}
+
+impl ClassVisitor for MadeKeeping<'_> {
+    type Output = ClassCellSystems;
+    fn visit<P: ClassProcess>(self, process: &P) -> ClassCellSystems {
+        ClassCellSystems::of_keeping(self.galaxy, process, self.key, self.most)
+    }
+}
+
+/// A placed class's cell that keeps no place, its places read again as the hits walk it, gives the
+/// hits and the shells' hosts of the cell that keeps them all, bit for bit and in order (the
+/// mergers' balance, part 3): 2 ly about a host of each placed class at three times, and the shell
+/// out to 3 ly about it over the first year, every cell read streaming; and a cell that
+/// streams keeps nothing on the heap.
+#[test]
+fn a_placed_cell_that_streams_its_places_gives_the_kept_cells_hits() {
+    let galaxy = at_27();
+    let stellar: LayerSet = [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E]
+        .into_iter()
+        .collect();
+    let hits = |cells: &KeepingUpTo, sphere: &QuerySphere| {
+        let mut out = Vec::new();
+        CatalogueClassSource::new()
+            .with_cells(cells)
+            .systems_in_sphere(galaxy, sphere, stellar, &mut out);
+        out
+    };
+    let (kept, streaming) = (KeepingUpTo(u32::MAX), KeepingUpTo(0));
+    let (mut found, mut shelled) = (0, 0);
+    for class in [
+        ClassId::STELLAR_MERGER,
+        ClassId::NEUTRON_STAR_MERGER,
+        ClassId::LUMINOUS_BLUE_VARIABLE,
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+    ] {
+        let host = first_hosts(galaxy, class, 1)[0];
+        for t in [at(-1_000), UniverseTime::EPOCH, at(1_000)] {
+            let place = host.system.position_at(t);
+            let sphere = QuerySphere::new(place, LightYears::new(2.0), t, LightYears::ZERO)
+                .expect("a sphere");
+            let expected = hits(&kept, &sphere);
+            found += expected.len();
+            assert_eq!(hits(&streaming, &sphere), expected, "{class} at {t}");
+        }
+        let shells = |cells: &KeepingUpTo| {
+            let mut out = Vec::new();
+            let centre = host.system.position_at(UniverseTime::EPOCH);
+            let source = CatalogueClassSource::new().with_cells(cells);
+            for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+                source.members_in_shell_over(
+                    galaxy,
+                    &centre,
+                    (UniverseTime::EPOCH, at(1)),
+                    (
+                        (layer, LightYears::ZERO, LightYears::new(3.0)),
+                        (0, NonZeroU32::MIN),
+                    ),
+                    &|_| true,
+                    &mut |system| out.push(*system),
+                );
+            }
+            out
+        };
+        let (kept_shells, streamed_shells) = (shells(&kept), shells(&streaming));
+        shelled += kept_shells.len();
+        assert_eq!(streamed_shells, kept_shells, "{class}'s shells");
+        let key = CatalogueCellKey::of(host.id).expect("a host's ID names its cell");
+        let streams = ProductionClasses
+            .visit_class(
+                galaxy,
+                class,
+                MadeKeeping {
+                    galaxy,
+                    key,
+                    most: 0,
+                },
+            )
+            .expect("a registered class");
+        assert!(streams.streams_places(), "{key:?}");
+        assert_eq!((streams.places(), streams.heap_bytes()), (&[][..], 0));
+        let keeps = ProductionClasses
+            .visit_class(
+                galaxy,
+                class,
+                MadeKeeping {
+                    galaxy,
+                    key,
+                    most: u32::MAX,
+                },
+            )
+            .expect("a registered class");
+        assert!(!keeps.streams_places());
+        assert_eq!(
+            keeps.places().len(),
+            usize::try_from(keeps.candidates()).unwrap()
+        );
+    }
+    assert!(
+        found >= 15 && shelled > 0,
+        "{found} hits, {shelled} in shells"
+    );
+}
+
+/// The eight stellar merger cells that meet at the galactic centre, each of some 12.2 million
+/// candidates, keep no place at the default bound, nor through a cache that keeps nothing: their
+/// places are read as a query walks them (the mergers' balance, part 3).
+#[test]
+fn the_cells_at_the_centre_keep_no_place() {
+    let galaxy = at_27();
+    for x in [-1, 0] {
+        for y in [-1, 0] {
+            for z in [-1, 0] {
+                let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [x, y, z]).unwrap();
+                let made = ProductionClasses
+                    .visit_class(galaxy, key.class(), Made { galaxy, key })
+                    .expect("a registered class");
+                assert!(made.candidates() > MAX_KEPT_PLACES, "{key:?}");
+                assert!(made.streams_places(), "{key:?}");
+                assert_eq!(made.heap_bytes(), 0, "{key:?}");
+            }
+        }
+    }
+    assert_eq!(NoClassCellCache.most_kept_places(), 0);
+}
+
 /// A class-cell cache that keeps every cell's systems it makes, for one galaxy.
 #[derive(Debug, Default)]
 struct KeepClassCells(RefCell<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>);
