@@ -107,7 +107,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Kelvin, Metres, Pascals, Radians, SquareMetres};
-use hyperion_base::{GENERATOR_VERSION, GeneratorVersion};
 
 use crate::bake::{
     RefinedNormals, TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain, encode_maturity,
@@ -770,25 +769,17 @@ pub const CLASS_MAP_BAND: u8 = CLASS_MAP_LEVEL - 6;
 /// The classes a class map holds at most: R07's `MAX_DISC_CLASSES`, the laws its disc carries.
 pub const CLASS_MAP_CLASSES: usize = 16;
 
-/// The generator version from which a refined texel carries the readings at its field cells'
-/// corners rather than at their centres ([`ClassMap::lattice`], [`FineLattice::Corners`]): 28.
+/// How finely a [`ClassMap`] reads its texels: the map's detail. [`WorkerFields::class_map`]
+/// answers at [`Corners`](Self::Corners) (R10.T15.b.2): a coast, an ice edge, or a crust's or a
+/// climate's bound runs along the field's cells, and the terrain draws it so, while a texel of
+/// [`CLASS_MAP_LEVEL`] over a level-8 field reads one class mix for its 16 cells, the coast then
+/// popped by up to 2–3 stops at the hand-over.
 ///
 /// A field cell of level L is a quad of the terrain's patches of level L − 6, whose class weights
 /// are baked at its corners, the patch's vertices, and drawn bilinearly between them; read at the
-/// cells' centres, a coast's cells differed by over a third of a stop in 8,655 of the served wet
-/// world's 36,576 refined cells (lane fix-coast-class-map, 2026-11-03). Train 27's list froze with
-/// the refined map on it, re-blessing `worker/class_map` from its refined lines, so the corners
-/// ride the next train (rule B); below it a refined map reads its cells' centres, as
-/// before, bit for bit.
-pub const REFINED_CORNERS_FROM: GeneratorVersion = GeneratorVersion::new(28);
-
-/// How finely a [`ClassMap`] reads its texels: the map's detail, which the generator version
-/// chooses ([`ClassMapDetail::of_version`]). [`WorkerFields::class_map`] answers at
-/// [`Refined`](Self::Refined) (R10.T15.b.2), and at [`Corners`](Self::Corners) from
-/// [`REFINED_CORNERS_FROM`]: a coast, an ice edge, or a crust's or a climate's bound runs along the
-/// field's cells, and the terrain draws it so, while a texel of [`CLASS_MAP_LEVEL`] over a level-8
-/// field reads one class mix for its 16 cells, the coast then popped by up to 2–3 stops at the
-/// hand-over.
+/// cells' centres ([`Refined`](Self::Refined), the map below generator version 28), a coast's
+/// cells differed by over a third of a stop in 8,655 of the served wet world's 36,576 refined
+/// cells (lane fix-coast-class-map, 2026-11-03).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ClassMapDetail {
     /// Each texel one reading at its centre, or its surveyed cells' mean where its centre's cell is
@@ -799,26 +790,23 @@ pub(crate) enum ClassMapDetail {
     /// ([`looks_apart`]) is read at each surveyed cell's centre and carries those readings
     /// ([`RefinedTexel`]), their mean its own; and one whose cells are drawn alike but one of which
     /// is drawn apart from the surveyed cell beside it across the texel's edge carries its own
-    /// reading for each of its surveyed cells.
+    /// reading for each of its surveyed cells: the map before generator version 28, which the
+    /// tests compare the corners' with.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the worker answers the corners' map; the tests compare the centres' one"
+        )
+    )]
     Refined,
     /// As [`Refined`](Self::Refined), but each refined texel carries the readings at its cells'
-    /// corners, the terrain's lattice of level L − 6 ([`RefinedTexel::corners`]): the map from
-    /// [`REFINED_CORNERS_FROM`].
+    /// corners, the terrain's lattice of level L − 6 ([`RefinedTexel::corners`]): the map
+    /// [`WorkerFields::class_map`] answers.
     Corners,
 }
 
 impl ClassMapDetail {
-    /// The detail of the class map at generator version `version`: [`Corners`](Self::Corners)
-    /// from [`REFINED_CORNERS_FROM`], [`Refined`](Self::Refined) below it.
-    #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
-        if version.get() >= REFINED_CORNERS_FROM.get() {
-            Self::Corners
-        } else {
-            Self::Refined
-        }
-    }
-
     /// The lattice its refined texels carry: [`FineLattice::Corners`] at
     /// [`Corners`](Self::Corners), [`FineLattice::Centres`] otherwise.
     #[must_use]
@@ -960,7 +948,7 @@ pub struct ClassMap {
 }
 
 /// Where a [`ClassMap`]'s refined texels are read: at their field cells' centres, or at their
-/// corners ([`REFINED_CORNERS_FROM`]).
+/// corners (the worker's map, from generator version 28).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FineLattice {
     /// Each surveyed cell's reading at its centre ([`RefinedTexel::cells`]).
@@ -1083,7 +1071,7 @@ impl ClassMap {
         &self.refined
     }
 
-    /// Where its refined texels are read: [`FineLattice::Corners`] from [`REFINED_CORNERS_FROM`].
+    /// Where its refined texels are read: [`FineLattice::Corners`] for the worker's map.
     #[must_use]
     pub const fn lattice(&self) -> FineLattice {
         self.lattice
@@ -2592,9 +2580,9 @@ impl WorkerFields {
     /// weights read a cell the field does not hold yet is left out, and the map is then not
     /// [complete](ClassMap::is_complete). Each texel over a field finer than [`CLASS_MAP_LEVEL`]
     /// takes its surveyed cells' classes by their records (`cell_material`, once a cell a map)
-    /// first, and those of the surveyed cells beside it; where the disc would draw its own apart, it
-    /// is read at each surveyed cell's centre, its own their mean ([`ClassMap::refined`]), and from
-    /// [`REFINED_CORNERS_FROM`] at its cells' corners ([`ClassMap::lattice`]).
+    /// first, and those of the surveyed cells beside it; where the disc would draw its own apart, its
+    /// own is its surveyed cells' mean at their centres, and it carries the readings at their
+    /// corners ([`ClassMap::refined`], [`ClassMap::lattice`]).
     ///
     /// # Errors
     ///
@@ -2608,7 +2596,7 @@ impl WorkerFields {
         body: BodyRef,
         seed: DetailSeed,
     ) -> Result<ClassMap, QueryBodyError> {
-        self.class_map_at(body, seed, ClassMapDetail::of_version(GENERATOR_VERSION))
+        self.class_map_at(body, seed, ClassMapDetail::Corners)
     }
 
     /// [`class_map`](Self::class_map) at an explicit detail, rather than the generator version's.

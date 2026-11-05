@@ -728,8 +728,8 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
     // refined in a pattern that varies cell to cell, a cell of each not surveyed, read at the
     // field's level in its refined texels and across their edges, on the GPU and in the rasteriser
     // alike: a level-8 field's 4 × 4 cells, and a level-7 field's 2 × 2 under a maturity, whose
-    // codes the cells and the tiles' gutters carry; each at its cells' centres and, from the crate's
-    // REFINED_CORNERS_FROM, at their corners.
+    // codes the cells and the tiles' gutters carry; each at its cells' centres and, as the worker
+    // answers from generator version 28, at their corners.
     for (const [side, matured, corners] of [
       [4, false, false],
       [2, true, false],
@@ -884,7 +884,7 @@ function fineClassMap(r: 2 | 4, matured: boolean): ClassMapTexels {
 }
 
 /**
- * {@link fineClassMap} at its refined texels' cells' corners (the crate's REFINED_CORNERS_FROM):
+ * {@link fineClassMap} at its refined texels' cells' corners (the worker's map from generator version 28):
  * four texels a face of two classes, every texel surveyed, those with i + j even refined to `r` ×
  * `r` cells, their corner (ca, cb) class 0's where ca + 2 cb + face
  * is 1 mod 3 and class 1's otherwise, the last cell of each not surveyed and its first corner none;

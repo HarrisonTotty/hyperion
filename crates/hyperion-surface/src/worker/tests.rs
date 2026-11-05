@@ -2462,26 +2462,30 @@ fn class_looks_are_apart_past_a_third_of_a_stop_or_on_another_law() {
     );
 }
 
-/// The class map the worker answers is the refined one (R10.T15.b.2): over the coast, where the
-/// refined map is another than the coarse one, it is the refined map and refines texels.
+/// The class map the worker answers is the one read at its refined texels' cells' corners
+/// (R10.T15.b.2, from generator version 28): over the coast, where the refined map is another than
+/// the coarse one, it is the corners' map, refines texels and is neither the centres' map nor the
+/// coarse one.
 #[test]
 fn the_class_map_is_the_refined_one() {
     let (mut fields, _) = coast_worker();
     let body = world(SyntheticWorld::EarthLike).header().body();
     let default = fields.class_map(body, SEED).unwrap();
     assert_ne!(default.refined(), []);
+    assert_eq!(default.lattice(), FineLattice::Corners);
     assert_eq!(
         default,
         fields
-            .class_map_at(body, SEED, ClassMapDetail::Refined)
+            .class_map_at(body, SEED, ClassMapDetail::Corners)
             .unwrap()
     );
-    assert_ne!(
-        default,
-        fields
-            .class_map_at(body, SEED, ClassMapDetail::Coarse)
-            .unwrap()
-    );
+    for other in [ClassMapDetail::Refined, ClassMapDetail::Coarse] {
+        assert_ne!(
+            default,
+            fields.class_map_at(body, SEED, other).unwrap(),
+            "{other:?}"
+        );
+    }
 }
 
 /// Where a refined texel's texel is in its map's texels.
@@ -2547,26 +2551,6 @@ fn assert_corners_are_the_bake_s(
             ),
         }
     }
-}
-
-#[test]
-fn the_refined_corners_wait_for_their_version() {
-    assert_eq!(
-        ClassMapDetail::of_version(GeneratorVersion::new(27)),
-        ClassMapDetail::Refined
-    );
-    assert_eq!(
-        ClassMapDetail::of_version(REFINED_CORNERS_FROM),
-        ClassMapDetail::Corners
-    );
-    // The tripwire: the bump to 28 fails it, and re-blesses `worker/class_map`, whose `refined`
-    // texels' cells then become `worker/class_map_corners`' corners, or raises the switch to the
-    // train they ride.
-    assert!(
-        GENERATOR_VERSION < REFINED_CORNERS_FROM,
-        "generator version {GENERATOR_VERSION} reaches REFINED_CORNERS_FROM: re-bless \
-         `worker/class_map` and retire the switch"
-    );
 }
 
 #[test]

@@ -1262,7 +1262,7 @@ export class TerrainSession {
   /**
    * `input` with the class sets `view`'s lit terrain of `body` takes (`TerrainFrameInput.classSets`;
    * lane fix-coast-class-map): under `HANDOVER_AT_CELLS`, where the body's class map was read at its
-   * refined texels' cells' corners (the crate's `REFINED_CORNERS_FROM`), its fade to its patches'
+   * refined texels' cells' corners (the worker's map from generator version 28), its fade to its patches'
    * ancestors of the field's cells' level at the view's range ratio ({@link classCellFade}) and its
    * class weights' morph to their parents'; `input` itself otherwise.
    */

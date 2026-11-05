@@ -467,7 +467,7 @@ export interface TerrainFrameInput {
   /**
    * The view's class sets on a lit pass (lane fix-coast-class-map; `terrainLit.wgsl`'s
    * `class_sets`), its session's where the body's class map reads its refined texels at their
-   * cells' corners (the crate's `REFINED_CORNERS_FROM`): `cellFade`, 0 to 1, the fade to the class
+   * cells' corners (the worker's map from generator version 28): `cellFade`, 0 to 1, the fade to the class
    * weights of each patch's ancestor of the field's cells' level (`surveyedFloorLevel`) near the
    * hand-over range, and `morph`, whether a patch's class weights morph to its parent's by its morph
    * factor. Absent, neither: every texel shaded as before, bit for bit.

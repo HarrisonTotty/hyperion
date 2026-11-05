@@ -224,7 +224,7 @@ export interface ClassMapTexels {
  * each refined texel t + 1, its high byte in r and its low in g, and r in b; 0 elsewhere, the gutter
  * included, so that across a face's edge a refined neighbour counts as its texel.
  *
- * A page at its cells' corners ({@link ClassMapFine.corners}, from the crate's `REFINED_CORNERS_FROM`)
+ * A page at its cells' corners ({@link ClassMapFine.corners}, the worker's from generator version 28)
  * holds in each tile, in place of its cells and gutter, the (r + 1)² corners of its cells at (0, 0)
  * to (r, r), the vertices of the terrain's patch of level L − 6 there, all 0 at a corner not
  * surveyed, and cell (a, b)'s survey in channel a of the page's first layer at (r + 1, b), 255 for a
@@ -234,8 +234,8 @@ export interface ClassMapTexels {
  */
 export interface ClassMapFine {
   /**
-   * Whether its tiles hold their cells' corners rather than the cells themselves (the crate's
-   * `REFINED_CORNERS_FROM`); absent for a page at the cells' centres.
+   * Whether its tiles hold their cells' corners rather than the cells themselves (the worker's
+   * map from generator version 28); absent for a page at the cells' centres.
    */
   readonly corners?: true;
   /** r, the field cells along a refined texel's side: 2 or 4. */
@@ -273,8 +273,8 @@ export interface ClassMapFineInput {
   /** r, the field cells along a texel's side: 2 or 4. */
   readonly side: number;
   /**
-   * Where its refined texels are read: `"corners"` at their cells' corners (the crate's
-   * `REFINED_CORNERS_FROM`), each giving its `surveyed` and `corners`; absent at their centres, each
+   * Where its refined texels are read: `"corners"` at their cells' corners (the worker's
+   * map from generator version 28), each giving its `surveyed` and `corners`; absent at their centres, each
    * giving its `cells`.
    */
   readonly lattice?: "corners";

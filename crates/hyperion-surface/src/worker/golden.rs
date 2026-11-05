@@ -13,7 +13,7 @@
 //! `tests/golden/worker/class_map.golden` (lane fix-coast-class-map), the class map over fields
 //! finer than its texels, as this version answers it and refined, and
 //! `tests/golden/worker/class_map_corners.golden`, the same maps read at their refined texels'
-//! cells' corners (`REFINED_CORNERS_FROM`).
+//! cells' corners, the worker's map from generator version 28.
 //!
 //! The client's worker test (`apps/hyperion/.../workers/fieldsWasm.test.ts`) reads the first: it
 //! posts the blocks to the client's module, through the worker's own answers, and asks the module's
@@ -177,7 +177,7 @@
 //! The `default` lines are the `refined` lines' texels (R10.T15.b.2).
 //!
 //! `worker/class_map_corners` holds the same two worlds' maps read at their refined texels' cells'
-//! corners (`ClassMapDetail::Corners`, from `REFINED_CORNERS_FROM`, 28): a line `world <name>:
+//! corners (`ClassMapDetail::Corners`, the worker's map from 28): a line `world <name>:
 //! level <L>, corners <texels> texels <refined> refined complete <bool>`, then for each refined
 //! texel `fine <place> cells <flags> corners <corner>…`, a `1` or `0` for each of its cells,
 //! surveyed or not, and each of their corners `<bytes>/<code>` or `-` for one not surveyed. The

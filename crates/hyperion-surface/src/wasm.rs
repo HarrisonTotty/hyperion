@@ -174,8 +174,8 @@
 //!   all 0 where the palette names no substance; `fineSide`, r, the field cells along a texel's
 //!   side; `refined()`, a `Uint32Array` of the place in `texels()` of each texel refined to the
 //!   field's level ([`ClassMap::refined`]), rising, empty where none is; `fineCorners`, whether
-//!   they are read at their cells' corners ([`ClassMap::lattice`], from
-//!   [`REFINED_CORNERS_FROM`](crate::worker::REFINED_CORNERS_FROM)) rather than at their centres;
+//!   they are read at their cells' corners ([`ClassMap::lattice`], the worker's map from generator
+//!   version 28) rather than at their centres;
 //!   `fineSurveyed()`, a `Uint8Array` of r² cells a refined texel in rising (j, i), 1 for a
 //!   surveyed cell and 0 for another; `fineWeights()`, a `Uint8Array` of r² cells a refined texel
 //!   in rising (j, i), or under `fineCorners` of the (r + 1)² corners of those cells, `classes`

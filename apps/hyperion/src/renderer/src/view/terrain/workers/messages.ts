@@ -370,8 +370,8 @@ export interface ClassMapAnswer {
   readonly refinement?: ClassMapRefinementAnswer;
   /**
    * Whether the module reads a map's refined texels at their cells' corners (lane
-   * fix-coast-class-map; `src/wasm.rs`'s `ClassMapAnswer.fineCorners`, from the crate's
-   * `REFINED_CORNERS_FROM`), whether or not this map refines any: the terrain then draws the field's
+   * fix-coast-class-map; `src/wasm.rs`'s `ClassMapAnswer.fineCorners`, the worker's map from
+   * generator version 28), whether or not this map refines any: the terrain then draws the field's
    * cells near the hand-over range as the disc does (`TerrainFrameInput.classSets`); absent where it
    * reads them at their centres.
    */
@@ -382,7 +382,7 @@ export interface ClassMapAnswer {
  * A class map's texels refined to the field's level, as a worker answers them (lane
  * fix-coast-class-map; `src/wasm.rs`'s `ClassMapAnswer.refined`, `fineCorners`, `fineSurveyed`,
  * `fineWeights` and `fineMaturity`): those whose field cells' classes the disc would draw apart,
- * each with its cells' own readings, or from the crate's `REFINED_CORNERS_FROM` the readings at
+ * each with its cells' own readings, or, as the worker answers from generator version 28, the readings at
  * their corners, the terrain's lattice of level L − 6 (`RefinedTexel::corners`).
  */
 export interface ClassMapRefinementAnswer {
