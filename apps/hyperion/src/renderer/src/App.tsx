@@ -6,6 +6,7 @@ import { ConsoleFrame } from "./components/ConsoleFrame";
 import { GraphicsPanel } from "./components/GraphicsPanel";
 import { UniverseProvider } from "./components/UniverseProvider";
 import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
+import { PlanetViewerDisplay } from "./displays/planet/PlanetViewerDisplay";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
 import {
   type InspectionOpening,
@@ -38,7 +39,7 @@ import type { WorkerLike } from "./view/terrain/workers/pool";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
 import type { SystemPlace } from "./lib/scene/model";
-import { DISPLAYS, type DisplayId } from "./lib/displays";
+import { type DisplayId, stationDisplays } from "./lib/displays";
 import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
@@ -285,6 +286,17 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
         />
       );
       break;
+    case "planet":
+      content = (
+        <PlanetViewerDisplay
+          setting={inputs.setting}
+          platform={inputs.platform}
+          performanceThreads={inputs.performanceThreads}
+          geometry={inputs.geometry}
+          atmosphereLevers={inputs.atmosphereLevers}
+        />
+      );
+      break;
   }
   return content;
 }
@@ -320,6 +332,10 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  *
  * `VIEW` and the `LINK` display's `Graphics` panel take the launch's quality setting (`--setting`,
  * R07.T17), which holds for the run.
+ *
+ * The `PLANET VIEWER` (plan R15), a development tool, follows `VIEW` on `F5` where the launch offers
+ * it (`window.hyperion.planetViewer`): it holds `VIEW`'s display of its own, and its planet, a kept
+ * scene of a generated system, stands under the `TRAINING` banner whenever it is shown.
  *
  * The header strip's `TRAINING` banner stands while `VIEW` is shown drawing a kept test scene, and
  * not over the server's scene (R02.T17; the guide's training banner): `ViewSceneProvider` holds the
@@ -406,7 +422,9 @@ export function App() {
     viewsCheck === undefined ? "link" : "view",
   );
   const [systemOpening, setSystemOpening] = useState<SystemOpening | null>(null);
-  useDisplayKeys(DISPLAYS, setActiveDisplay);
+  // A launch's displays hold for the launch: the PLANET VIEWER's offer is the preload's (plan R15).
+  const [displays] = useState(() => stationDisplays(window.hyperion.planetViewer));
+  useDisplayKeys(displays, setActiveDisplay);
   const openSystem = useCallback((target: SystemTarget): void => {
     setSystemOpening((previous) => ({ target, sequence: (previous?.sequence ?? 0) + 1 }));
     setActiveDisplay("system");
@@ -478,21 +496,23 @@ export function App() {
           >
             {(sceneProvenance) => (
               <ConsoleFrame
-                displays={DISPLAYS}
+                displays={displays}
                 activeDisplay={activeDisplay}
                 onSelectDisplay={setActiveDisplay}
                 linkStatus={connection.status}
                 // A views check measures for the whole launch, on every display; training is a
                 // kept test scene on VIEW; the server's scene is live operation.
+                // The PLANET VIEWER's planet is a kept scene too, never the live scene (plan R15).
                 modeBanner={
                   viewsCheck !== undefined
                     ? "MEASUREMENT"
-                    : activeDisplay === "view" && sceneProvenance === "kept"
+                    : (activeDisplay === "view" && sceneProvenance === "kept") ||
+                        activeDisplay === "planet"
                       ? "TRAINING"
                       : null
                 }
               >
-                {DISPLAYS.map(({ id }) => (
+                {displays.map(({ id }) => (
                   <Activity key={id} mode={id === activeDisplay ? "visible" : "hidden"}>
                     {displayContent(id, inputs)}
                   </Activity>

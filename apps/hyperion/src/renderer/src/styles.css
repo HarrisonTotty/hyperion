@@ -4237,6 +4237,163 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   overflow: clip;
 }
 
+/*
+ * The PLANET VIEWER (plan R15): its INPUTS panel in a column of its own on the left, its volatile
+ * ranks folded as it opens so that it stands whole at 1280 x 720, and its bar above VIEW's display,
+ * which fills the rest.
+ */
+.console__work--planet {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+  overflow: clip;
+}
+
+.planet-viewer {
+  display: grid;
+  grid-template-columns: 26rem minmax(0, 1fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+.planet-viewer__inputs {
+  min-height: 0;
+}
+
+.planet-viewer__view {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.planet-viewer__view > .view-display {
+  flex: 1 1 auto;
+}
+
+.planet-inputs {
+  font-size: 0.875rem;
+}
+
+.planet-inputs__groups {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.planet-inputs__group {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 0.25rem 0 0;
+}
+
+.planet-inputs__legend {
+  padding: 0 0.5rem 0 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+/* A row: the label, the field, its unit and its provenance, on the 0.25rem grid. */
+.planet-inputs__row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr) 2.5rem 4.5rem;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.planet-inputs__row--seed {
+  grid-template-columns: 7rem minmax(0, 1fr);
+  margin-top: 0.5rem;
+}
+
+.planet-inputs__label {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.planet-inputs__unit {
+  color: var(--text-muted);
+}
+
+/* What the folded volatile ranks' disclosure says of them, beside it. */
+.planet-inputs__summary {
+  margin-left: 0.5rem;
+}
+
+/* SEED and GENERATE on one row, the seed's field taking what the button leaves. */
+.planet-inputs__generate {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.planet-inputs__generate > .planet-inputs__row--seed {
+  flex: 1 1 auto;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin-top: 0;
+}
+
+.planet-inputs__held {
+  margin: 0.25rem 0 0;
+}
+
+.planet-inputs__draw-one {
+  padding: 0 0.5rem;
+}
+
+.planet-inputs__error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.planet-inputs__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-top: 0.5rem;
+}
+
+/* The bar above the view, where VIEW's SCENE selector stands on VIEW: RANDOMIZE, then SHARE. */
+.planet-viewer__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.planet-viewer__draw {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.planet-viewer__draw > .planet-inputs__row--seed {
+  grid-template-columns: max-content 12rem;
+  margin-top: 0;
+}
+
+.planet-viewer__share {
+  display: grid;
+  flex: 1 1 24rem;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+.planet-viewer__string {
+  font-family: var(--font-mono);
+}
+
+.planet-viewer__empty {
+  margin-top: 1rem;
+}
+
 .view-display {
   display: flex;
   flex-direction: column;

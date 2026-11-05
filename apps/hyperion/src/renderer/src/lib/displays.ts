@@ -1,5 +1,5 @@
 /** Identifies one of the station's displays. Later plans add theirs here and in `App`. */
-export type DisplayId = "link" | "galaxy" | "system" | "view";
+export type DisplayId = "link" | "galaxy" | "system" | "view" | "planet";
 
 /** A display as the navigation bar offers it. */
 export interface DisplayDefinition {
@@ -28,3 +28,22 @@ export const DISPLAYS = [
   { id: "system", title: "System", key: "F3" },
   { id: "view", title: "View", key: "F4" },
 ] as const satisfies ReadonlyArray<DisplayDefinition>;
+
+/**
+ * The `PLANET VIEWER`, a development tool's display (plan R15): after the station's displays,
+ * offered only where the launch allows it ({@link stationDisplays}).
+ */
+export const PLANET_VIEWER_DISPLAY = {
+  id: "planet",
+  title: "Planet Viewer",
+  key: "F5",
+} as const satisfies DisplayDefinition;
+
+/**
+ * The displays the navigation bar offers: the station's, and the `PLANET VIEWER` after them where
+ * `planetViewer` is set (`window.hyperion.planetViewer`: a client that is not packaged, or one
+ * launched with `--planet-viewer`).
+ */
+export function stationDisplays(planetViewer: boolean): ReadonlyArray<DisplayDefinition> {
+  return planetViewer ? [...DISPLAYS, PLANET_VIEWER_DISPLAY] : DISPLAYS;
+}

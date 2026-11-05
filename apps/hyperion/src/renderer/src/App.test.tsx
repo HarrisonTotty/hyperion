@@ -483,6 +483,42 @@ describe("App", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
   });
 
+  describe("the PLANET VIEWER (plan R15)", () => {
+    it("is offered on F5 where the launch offers it, under the TRAINING banner", async () => {
+      vi.stubGlobal("hyperion", { ...window.hyperion, planetViewer: true });
+      const user = userEvent.setup();
+      render(<App />);
+      const navigation = screen.getByRole("navigation", { name: "Displays" });
+      expect(
+        within(navigation).getByRole("button", { name: "F5 Planet Viewer" }),
+      ).toBeInTheDocument();
+      await user.keyboard("{F5}");
+      expect(screen.getByRole("heading", { level: 1, name: "Planet Viewer" })).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "INPUTS" })).toBeInTheDocument();
+      expect(modeBanner()).toHaveTextContent("TRAINING");
+    });
+
+    it("is not offered where the launch does not offer it, and F5 does nothing", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      const navigation = screen.getByRole("navigation", { name: "Displays" });
+      expect(within(navigation).queryByRole("button", { name: "F5 Planet Viewer" })).toBeNull();
+      await user.keyboard("{F5}");
+      expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
+    });
+
+    it("asks the server nothing while it is not shown", async () => {
+      vi.stubGlobal("hyperion", { ...window.hyperion, planetViewer: true });
+      render(<App />);
+      const socket = FakeWebSocket.latest();
+      act(() => {
+        socket.serverWelcomes();
+      });
+      expect(socket.requestsOfKind("viewer_planet")).toHaveLength(0);
+      expect(socket.requestsOfKind("viewer_randomize")).toHaveLength(0);
+    });
+  });
+
   it("switches to the view display on F4", async () => {
     const user = userEvent.setup();
     render(<App />);

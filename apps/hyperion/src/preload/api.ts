@@ -200,6 +200,11 @@ export interface HyperionApi {
    * R10, R10.T6.a); `null` elsewhere.
    */
   readonly performanceThreads: number | null;
+  /**
+   * Whether the client offers the `PLANET VIEWER` display (plan R15), a development tool: on a
+   * client that is not packaged, and on one launched with `--planet-viewer`.
+   */
+  readonly planetViewer: boolean;
   readonly versions: {
     readonly electron: string;
     readonly chrome: string;

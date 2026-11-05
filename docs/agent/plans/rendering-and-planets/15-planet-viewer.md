@@ -167,3 +167,15 @@ every galaxy system takes the code it took before. No `GENERATOR_VERSION` change
   `discs`, and the surface service's seed check read a viewer ID from it.
 - R15.T2: `system_bodies` takes `planets.seed()` in place of the universe's seed, which is the same
   for every galaxy system. A refused input names `inputs.<field>`.
+- R15.T3 (built): `displays/planet/` holds `PlanetViewerDisplay` (F5, `lib/displays.ts`'s
+  `PLANET_VIEWER_DISPLAY` and `stationDisplays`), `PlanetInputsPanel`, `PlanetViewerBar`,
+  `SeedField`, `usePlanetViewer` and `planetInputs.ts`. `ViewDisplay` takes `sceneBar={false}`.
+  The preload's `HyperionApi.planetViewer` is set by the `--hyperion-planet-viewer=` switch, which
+  `main` turns on for an unpackaged client or `--planet-viewer`.
+- R15.T3 (lean, 2026-11-05): `RANDOMIZE` and `SHARE` sit in a bar above the view, in the `SCENE`
+  selector's place. `SEED` shares `GENERATE`'s row, and `VOLATILES · RANK` folds at mount, so the
+  panel fits 1280×720. The keys are `G` and `N`, outside text fields and canvases. A viewer system's
+  designation is `VIEWER` and its ID's last six digits. The tab always shows `TRAINING`.
+- R15.T3 (lean, 2026-11-05): the field units hold: `SMA` and `FORMED AT` are always in AU, and
+  `ROTATION` is in d, capped at 1,000 d for entry. The slot for T4's `SUN` is
+  `PlanetInputsPanel`'s `sun` prop. The new names are in the guide's nomenclature list.

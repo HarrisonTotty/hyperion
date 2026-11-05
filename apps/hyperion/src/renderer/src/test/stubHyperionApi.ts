@@ -64,6 +64,7 @@ export function stubHyperionApi(
     graphics,
     setting,
     performanceThreads: null,
+    planetViewer: false,
     versions: { electron: "44.4.3", chrome: "142.0.0.0", node: "22.21.1" },
     ...(spike === undefined ? {} : { spike }),
     ...(viewsCheck === undefined ? {} : { viewsCheck }),

@@ -203,6 +203,11 @@ export interface ClientArgs {
    * window is drawn at: 1 by default; `undefined` without `--views-check`.
    */
   readonly viewsCheckPixelRatio?: ViewsCheckPixelRatio;
+  /**
+   * Whether `--planet-viewer` offers the `PLANET VIEWER` (plan R15) on a packaged client, which
+   * offers it only so; a development build offers it always. Absent unless given, on the consoles.
+   */
+  readonly planetViewer?: true;
 }
 
 /** A views check's device-pixel ratio, by its window's zoom (`--device-pixel-ratio`). */
@@ -389,6 +394,12 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option("--descent-spike", "run the descent spike (plan R05) in place of the consoles"),
+    )
+    .addOption(
+      new Option(
+        "--planet-viewer",
+        "offer the PLANET VIEWER display (plan R15), a development tool, on a packaged client",
+      ),
     )
     .addOption(
       new Option("--views-check", "run the several-views check (plan R07) in the consoles' VIEW"),
@@ -702,7 +713,12 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
         : "--descent-spike, which was not";
       command.error(`error: --${kebab(stray)} is an option of ${owners} given`);
     }
-    return { address, port, setting: settingOf(options) };
+    return {
+      address,
+      port,
+      setting: settingOf(options),
+      ...(options["planetViewer"] === true ? { planetViewer: true } : {}),
+    };
   }
   const spike = spikeLaunchOf(options);
   if (spike.setting === "low" && spike.vertexPath === "baked-offsets") {

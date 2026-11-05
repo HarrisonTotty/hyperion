@@ -27,6 +27,7 @@ import { type CompileBudgetLaunch, compileBudgetSwitch } from "../preload/compil
 import { geometrySwitch, geometryText } from "../preload/geometryLaunch";
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
 import { performanceThreadsSwitch } from "../preload/machineLaunch";
+import { planetViewerSwitch } from "../preload/planetViewerLaunch";
 import { qualitySwitch } from "../preload/qualityLaunch";
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
@@ -170,6 +171,7 @@ function createWindow(
   setting: QualitySettingName,
   spike: SpikeWindow | null,
   check: ViewsCheckWindowRun | null = null,
+  planetViewer = false,
 ): BrowserWindow {
   const run = spike ?? check;
   const size =
@@ -206,6 +208,7 @@ function createWindow(
         qualitySwitch(setting),
         // Read at each window's making: once a launch, a few milliseconds on macOS, none elsewhere.
         performanceThreadsSwitch(machinePerformanceThreads()),
+        planetViewerSwitch(planetViewer),
         ...(spike === null ? [] : [spikeSwitch(spike.launch)]),
         ...(check === null ? [] : [viewsCheckSwitch(check.launch)]),
         ...(run?.geometry === undefined ? [] : [geometrySwitch(run.geometry)]),
@@ -708,11 +711,13 @@ async function main(): Promise<void> {
     startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);
     return;
   }
-  createWindow(serverUrl, graphics, args.setting, null);
+  // The PLANET VIEWER, a development tool (plan R15), on a development build or where asked for.
+  const planetViewer = !app.isPackaged || args.planetViewer === true;
+  createWindow(serverUrl, graphics, args.setting, null, null, planetViewer);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(serverUrl, graphics, args.setting, null);
+      createWindow(serverUrl, graphics, args.setting, null, null, planetViewer);
     }
   });
 }

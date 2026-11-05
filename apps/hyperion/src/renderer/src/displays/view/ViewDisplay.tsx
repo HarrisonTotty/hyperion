@@ -417,6 +417,11 @@ interface ViewDisplayProps {
    * the renderer's module worker by default (`startOpticsWorker`), a fake in a test.
    */
   readonly opticsWorkers?: (() => OpticsWorkerLike) | undefined;
+  /**
+   * Whether the `SCENE` selector stands above the stage: by default; the `PLANET VIEWER`, whose
+   * scene is its own planet's inspection alone, gives none (plan R15).
+   */
+  readonly sceneBar?: boolean | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -2882,6 +2887,7 @@ function ViewPanels({
   sceneOptions = SCENE_OPTIONS,
   watchTerrain,
   opticsWorkers = startOpticsWorker,
+  sceneBar = true,
 }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
@@ -3110,66 +3116,72 @@ function ViewPanels({
   ];
   return (
     <div className="view-display">
-      <div className="view-display__bar">
-        <fieldset className="preset-buttons" aria-label="Scene" ref={scenesRef}>
-          <span className="field__label">SCENE</span>
-          {[SERVER_SCENE_NAME, ...sceneOptions.map((each) => each.name)].map((name) => (
-            <button
-              key={name}
-              type="button"
-              className="control preset-buttons__button"
-              aria-pressed={name === sceneName}
-              aria-describedby={
-                name === SERVER_SCENE_NAME && lines.length > 0 ? statusId : undefined
-              }
-              onClick={() => {
-                choose(name);
-              }}
-            >
-              {name}
-            </button>
-          ))}
-          {inspection === null ? null : (
-            // The inspection and its CLOSE stay on one line as the selector wraps.
-            <span className="view-display__inspection">
-              <button
-                type="button"
-                className="control preset-buttons__button"
-                aria-pressed={inspection.option.name === sceneName}
-                onClick={() => {
-                  choose(inspection.option.name);
-                }}
-              >
-                {inspection.option.name}
-              </button>
-              <button
-                type="button"
-                className="control preset-buttons__button view-display__inspection-close"
-                aria-label={`CLOSE ${inspection.option.name}`}
-                onClick={() => {
-                  // The button goes with the inspection: the focus goes to the scene shown.
-                  refocusScene.current = true;
-                  closeInspection();
-                }}
-              >
-                CLOSE
-              </button>
-            </span>
+      {!sceneBar && lines.length === 0 ? null : (
+        <div className="view-display__bar">
+          {!sceneBar ? null : (
+            <fieldset className="preset-buttons" aria-label="Scene" ref={scenesRef}>
+              <span className="field__label">SCENE</span>
+              {[SERVER_SCENE_NAME, ...sceneOptions.map((each) => each.name)].map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="control preset-buttons__button"
+                  aria-pressed={name === sceneName}
+                  aria-describedby={
+                    name === SERVER_SCENE_NAME && lines.length > 0 ? statusId : undefined
+                  }
+                  onClick={() => {
+                    choose(name);
+                  }}
+                >
+                  {name}
+                </button>
+              ))}
+              {inspection === null ? null : (
+                // The inspection and its CLOSE stay on one line as the selector wraps.
+                <span className="view-display__inspection">
+                  <button
+                    type="button"
+                    className="control preset-buttons__button"
+                    aria-pressed={inspection.option.name === sceneName}
+                    onClick={() => {
+                      choose(inspection.option.name);
+                    }}
+                  >
+                    {inspection.option.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="control preset-buttons__button view-display__inspection-close"
+                    aria-label={`CLOSE ${inspection.option.name}`}
+                    onClick={() => {
+                      // The button goes with the inspection: the focus goes to the scene shown.
+                      refocusScene.current = true;
+                      closeInspection();
+                    }}
+                  >
+                    CLOSE
+                  </button>
+                </span>
+              )}
+            </fieldset>
           )}
-        </fieldset>
-        {lines.length === 0 ? null : (
-          <div className="view-display__status" id={statusId}>
-            {lines.map((line) => (
-              <StatusLine
-                key={line.text}
-                text={line.text}
-                standing={line.standing}
-                action={line.retry === true ? { label: "RETRY", onAction: scene.retry } : undefined}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+          {lines.length === 0 ? null : (
+            <div className="view-display__status" id={statusId}>
+              {lines.map((line) => (
+                <StatusLine
+                  key={line.text}
+                  text={line.text}
+                  standing={line.standing}
+                  action={
+                    line.retry === true ? { label: "RETRY", onAction: scene.retry } : undefined
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <Stage
         key={opening}
         source={source}

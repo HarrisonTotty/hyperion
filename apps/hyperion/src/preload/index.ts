@@ -5,6 +5,7 @@ import { compileBudgetFromArgv } from "./compileBudgetLaunch";
 import { geometryFromArgv } from "./geometryLaunch";
 import { graphicsLaunchFromArgv, subscribeGpuProcessGone } from "./graphicsLaunch";
 import { performanceThreadsFromArgv } from "./machineLaunch";
+import { planetViewerFromArgv } from "./planetViewerLaunch";
 import { qualityFromArgv } from "./qualityLaunch";
 import { serverUrlFromArgv } from "./serverUrl";
 import { spikeMember } from "./spikeApi";
@@ -27,6 +28,7 @@ const api: HyperionApi = {
   },
   setting: qualityFromArgv(process.argv),
   performanceThreads: performanceThreadsFromArgv(process.argv),
+  planetViewer: planetViewerFromArgv(process.argv),
   versions: {
     electron: process.versions.electron,
     chrome: process.versions.chrome,

@@ -66,6 +66,11 @@ describe("the client's command line", () => {
     expect(url([])).toBe("ws://127.0.0.1:7878/ws");
   });
 
+  it("offers the planet viewer on a packaged client with --planet-viewer, and only then", () => {
+    expect(parse(["--planet-viewer"]).planetViewer).toBe(true);
+    expect(parse([])).not.toHaveProperty("planetViewer");
+  });
+
   it.each([
     ["--address", "--port"],
     ["-a", "-p"],
