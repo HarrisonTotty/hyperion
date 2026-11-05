@@ -332,7 +332,9 @@ fn passes_of(bodies: &[CensusBody]) -> u64 {
 /// a derivation at the epoch.
 ///
 /// - **No `Snowball` lies above 273.15 K**, asserted, and the six that P14.T54.b.l's bless left
-///   there ([`HOT_SNOWBALLS`]) take their climate's state, each printed.
+///   there ([`HOT_SNOWBALLS`]) take their climate's state, each printed: from generator version 27
+///   one of them a `Snowball` under freezing, its haze's anti-greenhouse cooling it to 264.1 K
+///   ([`FROZEN_AT_27`]).
 /// - **Every state agrees with its published figures by rules 5–7** where its record's surface is
 ///   `Ok` and its state is one of theirs, not a runaway under Venus's deck (judged without it), but
 ///   at a jump of its passes (decision-pre-23-review item 32's discrete jumps) and where its passes
@@ -396,7 +398,16 @@ fn the_present_climate_sets_the_state_over_the_400() {
             "hot snowball at 24 ({t_s_24} K) → {}",
             body.published.line()
         );
-        assert_ne!(body.published.state, SurfaceState::Snowball, "{id}");
+        if id == FROZEN_AT_27 {
+            assert_eq!(body.published.state, SurfaceState::Snowball, "{id}");
+            assert!(
+                body.published.t_s < 273.15,
+                "{id}: {} K",
+                body.published.t_s
+            );
+        } else {
+            assert_ne!(body.published.state, SurfaceState::Snowball, "{id}");
+        }
     }
     // No hot snowball.
     let hot: Vec<String> = at_25

@@ -6961,37 +6961,58 @@ const THERMOSTAT_RAISED: [&str; 18] = [
     "01ffeb2c60020000.0400",
 ];
 
-/// The 19 bodies whose partials alone move under P14.T51.l's secant steps, beyond 10⁻⁹ of max(each,
-/// 10⁻⁶ Pa), with `T_eq` within 2.6 × 10⁻¹⁰ and every discrete member the same: at jumps across the
-/// diagonal or steep crossings, where both roots stop within 2⁻³² of the crossing, in the walk's
-/// order.
-const SECANT_PARTIALS_ONLY: [&str; 19] = [
-    "02000b2ca0000001.1100",
-    "02000b2cdfff0000.0d00",
-    "01ffeb2c5ffe0000.0400",
-    "01fffb2bdfff0001.0600",
-    "01ffdb2c1fff0001.0900",
-    "01ffdb2c1fff0000.0700",
-    "01ffeb2cdffd0000.0a02",
+/// The 18 bodies whose partials alone move under P14.T51.l's secant steps, beyond 10⁻⁹ of max(each,
+/// 10⁻⁶ Pa), with `T_eq` within 3.1 × 10⁻¹⁰, `T_s` within 10⁻⁶ and every discrete member the same:
+/// at jumps across the diagonal or steep crossings, where both roots stop within 2⁻³² of the
+/// crossing, in the walk's order. Re-measured at generator version 27 (19 to 26, two of which,
+/// 01fffb2bdfff0001.0600 and `close_binary`'s 0900, end at 27 at another crossing, and three more
+/// still move their partials, 01ffeb2d20000000.e101, 41ffecb1ffc00007.e101 and
+/// 01ffcb2ba0010000.0700): mostly icy N₂ and methane `Snowball`s and cold airless or tenuous
+/// members, bracketed under both roots.
+const SECANT_PARTIALS_ONLY: [&str; 18] = [
+    "02000b2ca0000000.0800",
+    "02001b2ca0000000.0300",
+    "41ffecb200000005.1600",
+    "01ffeb2c20000000.0500",
+    "02001b2c9ffe0000.0500",
+    "01ffdb2c1fff0001.0501",
+    "01ffdb2c1fff0000.e103",
+    "01ffdb2c1fff0000.e104",
+    "41ffecb600000001.0700",
     "01ffeb2d20000000.e101",
-    "01ffdb2c60020000.0100",
-    "02002b2d1ffe0000.e101",
-    "41ffecb1ffc00007.0d01",
+    "02003b2c1fff0000.0900",
+    "01ffdb2c60020000.0400",
+    "02003b2ce0010000.0400",
     "41ffecb1ffc00007.e101",
-    "01fffb2d5ffe0000.0a01",
-    "01ffeb2d1ffc0000.0600",
-    "01ffeb2d1ffc0000.0900",
+    "01fffb2ce0030000.0400",
+    "01ffeb2d5fff0001.0800",
+    "01ffdb2d1ffd0001.0400",
     "01ffcb2ba0010000.0700",
-    "close_binary.0800",
-    "close_binary.0900",
-    "close_binary.e501",
 ];
 
 /// The bodies whose secant root is another crossing of the diagonal than the halvings', in the
 /// walk's order (P14.T51.l's record; `under_the_secant_root_the_passes_and_movers_are_stated`):
-/// three, of which 41ffecb200000004.0200 went from the sample with its system at generator version
-/// 27, whose galaxy places another set of systems at the solar circle.
-const SECANT_OTHER_CROSSINGS: [&str; 2] = ["01ffdb2c1fff0001.0b00", "02003b2d1ffe0001.0200"];
+/// 11 at generator version 27, re-measured. 01fffb2bdfff0001.0600, an N₂ `Snowball`, ends at
+/// another fixed point (`T_eq` 51.1 → 59.6 K, `T_s` 52.1 → 78.1 K, its argon no longer capped and
+/// its jump gone); one of the gas envelopes at a `T_eq` of 250.0 K, 41ffecb5ffc00004.0400, stops
+/// 1.7 × 10⁻⁵ of `T_eq` away on its steep crossing; and nine `Snowball`s at jumps, `close_binary`'s
+/// 0900 among them, stop on the jump's other side, `T_s` up to 1.2 × 10⁻⁴ of itself away, three of
+/// them a jump under the secant steps alone. To 26 they were three: 01ffdb2c1fff0001.0b00 and
+/// 02003b2d1ffe0001.0200, which at 27 end where the halvings do, and 41ffecb200000004.0200, gone
+/// from the sample with its system at 27.
+const SECANT_OTHER_CROSSINGS: [&str; 11] = [
+    "01fffb2bdfff0001.0600",
+    "02001b2ce0020002.0800",
+    "21ffd65a7ff80001.0700",
+    "41ffecb5ffc00004.0400",
+    "41ffecb600000005.0500",
+    "02003b2c60010001.0600",
+    "01fffb2d5ffe0000.0700",
+    "02000b2b60020000.0600",
+    "02003b2c60020000.0500",
+    "42002cb200400001.0600",
+    "close_binary.0900",
+];
 
 /// P14.T51.l, a measurement for its record, run by name: every present planet, member and moon of
 /// the 400 sample systems and the golden systems at the epoch, each system generated and derived
@@ -7252,13 +7273,14 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
     let slowest = rounds.iter().copied().max().unwrap_or(0);
     assert!(slowest < SECANT_STEPS, "a round took {slowest} steps");
     assert!(halvings.len() > 2_000, "{}", halvings.len());
-    // Pinned as measured (P14.T51.l's record). Three bodies end at another crossing of the
-    // diagonal: 41ffecb200000004.0200, whose 2-cycle's bracket holds another fixed point than the
-    // plain passes' (T_eq 0.37 K warmer); 02003b2d1ffe0001.0200, whose bracket holds several jumps
-    // (T_s 239.8 → 193.3 K); and 01ffdb2c1fff0001.0b00, whose jump lies against nitrogen's cover's
-    // edge, the halvings stopping on its ice's side and the secant steps on the other. The rest
-    // move only their partials, at jumps or steep crossings where both roots stop within 2⁻³² of
-    // the crossing.
+    // Pinned as measured (P14.T51.l's record, re-measured at 27). Eleven bodies end at another
+    // crossing of the diagonal (`SECANT_OTHER_CROSSINGS`): one at another fixed point, a gas
+    // envelope on its steep crossing, and nine `Snowball`s on a jump's other side. The rest move
+    // only their partials, at jumps or steep crossings where both roots stop within 2⁻³² of the
+    // crossing. To 26 three ended at another crossing: 41ffecb200000004.0200, whose 2-cycle's
+    // bracket held another fixed point than the plain passes' (T_eq 0.37 K warmer);
+    // 02003b2d1ffe0001.0200, whose bracket held several jumps (T_s 239.8 → 193.3 K); and
+    // 01ffdb2c1fff0001.0b00, whose jump lay against nitrogen's cover's edge.
     assert_eq!(
         other_roots, SECANT_OTHER_CROSSINGS,
         "the bodies whose secant root is another crossing"
@@ -7271,25 +7293,14 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
 
 /// The pinned bodies of P14.T51.l's record ([`SECANT_OTHER_CROSSINGS`], [`SECANT_PARTIALS_ONLY`])
 /// whose passes converge under both roots, where with its holds they ended in brackets, in the
-/// walk's order. From generator version 25 five by P14.T53.b part 3 (01ffeb2c5ffe0000.0400,
+/// walk's order: none of 27's, every one of its pins bracketed under both roots. To 26 the pins
+/// held twelve: from generator version 25 five by P14.T53.b part 3 (01ffeb2c5ffe0000.0400,
 /// 01ffdb2c1fff0001.0900 and .0b00, 01ffdb2c60020000.0100 and 01ffeb2d1ffc0000.0600), and
 /// 02003b2d1ffe0001.0200, whose bracket held several jumps, by P14.T53.e's present state; from 26
 /// 01ffeb2cdffd0000.0a02, and `close_binary`'s `.0800` and `.e501`, which the CO₂ cap's energy
-/// balance moves (P14.T53.h); and from 27 01ffdb2c1fff0000.0700 and 01ffeb2d1ffc0000.0900.
-/// 41ffecb1ffc00007.0d01, which converged at 27, brackets again from 28 (train 28's folds).
-const SECANT_PINNED_CONVERGED: [&str; 11] = [
-    "01ffeb2c5ffe0000.0400",
-    "01ffdb2c1fff0001.0900",
-    "01ffdb2c1fff0001.0b00",
-    "01ffeb2cdffd0000.0a02",
-    "01ffdb2c60020000.0100",
-    "01ffeb2d1ffc0000.0600",
-    "02003b2d1ffe0001.0200",
-    "close_binary.0800",
-    "close_binary.e501",
-    "01ffdb2c1fff0000.0700",
-    "01ffeb2d1ffc0000.0900",
-];
+/// balance moves (P14.T53.h); and from 27 01ffdb2c1fff0000.0700, 01ffeb2d1ffc0000.0900 and
+/// 41ffecb1ffc00007.0d01; 27's re-measured pins hold none of them.
+const SECANT_PINNED_CONVERGED: [&str; 0] = [];
 
 /// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition
 /// on the record's leans): each of [`SECANT_OTHER_CROSSINGS`] and [`SECANT_PARTIALS_ONLY`], derived
@@ -7297,8 +7308,8 @@ const SECANT_PINNED_CONVERGED: [&str; 11] = [
 /// is
 /// bracketed, and every bracket round whose published end is the body's albedo stopped at a
 /// crossing of the diagonal: its two ends' g on opposite sides within 2⁻³² in albedo
-/// (`Crossing::is_valid`); but [`SECANT_PINNED_CONVERGED`]'s, which converge under both from
-/// generator version 25 (P14.T53.b part 3 and P14.T53.e) or 26. It moves no output.
+/// (`Crossing::is_valid`); but [`SECANT_PINNED_CONVERGED`]'s, which converge under both (none of
+/// the pins as re-measured at generator version 27). It moves no output.
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -9380,13 +9391,18 @@ fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor()
 }
 
 /// P14.T24.i's tests over the 400 whole systems, a measurement run by name (P14.T24.i's
-/// follow-up, decision-t24i-airless-state D1.4, the conformance review's must-fix): their 18
-/// unlit records (bless-note-23's) each read at least their night floor (the walk asserts it on
-/// each) and `for_body` answers `Ok` on all 18, none refused for its argon ice; the lit airless
-/// records at their floor are counted, 1,359, with their argon ices, 1,202; and the airs whose
-/// `T_eq` lies under their floor, which rise with their greenhouse's base (the follow-up's D1.3),
-/// are 13. B3 counted 1,365, 1,121 and 7 on P14.T54.b.k's tree, every 24 hold lifted at 23, before
-/// P14.T53.a's thick CO₂ closure landed (restated at 24, P14.T54.b.l).
+/// follow-up, decision-t24i-airless-state D1.4, the conformance review's must-fix): their unlit
+/// records each read at least their night floor (the walk asserts it on each) and `for_body`
+/// answers `Ok` on all, none refused for its argon ice; the lit airless records at their floor
+/// are counted, with their argon ices; and so are the airs whose `T_eq` lies under their floor,
+/// which rise with their greenhouse's base (the follow-up's D1.3).
+///
+/// Re-measured at generator version 27, on 27's sample: the unlit records are 2, both airless
+/// members of `0x8200_b2df_f000_0002`, neither holding an argon ice; 1,110 lit airless records
+/// stand at their floor, 996 with an argon ice; and 8 airs rise from under their floor. To 26 they
+/// were 18 (bless-note-23's), 1,359, 1,202 and 13; B3 counted 1,365, 1,121 and 7 on P14.T54.b.k's
+/// tree, every 24 hold lifted at 23, before P14.T53.a's thick CO₂ closure landed (restated at 24,
+/// P14.T54.b.l).
 ///
 /// Its counts against the unlit mean's hold (the raised records' cover changes, 1,307, their
 /// `for_body` changes, none, the fourteen re-settled and no other record moved), every 24 hold in
@@ -9398,7 +9414,7 @@ fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
     eprintln!("the sample's unlit records: {census:#?}");
     assert_eq!(
         (census.unlit.len(), census.unlit_read, census.unlit_argon),
-        (18, 18, 0)
+        (2, 2, 0)
     );
     assert!(
         census
@@ -9408,8 +9424,8 @@ fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
         "{:#?}",
         census.unlit
     );
-    assert_eq!((census.raised, census.raised_argon), (1_359, 1_202));
-    assert_eq!(census.raised_airs.len(), 13, "{:#?}", census.raised_airs);
+    assert_eq!((census.raised, census.raised_argon), (1_110, 996));
+    assert_eq!(census.raised_airs.len(), 8, "{:#?}", census.raised_airs);
     eprintln!(
         "raised {}, argon ices {} (means {:?}); airs raised {}",
         census.raised,
@@ -9452,10 +9468,11 @@ fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
 }
 
 /// P14.T49.n's case of T24.i's test over the 400 whole systems, a measurement run by name (as
-/// [`under_24_s_densities_the_golden_systems_unlit_records_all_read`]'s): the 18 unlit records
-/// read their night floor and `for_body` reads all 18, 9 of them holding an argon ice (P14.T53.c's
-/// ice-held argon), which 24's densities read. Under 23's densities, a hold gone at the 23 → 24
-/// bump, those 9 were refused, not modelled, and the other 9 read.
+/// [`under_24_s_densities_the_golden_systems_unlit_records_all_read`]'s): the unlit records read
+/// their night floor and `for_body` reads them all, those holding an argon ice (P14.T53.c's
+/// ice-held argon) too, which 24's densities read. At generator version 27, on 27's sample, they
+/// are 2, neither holding an argon ice; to 26 they were 18, 9 of them holding one. Under 23's densities, a hold gone at the 23 → 24 bump, those 9
+/// were refused, not modelled, and the other 9 read.
 #[test]
 #[ignore = "a measurement for the bless note, run by name"]
 fn under_24_s_densities_the_sample_s_unlit_records_all_read() {
@@ -9468,7 +9485,7 @@ fn under_24_s_densities_the_sample_s_unlit_records_all_read() {
             census.unlit_argon,
             unlit_argon_ices(&census)
         ),
-        (18, 18, 0, 9)
+        (2, 2, 0, 0)
     );
 }
 
@@ -13733,13 +13750,14 @@ fn part_three_s_census_is_stated() {
             "{at}"
         );
     }
-    // decision-p14-t53b-part3 §12 (0900): LOOK72's 106 K past runaway keeps water beyond its
-    // escape's capacity, as ice alone, a `Snowball`.
+    // decision-p14-t53b-part3 §12 (0900): LOOK72's 106 K past runaway kept water beyond its
+    // escape's capacity, as ice alone, a `Snowball`; from generator version 27 it is not generated
+    // (`LOOK72_GONE`).
     let runaway_106_k: Vec<&SteamBody> = on
         .iter()
         .filter(|a| a.label.starts_with("look72") && a.id == LOOK72_106_K_RUNAWAY)
         .collect();
-    assert_eq!(runaway_106_k.len(), 1, "{LOOK72_106_K_RUNAWAY}");
+    assert_eq!(runaway_106_k.len(), 0, "{LOOK72_106_K_RUNAWAY}");
     for a in runaway_106_k {
         let at = format!("{}: {}", a.label, a.line());
         assert_eq!(a.published, SurfaceState::Snowball, "{at}");
