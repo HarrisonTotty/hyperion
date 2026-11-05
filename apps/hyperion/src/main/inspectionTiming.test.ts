@@ -104,6 +104,19 @@ describe("the frame profile's trace (the owner's report)", () => {
     ]);
   });
 
+  it("states each thread's longest task, clipped to the window (lane perf-render-thread-ground)", () => {
+    const scan = named(new ProfileScan());
+    scan.add({ name: "RunTask", ph: "X", pid: 1, tid: 1, ts: 0, dur: 5_000 });
+    scan.add({ name: "RunTask", ph: "X", pid: 1, tid: 1, ts: 1_100, dur: 300 });
+    scan.add({ name: "RunTask", ph: "X", pid: 9, tid: 9, ts: 1_500, dur: 700 });
+    scan.add({ name: "RunTask", ph: "X", pid: 9, tid: 9, ts: 2_400, dur: 900 });
+    const { threads } = scan.figures(1_000, 3_000);
+    expect(threads.map((t) => [t.thread, t.longestTaskMs])).toEqual([
+      ["CrRendererMain", 2],
+      ["CrGpuMain", 0.7],
+    ]);
+  });
+
   it("times each sample until the next, from the profile's start, by self and with its callees", () => {
     const scan = profiled(named(new ProfileScan()));
     scan.add({ name: "RunTask", ph: "X", pid: 1, tid: 1, ts: 1_000, dur: 1_000 });
@@ -291,6 +304,7 @@ function results(
               thread: "CrRendererMain",
               busyMs: 1_500,
               gcMs: 40,
+              longestTaskMs: 96,
               sampledMs: 1_400,
               self: [{ name: "surveyEdges styles-x.js:31", ms: 900 }],
               inclusive: [
@@ -584,7 +598,9 @@ describe("the frame profile's timing file (the owner's report)", () => {
     const markdown = inspectionTimingMarkdown(results());
     expect(markdown).toContain("## close: 2 draws in 2.0 s, 1.00 a second");
     expect(markdown).toContain("| atmosphere view | 600.00 | 800.00 | 700.00 | 70.0% |");
-    expect(markdown).toContain("| Renderer / CrRendererMain | 1500 | 750.0 | 75.0% | 40 | 1400 |");
+    expect(markdown).toContain(
+      "| Renderer / CrRendererMain | 1500 | 750.0 | 75.0% | 96.0 | 40 | 1400 |",
+    );
     expect(markdown).toContain(
       "| 900 | `surveyEdges styles-x.js:31` | 1300 | `tick index-x.js:5` |",
     );
@@ -615,7 +631,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 5,
+      version: 6,
       run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
     });
   });

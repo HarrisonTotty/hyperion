@@ -353,6 +353,23 @@ export function lowerPlateLines(document: Document): ReadonlyArray<string> {
   });
 }
 
+/**
+ * The free camera's rate step as the display reads it: its `CAMERA` line's, or where no such line
+ * stands, as under `MAXIMIZE VIEW`, which hides it with the upper block, the camera panel's rate
+ * reading, which the hidden side column still holds (lane perf-render-thread-ground: the 4 km
+ * window's descent goes on under `MAXIMIZE VIEW` where the room holds the readout back).
+ */
+export function cameraRateStep(document: Document, cameraLine: string | null): number | null {
+  if (cameraLine !== null) {
+    return rateStepOfCameraLine(cameraLine);
+  }
+  const reading = document
+    .querySelector('output[aria-label="Free camera rate"]')
+    ?.textContent.replaceAll(/\s+/gu, " ")
+    .trim();
+  return reading === undefined ? null : rateStepOfCameraLine(`FREE · ${reading}`);
+}
+
 /** The capture's label for `body`: `inspection-<system>-<index in hexadecimal>`. */
 export function inspectionCaptureLabel(body: BodyIdHex): string {
   const { system, bodyIndex } = parseBodyId(body);
@@ -717,7 +734,7 @@ async function inspect(
   };
   /** Sets the free camera's rate to `wanted` through `PageUp` and `PageDown` on its canvas. */
   const setRate = async (wanted: number): Promise<void> => {
-    const now = rateStepOfCameraLine(plate().line("CAMERA"));
+    const now = cameraRateStep(document, plate().line("CAMERA"));
     if (now === null) {
       throw new Error("views check: the CAMERA line reads no FREE rate");
     }
@@ -728,7 +745,7 @@ async function inspect(
     pressKey(canvas(), now < wanted ? "PageUp" : "PageDown");
     await until(
       `the rate did not step from ${String(now)}`,
-      () => rateStepOfCameraLine(plate().line("CAMERA")) !== now,
+      () => cameraRateStep(document, plate().line("CAMERA")) !== now,
     );
     await setRate(wanted);
   };

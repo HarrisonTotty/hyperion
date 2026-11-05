@@ -8,6 +8,7 @@ import { LIGHTING_NOT_RECEIVED, LIGHTING_PENDING } from "../../../view/lighting/
 import { TERRAIN_LOWEST_ALTITUDE_M } from "../../../view/scenes/terrainScene";
 import { positionRangeM } from "./atmosphereCheckRun";
 import {
+  cameraRateStep,
   closeRateStep,
   drawsLitBody,
   INSPECTION_CHECK_TIMING,
@@ -22,6 +23,7 @@ import {
   slantRangeM,
 } from "./inspectionCheckRun";
 import { lowerYieldLine } from "../viewRoom";
+import { freeRateReading } from "../viewRun";
 
 /** A profiled window, as the frame profile measured it. */
 const WINDOW: InspectionTimingWindow = {
@@ -316,6 +318,20 @@ describe("the inspection run's reading of the ground and the camera's range", ()
         [],
       ].map(inspectionGround),
     ).toEqual(["surveyed", "waiting", "not modelled", "waiting"]);
+  });
+
+  it("reads the free camera's rate from the CAMERA line, or under MAXIMIZE VIEW from the camera panel (lane perf-render-thread-ground)", () => {
+    const panel = new DOMParser().parseFromString(
+      `<output aria-label="Free camera rate">${freeRateReading(7)}</output>`,
+      "text/html",
+    );
+    const none = new DOMParser().parseFromString("<p></p>", "text/html");
+    expect([
+      cameraRateStep(panel, `FREE · ${freeRateReading(3)}`),
+      cameraRateStep(panel, null),
+      cameraRateStep(none, null),
+      cameraRateStep(panel, "SEAT"),
+    ]).toEqual([3, 7, null, null]);
   });
 
   it("tells a readout the room holds back from the ground it reads", () => {

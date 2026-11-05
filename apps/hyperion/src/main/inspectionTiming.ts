@@ -57,9 +57,10 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
  * The schema's version; bumped with any change to the file's shape: 2 since each window's march
  * census, the run's march probe and its levers over the setting's (plan R08, R08.T8.d), 3 since the
  * run's lit probe (R08.T9.b), 4 since each window's terrain cluster counters (plan R14, R14.T3.d), 5
- * since each window's React commits and each thread's React work (lane perf-render-thread-2).
+ * since each window's React commits and each thread's React work (lane perf-render-thread-2), 6
+ * since each thread's longest task (lane perf-render-thread-ground).
  */
-export const INSPECTION_TIMING_VERSION = 5;
+export const INSPECTION_TIMING_VERSION = 6;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -131,6 +132,8 @@ export interface ProfiledThread {
   readonly busyMs: number;
   /** The union of its GC slices within the window, ms. */
   readonly gcMs: number;
+  /** Its longest task within the window, its part inside the window alone, ms; 0 with none. */
+  readonly longestTaskMs: number;
   /** Its CPU profile's sampled time within the window, idle left out, ms; `null` with none. */
   readonly sampledMs: number | null;
   /** Its hottest functions by self time, at most {@link PROFILED_FUNCTIONS}. */
@@ -229,6 +232,15 @@ function clippedUnionUs(spans: ReadonlyArray<Span>, fromUs: number, toUs: number
     open = [start, end];
   }
   return open === null ? total : total + open[1] - open[0];
+}
+
+/** The longest of `spans` within [fromUs, toUs], each clipped to it, µs; 0 with none. */
+function clippedLongestUs(spans: ReadonlyArray<Span>, fromUs: number, toUs: number): number {
+  let longest = 0;
+  for (const [start, end] of spans) {
+    longest = Math.max(longest, Math.min(end, toUs) - Math.max(start, fromUs));
+  }
+  return longest;
 }
 
 /** A call frame's name as the profile lists it: function, script file and line. */
@@ -396,6 +408,7 @@ export class ProfileScan {
         process: this.#processNames.get(pid) ?? null,
         thread: this.#threadNames.get(key) ?? null,
         busyMs: clippedUnionUs(this.#tasks.get(key) ?? [], fromUs, toUs) / 1000,
+        longestTaskMs: clippedLongestUs(this.#tasks.get(key) ?? [], fromUs, toUs) / 1000,
         gcMs: clippedUnionUs(this.#gc.get(key) ?? [], fromUs, toUs) / 1000,
         sampledMs: functions === null ? null : functions.sampledUs / 1000,
         self: functions === null ? [] : hottest(functions.self, PROFILED_FUNCTIONS),
@@ -1199,11 +1212,11 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
     ...(trace.value === null
       ? [`— (${trace.reason})`]
       : [
-          "| Process / thread | Busy (ms) | Busy a draw (ms) | Share of the window | GC (ms) | Sampled (ms) |",
-          "| --- | --- | --- | --- | --- | --- |",
+          "| Process / thread | Busy (ms) | Busy a draw (ms) | Share of the window | Longest task (ms) | GC (ms) | Sampled (ms) |",
+          "| --- | --- | --- | --- | --- | --- | --- |",
           ...threads.map(
             (thread) =>
-              `| ${cell(threadName(thread))} | ${thread.busyMs.toFixed(0)} | ${perDraw(thread.busyMs)} | ${window.durationMs > 0 ? `${((100 * thread.busyMs) / window.durationMs).toFixed(1)}%` : "—"} | ${thread.gcMs.toFixed(0)} | ${thread.sampledMs === null ? "—" : thread.sampledMs.toFixed(0)} |`,
+              `| ${cell(threadName(thread))} | ${thread.busyMs.toFixed(0)} | ${perDraw(thread.busyMs)} | ${window.durationMs > 0 ? `${((100 * thread.busyMs) / window.durationMs).toFixed(1)}%` : "—"} | ${thread.longestTaskMs.toFixed(1)} | ${thread.gcMs.toFixed(0)} | ${thread.sampledMs === null ? "—" : thread.sampledMs.toFixed(0)} |`,
           ),
         ]),
     "",
