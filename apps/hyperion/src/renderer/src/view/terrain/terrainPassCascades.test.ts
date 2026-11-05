@@ -1678,7 +1678,8 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
 
   it("draws their may-discard buckets forward after the visibility buffer's resolve, by the fin form, and rasterises none (R14.T2.c)", async () => {
     const made = await edgePass();
-    made.pass.setGeometry({ ...SETTINGS.high.geometry, shading: "visibility" });
+    // At stride 1, as its buckets are counted: high's strides are on since the strides lane.
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, shading: "visibility", strides: "off" });
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     await settle();
     const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
