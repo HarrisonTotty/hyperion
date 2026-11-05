@@ -2594,7 +2594,7 @@ impl WorkerFields {
     /// takes its surveyed cells' classes by their records (`cell_material`, once a cell a map)
     /// first, and those of the surveyed cells beside it; where the disc would draw its own apart, it
     /// is read at each surveyed cell's centre, its own their mean ([`ClassMap::refined`]), and from
-    /// [`REFINED_CORNERS_FROM`] at its cells' corners ([`ClassMapDetail::of_version`]).
+    /// [`REFINED_CORNERS_FROM`] at its cells' corners ([`ClassMap::lattice`]).
     ///
     /// # Errors
     ///
