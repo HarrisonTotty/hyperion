@@ -132,19 +132,22 @@ RUST_READERS: List[Tuple[str, str, str, str]] = [
 # The sources of the tests that the justfile's `wasm_sky` leaves out of the wasip1 runs, of the test
 # code they reach (the sky's modules, the sim's shared test fixtures, the surface worker that they
 # reach since R10.T4.b and the steepness tails' hold switch that `with_every_27_hold` reaches since
-# R10.T6.a's) and of the testkit's golden
-# checks: smart-ci's tests hold each such test to pinning no value (`test_smart_ci.py`'s guard, which
-# checks that it reads no other file), so a change here runs them.
+# R10.T6.a's) and of the testkit's golden checks and pins: smart-ci's tests hold each such test to
+# pinning no value (`test_smart_ci.py`'s guard, which checks that it reads no other file), so a
+# change here runs them.
 WASM_SKY_SOURCES = re.compile(
-    r"^crates/hyperion-(sim/src/.*\.rs|surface/src/(worker|material/weights)\.rs|testkit/src/golden\.rs)$"
+    r"^crates/hyperion-(sim/src/.*\.rs|surface/src/(worker|material/weights)\.rs|testkit/src/(golden|pins)\.rs)$"
 )
 # GENERATOR_VERSION heads every golden file, so a change to it runs every crate's tests.
 GENERATOR_VERSION_FILE = "crates/hyperion-base/src/version.rs"
 # A crate's goldens, under its `tests/golden/`, which its tests read by name through the testkit's
-# `golden!` and `golden::check`: a changed golden runs the tests of its crate that reach that reader,
-# and those that name the file's path (`rust_graph`).
+# `golden!` and `golden::check`, and its pinned figures, under its `tests/pins/`, which they read
+# through `pins!` (`hyperion_testkit::pins`): a changed golden or pins file runs the tests of its
+# crate that reach that reader, and those that name the file's path (`rust_graph`).
 GOLDEN_DIR = "tests/golden/"
-GOLDEN_READERS = [(GOLDEN_DIR, "crates/hyperion-testkit/src/golden.rs")]
+PINS_DIR = "tests/pins/"
+GOLDEN_READERS = [(GOLDEN_DIR, "crates/hyperion-testkit/src/golden.rs"),
+                  (PINS_DIR, "crates/hyperion-testkit/src/pins.rs")]
 # The cause the native nextest step and the test build name for the tests that read the Rust sources
 # (`rust_graph.Selection.sources`): a changed `.rs` file of a crate runs those whose walker may list
 # that crate (their scope), natively alone.
@@ -1158,10 +1161,12 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
             needs.add(needs.graph, crate.name, path)
             needs.add(needs.rustdoc, crate.name, path)
             needs.say(path, f"{crate.name}'s documentation, which its crate root includes: its tests and rustdoc")
-        elif rel.startswith(GOLDEN_DIR):
-            # A golden: the tests that read it, by name, through the golden reader, and what names it.
+        elif rel.startswith((GOLDEN_DIR, PINS_DIR)):
+            # A golden or a pins file: the tests that read it, by name, through its reader, and what
+            # names it.
             needs.add(needs.graph, crate.name, path)
-            needs.say(path, f"{crate.name}'s golden: the tests that read goldens")
+            kind = "golden" if rel.startswith(GOLDEN_DIR) else "pins"
+            needs.say(path, f"{crate.name}'s {kind}: the tests that read {kind}{'s' if kind == 'golden' else ''}")
         else:
             # Data: fixtures, fitted inputs and manifests, a data directory's README. Its crate's
             # every test, and through the graph the tests of other crates that name the file or its
@@ -3048,7 +3053,8 @@ concerned (`--plan` shows each step and the paths that caused it):
                                 crate's Rust sources, natively
   a crate's Cargo.toml          that crate's checks and every test, and its dependents' Clippy,
                                 rustdoc and tests
-  a crate's goldens             the tests of its crate that read goldens, and those that name the file
+  a crate's goldens and pins    the tests of its crate that read goldens (or pins), and those that
+                                name the file
   a crate's other data          that crate's tests, those of any crate that name the file, and the
                                 vitest files that read it (a Markdown file is data when its crate's
                                 root includes it as documentation, and runs the crate's rustdoc)
@@ -3058,9 +3064,9 @@ concerned (`--plan` shows each step and the paths that caused it):
                                 Prettier's files Prettier over every file
   crates/hyperion-protocol      the bindings' check and the TypeScript side
   the surface module's sources  gen-surface and the vitest files that import the module
-  the sim's sources, golden.rs  smart-ci's own tests too, whose guard holds the tests that the
-                                wasip1 runs leave to `just test-wasm-sky` (`wasm_sky`) to pinning
-                                no value
+  the sim's sources, golden.rs  smart-ci's own tests too (pins.rs as golden.rs), whose guard holds
+                                the tests that the wasip1 runs leave to `just test-wasm-sky`
+                                (`wasm_sky`) to pinning no value
   shaders, engine, smoke        just test-render's build and run, the run in the suites' hold of
                                 the heavy-test lock
   the whole workspace's inputs  the full `just ci`: justfile, Cargo.toml, Cargo.lock, pnpm-lock.yaml,

@@ -367,6 +367,7 @@ class TheRules(unittest.TestCase):
         self.assertEqual(args(hooked, "_doc-check-for"), ["-p hyperion-sim --features hyperion-sim/testing"])
         # Data, goldens, other configuration and docs the crate does not include run no rustdoc.
         for path in ("crates/hyperion-sim/tests/golden/orbit/states.golden",
+                     "crates/hyperion-sim/tests/pins/orbit/states.pins",
                      "crates/hyperion-fit/data/cie_cmf/CIE_xyz_1931_2deg.csv", "crates/hyperion-fit/manifests/mge.toml",
                      "crates/hyperion-sim/README.md", ".config/nextest.toml", "rustfmt.toml", "clippy.toml",
                      "crates/hyperion-base/clippy.toml", "packages/protocol/src/generated/BodyId.ts"):
@@ -485,6 +486,16 @@ class TheRules(unittest.TestCase):
                      "docs/agent/diagram.png", "tools/new-tool/run.sh", ".config/other.toml"):
             with self.subTest(path=path):
                 self.assertTrue(plan(path).is_full, calls(plan(path)))
+
+    def test_a_crates_pins_run_its_tests_that_read_pins(self) -> None:
+        # Pinned figures (`hyperion_testkit::pins`) are read by name through `pins!`, as goldens are
+        # through `golden!`: not the full ci, and no rustdoc.
+        p = plan("crates/hyperion-sim/tests/pins/orbit/states.pins")
+        self.assertFalse(p.is_full)
+        self.assertIn("hyperion-sim's pins: the tests that read pins",
+                      p.why["crates/hyperion-sim/tests/pins/orbit/states.pins"])
+        self.assertIn("_nextest-run", calls(p))
+        self.assertIn(("tests/pins/", "crates/hyperion-testkit/src/pins.rs"), smart_ci.GOLDEN_READERS)
 
     def test_a_crates_data_runs_its_tests_and_the_vitest_files_that_read_it(self) -> None:
         p = plan("crates/hyperion-sim/tests/golden/orbit/states.golden")
@@ -2521,7 +2532,7 @@ class RealWorkspace(unittest.TestCase):
 Filter = smart_ci.Filter
 
 
-# What pins a value on every target: a golden, a float's bits written as a literal, a constant named
+# What pins a value on every target: a golden, a pins file's figure, a float's bits written as a literal, a constant named
 # as a pin (`*_BITS`, `*FINGERPRINT*`, `*_DIGEST`), an assertion that a digest is a constant, or one
 # against a hexadecimal literal (bits, a digest or an id written out).
 PIN_CONSTANT = re.compile(r"[A-Z0-9_]*FINGERPRINT[A-Z0-9_]*|[A-Z0-9_]+_(?:BITS|DIGEST)")
@@ -2609,8 +2620,10 @@ def pin_markers(tokens: Sequence[Token]) -> List[str]:
         if kind != "i":
             continue
         after = [v for _, v in tokens[i + 1:i + 3]]
-        if value == "golden" and after[:1] == ["!"]:
-            found.add("golden!")
+        if value in ("golden", "pins") and after[:1] == ["!"]:
+            found.add(f"{value}!")
+        elif value == "Pins" and after[:1] == ["::"] and after[1:2]:
+            found.add(f"Pins::{after[1]}")
         elif value == "golden" and after[:1] == ["::"] and after[1:2] and after[1].startswith("check"):
             found.add(f"golden::{after[1]}")
         elif value == "check_golden":
@@ -2644,13 +2657,14 @@ class WasmSkyScan:
         test_files = set().union(*(unit.test_files for unit in graph.units.values()))
         self.test_code = {rust_graph.item_node(path, item[0]) for path, facts in graph.rs.items()
                           for item in facts.items if item[5] or path in test_files}
-        # The testkit's golden checks, its public `check…` functions and its macro, which a test may
-        # call by a name its tokens do not show.
-        golden = smart_ci.GOLDEN_READERS[0][1]
-        facts = graph.rs.get(golden)
-        self.golden_checks = {rust_graph.item_node(golden, item[0]) for item in (facts.items if facts else [])
-                              if (item[1] == "fn" and item[3] == "pub" and item[2].startswith("check"))
-                              or item[1] == "macro"}
+        # The testkit's golden checks and pins, its readers' public `check…` functions and their
+        # macros, which a test may call by a name its tokens do not show.
+        self.golden_checks: Set[str] = set()
+        for _, reader in smart_ci.GOLDEN_READERS:
+            facts = graph.rs.get(reader)
+            self.golden_checks |= {rust_graph.item_node(reader, item[0]) for item in (facts.items if facts else [])
+                                   if (item[1] == "fn" and item[3] == "pub" and item[2].startswith("check"))
+                                   or item[1] == "macro"}
         self.moved = [(unit, test) for unit in sorted(graph.units.values(), key=lambda u: u.id) if unit.runs
                       for test in graph.tests.get(unit.id, []) if not test.ignored
                       and self.filter.matches(unit.crate, unit.id, test.name)]
@@ -2712,6 +2726,8 @@ class TheWasmSkyGuard(unittest.TestCase):
             "    #[test]\n    fn by_its_bits() { assert_eq!(march(), f64::from_bits(0x3ff0_0000_0000_0000)); }\n"
             "    #[test]\n    fn by_a_macro() { hyperion_testkit::golden!(\"band\", \"text\"); }\n"
             "    #[test]\n    fn by_a_check() { check(\"\", \"band\", \"text\"); }\n"
+            "    #[test]\n    fn by_its_pins() { hyperion_testkit::pins!(\"band\", \"by_its_pins\").exact(\"x\", 1); }\n"
+            "    #[test]\n    fn by_a_handle() { Pins::open(\"\", \"band\", \"by_a_handle\").exact(\"x\", 1); }\n"
             "    #[test]\n    fn by_a_digest() { assert!(super::super::testing::sky() == 0x12); }\n"
             "    #[test]\n    fn by_an_assert() { assert!(f64_digest(&[march()]) == crate::sky::PINNED); }\n"
             "    #[test]\n    fn by_its_fingerprint() { let _ = SERIAL_FINGERPRINT; }\n"
@@ -2756,7 +2772,7 @@ class TheWasmSkyGuard(unittest.TestCase):
         moved = {t.name.rsplit("::", 1)[1]: t for _, t in scan.moved}
         self.assertEqual(sorted(moved), sorted([
             "plain", "same_target", "same_bits", "by_a_helper", "by_a_constant", "by_its_bits", "by_a_macro",
-            "by_a_check", "by_a_digest", "by_an_assert", "by_its_fingerprint", "by_a_literal", "by_a_count",
+            "by_a_check", "by_its_pins", "by_a_handle", "by_a_digest", "by_an_assert", "by_its_fingerprint", "by_a_literal", "by_a_count",
             "plain_from_testing"]))
         pins = {name: sorted(m for found in scan.pins(t.node).values() for m in found) for name, t in moved.items()}
         self.assertEqual(pins, {
@@ -2767,6 +2783,8 @@ class TheWasmSkyGuard(unittest.TestCase):
             "by_its_bits": ["from_bits(0x…)"],
             "by_a_macro": ["golden!"],
             "by_a_check": ["fn::check"],
+            "by_its_pins": ["pins!"],
+            "by_a_handle": ["Pins::open"],
             "by_a_digest": ["SKY_DIGEST", "SKY_DIGEST", "assert!(…, 0x…)"],
             "by_an_assert": ["assert!(a digest, a constant)"],
             "by_its_fingerprint": ["SERIAL_FINGERPRINT"],
@@ -2831,10 +2849,11 @@ class TheWasmSkyFilter(unittest.TestCase):
         sources = [f for f in self.ws.files if smart_ci.WASM_SKY_SOURCES.search(f)]
         self.assertLessEqual(read, set(sources))
         self.assertEqual([f for f in sources if not self.graph.rs[f].ok], [])
-        golden = smart_ci.GOLDEN_READERS[0][1]
+        (_, golden), (_, pins) = smart_ci.GOLDEN_READERS
         self.assertTrue(smart_ci.WASM_SKY_SOURCES.search(golden))
-        self.assertLessEqual({f"{golden}#fn::check", f"{golden}#fn::check_embedded", f"{golden}#macro::golden"},
-                             self.scan.golden_checks)
+        self.assertTrue(smart_ci.WASM_SKY_SOURCES.search(pins))
+        self.assertLessEqual({f"{golden}#fn::check", f"{golden}#fn::check_embedded", f"{golden}#macro::golden",
+                              f"{pins}#macro::pins"}, self.scan.golden_checks)
 
     def test_no_macro_makes_tests_where_it_selects(self) -> None:
         # The guard sees the tests the source names; one that a macro or a case attribute makes would
