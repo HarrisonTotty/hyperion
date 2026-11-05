@@ -1242,7 +1242,8 @@ fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new
 /// arm no molten body differs from its published air's surface by more than 1% but those whose air
 /// lies under the solidus, each of which publishes the solidus; both counts are printed. No sample
 /// changes its state between the arms, so every counted body is `MagmaOcean` under both, and every
-/// sample that moves is a counted one; anything else goes to main.
+/// sample that moves is a counted one; anything else goes to main. From generator version 28
+/// P14.T9.d's placement margin leaves 186 molten bodies to count, held over 180 (a finding).
 #[test]
 #[ignore = "slow: the guard's 30,063 samples, each derived under both arms of P14.T53.g's hold"]
 fn under_every_26_hold_count_xvii_finds_no_molten_body_off_its_published_air() {
@@ -1303,7 +1304,7 @@ fn under_every_26_hold_count_xvii_finds_no_molten_body_off_its_published_air() {
         "TO MAIN: a state change, a sample derived under one arm alone, or a mover that is not \
          count (xvii)'s"
     );
-    assert!(published.bodies > 200, "{}", published.line());
+    assert!(published.bodies > 180, "{}", published.line());
     assert_eq!(published.bodies, held.bodies);
     assert_eq!(published.off_their_air, 0);
     assert_eq!(
