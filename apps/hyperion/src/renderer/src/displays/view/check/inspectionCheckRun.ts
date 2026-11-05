@@ -736,7 +736,9 @@ async function inspect(
   const setRate = async (wanted: number): Promise<void> => {
     const now = cameraRateStep(document, plate().line("CAMERA"));
     if (now === null) {
-      throw new Error("views check: the CAMERA line reads no FREE rate");
+      throw new Error(
+        "views check: neither the CAMERA line nor the camera panel reads a FREE rate",
+      );
     }
     if (now === wanted) {
       return;

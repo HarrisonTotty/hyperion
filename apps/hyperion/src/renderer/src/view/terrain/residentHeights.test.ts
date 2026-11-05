@@ -90,6 +90,49 @@ function moveOf(held: ReadonlyArray<BakedPatch>, change: (h: ResidentHeights) =>
   return heights.rimRevision - before;
 }
 
+/** The bakes' revision's move over `change`, from a pass holding `held`. */
+function revisionMoveOf(
+  held: ReadonlyArray<BakedPatch>,
+  change: (h: ResidentHeights) => void,
+): number {
+  const heights = new ResidentHeights();
+  for (const bake of held) {
+    heights.take(bake);
+  }
+  const before = heights.revision;
+  change(heights);
+  return heights.revision - before;
+}
+
+describe("the resident bakes' revision (lane perf-render-thread-ground)", () => {
+  it("moves as any bake comes, is taken again or goes, and at a clear, but not for a key held by none", () => {
+    const held = bakeOf(KEY, () => 100, EVERY);
+    expect([
+      revisionMoveOf([], (h) => {
+        h.take(bakeOf(KEY, () => 100, WEST_HALF));
+      }),
+      revisionMoveOf([], (h) => {
+        h.take(held);
+      }),
+      revisionMoveOf([], (h) => {
+        h.take(bakeOf(KEY, () => 100, NONE));
+      }),
+      revisionMoveOf([held], (h) => {
+        h.take(bakeOf(KEY, () => 120, EVERY));
+      }),
+      revisionMoveOf([held], (h) => {
+        h.forget(patchKeyString(KEY));
+      }),
+      revisionMoveOf([held], (h) => {
+        h.forget(patchKeyString({ ...KEY, i: 11 }));
+      }),
+      revisionMoveOf([held], (h) => {
+        h.clear();
+      }),
+    ]).toEqual([1, 1, 1, 1, 1, 0, 1]);
+  });
+});
+
 describe("the survey edge's rim from the resident bakes (R10.T16.c)", () => {
   it("stands at a bake's height where its mask holds the edge, bilinear between its vertices", () => {
     const heights = new ResidentHeights();

@@ -313,21 +313,35 @@ describe("the ground a view drew (R10.T16.c after R10.T16.i)", () => {
       }
     });
 
-    it("reads its vertices again once the bakes' revision moves", () => {
+    it("reads its vertices again once the bakes' revision moves, as a ground made afresh does", () => {
       const once = counted();
       const bakes = { ...bakesOf(once.bakes), revision: 0 };
+      const refining = INSTANCES[1] ?? PLAIN;
       const ground = new DrawnGround(bakes, FIGURE);
       ground.begin();
-      ground.push(INSTANCES[1] ?? PLAIN);
+      ground.push(refining);
       ground.end(cameraOver(1_500), IDENTITY);
       const place = at(KEY, 20.4, 20.1);
       const first = ground.rimHeightAtM(place);
-      const kept = once.reads();
-      ground.rimHeightAtM(place);
-      const again = once.reads();
+      // The parent's bake taken again, sloped otherwise, which the refine's mix reads live.
+      once.bakes.set(patchKeyString(PARENT), {
+        standing: "edge",
+        ownAtM: (x, y) => 20 + x - 2 * y,
+        morphAtM: () => 0,
+        surveyedAt: () => true,
+      });
+      const held = ground.rimHeightAtM(place);
       bakes.revision = 1;
       const moved = ground.rimHeightAtM(place);
-      expect([again === kept, once.reads() > again, moved]).toEqual([true, true, first]);
+      const fresh = new DrawnGround(bakesOf(once.bakes), FIGURE);
+      fresh.begin();
+      fresh.push(refining);
+      fresh.end(cameraOver(1_500), IDENTITY);
+      expect([held === first, moved === first, moved]).toEqual([
+        true,
+        false,
+        fresh.rimHeightAtM(place),
+      ]);
     });
   });
 

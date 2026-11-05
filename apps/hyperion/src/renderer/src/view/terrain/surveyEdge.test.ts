@@ -1083,7 +1083,9 @@ describe("the survey edge's mark over the ground as drawn, its reads and its seg
 
   it("draws the segments and the range it drew with each read afresh and each segment made, bit for bit", () => {
     const coverage = surveyed([0, 16, 16], [0, 17, 16], [0, 16, 17]);
-    const marks = [2_000, 9_000, 40_000, 250_000].flatMap((heightM) => {
+    // From under the instances' morph bands' start, 800 m, where the ground's reads take no morph
+    // target, to far over them.
+    const marks = [400, 2_000, 9_000, 40_000, 250_000].flatMap((heightM) => {
       const { view, camera, cameraM } = viewOf(coverage, heightM);
       const drawn = new DrawnGround(
         { bakeAt: (key) => bakes.get(patchKeyString(key)) ?? null, rimRevision: 0, revision: 0 },
@@ -1125,6 +1127,8 @@ describe("the survey edge's mark over the ground as drawn, its reads and its seg
       [
         [24, 0],
         [24, 0],
+        [24, 0],
+        [24, 0],
         [0, 0],
         [0, 0],
         [660, 228],
@@ -1132,7 +1136,7 @@ describe("the survey edge's mark over the ground as drawn, its reads and its seg
         [828, 360],
         [828, 360],
       ],
-      "41e68d29dfa5e695",
+      "b8a7ff7c606f15b5",
     ]);
   });
 });
