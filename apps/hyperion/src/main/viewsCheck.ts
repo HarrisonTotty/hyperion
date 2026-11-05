@@ -165,7 +165,9 @@ export const VIEWS_CHECK_TRACE_BUFFER_KB = 512 * 1024;
  * `target/views-check/terrain/` and `docs/measurements/terrain-check/`, and the atmosphere run's
  * (plan R08, R08.T10.b) under `target/views-check/atmosphere/` and
  * `docs/measurements/atmosphere-flight/`, and the inspection run's captures, its only output, under
- * `target/views-check/inspection/`; the captures under the smoke's directory either way.
+ * `target/views-check/inspection/`, as the planet viewer run's are under
+ * `target/views-check/planet-viewer/` (plan R15, T6); the captures under the smoke's directory either
+ * way.
  *
  * @remarks
  * A run in the check-only software mode (plan R01, R01.T16) writes under the smoke's directory, a
@@ -198,6 +200,12 @@ export function viewsCheckDirs(
     case "inspection":
       dirs = { smoke: "target/views-check/inspection", full: "target/views-check/inspection" };
       break;
+    case "planet-viewer":
+      dirs = {
+        smoke: "target/views-check/planet-viewer",
+        full: "target/views-check/planet-viewer",
+      };
+      break;
   }
   const kept = launch.smoke || launchMode === "software";
   return { out: kept ? dirs.smoke : dirs.full, captures: dirs.smoke };
@@ -226,7 +234,8 @@ export const INSPECTION_TIMING_DIR = "target/views-check/timing";
  * (`--timing`; the owner's report): 10 for its orbit and close windows, each up to two minutes,
  * and 20 for its low window, flown down to by up to 40 holds of three draws each (on SwiftShader at
  * the high setting, draws of some 50 s, the step outlasted 125 minutes; perf-frame-encoding,
- * 2026-11-04). Each is
+ * 2026-11-04); the planet viewer run's (plan R15, T6), one planet generated and taken from orbit
+ * to its surface, the inspection run's 8 and 15. Each is
  * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
  * as the renderer's waits are.
  */
@@ -251,6 +260,12 @@ export function viewsCheckWatchdogMs(
       // A profile's orbit and close windows, each at most two minutes and a trace's reduction, 10
       // more, and its low window's descent and window 20.
       ms = (launch.smoke ? 8 * 60_000 : 15 * 60_000) + (launch.timing === true ? 30 * 60_000 : 0);
+      break;
+    case "planet-viewer":
+      // One planet generated and opened, its first photorealistic frames and surveyed ground
+      // awaited, then zoomed down to low orbit and the surface, its terrain streamed: as the
+      // inspection run's.
+      ms = launch.smoke ? 8 * 60_000 : 15 * 60_000;
       break;
   }
   return launchMode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;
@@ -981,6 +996,9 @@ export class ViewsCheckSession {
                 : `the atmosphere run's checks failed: ${atmosphereFailures(results)}`;
           break;
         }
+        case "planet-viewer":
+          failure = this.#captured ? null : "the planet viewer run ended with no capture saved";
+          break;
         case "inspection":
           failure = !this.#captured
             ? "the inspection run ended with no capture saved"
@@ -1075,6 +1093,7 @@ function phasesOf(run: ViewsCheckRunKind): ReadonlyArray<CheckPhaseName> {
     case "handover":
     case "atmosphere":
     case "inspection":
+    case "planet-viewer":
       phases = [];
       break;
   }
@@ -1099,6 +1118,9 @@ function runWords(run: ViewsCheckRunKind): string {
       break;
     case "inspection":
       words = "the inspection run";
+      break;
+    case "planet-viewer":
+      words = "the planet viewer run";
       break;
   }
   return words;

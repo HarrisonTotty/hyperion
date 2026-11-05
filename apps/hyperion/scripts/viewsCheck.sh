@@ -12,6 +12,7 @@
 #                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered | --whole]
 #                            [--hyperion-gpu-timing]
 #                  | --atmosphere
+#                  | --planet-viewer
 #                  | --inspection --universe <ID> --body <ID>
 #                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]
 #                              [--count-gpu-calls]
@@ -107,6 +108,15 @@
 # target/views-check/inspection/. One setting, high unless given, and one body a launch; it exits 1
 # when a step does not take effect, VIEW BODY is held back, or a fault line stands on a capture.
 #
+# --planet-viewer runs the planet viewer run instead (plan R15, T6): on a running server, the first
+# universe it lists opened on GALAXY, the PLANET VIEWER shown and its inputs as they stand at mount,
+# an Earth about a Sun, generated; its planet in VIEW's ORBIT camera, on AUTO and its ground surveyed,
+# captured once AUTO has settled as between-planet-viewer-orbit.png, then zoomed by the wheel to
+# 400 km above the ground as between-planet-viewer-low-orbit.png, then to 300 m above it with its look
+# tilted to the horizon as between-planet-viewer-surface.png, under target/views-check/planet-viewer/.
+# One setting, high unless given; it exits 1 when a step does not take effect or a reading does not
+# come, the planet's ground is not modelled, or a fault line stands on a capture.
+#
 # --inspection --timing profiles the inspection's frame too (the owner's report, 2026-11-01): from
 # orbit, as the first capture is taken, closed in, as the close capture is, and 4 km above the
 # ground, where the shadow cascades draw (main's ask, 2026-11-01), each window 30 of
@@ -186,6 +196,7 @@ terrain=0
 served=0
 atmosphere=0
 inspection=0
+planet=0
 whole=0
 timing=0
 setting=""
@@ -200,6 +211,7 @@ while [[ $# -gt 0 ]]; do
         --handover) check_args+=("$1"); shift ;;
         --atmosphere) atmosphere=1; check_args+=("$1"); shift ;;
         --inspection) inspection=1; check_args+=("$1"); shift ;;
+        --planet-viewer) planet=1; check_args+=("$1"); shift ;;
         --whole) whole=1; shift ;;
         --timing) timing=1; check_args+=("$1"); shift ;;
         --universe) served=1; check_args+=("$1"); shift ;;
@@ -308,7 +320,7 @@ fi
 # the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
 # 15), its full run's 40 in the software mode, above its 30 there (its places, a stage each); the
 # inspection run's 10 and 17, above its (8 and 15), and 30 minutes more with its profile, as its
-# watchdog has (its low window's descent 20 of them). Given two, the client refuses the launch at once, so the first run's limit here
+# watchdog has (its low window's descent 20 of them); the planet viewer run's the inspection run's. Given two, the client refuses the launch at once, so the first run's limit here
 # stands.
 if [[ $terrain -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 2400) + (served == 1 ? 1200 : 0) ))
@@ -316,6 +328,8 @@ elif [[ $atmosphere -eq 1 ]]; then
     limit=$(( smoke == 1 ? 600 : (software == 1 ? 2400 : 1200) ))
 elif [[ $inspection -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 1020) + (timing == 1 ? 1800 : 0) ))
+elif [[ $planet -eq 1 ]]; then
+    limit=$(( smoke == 1 ? 600 : 1020 ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
 fi

@@ -33,7 +33,13 @@ import {
   NO_TURN,
   type ViewTurn,
 } from "../../view/camera/look";
-import { coRotated, orbitDragged, orbitLooked, orbitZoomed } from "../../view/camera/orbit";
+import {
+  coRotated,
+  orbitDragged,
+  orbitLooked,
+  orbitRadiusM,
+  orbitZoomed,
+} from "../../view/camera/orbit";
 import type { CameraFrame, CameraPose } from "../../view/camera/pose";
 import {
   advanceEasedMove,
@@ -312,7 +318,10 @@ function orbitZoomRun(run: ViewRun, steps: number, scene: CameraScene): CommandR
     kind: "done",
     run: {
       ...run,
-      camera: { ...run.camera, pose: orbitZoomed(run.camera.pose, steps, body.radiusM) },
+      camera: {
+        ...run.camera,
+        pose: orbitZoomed(run.camera.pose, steps, orbitRadiusM(body, run.camera.pose.positionM)),
+      },
     },
   };
 }
@@ -356,8 +365,10 @@ function flyOrbit(
     yawRad: -keys.rotate.y * ORBIT_ARROW_RAD_PER_S * dtS,
     pitchRad: -keys.rotate.x * ORBIT_ARROW_RAD_PER_S * dtS,
   };
-  let pose = orbitDragged(camera.pose, addTurns(dragged, arrows), body.radiusM);
-  pose = orbitZoomed(pose, -keys.translate.z * ORBIT_ZOOM_STEPS_PER_S * dtS, body.radiusM);
+  // The datum's radius along the camera's line, which a frame's turn moves by too little to matter.
+  const radiusM = orbitRadiusM(body, camera.pose.positionM);
+  let pose = orbitDragged(camera.pose, addTurns(dragged, arrows), radiusM);
+  pose = orbitZoomed(pose, -keys.translate.z * ORBIT_ZOOM_STEPS_PER_S * dtS, radiusM);
   pose = orbitLooked(
     pose,
     keys.translate.y * ORBIT_LOOK_RAD_PER_S * dtS,

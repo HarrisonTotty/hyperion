@@ -180,8 +180,17 @@ function readAnswer(multipleStars = false): ResponseFor<"viewer_inputs"> {
   };
 }
 
-/** Types `id` into `BODY` and presses `OPEN BODY`. */
+/** Opens the panel's `SOURCE`, folded as the display mounts, unless it is open. */
+async function openSource(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const source = screen.getByRole("button", { name: "SOURCE" });
+  if (source.getAttribute("aria-expanded") !== "true") {
+    await user.click(source);
+  }
+}
+
+/** Types `id` into `BODY`, under `SOURCE`, and presses `OPEN BODY`. */
 async function openTyped(user: ReturnType<typeof userEvent.setup>, id: string): Promise<void> {
+  await openSource(user);
   const field = screen.getByRole("textbox", { name: "BODY" });
   await user.clear(field);
   await user.type(field, id);
@@ -537,9 +546,9 @@ describe("nextDrawSeed", () => {
       await settle();
       expect([
         screen.queryByText(/NO PLANET/u),
-        screen.getByRole("textbox", { name: "BODY" }).getAttribute("value"),
+        screen.queryByText(`BODY ${FIXTURE_EARTH.toUpperCase()}`) !== null,
         socket.requestsOfKind("resolve_system").length,
-      ]).toEqual([null, FIXTURE_EARTH.toUpperCase(), 0]);
+      ]).toEqual([null, true, 0]);
     });
 
     it("is opened again when the display is shown, where hiding it cut the hand-over short", async () => {
@@ -579,7 +588,8 @@ describe("nextDrawSeed", () => {
 
   describe("BODY's field", () => {
     it("states the form it takes while it is empty", async () => {
-      await renderViewer();
+      const { user } = await renderViewer();
+      await openSource(user);
       expect(screen.getByRole("textbox", { name: "BODY" })).toHaveAccessibleDescription(
         "a body's ID: 16 hexadecimal digits, a full stop and 4 more",
       );
@@ -605,6 +615,25 @@ describe("nextDrawSeed", () => {
       await user.clear(field);
       await user.tab();
       expect(field).toHaveProperty("value", FIXTURE_EARTH.toUpperCase());
+    });
+  });
+
+  describe("SOURCE", () => {
+    it("is folded as the display mounts, saying no planet is shown", async () => {
+      await renderViewer();
+      expect([
+        screen.getByRole("button", { name: "SOURCE" }).getAttribute("aria-expanded"),
+        screen.queryByRole("textbox", { name: "BODY" }),
+        screen.queryByText("NONE") !== null,
+      ]).toEqual(["false", null, true]);
+    });
+
+    it("says a generated planet is shown", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+      await showPlanet(socket, toInputsDto(DEFAULT_INPUTS));
+      expect(screen.queryByText("GENERATED")).not.toBeNull();
     });
   });
 });

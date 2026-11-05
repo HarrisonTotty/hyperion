@@ -16,7 +16,7 @@ import {
 import type { CameraFrame, CameraPose, CraftId, Quaternion } from "./pose";
 import { DEFAULT_FOV_DEG, FOV_STEPS_DEG } from "./projection";
 import { lookAlong, multiply, quaternionFromAxisAngle, rotate, slerp } from "./quaternion";
-import { orbitStart } from "./orbit";
+import { type OrbitDatum, orbitRadiusM, orbitStart } from "./orbit";
 import { type FrameChange, rebase, sameCameraFrame } from "./rebase";
 
 /**
@@ -30,11 +30,12 @@ import { type FrameChange, rebase, sameCameraFrame } from "./rebase";
  */
 export type CameraPreset = "seat" | "chase" | "free" | "orbit";
 
-/** A body an `ORBIT` camera may be held about (plan R15, T4), with its reference radius. */
-export interface OrbitBody {
+/**
+ * A body an `ORBIT` camera may be held about (plan R15, T4), with its reference spheroid, the datum
+ * the orbit's altitude is measured from.
+ */
+export interface OrbitBody extends OrbitDatum {
   readonly id: BodyIdHex;
-  /** Its equatorial radius, m, positive: the datum the orbit's altitude is measured from. */
-  readonly radiusM: number;
 }
 
 /**
@@ -412,7 +413,8 @@ export function presetPose(
         break;
       }
       const frame: CameraFrame = { kind: "body", body: body.id };
-      pose = orbitStart(rebase(from, frame, scene.origins).pose, frame, body.radiusM);
+      const held = rebase(from, frame, scene.origins).pose;
+      pose = orbitStart(held, frame, orbitRadiusM(body, held.positionM));
       break;
     }
   }

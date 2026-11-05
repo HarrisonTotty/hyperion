@@ -249,13 +249,17 @@ const LIT_BODY_MATERIALS = ["bodies:disc", "bodies:smoothMesh", "terrain-lit-"] 
 
 /**
  * Whether `frame`, one of a view's submissions, draws a lit body larger than a point: a draw in
- * its photorealistic `bodies` or `discs` pass (`PHOTOREAL_PASS_LABELS`) of one of
+ * its photorealistic `bodies` pass, that pass's second raster (`bodies late`, R14.T3.d's, where
+ * close over the ground the terrain's clusters may all draw), or its `discs` pass
+ * (`PHOTOREAL_PASS_LABELS`) of one of
  * {@link LIT_BODY_MATERIALS}. A body drawn as a point, or beyond the frame, draws none, nor do the
  * host discs, whose material is the sky's.
  */
 export function drawsLitBody(frame: Pick<FrameSubmission, "label" | "draws">): boolean {
   return (
-    (frame.label === PHOTOREAL_PASS_LABELS.bodies || frame.label === PHOTOREAL_PASS_LABELS.discs) &&
+    (frame.label === PHOTOREAL_PASS_LABELS.bodies ||
+      frame.label === PHOTOREAL_PASS_LABELS.bodiesLate ||
+      frame.label === PHOTOREAL_PASS_LABELS.discs) &&
     frame.draws.some((draw) =>
       LIT_BODY_MATERIALS.some((prefix) => draw.material.name.startsWith(prefix)),
     )

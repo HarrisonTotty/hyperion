@@ -50,6 +50,7 @@ const RUN_KINDS: ReadonlyArray<ViewsCheckRunKind> = [
   "handover",
   "atmosphere",
   "inspection",
+  "planet-viewer",
 ];
 
 /** The fields a terrain run may be served. */
@@ -190,7 +191,10 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
     !(out === null || (typeof out === "string" && out.length > 0)) ||
     run === null ||
     fixture === null ||
-    ((run === "several-views" || run === "atmosphere" || run === "inspection") &&
+    ((run === "several-views" ||
+      run === "atmosphere" ||
+      run === "inspection" ||
+      run === "planet-viewer") &&
       fixture !== "terrain-test")
   ) {
     return null;

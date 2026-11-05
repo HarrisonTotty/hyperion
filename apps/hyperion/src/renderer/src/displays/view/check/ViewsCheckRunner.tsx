@@ -30,10 +30,16 @@ import {
 } from "./inspectionCheckRun";
 import { INSPECTION_PROFILE_TIMING, InspectionProfiler } from "./inspectionProfile";
 import {
+  PLANET_VIEWER_CHECK_TIMING,
+  recordPlanetViewerCheck,
+  runPlanetViewerCheck,
+} from "./planetViewerCheckRun";
+import {
   atmosphereCheckTimingOf,
   handoverCheckTimingOf,
   inspectionCheckTimingOf,
   inspectionProfileTimingOf,
+  planetViewerCheckTimingOf,
   terrainCheckTimingOf,
   viewsCheckTimingOf,
 } from "./softwareTiming";
@@ -51,7 +57,8 @@ import type { ViewsProbe } from "./viewsProbe";
  * its looks, which `VIEW` offers through the terrain probe's kept scenes; the atmosphere run (plan
  * R08, R08.T10.b) the views probe alone, as T20's, and in the software mode its places, whose kept
  * scenes `VIEW` offers (`atmospherePlaces.ts`); the inspection run (the owner's request,
- * 2026-11-01) the views probe and the link's request client, through which it asks what it opens.
+ * 2026-11-01) the views probe and the link's request client, through which it asks what it opens;
+ * the planet viewer run (plan R15, T6) the same, through which it lists the server's universes.
  */
 export type CheckedRun =
   | { readonly kind: "several-views" }
@@ -68,6 +75,11 @@ export type CheckedRun =
       readonly calls: GpuCallCounter | null;
       /** Its watch of `VIEW`'s terrain session, for its frame profile's cluster counters (R14). */
       readonly clusters: InspectionClusters;
+    }
+  | {
+      readonly kind: "planet-viewer";
+      /** The link's request client, through which the run lists the server's universes. */
+      readonly requests: RequestClient;
     }
   | { readonly kind: "terrain"; readonly terrain: TerrainProbe }
   | {
@@ -190,6 +202,20 @@ export function ViewsCheckRunner({
                 api.launch.smoke ? ATMOSPHERE_CHECK_TIMING.smoke : ATMOSPHERE_CHECK_TIMING.full,
                 launchMode,
               ),
+            }),
+          controller.signal,
+        );
+        break;
+      case "planet-viewer":
+        ended = recordPlanetViewerCheck(
+          api,
+          () =>
+            runPlanetViewerCheck({
+              ...shared,
+              api,
+              views: probe,
+              requests: run.requests,
+              timing: planetViewerCheckTimingOf(PLANET_VIEWER_CHECK_TIMING, launchMode),
             }),
           controller.signal,
         );

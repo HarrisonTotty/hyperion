@@ -15,6 +15,7 @@ import type { AtmosphereCheckTiming } from "./atmosphereCheckRun";
 import type { HandoverCheckTiming } from "./handoverCheckRun";
 import type { InspectionCheckTiming } from "./inspectionCheckRun";
 import type { InspectionProfileTiming } from "./inspectionProfile";
+import type { PlanetViewerCheckTiming } from "./planetViewerCheckRun";
 import type { TerrainCheckTiming } from "./terrainCheckRun";
 import type { ViewsCheckTiming } from "./viewsCheckRun";
 
@@ -101,6 +102,26 @@ export function inspectionCheckTimingOf(
   timing: InspectionCheckTiming,
   launchMode: GraphicsLaunchMode,
 ): InspectionCheckTiming {
+  return launchMode === "software"
+    ? {
+        ...timing,
+        waitMs: stretched(timing.waitMs),
+        drawWaitMs: stretched(timing.drawWaitMs),
+        settleMaxMs: stretched(timing.settleMaxMs),
+        groundWaitMs: stretched(timing.groundWaitMs),
+      }
+    : timing;
+}
+
+/**
+ * The planet viewer run's timing for a launch (plan R15, T6): its waits for a control, for the
+ * first photorealistic frames and for its surveyed ground, and `AUTO`'s settle limit, stretched in
+ * the software mode, as the inspection run's are; its counts of draws and its hold of `R`, never.
+ */
+export function planetViewerCheckTimingOf(
+  timing: PlanetViewerCheckTiming,
+  launchMode: GraphicsLaunchMode,
+): PlanetViewerCheckTiming {
   return launchMode === "software"
     ? {
         ...timing,

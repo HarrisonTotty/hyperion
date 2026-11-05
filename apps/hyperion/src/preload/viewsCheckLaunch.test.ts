@@ -101,6 +101,17 @@ describe("the views check's launch switch", () => {
     expect(readViewsCheckLaunch({ ...served, ...change })).toBeNull();
   });
 
+  it("carries the planet viewer run, which names no served world (plan R15, T6)", () => {
+    const launch: ViewsCheckLaunch = { ...LAUNCH, run: "planet-viewer" };
+    expect([
+      viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)]),
+      readViewsCheckLaunch({
+        ...launch,
+        served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      }),
+    ]).toEqual([launch, null]);
+  });
+
   it("carries the inspection run's body, which it always names (the owner's request)", () => {
     const launch: ViewsCheckLaunch = {
       ...LAUNCH,

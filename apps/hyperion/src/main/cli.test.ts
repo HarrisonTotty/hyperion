@@ -631,6 +631,24 @@ describe("the several-views check's options", () => {
     });
   });
 
+  it("takes --planet-viewer beside --views-check as the planet viewer run (plan R15, T6)", () => {
+    expect(parse(["--views-check", "--planet-viewer"]).viewsCheck).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "planet-viewer",
+      fixture: "terrain-test",
+    });
+  });
+
+  it("refuses the planet viewer run beside another run", () => {
+    const error = refusal(["--views-check", "--planet-viewer", "--terrain"]);
+    expect([error.exitCode, error.message]).toEqual([
+      1,
+      "error: --planet-viewer is a run of its own beside --views-check; give it alone",
+    ]);
+  });
+
   it("takes --look, the hand-over check's one look (R10.T15.b.2)", () => {
     expect(
       parse([

@@ -306,6 +306,12 @@ describe("the inspection run's lighting and its bodies drawn (fix-retina-frame)"
     ).toEqual([true, true, true]);
   });
 
+  it("counts the terrain's clusters in the bodies pass's late raster (R14.T3.d)", () => {
+    expect(drawsLitBody(submissionOf("bodies late", ["terrain-lit-cluster-baked-offsets"]))).toBe(
+      true,
+    );
+  });
+
   it("counts no host disc alone, and no body material in another pass", () => {
     expect(
       [

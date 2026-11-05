@@ -442,8 +442,18 @@ export function cameraSceneOf(scene: ViewScene): CameraScene {
             lengthM: own.hull.lengthM,
           },
     defaultPose: scene.defaultPose,
+    // Each with its reference spheroid where its figure is granted, else a sphere of its radius.
     orbitBodies: scene.bodies.flatMap((body) =>
-      body.kind !== "star" && body.radiusM > 0 ? [{ id: body.id, radiusM: body.radiusM }] : [],
+      body.kind !== "star" && body.radiusM > 0
+        ? [
+            {
+              id: body.id,
+              equatorialRadiusM: body.radiusM,
+              polarRadiusM: body.appearance?.figure?.polarRadiusM ?? body.radiusM,
+              pole: body.appearance?.figure?.pole ?? null,
+            },
+          ]
+        : [],
     ),
     // Only the PLANET VIEWER's scene offers ORBIT, about its planet (plan R15, T4).
     orbitHome: scene.orbitHome ?? null,

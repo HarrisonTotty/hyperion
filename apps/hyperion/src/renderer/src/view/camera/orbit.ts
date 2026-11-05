@@ -8,9 +8,12 @@
  *   follows it. The turn is the drag's orbit turn scaled by the altitude over the distance from the
  *   centre, so that far out a drag swings the camera round the body and close in it pans the
  *   camera over the ground.
- * - **Zoom** steps the altitude above the body's reference radius by {@link ORBIT_ZOOM_FACTOR} a
- *   step, between {@link ORBIT_FLOOR_M} and {@link ORBIT_CEILING_RADII} radii, along the line
- *   from the centre; the look is kept.
+ * - **Its altitude** is measured above the body's reference spheroid, its datum, along the camera's
+ *   line from the centre ({@link orbitRadiusM}), so that an oblate body's ground is reached at every
+ *   latitude: the radius each function takes is the datum's along that line.
+ * - **Zoom** steps the altitude above the datum by {@link ORBIT_ZOOM_FACTOR} a step, between
+ *   {@link ORBIT_FLOOR_M} and {@link ORBIT_CEILING_RADII} radii, along the line from the centre;
+ *   the look is kept.
  * - **Tilt and heading** turn the look about the camera's right axis and the local vertical, the
  *   tilt held between straight down at the centre and the horizon, so that close in the camera
  *   looks out along the terrain.
@@ -27,10 +30,35 @@ import { lookAlong, multiply, quaternionFromAxisAngle, rotate } from "./quaterni
 export const ORBIT_ZOOM_FACTOR = 1.25;
 
 /**
- * The least altitude above the body's reference radius, m: 10, the guide's lowest look at the
- * ground; the camera holds no ground of its own, so terrain above the datum may stand higher.
+ * The least altitude above the body's datum, m: 10, the guide's lowest look at the ground; the
+ * camera holds no ground of its own, so terrain above the datum may stand higher.
  */
 export const ORBIT_FLOOR_M = 10;
+
+/** A body's reference spheroid as `ORBIT` reads it: its radii and its pole along the galactic axes. */
+export interface OrbitDatum {
+  /** The equatorial radius, m, positive. */
+  readonly equatorialRadiusM: number;
+  /** The polar radius, m, positive and at most the equatorial. */
+  readonly polarRadiusM: number;
+  /** The spheroid's axis, a unit vector along the galactic axes; `null` for a sphere's. */
+  readonly pole: Vec3 | null;
+}
+
+/**
+ * The datum's radius along the line from the centre through `positionM`, m: where that line meets
+ * the spheroid, 1 ÷ √(cos²φ ÷ a² + sin²φ ÷ c²) at the line's latitude φ; the equatorial radius
+ * at the centre itself or for a body with no pole.
+ */
+export function orbitRadiusM(datum: OrbitDatum, positionM: Vec3): number {
+  const distanceM = norm(positionM);
+  if (datum.pole === null || !(distanceM > 0)) {
+    return datum.equatorialRadiusM;
+  }
+  const sin = dot(positionM, datum.pole) / distanceM;
+  const cos2 = Math.max(1 - sin * sin, 0);
+  return 1 / Math.sqrt(cos2 / datum.equatorialRadiusM ** 2 + (sin * sin) / datum.polarRadiusM ** 2);
+}
 
 /** The greatest distance from the centre, in body radii: 50, where a body still fills a few px. */
 export const ORBIT_CEILING_RADII = 50;

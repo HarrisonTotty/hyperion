@@ -45,6 +45,17 @@ function volatilesSummary(inputs: PlanetInputs): string {
     : `${String(given)} GIVEN, ${String(VOLATILES.length - given)} DRAWN`;
 }
 
+/**
+ * What the folded `SOURCE` says of the planet on show: `GENERATED` from the inputs, `BODY` and the
+ * galaxy's planet's ID, or `NONE` before the first.
+ */
+function sourceSummary(shown: PlanetViewer["shown"]): string {
+  if (shown === null) {
+    return "NONE";
+  }
+  return shown.source.kind === "generated" ? "GENERATED" : `BODY ${shown.body.toUpperCase()}`;
+}
+
 /** The key that generates the panel's inputs from anywhere on the display but a text field. */
 export const GENERATE_KEY = "g";
 
@@ -83,15 +94,20 @@ function samePlanet(a: PlanetInputs, b: PlanetInputs): boolean {
  * - `GENERATE` (`G`), beside `SEED`, shows the panel's inputs as a planet, its `PENDING`, then its
  *   outcome, under it. It and the bar's `RANDOMIZE` are held back with the reason while no universe
  *   is open or the link is down.
- * - `BODY` heads the panel ({@link BodyField}): `OPEN BODY` shows a planet of the galaxy by its ID
- *   and puts its inputs, read back, on the panel. While the panel holds the inputs of a planet
- *   whose system has more stars than one, a note says that they hold its host alone.
+ * - `SOURCE` heads the panel, folded as it opens, so that the panel stands whole at 1280×720, and
+ *   saying what the planet on show is: `GENERATED`, or `BODY` and its ID. Opened, its `BODY`
+ *   ({@link BodyField}) and `OPEN BODY` show a planet of the galaxy by its ID and put its inputs,
+ *   read back, on the panel; `OPEN BODY`'s `PENDING` or its refusal opens it. While the panel holds
+ *   the inputs of a planet whose system has more stars than one, a note says that they hold its
+ *   host alone.
  */
 export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetInputsPanelProps) {
   const titleId = useId();
   const statusId = useId();
   const volatilesId = useId();
+  const sourceId = useId();
   const [volatilesOpen, setVolatilesOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(false);
   const { inputs, command, shown } = viewer;
   const refused = command?.state.kind === "rejected" ? refusedInput(command.field) : null;
   const drawnShown = shown !== null && samePlanet(shown.inputs, inputs) ? shown.drawn : null;
@@ -127,24 +143,48 @@ export function PlanetInputsPanel({ viewer, heldBack, heldBackId, sun }: PlanetI
           held: samePlanet(shown.inputs, inputs),
         }
       : null;
+  const openStatus = statusOf("open");
+  // OPEN BODY's PENDING or its refusal opens the group, so that it stands under the field.
+  const sourceShown = sourceOpen || openStatus !== null;
   return (
     <section className="panel planet-inputs" aria-labelledby={titleId}>
       <h2 className="panel__title" id={titleId}>
         INPUTS
       </h2>
-      <BodyField
-        shownBody={bodyShown?.body ?? null}
-        status={statusOf("open")}
-        heldBack={heldBack}
-        heldBackId={heldBackId}
-        onOpen={viewer.openBody}
-      />
-      {bodyShown !== null && bodyShown.multipleStars && bodyShown.held ? (
-        <p className="planet-inputs__note">
-          <StatusText text="MULTIPLE STARS: the inputs hold its host alone" />
-        </p>
-      ) : null}
       <div className="planet-inputs__groups">
+        <fieldset className="planet-inputs__group">
+          <legend className="planet-inputs__legend">
+            <button
+              type="button"
+              className="control disclosure"
+              aria-expanded={sourceShown}
+              aria-controls={sourceId}
+              onClick={() => {
+                setSourceOpen(!sourceShown);
+              }}
+            >
+              <DisclosureGlyph expanded={sourceShown} />
+              SOURCE
+            </button>
+            {sourceShown ? null : (
+              <span className="planet-inputs__summary">{sourceSummary(shown)}</span>
+            )}
+          </legend>
+          <div id={sourceId} hidden={!sourceShown}>
+            <BodyField
+              shownBody={bodyShown?.body ?? null}
+              status={openStatus}
+              heldBack={heldBack}
+              heldBackId={heldBackId}
+              onOpen={viewer.openBody}
+            />
+          </div>
+        </fieldset>
+        {bodyShown !== null && bodyShown.multipleStars && bodyShown.held ? (
+          <p className="planet-inputs__note">
+            <StatusText text="MULTIPLE STARS: the inputs hold its host alone" />
+          </p>
+        ) : null}
         {GROUPS.map((group) => (
           <fieldset key={group.title} className="planet-inputs__group">
             <legend className="planet-inputs__legend">{group.title}</legend>

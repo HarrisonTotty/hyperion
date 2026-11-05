@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { norm, sub as sub3, type Vec3 } from "../../geometry/vec3";
 import { sliceEarthInspection } from "../../test/inspectionFixture";
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
-import { orbitAltitudeM } from "../../view/camera/orbit";
+import { orbitAltitudeM, orbitRadiusM } from "../../view/camera/orbit";
 import { offeredPresets } from "../../view/camera/state";
 import { rotateToBodyFixed } from "../../view/coords/rotation";
 import { cameraSceneOf, sceneOrigins } from "../../view/scene/model";
@@ -63,12 +63,13 @@ describe("the ORBIT camera in a run", () => {
     if (body === undefined) {
       throw new Error("the orbit's body is not among the scene's");
     }
-    const before = orbitAltitudeM(run.camera.pose, body.radiusM);
+    const radiusM = orbitRadiusM(body, run.camera.pose.positionM);
+    const before = orbitAltitudeM(run.camera.pose, radiusM);
     const zoomed = commandRun(run, { kind: "zoom", steps: 2 }, CUT);
     if (zoomed.kind !== "done") {
       throw new Error("the wheel was refused in ORBIT");
     }
-    expect(orbitAltitudeM(zoomed.run.camera.pose, body.radiusM)).toBeCloseTo(before / 1.25 ** 2, 0);
+    expect(orbitAltitudeM(zoomed.run.camera.pose, radiusM)).toBeCloseTo(before / 1.25 ** 2, 0);
   });
 
   it("zooms in under W", () => {

@@ -4271,20 +4271,26 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   flex: 1 1 auto;
 }
 
+/* Spaced closer than a panel's default, so that the column stands whole at 1280×720. */
 .planet-inputs {
+  padding-block: 0.5rem;
   font-size: 0.875rem;
+}
+
+.planet-inputs > .panel__title {
+  margin-bottom: 0.5rem;
 }
 
 .planet-inputs__groups {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
 
 .planet-inputs__group {
   margin: 0;
   border: 0;
   border-top: 1px solid var(--line);
-  padding: 0.25rem 0 0;
+  padding: 0.125rem 0 0;
 }
 
 .planet-inputs__legend {
@@ -4338,13 +4344,19 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
 }
 
 .planet-inputs__generate > .planet-inputs__row--seed {
   flex: 1 1 auto;
   grid-template-columns: max-content minmax(0, 1fr);
   margin-top: 0;
+}
+
+/* The panel's commands keep their key and name on one line, the field beside them giving way. */
+.planet-inputs__generate > .command {
+  flex: none;
+  white-space: nowrap;
 }
 
 /* A body's ID, an identifier read character by character: monospaced, from the left. */

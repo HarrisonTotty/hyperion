@@ -4,6 +4,7 @@ import { dot, norm, normalise, vec3 } from "../../geometry/vec3";
 import { rotation3FromRows } from "../coords/rotation";
 import {
   coRotated,
+  orbitRadiusM,
   ORBIT_CEILING_RADII,
   ORBIT_FLOOR_M,
   ORBIT_START_RADII,
@@ -92,6 +93,19 @@ describe("the ORBIT camera", () => {
     const turned = orbitLooked(tilted, 0, 1);
     expect(orbitTiltRad(turned)).toBeCloseTo(0.5, 9);
     expect(turned.positionM).toEqual(pose.positionM);
+  });
+
+  it("measures its altitude above an oblate datum, the polar radius over the pole", () => {
+    const datum = { equatorialRadiusM: 6.3781e6, polarRadiusM: 6.3568e6, pole: vec3(0, 0, 1) };
+    expect([
+      orbitRadiusM(datum, vec3(0, 0, 2e7)),
+      orbitRadiusM(datum, vec3(2e7, 0, 0)),
+      orbitRadiusM({ ...datum, pole: null }, vec3(0, 0, 2e7)),
+    ]).toEqual([
+      expect.closeTo(6.3568e6, 3),
+      expect.closeTo(6.3781e6, 3),
+      expect.closeTo(6.3781e6, 3),
+    ]);
   });
 
   it("turns with its body's spin, so that it hovers over one place of the ground", () => {

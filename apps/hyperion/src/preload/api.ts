@@ -1262,10 +1262,12 @@ export type ViewsCheckTerrainFixture =
  * scripted hand flight on `ATMOSPHERE TEST` (`atmosphere`, `--atmosphere`, plan R08, R08.T10.b;
  * {@link AtmosphereCheckRecord}); or a served body opened from `SYSTEM` through `VIEW BODY` and its
  * photorealistic body inspection captured (`inspection`, `--inspection`, the owner's request,
- * 2026-11-01), which writes its capture alone.
+ * 2026-11-01), which writes its capture alone; or the `PLANET VIEWER`'s planet generated and
+ * captured from orbit, low orbit and its surface (`planet-viewer`, `--planet-viewer`, plan R15,
+ * T6), which writes its captures alone.
  */
 export type ViewsCheckRunKind =
-  "several-views" | "terrain" | "handover" | "atmosphere" | "inspection";
+  "several-views" | "terrain" | "handover" | "atmosphere" | "inspection" | "planet-viewer";
 
 /**
  * The check's phases, each a configuration of `VIEW` held while it is measured (R07.T20): the

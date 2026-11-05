@@ -310,6 +310,14 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
     expect(run.launches.map((launch) => valueOf(launch, "--setting"))).toEqual([null]);
   });
 
+  it("passes --planet-viewer on in one launch, at the inspection run's limit (plan R15, T6)", () => {
+    const run = runScriptWith(["--software", "--planet-viewer"], {});
+    expect([
+      run.launches.map((launch) => launch.includes("--planet-viewer")),
+      /each launch's limit (\d+) s/u.exec(run.output)?.[1],
+    ]).toEqual([[true], "5100"]);
+  });
+
   it("makes one launch at the setting given", () => {
     const run = runScript(["--terrain", "--setting", "low"]);
     expect(run.launches.map((launch) => valueOf(launch, "--setting"))).toEqual(["low"]);

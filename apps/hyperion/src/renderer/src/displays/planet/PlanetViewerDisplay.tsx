@@ -7,6 +7,7 @@ import { useUniverse } from "../../lib/universe";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import type { AtmosphereLeversOverride, GeometryOverride } from "../../../../preload/api";
 import { ViewDisplay } from "../view/ViewDisplay";
+import type { ViewEngineSource } from "../view/useViewEngine";
 import { ViewSceneProvider } from "../view/ViewSceneProvider";
 import { GENERATE_KEY, PlanetInputsPanel } from "./PlanetInputsPanel";
 import { PlanetViewerBar, RANDOMIZE_KEY } from "./PlanetViewerBar";
@@ -16,6 +17,8 @@ import { heldSunStatement } from "./viewerScene";
 
 /** Props of {@link PlanetViewerDisplay}: what `App` hands `VIEW`, which the viewer draws with. */
 export interface PlanetViewerDisplayProps {
+  /** Where `VIEW`'s engine comes from: R01's by default, the probe's on a views check (R15.T6). */
+  readonly engineSource?: ViewEngineSource | undefined;
   readonly setting: QualitySetting;
   readonly platform: string;
   readonly performanceThreads: number | null;
@@ -49,6 +52,7 @@ export interface PlanetViewerDisplayProps {
  *   session and atmosphere cache with them, and it asks nothing.
  */
 function PlanetViewerPanels({
+  engineSource,
   setting,
   platform,
   performanceThreads,
@@ -97,6 +101,7 @@ function PlanetViewerPanels({
   const renderView = useCallback(
     () => (
       <ViewDisplay
+        engineSource={engineSource}
         sceneBar={false}
         sceneOptions={NO_KEPT_SCENES}
         hostStatements={hostStatements}
@@ -107,7 +112,15 @@ function PlanetViewerPanels({
         atmosphereLevers={atmosphereLevers}
       />
     ),
-    [setting, platform, performanceThreads, geometry, atmosphereLevers, hostStatements],
+    [
+      engineSource,
+      setting,
+      platform,
+      performanceThreads,
+      geometry,
+      atmosphereLevers,
+      hostStatements,
+    ],
   );
   const { shown } = viewer;
   return (

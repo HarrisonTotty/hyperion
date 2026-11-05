@@ -701,13 +701,21 @@ async function main(): Promise<void> {
     }
     logGeometry("views check", args.geometry);
     logCompileBudget("views check", args.compileBudget);
-    const window = createWindow(serverUrl, graphics, args.setting, null, {
-      launch: viewsCheck,
-      hidden,
-      geometry: args.geometry,
-      compileBudget: args.compileBudget,
-      zoom,
-    });
+    const window = createWindow(
+      serverUrl,
+      graphics,
+      args.setting,
+      null,
+      {
+        launch: viewsCheck,
+        hidden,
+        geometry: args.geometry,
+        compileBudget: args.compileBudget,
+        zoom,
+      },
+      // The planet viewer run drives the PLANET VIEWER, which its launch offers (plan R15, T6).
+      viewsCheck.run === "planet-viewer",
+    );
     startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);
     return;
   }

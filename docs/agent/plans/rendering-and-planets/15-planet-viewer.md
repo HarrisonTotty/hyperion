@@ -187,8 +187,10 @@ every galaxy system takes the code it took before. No `GENERATOR_VERSION` change
 - R15.T4 (lean, 2026-11-05): `ORBIT` is offered only by a scene that names its body
   (`ViewScene.orbitHome`, which only the viewer sets), so `VIEW`'s other scenes and their captures
   are unchanged. Its key is `0`.
-- R15.T4 (lean, 2026-11-05): the floor is 10 m above the body's reference radius, not above the
-  ground. The camera reads no terrain height, so above the datum it can stand inside high ground.
+- R15.T4 (lean, 2026-11-05): the floor is 10 m above the datum, the reference spheroid along the
+  camera's line from the centre (`orbitRadiusM`), not above the ground. The camera reads no terrain
+  height, so above the datum it can stand inside high ground. T6's first captures found that the
+  equatorial radius held the camera kilometres off an oblate planet's ground away from its equator.
 - R15.T4 (lean, 2026-11-05): tilt and heading are on `R`/`F` and `Q`/`E`, the free camera's keys,
   with no Shift-drag. The wheel and `W`/`S` zoom, and the arrows orbit at 0.5 rad/s, scaled as a
   drag is by altitude over distance.
@@ -214,3 +216,19 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   which has no room for a reason. A belt member the server refuses shows its refusal.
 - R15.T5 (lean, 2026-11-05): a hand-over counts as handled once its outcome is reported or a newer
   command cuts it short. One cut short by the display hidden is opened again when it is next shown.
+- R15.T6 (built): `--views-check --planet-viewer` runs `planetViewerCheckRun.ts` (the CLI, the
+  preload's launch, main's session with its captures under `target/views-check/planet-viewer/` and
+  the inspection run's watchdog, `viewsCheck.sh --planet-viewer`). Such a launch opens on `GALAXY`
+  and offers the viewer, and the viewer's `VIEW` draws through the views probe.
+- R15.T6 (lean, 2026-11-05): the run opens the first universe the server lists and generates the
+  panel's inputs at mount. It zooms by the wheel to 400 km and then 300 m above the ground at the
+  line of sight, or above the datum where the ground is below it, and tilts to the horizon under
+  `R`. Each capture is taken of the whole tab and again under `MAXIMIZE VIEW`.
+- R15.T6 (lean, 2026-11-05): the first captures showed the tab overflowing 1280×720, so `SOURCE`
+  (the `BODY` row) is folded at mount, as `VOLATILES · RANK` is, and the commands' labels keep to
+  one line.
+- R15.T6 (lean, 2026-11-05): the run fails where the tab overflows the window (the console's frame
+  taller than it), and it captures before it judges, so that a failed run keeps its picture.
+- R15.T6 (lean, 2026-11-05): the inspection run's lit-body guard now counts the bodies pass's late
+  raster (R14.T3.d). At the surface the guard is logged with what was drawn rather than failing the
+  run, since close over a sea its materials may not be drawn; faults and lighting still fail it.

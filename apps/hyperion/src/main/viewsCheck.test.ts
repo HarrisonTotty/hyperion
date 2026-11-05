@@ -613,6 +613,40 @@ describe("the inspection run (the owner's request)", () => {
   });
 });
 
+describe("the planet viewer run (plan R15, T6)", () => {
+  const LAUNCH: ViewsCheckLaunch = {
+    setting: "high",
+    smoke: false,
+    out: null,
+    run: "planet-viewer",
+    fixture: "terrain-test",
+  };
+
+  it("keeps its captures under target/, whatever the mode", () => {
+    expect(viewsCheckDirs(LAUNCH, "software")).toEqual({
+      out: "target/views-check/planet-viewer",
+      captures: "target/views-check/planet-viewer",
+    });
+  });
+
+  it("is given the inspection run's 15 minutes, five times as long in software", () => {
+    expect([
+      viewsCheckWatchdogMs(LAUNCH, "vulkan"),
+      viewsCheckWatchdogMs(LAUNCH, "software"),
+    ]).toEqual([15 * 60_000, 75 * 60_000]);
+  });
+
+  it("fails a run that ends with no capture saved", () => {
+    const lines: string[] = [];
+    const { session: run, deps } = session({ launch: LAUNCH, log: (line) => lines.push(line) });
+    run.end(0, null);
+    expect(lines.at(-1)).toBe(
+      "views check: FAIL the planet viewer run ended with no capture saved",
+    );
+    expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+});
+
 describe("the inspection run's frame profile (the owner's report)", () => {
   const LAUNCH: ViewsCheckLaunch = {
     setting: "high",

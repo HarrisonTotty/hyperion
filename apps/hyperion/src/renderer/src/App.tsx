@@ -184,6 +184,9 @@ function checkProbesOf(
         placed: launchMode === "software" ? placedAtmosphere(launch.smoke) : null,
       };
       break;
+    case "planet-viewer":
+      run = { kind: "planet-viewer", requests };
+      break;
     case "inspection":
       run = {
         kind: "inspection",
@@ -254,6 +257,15 @@ function checkedViewOf(probes: CheckProbes): CheckedView {
       watchTerrain: undefined,
     };
   }
+  // The planet viewer run (plan R15, T6) draws through the views probe, in the PLANET VIEWER's VIEW.
+  if (run.kind === "planet-viewer") {
+    return {
+      engineSource: probes.views.source,
+      terrain: null,
+      sceneOptions: undefined,
+      watchTerrain: undefined,
+    };
+  }
   const { terrain } = run;
   return {
     engineSource: terrain.source,
@@ -315,6 +327,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           geometry={inputs.geometry}
           atmosphereLevers={inputs.atmosphereLevers}
           opening={inputs.planetOpening}
+          engineSource={inputs.checkedView?.engineSource}
         />
       );
       break;
@@ -439,8 +452,14 @@ export function App() {
       abort.abort();
     };
   }, [awaitingServed, connected, requests, viewsCheck]);
+  // A views check opens on VIEW, whose engine its probe watches; the planet viewer run opens on
+  // GALAXY, where it opens a universe, so that VIEW never draws beside the viewer (plan R15, T6).
   const [activeDisplay, setActiveDisplay] = useState<DisplayId>(
-    viewsCheck === undefined ? "link" : "view",
+    viewsCheck === undefined
+      ? "link"
+      : viewsCheck.launch.run === "planet-viewer"
+        ? "galaxy"
+        : "view",
   );
   const [systemOpening, setSystemOpening] = useState<SystemOpening | null>(null);
   // A launch's displays hold for the launch: the PLANET VIEWER's offer is the preload's (plan R15).

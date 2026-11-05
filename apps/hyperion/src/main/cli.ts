@@ -90,7 +90,11 @@
  * `--universe` names opened on `GALAXY`, the system of the body `--body` names opened on `SYSTEM`,
  * the body opened in `VIEW` through the orbit map's `VIEW BODY` and its photorealistic inspection
  * captured; it needs both, and is refused without `--views-check` and beside `--terrain` or
- * `--atmosphere`. With `--timing` too (the owner's report, 2026-11-01) the inspection run profiles
+ * `--atmosphere`. With `--planet-viewer` (plan R15, T6) it runs the planet viewer run instead: the
+ * first universe the server lists opened on `GALAXY`, the `PLANET VIEWER`'s default planet generated
+ * and captured from orbit, from low orbit and on its surface looking along the ground; it is refused
+ * beside `--terrain`, `--atmosphere` or `--inspection`, and with `--universe` or `--body`. With
+ * `--timing` too (the owner's report, 2026-11-01) the inspection run profiles
  * its frame from orbit, closed in and low over the ground, per pass and per thread, into
  * `target/views-check/timing/`; `--timing` is refused without `--inspection`. With
  * `--composite-probe sky-off|transmittance-off|per-pixel|surface-grey` too (the owner's priority,
@@ -398,7 +402,7 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--planet-viewer",
-        "offer the PLANET VIEWER display (plan R15), a development tool, on a packaged client",
+        "offer the PLANET VIEWER display (plan R15), a development tool, on a packaged client; with --views-check, its run: one planet from orbit to its surface, captured",
       ),
     )
     .addOption(
@@ -638,6 +642,15 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   ) {
     command.error("error: --inspection is a run of its own; give it alone");
   }
+  if (
+    options["planetViewer"] === true &&
+    options["viewsCheck"] === true &&
+    (options["terrain"] === true ||
+      options["atmosphere"] === true ||
+      options["inspection"] === true)
+  ) {
+    command.error("error: --planet-viewer is a run of its own beside --views-check; give it alone");
+  }
   if (options["inspection"] === true && options["viewsCheck"] !== true) {
     command.error("error: --inspection is an option of --views-check, which was not given");
   }
@@ -844,15 +857,17 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
   // `--handover` and `--weathered` are refused without `--terrain` before this is reached, and
   // `--atmosphere` with it, so an atmosphere launch names `TERRAIN TEST`'s field, the default.
   const run: ViewsCheckLaunch["run"] =
-    options["inspection"] === true
-      ? "inspection"
-      : options["atmosphere"] === true
-        ? "atmosphere"
-        : options["terrain"] !== true
-          ? "several-views"
-          : options["handover"] === true
-            ? "handover"
-            : "terrain";
+    options["planetViewer"] === true
+      ? "planet-viewer"
+      : options["inspection"] === true
+        ? "inspection"
+        : options["atmosphere"] === true
+          ? "atmosphere"
+          : options["terrain"] !== true
+            ? "several-views"
+            : options["handover"] === true
+              ? "handover"
+              : "terrain";
   return {
     setting: settingOf(options),
     smoke: options["smoke"] === true,
