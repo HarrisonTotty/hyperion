@@ -56,7 +56,7 @@ import type { DeckSplit } from "../view/atmosphere/thick/deck";
 import { upperMediumOf } from "../view/atmosphere/thick/deckRead";
 import { ENVELOPE_FLOOR_CHANNEL } from "../view/atmosphere/thick/regime";
 import type { Rgb } from "../view/photometry/toneCurve";
-import { detailOf, recordInput } from "./atmosphereRecords";
+import { type DetailAnswer, detailOf, recordInput } from "./atmosphereRecords";
 import { handJupiterDetail } from "./giantFixtures";
 
 /** The case's name: its files are `jupiter-envelope.case.json` and `.reference.json`. */
@@ -75,11 +75,11 @@ export const JUPITER_ENVELOPE_BASE_DEPTH = 20;
  */
 export const JUPITER_ENVELOPE_LEAST_LEVEL_SPACING_M = 0.01;
 
-/** The case and the split its gate reads it at. */
-export interface JupiterEnvelopeCase {
+/** An envelope's case and the split its gate reads it at. */
+export interface EnvelopeCase {
   readonly referenceCase: ReferenceCase;
   /**
-   * The hand Jupiter's envelope floor in the case's heights, the split its route takes
+   * The giant's envelope floor in the case's heights, the split its route takes
    * (`assemble.ts`'s `DrawnEnvelope.floorAltitudeM`, the cover's floor), over a black floor.
    */
   readonly split: DeckSplit;
@@ -140,34 +140,43 @@ function termHeldApart(term: MediumTerm, topHeightM: number): MediumTerm {
 }
 
 /** The case once built, for the module's life. */
-let built: JupiterEnvelopeCase | undefined;
+let built: EnvelopeCase | undefined;
 
 /**
  * `jupiter-envelope` (the module's remarks), built on the first call and held.
  *
  * @throws Error if the hand Jupiter draws no envelope's medium: a broken fixture.
  */
-export function jupiterEnvelopeCase(): JupiterEnvelopeCase {
-  if (built !== undefined) {
-    return built;
-  }
-  const { medium, drawn } = assembleMedium(recordInput(detailOf(handJupiterDetail())), {
+export function jupiterEnvelopeCase(): EnvelopeCase {
+  built ??= handEnvelopeCase(JUPITER_ENVELOPE_CASE, handJupiterDetail());
+  return built;
+}
+
+/**
+ * The absorbing envelope case `name` of a hand giant's `detail`, as `jupiter-envelope` is built
+ * (the module's remarks): its medium as its envelope assembles, cut at green τ
+ * {@link JUPITER_ENVELOPE_BASE_DEPTH} from the top over a black ground, its levels held
+ * {@link JUPITER_ENVELOPE_LEAST_LEVEL_SPACING_M} apart, on a sphere through the cut, under the disc
+ * and the limb from orbit (each tangent below its top), split at its envelope floor.
+ *
+ * @throws Error if the giant draws no envelope's medium, or its floor lies below the cut.
+ */
+export function handEnvelopeCase(name: string, detail: DetailAnswer): EnvelopeCase {
+  const { medium, drawn } = assembleMedium(recordInput(detailOf(detail)), {
     envelopes: true,
   });
   if (medium === undefined || drawn.envelope === undefined) {
-    throw new Error("the hand Jupiter draws an envelope's medium");
+    throw new Error(`${name}'s giant draws an envelope's medium`);
   }
   const baseM = depthHeightM(medium, JUPITER_ENVELOPE_BASE_DEPTH);
   const floorM = drawn.envelope.floorAltitudeM;
   if (!(floorM > baseM)) {
-    throw new Error(
-      `the hand Jupiter's floor at ${floorM} m lies above the case's base ${baseM} m`,
-    );
+    throw new Error(`${name}'s floor at ${floorM} m lies at or below the case's base ${baseM} m`);
   }
   const cut = upperMediumOf(medium, baseM);
   const caseMedium: AtmosphereMedium = {
     ...cut,
-    name: JUPITER_ENVELOPE_CASE,
+    name,
     groundAlbedo: [0, 0, 0],
     terms: cut.terms.map((term) => termHeldApart(term, cut.topHeightM)),
   };
@@ -187,14 +196,14 @@ export function jupiterEnvelopeCase(): JupiterEnvelopeCase {
     (n) => n * scaleHeightM < caseMedium.topHeightM,
   ).map((n) => ({ name: `limb-${nameLabel(n)}H`, heightM: n * scaleHeightM }));
   const base = sphereCase(
-    JUPITER_ENVELOPE_CASE,
+    name,
     caseMedium,
     drawn.sources,
     radiusM,
     drawn.absorbers.map((absorber) => absorberCurve(absorber, R06_SOLAR_BAKE_SPECTRUM)),
     phaseAsymmetry,
   );
-  built = {
+  return {
     referenceCase: {
       ...base,
       geometries: [
@@ -207,5 +216,4 @@ export function jupiterEnvelopeCase(): JupiterEnvelopeCase {
     split: { altitudeM: floorM - baseM, floor: "envelope" },
     baseAltitudeM: baseM,
   };
-  return built;
 }

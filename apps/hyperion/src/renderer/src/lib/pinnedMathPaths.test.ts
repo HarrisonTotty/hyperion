@@ -79,6 +79,7 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/reference/thickCases.ts",
     "../test/venusAlbedo.ts",
     "../test/jupiterEnvelopeCase.ts",
+    "../test/saturnEnvelopeCase.ts",
     // R08.T17's spectral cases and check, and the conversion and colours they read.
     "../view/atmosphere/reference/spectralCases.ts",
     "../view/atmosphere/reference/spectralCheck.ts",
@@ -104,6 +105,7 @@ const MODULES = import.meta.glob<string>(
     "../view/atmosphere/reference/jupiterEnvelope.test.ts",
     "../view/atmosphere/reference/metricVerdicts.test.ts",
     "../view/atmosphere/reference/references.test.ts",
+    "../view/atmosphere/reference/saturnEnvelope.test.ts",
     "../view/atmosphere/reference/spectralCases.test.ts",
     "../view/atmosphere/reference/spectralCheck.test.ts",
     "../view/atmosphere/reference/sweepBoundary.test.ts",
@@ -119,7 +121,7 @@ const MODULES = import.meta.glob<string>(
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 79;
+const LISTED = 81;
 
 /** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
 const TESTS = import.meta.glob<string>("../**/*.test.ts", {

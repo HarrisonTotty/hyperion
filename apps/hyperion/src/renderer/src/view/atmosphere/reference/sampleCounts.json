@@ -1118,5 +1118,18 @@
       "limb-1H": 48128,
       "limb-3H": 510976
     }
+  },
+  "saturn-envelope": {
+    "geometries": {
+      "disc-p0": 2289664,
+      "disc-p30": 89088,
+      "disc-p60": 495616,
+      "disc-p75": 147456,
+      "disc-p85": 218112,
+      "limb-0.1H": 32768,
+      "limb-0.3H": 33792,
+      "limb-1H": 61440,
+      "limb-3H": 62464
+    }
   }
 }
