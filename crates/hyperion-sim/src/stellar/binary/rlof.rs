@@ -1238,13 +1238,11 @@ impl Engine {
                 false
             }
             // A dwarf at the Chandrasekhar mass collapses below, edge-lit or not (`dwarf_limit`,
-            // P11.T4's fix), but from 29 for a pinned primary's, which is left to its pin.
+            // P11.T4's fix), but for a pinned primary's, which is left to its pin.
             Kind::CarbonOxygenWhiteDwarf
                 if kd.surface() == Surface::Helium
                     && self.accreted_helium[a_idx] >= EDGE_LIT_HELIUM
-                    && (!dwarf_limit::collapses(ma)
-                        || (self.ctx.rules().dwarf_limit.leaves_the_pin()
-                            && self.pin_pending(a_idx))) =>
+                    && (!dwarf_limit::collapses(ma) || self.pin_pending(a_idx)) =>
             {
                 let masses = masses_now(self);
                 self.pool(PooledIaEvent::new(

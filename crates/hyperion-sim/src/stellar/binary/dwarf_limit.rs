@@ -1,6 +1,6 @@
 //! The binary engine's white dwarfs at the Chandrasekhar mass, and the dwarf a merger's product
-//! leaves where no star can hold it (plan 11, P11.T4's fix, on the record from 27; its union's
-//! fixes held at [`DWARF_LIMIT_VERSION`]).
+//! leaves where no star can hold it (plan 11, P11.T4's fix, on the record from 27, and its
+//! white-dwarf union's fixes).
 //!
 //! As first built, two routes showed a white dwarf above the Chandrasekhar mass, which the engine
 //! collapses everywhere else (`Engine::accretor_events`, ruling 129.4c):
@@ -38,38 +38,36 @@
 //! - a dwarf a wind feeds in a detached phase stops at the Chandrasekhar mass and collapses there
 //!   (`Engine::collapse_fed_dwarf`), where as first built it grew on (an oxygen–neon dwarf of
 //!   1.37 M☉ to 1.44 M☉ beside an AGB star in one pair of layer D, 2026-11-02).
-
 //!
-//! From 29 ([`DwarfLimitRules::Whole`], the white-dwarf union's fixes; the held arm,
-//! [`DwarfLimitRules::Held`], is version 27's code verbatim):
+//! The white-dwarf union's fixes, on the record from 29 (version 28 and before took version 27's
+//! code):
 //!
 //! - no white dwarf passes the Chandrasekhar mass but a pinned primary's whose pin is pending
 //!   (design note 16), which is left to its pin (`Engine::pin_pending`): the merged dwarf's
 //!   collapse in `Engine::finish_merger`, the edge-lit arm of `Engine::accretor_events` and the
-//!   detached phase's stop wait for it, and its product takes the held arm, placed or not, the
-//!   unplaced one's dwarf held by `Engine::held_product`, as at 27; the dwarfs' own merger
-//!   collapses such a primary's merged dwarf at once at the Chandrasekhar mass, as before the fix;
+//!   detached phase's stop wait for it, and its product is typed as version 27 typed every
+//!   product, placed or not ([`ProductTyping::Pinned`]), the unplaced one's dwarf held by
+//!   `Engine::held_product`; the dwarfs' own merger collapses such a primary's merged dwarf at
+//!   once at the Chandrasekhar mass, as before the fix;
 //! - a thermally pulsing AGB product leaves an oxygen–neon dwarf where its core at the base of the
 //!   AGB, as its placement solves it back, is 1.6 M☉ or more, a helium giant one where the product's
 //!   mass, standing for the helium star's, is (HPT section 6.1), and either one where it merged from
 //!   an oxygen–neon dwarf;
 //! - a helium core of 0.5 M☉ or more, which is not degenerate, is the product's naked helium star
-//!   (HPT section 6, before equation 76), where the held arm takes one only from the Chandrasekhar
+//!   (HPT section 6, before equation 76), where version 27 took one only from the Chandrasekhar
 //!   mass;
 //! - only a carbon–oxygen or oxygen–neon dwarf a wind feeds stops at the Chandrasekhar mass in a
 //!   detached phase: a helium dwarf ignites at 0.7 M☉ (BSE section 2.6.6), far below it;
 //! - a product a star of its kind can hold, of a carbon–oxygen or oxygen–neon dwarf parent, keeps
-//!   that dwarf's kind ([`DwarfLimitRules::placed`], `Engine::dwarf_cores`; oxygen–neon if either
+//!   that dwarf's kind ([`ProductTyping::placed`], `Engine::dwarf_cores`; oxygen–neon if either
 //!   parent's core is), so that its strip, its own death and a later unplaced product take it,
 //!   whatever its track's `Mc,BAGB` would type it: BSE carries no composition and re-types the
 //!   core, but carbon burning is not undone, and a cold carbon–oxygen core a shell grows below
 //!   about 2 × 10⁻⁶ M☉ yr⁻¹ ignites carbon at its centre at the Chandrasekhar mass, not off it
 //!   (Nomoto and Iben 1985, ApJ 297, 531; Kawai, Saio and Nomoto 1987, ApJ 315, 229), as on the
-//!   thermally pulsing AGB; so such a core whose track would collapse ends as a carbon–oxygen core
-//!   at the Chandrasekhar mass does, in a disruption that leaves nothing
-//!   (fix-p11-placed-product-kind, research-leans-35 §7; `Engine::core_limit_age`). An early AGB's
-//!   core grows at about that rate, where off-centre ignition, an oxygen–neon core and a collapse
-//!   are as likely (lean, 2026-11-03: the ruling's ending kept, for main);
+//!   thermally pulsing AGB (fix-p11-placed-product-kind, research-leans-35 §7). How such a core
+//!   ends, its track decides, the kept kind setting only what is left (P11.T4's kept-core endings,
+//!   `supernova::SwollenDeath::of`);
 //! - a thermally pulsing AGB product whose `Mc,BAGB`, as its placement solves it back, is 2.25 M☉
 //!   or more (a carbon–oxygen core of 1.438 M☉ or more; the engine's `IRON_CORE_MC_BAGB`) and that
 //!   merged from no dwarf has an iron core (HPT section 6), which BSE section 2.7.4 makes a neutron
@@ -78,59 +76,42 @@
 //!   HPT's `Mc,SN` = 0.773 `Mc,BAGB` − 0.35 (equation 75) is the core itself at the `Mc,BAGB` it is
 //!   solved back to, so it collapses at once with its hydrogen envelope on, by plan 06's iron-core
 //!   collapse and its kick ([`Unplaced::IronCore`], `Engine::iron_core_collapse`), not by the
-//!   accretion-induced collapse of a dwarf as the held arm has it; so does a helium-giant product
+//!   accretion-induced collapse of a dwarf as version 27 had it; so does a helium-giant product
 //!   of no dwarf with such a core, whose helium star's carbon–oxygen core at its `Mc,SN` HPT
 //!   section 6 makes a collapse too (fix-p11-helium-product-core, research-leans-35 §8), with no
 //!   hydrogen and its helium on;
-//! - a star whose core is a dwarf's (`Engine::dwarf_cores`) stops where that core reaches its limit
-//!   (`detached::Stop::CoreLimit`, `Engine::core_limit_age`, reading the track's carbon–oxygen core
-//!   with `Track::carbon_oxygen_core_at`): an oxygen–neon core collapses by electron capture at
+//! - a star whose core is an oxygen–neon dwarf's (`Engine::dwarf_cores`) stops where that core
+//!   reaches its limit (`detached::Stop::CoreLimit`, `Engine::core_limit_age`, reading the track's
+//!   carbon–oxygen core with `Track::carbon_oxygen_core_at`), and collapses by electron capture at
 //!   `OXYGEN_NEON_CAPTURE_MASS` under `MandelMuller2020` and at the Chandrasekhar mass under
-//!   `Hurley2000`, and a carbon–oxygen core disrupts at the Chandrasekhar mass, where an early AGB
-//!   of `Mc,BAGB` above 2.316 M☉ would collapse it later.
+//!   `Hurley2000`; a carbon–oxygen one ends as its track does (P11.T4's kept-core endings).
 
-use crate::GeneratorVersion;
 use crate::stellar::Phase;
 use crate::stellar::remnant::collapse::IRON_CORE_MC_BAGB;
 use crate::stellar::remnant::structure::{CHANDRASEKHAR_MASS, OXYGEN_NEON_MC_BAGB};
-use crate::stellar::rules::StellarRules;
 use crate::stellar::sse;
 use crate::units::SolarMasses;
 
 use super::star::Kind;
 
-/// The generator version whose stellar rules take the white-dwarf union's fixes to the dwarf limit
-/// (P11.T4): `Engine::new_star_around`, the dwarfs' merger, `Engine::finish_merger`, the edge-lit
-/// arm of `Engine::accretor_events` and the detached phase's step limit take
-/// [`DwarfLimitRules::Whole`].
-///
-/// Below it every pair takes the held arm, [`DwarfLimitRules::Held`], the code of version 27
-/// verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `StellarRules::every_29_hold()`. The bump to 29 deletes the hold, not the rule: the
-/// [`DwarfLimitRules::Held`] arm and its branches, the stellar rules' `dwarf_limit` field and its
-/// reads in the engine, the brief's read of [`DwarfLimitRules::fitted_tables_hold`] and the
-/// tripwire (`the_dwarf_limit_is_held_only_until_the_29_bump`). It keeps, applied always, the
-/// typing of [`DwarfLimitRules::unplaced`]'s new arm, the record of [`DwarfLimitRules::placed`],
-/// the pin's bypasses, `detached::Stop::CoreLimit` and `Engine::iron_core_collapse`, and refits the
-/// pair-light and reach tables, which the engine's runs fit.
-pub(crate) const DWARF_LIMIT_VERSION: GeneratorVersion = GeneratorVersion::new(29);
-
-/// How the binary engine's dwarf limit treats a pinned primary and types the dwarf a merger's
-/// unplaced product leaves (the stellar rules' `dwarf_limit` field, the hold of
-/// [`DWARF_LIMIT_VERSION`]).
+/// How the binary engine types a merger's product ([`ProductTyping::placed`],
+/// [`ProductTyping::unplaced`]): a pinned primary's whose pin is pending (`Engine::pin_pending`)
+/// as version 27 typed every product, since it is left to its pin (design note 16;
+/// research-leans-34 §1(b)), and any other by the white-dwarf union's fixes (P11.T4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum DwarfLimitRules {
-    /// Version 27's: a pinned primary's merged or fed dwarf collapses at the Chandrasekhar mass
-    /// like any other, the unplaced product is oxygen–neon by its core at the base of the AGB alone,
-    /// and a helium core is its naked helium star only from the Chandrasekhar mass.
-    Held,
-    /// Version 29's: a pinned primary is left to its pin, a helium giant product is typed by its
-    /// mass, and a non-degenerate helium core is a helium star.
-    Whole,
+pub(super) enum ProductTyping {
+    /// A pinned primary's product, left to its pin: placed, it takes its track's kind; unplaced, it
+    /// is oxygen–neon by its core at the base of the AGB alone, and a helium core is its naked
+    /// helium star only from the Chandrasekhar mass.
+    Pinned,
+    /// Any other product: placed, it keeps its dwarf parent's kind; unplaced, a helium giant is
+    /// typed by its mass, a core at its iron core's mass collapses, and a non-degenerate helium
+    /// core is a helium star.
+    Unpinned,
 }
 
 /// The helium core, 0.5 M☉, below which an unplaced product is a helium white dwarf and from which
-/// a carbon–oxygen one; under [`DwarfLimitRules::Whole`], the core from which a helium core is no
+/// a carbon–oxygen one; for [`ProductTyping::Unpinned`], the core from which a helium core is no
 /// white dwarf but its naked helium star. A degenerate helium core ignites at about 0.45–0.49 M☉
 /// (`Mc,HeI`, HPT section 5.3 and equation 49, below `M_HeF`), so one of 0.5 M☉ or more is not
 /// degenerate, and HPT section 6 leaves a naked helium star of a non-degenerate core (before
@@ -138,7 +119,7 @@ pub(crate) enum DwarfLimitRules {
 const DEGENERATE_HELIUM_CORE_LIMIT: SolarMasses = SolarMasses::new(0.5);
 
 /// What a merger's product that no star of its kind can hold leaves
-/// ([`DwarfLimitRules::unplaced`]).
+/// ([`ProductTyping::unplaced`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Unplaced {
     /// A white dwarf of `phase` and `mass`.
@@ -273,7 +254,7 @@ pub(crate) fn dwarf_core_deaths() -> [usize; 5] {
     DWARF_CORE_DEATHS.with(core::cell::Cell::get)
 }
 
-/// What a merger's product's core was ([`DwarfLimitRules::unplaced`]): a carbon–oxygen or
+/// What a merger's product's core was ([`ProductTyping::unplaced`]): a carbon–oxygen or
 /// oxygen–neon white dwarf, whose product's dwarf is of its kind whatever its mass, since gaining
 /// and losing a hydrogen envelope does not change a core's composition, or anything else. The
 /// engine keeps it too for the giant each dwarf swells into, whose every exit takes it
@@ -365,23 +346,23 @@ impl CoreSource {
     }
 }
 
-impl DwarfLimitRules {
+impl ProductTyping {
     /// The dwarf whose kind a merger's product that a star of its kind can hold keeps, its core
-    /// from `source` (`Engine::dwarf_cores`): `source` under [`DwarfLimitRules::Whole`], since a
-    /// core keeps its composition whatever its placement's `Mc,BAGB` would type it, and none under
-    /// [`DwarfLimitRules::Held`], whose product takes its track's kind as BSE's does (BSE carries
+    /// from `source` (`Engine::dwarf_cores`): `source` for [`ProductTyping::Unpinned`], since a
+    /// core keeps its composition whatever its placement's `Mc,BAGB` would type it, and none for
+    /// [`ProductTyping::Pinned`], whose product takes its track's kind as BSE's does (BSE carries
     /// no composition).
     #[must_use]
     pub(super) const fn placed(self, source: CoreSource) -> CoreSource {
         match self {
-            Self::Held => CoreSource::Other,
-            Self::Whole => source,
+            Self::Pinned => CoreSource::Other,
+            Self::Unpinned => source,
         }
     }
 
     /// What the product of `kind`, mass `m` and core `core` from `source` leaves where no star of
-    /// its kind has such a core: see the module documentation; but under
-    /// [`DwarfLimitRules::Whole`] a helium giant of no dwarf's ends by its mass `m`, which stands
+    /// its kind has such a core: see the module documentation; but for
+    /// [`ProductTyping::Unpinned`] a helium giant of no dwarf's ends by its mass `m`, which stands
     /// for its helium star's and so for `Mc,BAGB` (HPT section 6.1; P11.T4's kept-core endings):
     /// an iron core from 2.25 M☉, an oxygen–neon core's electron capture from 1.6 M☉ (HPT section
     /// 6; research-leans-40), a disruption that leaves nothing from the Chandrasekhar mass, and a
@@ -400,21 +381,23 @@ impl DwarfLimitRules {
         let by_mass =
             matches!(kind, Kind::HeliumGap | Kind::HeliumGiant) && source == CoreSource::Other;
         match self {
-            Self::Whole if by_mass && m >= IRON_CORE_MC_BAGB => Unplaced::IronCore {
+            Self::Unpinned if by_mass && m >= IRON_CORE_MC_BAGB => Unplaced::IronCore {
                 co_core: mass,
                 helium_core: m,
                 mass: m,
             },
-            Self::Whole if by_mass && m >= OXYGEN_NEON_MC_BAGB => Unplaced::ElectronCapture {
+            Self::Unpinned if by_mass && m >= OXYGEN_NEON_MC_BAGB => Unplaced::ElectronCapture {
                 co_core: mass,
                 mass: m,
             },
-            Self::Whole if by_mass && m >= CHANDRASEKHAR_MASS => Unplaced::Disruption { mass: m },
-            Self::Whole if by_mass => Unplaced::WhiteDwarf {
+            Self::Unpinned if by_mass && m >= CHANDRASEKHAR_MASS => {
+                Unplaced::Disruption { mass: m }
+            }
+            Self::Unpinned if by_mass => Unplaced::WhiteDwarf {
                 phase: Phase::CarbonOxygenWhiteDwarf,
                 mass,
             },
-            Self::Whole
+            Self::Unpinned
                 if carbon_oxygen_core(kind) && source == CoreSource::Other && iron_core(core) =>
             {
                 Unplaced::IronCore {
@@ -423,7 +406,7 @@ impl DwarfLimitRules {
                     mass: m,
                 }
             }
-            Self::Held if carbon_oxygen_core(kind) => {
+            Self::Pinned if carbon_oxygen_core(kind) => {
                 let oxygen_neon = source == CoreSource::OxygenNeonDwarf
                     || sse::pulsing_agb_helium_core(core) >= OXYGEN_NEON_MC_BAGB;
                 Unplaced::WhiteDwarf {
@@ -435,7 +418,7 @@ impl DwarfLimitRules {
                     mass,
                 }
             }
-            Self::Whole if carbon_oxygen_core(kind) => {
+            Self::Unpinned if carbon_oxygen_core(kind) => {
                 let oxygen_neon = if kind == Kind::PulsingAgb {
                     sse::pulsing_agb_helium_core(core) >= OXYGEN_NEON_MC_BAGB
                 } else {
@@ -453,9 +436,9 @@ impl DwarfLimitRules {
                     mass,
                 }
             }
-            Self::Held if mass >= CHANDRASEKHAR_MASS => Unplaced::HeliumStar { mass },
-            Self::Whole if core >= DEGENERATE_HELIUM_CORE_LIMIT => Unplaced::HeliumStar { mass },
-            Self::Held | Self::Whole => Unplaced::WhiteDwarf {
+            Self::Pinned if mass >= CHANDRASEKHAR_MASS => Unplaced::HeliumStar { mass },
+            Self::Unpinned if core >= DEGENERATE_HELIUM_CORE_LIMIT => Unplaced::HeliumStar { mass },
+            Self::Pinned | Self::Unpinned => Unplaced::WhiteDwarf {
                 phase: if core < DEGENERATE_HELIUM_CORE_LIMIT {
                     Phase::HeliumWhiteDwarf
                 } else {
@@ -464,23 +447,6 @@ impl DwarfLimitRules {
                 mass,
             },
         }
-    }
-
-    /// Whether a pinned primary whose pin is pending (`Engine::pin_pending`) is left to its pin
-    /// rather than collapsed at the Chandrasekhar mass or stopped there: under
-    /// [`DwarfLimitRules::Whole`] only.
-    #[must_use]
-    pub(super) fn leaves_the_pin(self) -> bool {
-        self == Self::Whole
-    }
-
-    /// Whether the tables fitted offline from the binary engine's runs, which `hyperion-fit` builds
-    /// under the generator version's rules (the pair-light and reach tables the range brief's gate
-    /// reads), hold for a pair under this arm: under the version's arm only, until the bump refits
-    /// them.
-    #[must_use]
-    pub(crate) fn fitted_tables_hold(self) -> bool {
-        self == StellarRules::of_version(crate::GENERATOR_VERSION).dwarf_limit
     }
 }
 

@@ -1302,12 +1302,9 @@ fn electron_capture(age: f64, progenitor: ProgenitorAtDeath) -> Fate {
 /// under `recipe`: HPT's remnant of the core under [`RemnantRecipe::Hurley2000`] (their section 6
 /// and equation 92, as in the published SSE code), and Mandel and Müller's 1.26 M☉ neutron star
 /// under [`RemnantRecipe::MandelMuller2020`] (MM20 section 3, [`electron_capture_remnant`]). The
-/// collapse of [`Builder::oxygen_neon_core`] and, from version 29, of an oxygen–neon helium star
+/// collapse of [`Builder::oxygen_neon_core`], of an oxygen–neon helium star
 /// ([`Builder::helium_star_end`]) and of a merger's product that no star holds
-/// (`Engine::capture_collapse`).
-///
-/// It is on the held arm's path too, `oxygen_neon_core`'s under `Hurley2000`: a rule of version 29
-/// alone belongs at its callers, as `Engine::capture_collapse`'s `Mc,SN` does.
+/// (`Engine::capture_collapse`, whose `Mc,SN` is its caller's).
 #[must_use]
 pub(super) fn oxygen_neon_capture_fate(
     recipe: RemnantRecipe,

@@ -409,8 +409,8 @@ impl Engine {
     /// The core collapses inside its hydrogen envelope, an electron-capture supernova (Nomoto
     /// 1984, ApJ 277, 791; HPT section 6, the engine's [`DeathKind::ElectronCapture`]), into Mandel
     /// and Müller's 1.26 M☉ neutron star ([`electron_capture_remnant`]) with the low-mode kick of
-    /// electron capture and no Type Ia candidate (P11.T4's swollen dwarf and dwarf limit from
-    /// version 29): at its track's death ([`SwollenDeath::ElectronCapture`]), or where its core
+    /// electron capture and no Type Ia candidate (P11.T4's swollen dwarf and dwarf limit): at its
+    /// track's death ([`SwollenDeath::ElectronCapture`]), or where its core
     /// reaches its limit first ([`Engine::core_limit_age`]). Its envelope is the rest of
     /// `before`.
     fn electron_capture_collapse(&mut self, i: usize, core: SolarMasses, before: f64) {
@@ -439,8 +439,8 @@ impl Engine {
     /// The engine's age, years, at which member `i`'s core, a white dwarf's whose kind its track
     /// would not give it ([`Engine::dwarf_cores`]), reaches its limit ([`core_limit`]) inside the
     /// member's current phase, where it ends as that dwarf's core does
-    /// ([`Engine::reach_core_limit`]; P11.T4's swollen dwarf and dwarf limit from version 29,
-    /// research-leans-35 §7–§8); `None` for any other member, for a pinned primary whose pin is
+    /// ([`Engine::reach_core_limit`]; P11.T4's swollen dwarf and dwarf limit, research-leans-35
+    /// §7–§8); `None` for any other member, for a pinned primary whose pin is
     /// pending, or where the phase ends first, whose boundary the next step's limit starts from.
     ///
     /// Only an oxygen–neon core has a limit ([`core_limit`]): a carbon–oxygen one ends as its track
@@ -594,8 +594,8 @@ impl Engine {
     /// Member `i`, a merger's product of `mass` M☉ with an iron core, collapses now.
     ///
     /// The product is one that no star can hold, its envelope on, whose carbon–oxygen core of
-    /// `co_core`, inside a helium core of `helium_core`, is an iron core (P11.T4's dwarf limit
-    /// from version 29, [`Unplaced::IronCore`]; HPT section 6, BSE section 2.7.4). It takes plan
+    /// `co_core`, inside a helium core of `helium_core`, is an iron core (P11.T4's dwarf limit,
+    /// [`Unplaced::IronCore`]; HPT section 6, BSE section 2.7.4). It takes plan
     /// 06's iron-core collapse ([`sse::iron_core_fate`]) under the pair's remnant recipe and the
     /// member's remnant draws, the supernova of its hydrogen envelope and the helium outside its
     /// carbon–oxygen core ([`SupernovaType::of_envelopes`]), and the kick of plan 06's law for an

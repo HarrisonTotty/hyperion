@@ -45,7 +45,7 @@ use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts};
 use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
-use super::dwarf_limit::{self, CoreSource, DwarfLimitRules, Unplaced};
+use super::dwarf_limit::{self, CoreSource, ProductTyping, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
 use super::params::BinaryParams;
 use super::rlof::kelvin_helmholtz;
@@ -478,28 +478,15 @@ impl Engine {
         }
     }
 
-    /// The white dwarf whose core member `i`, of type `kind`, gives a merger's product: from
-    /// version 29 (P11.T4's dwarf limit, [`DwarfLimitRules::Whole`]) [`Engine::dwarf_core`], and
-    /// before it only the one a swollen dwarf's giant keeps ([`Engine::dwarf_cores`]), as version
-    /// 27 typed a coalescence's or a collision's product by no dwarf parent.
-    #[must_use]
-    fn merged_dwarf_core(&self, i: usize, kind: Kind) -> CoreSource {
-        match self.ctx.rules().dwarf_limit {
-            DwarfLimitRules::Held => self.dwarf_cores[i],
-            DwarfLimitRules::Whole => self.dwarf_core(i, kind),
-        }
-    }
-
     /// The white dwarf whose core the product of a coalescence of `parents`, each a member's index
-    /// and type, takes ([`Engine::merged_dwarf_core`]). The product's core is both members' (BSE
+    /// and type, takes ([`Engine::dwarf_core`], P11.T4's dwarf limit; version 27 typed a
+    /// coalescence's or a collision's product by no dwarf parent). The product's core is both members' (BSE
     /// section 2.7.1): a dwarf's where either is, and oxygen–neon where either's is, a giant's own
     /// included (research-leans-35 §7).
     #[must_use]
     pub(super) fn coalesced_source(&self, parents: [(usize, Kind); 2]) -> CoreSource {
         let [(a, kind_a), (b, kind_b)] = parents;
-        let source = self
-            .merged_dwarf_core(a, kind_a)
-            .with(self.merged_dwarf_core(b, kind_b));
+        let source = self.dwarf_core(a, kind_a).with(self.dwarf_core(b, kind_b));
         if source == CoreSource::CarbonOxygenDwarf
             && parents
                 .into_iter()
@@ -812,10 +799,9 @@ impl Engine {
                 } else {
                     Phase::CarbonOxygenWhiteDwarf
                 };
-                // `finish_merger` collapses a dwarf at the Chandrasekhar mass (P11.T4's fix), but from
-                // 29 for a pinned primary's, which collapses at once at it as before the fix.
-                let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
-                if pinned && dwarf_limit::collapses(total) {
+                // `finish_merger` collapses a dwarf at the Chandrasekhar mass (P11.T4's fix), but for
+                // a pinned primary's, which collapses at once at it as before the fix.
+                if self.pin_pending(0) && dwarf_limit::collapses(total) {
                     self.finish_merger(self.white_dwarf(phase, total).into());
                     self.accretion_induced_collapse(0, total);
                     return;
@@ -851,7 +837,7 @@ impl Engine {
                     s_hi.state.core_mass().value(),
                     s_hi.burnt,
                     s_hi.state.phase_fraction(),
-                    self.merged_dwarf_core(first, hi),
+                    self.dwarf_core(first, hi),
                 )
             }
         };
@@ -868,13 +854,13 @@ impl Engine {
     /// A white dwarf product at or above the Chandrasekhar mass collapses at once, as an accreting
     /// one does (`Engine::accretor_events`): a Type Ia candidate is pooled unless it is oxygen–neon,
     /// with the two stars' masses before the merger, and the dwarf collapses by accretion-induced
-    /// collapse (P11.T4's fix, `dwarf_limit::collapses`); from 29 a pinned primary's product is
-    /// left to its pin ([`Engine::pin_pending`], P11.T4's `dwarf_limit`), and an unplaced product's
+    /// collapse (P11.T4's fix, `dwarf_limit::collapses`); a pinned primary's product is left to its
+    /// pin ([`Engine::pin_pending`], P11.T4's dwarf limit), and an unplaced product's
     /// iron core ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]), as does
     /// its oxygen–neon core by electron capture ([`Product::ElectronCapture`],
     /// [`Engine::capture_collapse`]), and its disruption leaves nothing ([`Product::Disruption`]);
-    /// none pools a candidate. From 29 a product whose core is a carbon–oxygen or oxygen–neon
-    /// dwarf's keeps that kind ([`Engine::dwarf_cores`]).
+    /// none pools a candidate. A product whose core is a carbon–oxygen or oxygen–neon dwarf's keeps
+    /// that kind ([`Engine::dwarf_cores`]).
     fn finish_merger(&mut self, product: Product) {
         let (product, source, ending) = match product {
             Product::Member(member, source) => (member, source, None),
@@ -882,7 +868,7 @@ impl Engine {
             | Product::ElectronCapture { .. }
             | Product::Disruption { .. }) => (Member::Gone, CoreSource::Other, Some(ending)),
         };
-        let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
+        let pinned = self.pin_pending(0);
         let dwarf = if let Member::Remnant { phase, mass, .. } = &product
             && matches!(
                 phase,
@@ -1377,9 +1363,8 @@ impl Engine {
         self.new_star_around(kind, m, core, burnt, fraction, CoreSource::Other)
     }
 
-    /// [`Engine::new_star`] for a product whose core came from `source`: from version 29 it types
-    /// the dwarf an unplaced product leaves ([`DwarfLimitRules::unplaced`]), and a placed
-    /// product keeps its kind ([`DwarfLimitRules::placed`], [`Engine::dwarf_cores`]).
+    /// [`Engine::new_star`] for a product whose core came from `source`: it types the dwarf an unplaced product leaves ([`ProductTyping::unplaced`]), and a placed
+    /// product keeps its kind ([`ProductTyping::placed`], [`Engine::dwarf_cores`]).
     #[must_use]
     fn new_star_around(
         &self,
@@ -1428,19 +1413,19 @@ impl Engine {
             Kind::NeutronStar | Kind::BlackHole => return self.compact(kind, m).into(),
             Kind::Massless => return Member::Gone.into(),
         };
-        // A pinned primary's product is left to its pin under the held arm, placed or not: its
-        // dwarf typed by it and held by `held_product` (research-leans-34 §1(b)).
-        let limit = if self.pin_pending(0) {
-            DwarfLimitRules::Held
+        // A pinned primary's product is left to its pin, placed or not: typed as at 27, its dwarf
+        // held by `held_product` (research-leans-34 §1(b)).
+        let typing = if self.pin_pending(0) {
+            ProductTyping::Pinned
         } else {
-            self.ctx.rules().dwarf_limit
+            ProductTyping::Unpinned
         };
         if let Some(star) = self.placed_star(0, target, m, core) {
-            // From 29 a placed product keeps its dwarf parent's kind (P11.T4's fix).
-            return Product::Member(star, limit.placed(source));
+            // A placed product keeps its dwarf parent's kind (P11.T4's fix).
+            return Product::Member(star, typing.placed(source));
         }
         let (m, core) = (SolarMasses::new(m), SolarMasses::new(core));
-        let unplaced = limit.unplaced(kind, m, core, source);
+        let unplaced = typing.unplaced(kind, m, core, source);
         #[cfg(test)]
         unplaced.count(self.pin_pending(0));
         match unplaced {
@@ -1686,9 +1671,9 @@ fn held_core(core: &StarState, core_radius: SolarRadii) -> Member {
 }
 
 /// What a merger leaves in the primary's place ([`Engine::finish_merger`]): a member, with the
-/// white dwarf its core is if a dwarf's (from version 29, P11.T4's swollen dwarf and dwarf limit,
+/// white dwarf its core is if a dwarf's (P11.T4's swollen dwarf and dwarf limit,
 /// [`Engine::dwarf_cores`]), or the iron core of a product that no star can hold, which collapses
-/// at once (from version 29, P11.T4's dwarf limit, [`Unplaced::IronCore`]).
+/// at once (P11.T4's dwarf limit, [`Unplaced::IronCore`]).
 #[derive(Debug, Clone)]
 pub(super) enum Product {
     /// The member, and the dwarf its core is.
@@ -1704,7 +1689,7 @@ pub(super) enum Product {
         mass: SolarMasses,
     },
     /// A helium star of `mass` whose carbon–oxygen core of `co_core` is an oxygen–neon one, which
-    /// collapses by electron capture (from version 29, [`Unplaced::ElectronCapture`]).
+    /// collapses by electron capture ([`Unplaced::ElectronCapture`]).
     ElectronCapture {
         /// Its carbon–oxygen core.
         co_core: SolarMasses,
@@ -1712,7 +1697,7 @@ pub(super) enum Product {
         mass: SolarMasses,
     },
     /// A star of `mass` whose carbon–oxygen core ignites carbon and disrupts it, leaving nothing
-    /// (from version 29, [`Unplaced::Disruption`]).
+    /// ([`Unplaced::Disruption`]).
     Disruption {
         /// Its mass.
         mass: SolarMasses,

@@ -867,7 +867,7 @@ pub(super) struct Engine {
     /// (the guard against the recursion of a held bare core, ruling 129.4c).
     pub(super) in_common_envelope: bool,
     /// The white dwarf each member's core is ([`CoreSource`]), where the member is a star whose
-    /// core is a carbon–oxygen or oxygen–neon dwarf's (from version 29): the giant such a dwarf
+    /// core is a carbon–oxygen or oxygen–neon dwarf's: the giant such a dwarf
     /// swelled into (P11.T4's swollen dwarf), a merger product placed around one (P11.T4's dwarf
     /// limit, [`Product::Member`](super::common_envelope::Product::Member)), or what a strip of
     /// either leaves living. Its strip, its own death and a merger product it makes take that

@@ -122,11 +122,11 @@ pub(super) enum Stop {
     Stripped(usize),
     /// The orbit can hold no angular momentum left: the stars spiral together.
     Coalescence,
-    /// Member `i`, a white dwarf a wind feeds, reaches the Chandrasekhar mass (P11.T4's
-    /// `dwarf_limit`; [`Engine::collapse_fed_dwarf`]).
+    /// Member `i`, a white dwarf a wind feeds, reaches its collapse mass (P11.T4's dwarf limit;
+    /// [`Engine::collapse_fed_dwarf`]).
     Chandrasekhar(usize),
-    /// Member `i`'s core, a white dwarf's, reaches its limit with its envelope on (from version
-    /// 29, P11.T4's swollen dwarf and dwarf limit; [`Engine::core_limit_age`]).
+    /// Member `i`'s core, a white dwarf's, reaches its limit with its envelope on (P11.T4's swollen
+    /// dwarf and dwarf limit; [`Engine::core_limit_age`]).
     CoreLimit(usize),
 }
 
@@ -722,16 +722,14 @@ impl Engine {
         r
     }
 
-    /// The time, years, in which member `i`, a white dwarf a wind feeds at `rates` from `s`,
-    /// reaches its collapse mass ([`Engine::collapse_mass`]: the Chandrasekhar mass, and an
-    /// oxygen–neon dwarf's capture mass under the default recipe), at which it stops (P11.T4's `dwarf_limit`,
-    /// [`Stop::Chandrasekhar`]); `None` for any other member. From 29 a carbon–oxygen or
-    /// oxygen–neon dwarf only, and none for a pinned primary whose pin is pending
-    /// (`Engine::pin_pending`).
+    /// The time, years, in which member `i`, a carbon–oxygen or oxygen–neon white dwarf a wind
+    /// feeds at `rates` from `s`, reaches its collapse mass ([`Engine::collapse_mass`]: the
+    /// Chandrasekhar mass, and an oxygen–neon dwarf's capture mass under the default recipe), at
+    /// which it stops (P11.T4's dwarf limit, [`Stop::Chandrasekhar`]); `None` for any other member,
+    /// and for a pinned primary whose pin is pending (`Engine::pin_pending`).
     #[must_use]
     fn to_the_dwarf_limit(&self, i: usize, s: &Snapshot, rates: &Rates) -> Option<f64> {
-        let whole = self.ctx.rules().dwarf_limit.leaves_the_pin();
-        if whole && self.pin_pending(i) {
+        if self.pin_pending(i) {
             return None;
         }
         let Member::Remnant { phase, .. } = &self.members[i] else {
@@ -739,17 +737,17 @@ impl Engine {
         };
         // An oxygen–neon dwarf's is the capture mass (P11.T4's kept-core endings).
         let limit = self.collapse_mass(*phase).value();
-        // From 29 a helium dwarf is left out: it ignites at 0.7 M☉ (BSE section 2.6.6), far below
-        // the limit.
+        // A helium dwarf is left out: it ignites at 0.7 M☉ (BSE section 2.6.6), far below the
+        // limit.
         let dwarf = matches!(
             phase,
             Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
-        ) || (!whole && *phase == Phase::HeliumWhiteDwarf);
+        );
         (dwarf && rates.mass[i] > 0.0).then(|| ((limit - s.masses[i]) / rates.mass[i]).max(0.0))
     }
 
     /// Adds to `limits` the events of member `i`'s white dwarf, or of its core that is one's, from
-    /// `s` at `rates` (P11.T4's dwarf limit, and from version 29 its swollen dwarf): a dwarf a wind
+    /// `s` at `rates` (P11.T4's dwarf limit and swollen dwarf): a dwarf a wind
     /// feeds at the Chandrasekhar mass ([`Stop::Chandrasekhar`]), and a dwarf's core at its limit
     /// ([`Stop::CoreLimit`]).
     fn dwarf_limits(&self, i: usize, s: &Snapshot, rates: &Rates, limits: &mut StepLimit) {
