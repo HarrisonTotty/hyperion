@@ -954,9 +954,14 @@ fn a_query_on_a_test_stream_s_axis_equals_every_member_of_its_tube() {
 
 /// The most of `pal5_like`'s members that lie outside its shell under any of the eight seeds of
 /// [`over_eight_seeds_the_test_tubes_lie_within_their_tracers_and_shells`], as measured
-/// (2026-10-31, x86-64) with its tips fitted in the orbital plane (P10.T6.a): 2, of 3 over the
-/// eight, against 147 at the first seed when they were fitted in x, y and z.
-const PAL5_OUTSIDE_PINNED: usize = 2;
+/// (2026-11-05, x86-64, at generator version 27) with its tips fitted in the orbital plane
+/// (P10.T6.a): 5, at the third seed, of 6 over the eight. When the fit was new (2026-10-31, at 24)
+/// it was 2 of 3, against 147 at the first seed when the tips were fitted in x, y and z.
+///
+/// No 27 hold moved it. On the tree before the folds, every 27 hold and 26's rules alike gave
+/// 67,580 members and 5 outside at the third seed, and so did each hold turned back to its 26 arm
+/// alone. So it moved between 24 and 26, which this slow test was not run on.
+const PAL5_OUTSIDE_PINNED: usize = 5;
 
 /// P10.T6.a's tips, fitted in the orbital plane: over eight seeds of the generator's 2,000
 /// tracers, every knot of `pal5_like` and `gd1_like` lies within its arm's tracers' radial range,

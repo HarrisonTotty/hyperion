@@ -71,10 +71,11 @@
 //! and z its centre line was a chord inside the arc, with widths some ten times the median:
 //! `pal5_like`'s trailing tip's knot 3 lay at 28,648 ly, below every tracer (the least at 30,316)
 //! and the shell's inner radius (28,689), and its members up to 11,000 ly inside it. The tips are
-//! now fitted in the orbital plane ([`tube`]'s "The reduction", P10.T6.a). That leaves 3 of
-//! `pal5_like`'s members outside its shell over eight seeds, and 265 of 4.9 million in a drawn
-//! Milky Way (seed `0x0a10_3000_0000_0000`, a probe of P10.T6.a's lane); research-leans-10 found
-//! every tracer in the root cube inside its shell, so those are the cut's tail past the tracers.
+//! now fitted in the orbital plane ([`tube`]'s "The reduction", P10.T6.a). That left 3 of
+//! `pal5_like`'s members outside its shell over eight seeds at 24 (6 at 27), and 265 of 4.9
+//! million in a drawn Milky Way (seed `0x0a10_3000_0000_0000`, a probe of P10.T6.a's lane);
+//! research-leans-10 found every tracer in the root cube inside its shell, so those are the cut's
+//! tail past the tracers.
 //! So from 26 a stream's member outside its shell is no member, as one outside the root cube is
 //! not (main's ruling of 2026-10-31, reversible behind its hold, kept as the guard of the tips'
 //! fix): the range query and
