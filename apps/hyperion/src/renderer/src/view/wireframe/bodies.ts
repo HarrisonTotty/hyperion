@@ -1091,15 +1091,24 @@ export interface RingGeometry {
 /** The angle between a ring's radial ticks, degrees: 10, as the orbit map draws them. */
 export const RING_TICK_STEP_DEG = 10;
 
+/** A ring's lines as the camera sees them ({@link ringEllipse}). */
+export interface RingLines {
+  /** Its inner and outer edges, subdivided to the sagitta tolerance. */
+  readonly edges: ReadonlyArray<Polyline>;
+  /** A radial tick every {@link RING_TICK_STEP_DEG} from one edge to the other: its grid. */
+  readonly ticks: ReadonlyArray<Polyline>;
+}
+
 /**
  * A ring's ellipses as the camera sees them: its inner and outer edges, subdivided to the sagitta
- * tolerance, and a radial tick every 10° from one to the other (plan R02, Design note 13).
+ * tolerance, and a radial tick every 10° from one to the other (plan R02, Design note 13), apart,
+ * so that the photorealistic overlay may leave the ticks out with its `GRID` (R08.T17).
  */
 export function ringEllipse(
   ring: RingGeometry,
   camera: ProjectionCamera,
   viewport: Viewport,
-): ReadonlyArray<Polyline> {
+): RingLines {
   const [e1, e2] = perpendicularPair(ring.normal);
   const at = (radiusM: number, theta: number): Vec3 =>
     add(
@@ -1134,5 +1143,5 @@ export function ringEllipse(
       ),
     );
   }
-  return [...edge(ring.innerRadiusM), ...edge(ring.outerRadiusM), ...ticks];
+  return { edges: [...edge(ring.innerRadiusM), ...edge(ring.outerRadiusM)], ticks };
 }

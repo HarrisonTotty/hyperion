@@ -368,9 +368,9 @@ describe("an unrotated body's graticule", () => {
 });
 
 describe("ringEllipse", () => {
-  it("draws both edges and a radial tick every 10°", () => {
+  it("draws both edges and, apart from them, a straight radial tick every 10°", () => {
     const camera: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: FOV_X_RAD };
-    const lines = ringEllipse(
+    const { edges, ticks } = ringEllipse(
       {
         centreM: vec3(0, 0, -5e8),
         innerRadiusM: 7e7,
@@ -380,11 +380,11 @@ describe("ringEllipse", () => {
       camera,
       VIEWPORT,
     );
-    const ticks = lines.filter((line) => line.length === 2);
-    expect({ ticks: ticks.length, edges: lines.length - ticks.length >= 2 }).toEqual({
-      ticks: 36,
-      edges: true,
-    });
+    expect({
+      ticks: ticks.length,
+      straight: ticks.every((line) => line.length === 2),
+      edges: edges.length >= 2 && edges.every((line) => line.length > 2),
+    }).toEqual({ ticks: 36, straight: true, edges: true });
   });
 });
 

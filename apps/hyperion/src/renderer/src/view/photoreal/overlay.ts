@@ -35,8 +35,10 @@
  *
  * A view's `GRID` (the owner's request, 2026-10-31) at `OFF` leaves the reference grid out of the
  * overlay: every body's datum lines, its limb and graticule (the batches that name their body,
- * `LineBatch.body`), so that the image of the body shows unmarked; every mark stays, the
- * occluders that hide marks behind a body among them.
+ * `LineBatch.body`), and since R08.T17 a ring's radial ticks (`LineBatch.grid`), so that the image
+ * of the body shows unmarked; every mark stays, the occluders that hide marks behind a body among
+ * them, and a ring's two edges, which stand for it until R11 draws it (Design note 17; lean,
+ * 2026-11-05).
  */
 import type { ColourTokens } from "../../spatial/paint";
 import type { BodyFigure } from "../appearance/fromWire";
@@ -66,7 +68,8 @@ function cased(line: LineBatch, casingPx: number): LineBatch {
  * R02's draw list as the overlay draws it over the image: every line batch cased in its
  * `--surface-0` casing colour at `CASING_PX` times the list's stroke scale ({@link casingDevicePx}), the
  * hull edges included; every hull's opaque faces filled in `--surface-0`, its silhouette
- * (R07.T16.e); no star sprite; and, with the view's `GRID` at `OFF`, no body's datum lines.
+ * (R07.T16.e); no star sprite; and, with the view's `GRID` at `OFF`, no body's datum lines and no
+ * ring's ticks.
  *
  * @remarks
  * Its list is built with the datum inside the figure (`DrawOptions.datumInside`; plan R10,
@@ -76,7 +79,8 @@ function cased(line: LineBatch, casingPx: number): LineBatch {
  * @param tokens - The tokens the list was built with, whose `--surface-0` its casings take: the
  *   silhouette is one surface with them (decision-r07-t16a, item 3).
  * @param grid - The view's `GRID`: `true` (`ON`, as a view starts) draws each body's limb and
- *   graticule over the image; `false` leaves them out and keeps every other batch.
+ *   graticule and each ring's ticks over the image; `false` leaves them out and keeps every other
+ *   batch.
  */
 export function overlayDrawList(
   list: WireframeDrawList,
@@ -89,7 +93,7 @@ export function overlayDrawList(
     ...list,
     occluderMeshes: list.occluderMeshes.map(silhouette),
     lines: list.lines
-      .filter((line) => grid || line.body === undefined)
+      .filter((line) => grid || (line.body === undefined && line.grid !== true))
       .map((line) => cased(line, casingPx)),
     sprites: [],
   };

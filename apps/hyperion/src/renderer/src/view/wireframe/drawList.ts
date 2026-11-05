@@ -238,6 +238,12 @@ export interface LineBatch {
    */
   readonly body?: string;
   /**
+   * Whether the batch is a reference grid that is no body's datum: a ring's radial ticks (plan R02,
+   * Design note 13), which the photorealistic overlay leaves out with the view's `GRID` at `OFF`,
+   * as it does a body's limb and graticule (R08.T17); absent for every other batch.
+   */
+  readonly grid?: true;
+  /**
    * The centre, from the camera, `f32` m along the camera frame's axes, of the body whose ground
    * the batch is drawn on (plan R10, R10.T16.c): the survey edge's, each of whose fragments is
    * tested at the depth the datum's plane through its point has at the fragment's pixel where that
@@ -857,15 +863,17 @@ export function buildWireframeDrawList(
       continue;
     }
     const selected = sameTarget(options.selection, { kind: "body", body: ring.body });
-    lines.push(
-      batch(
-        `ring:${ring.body}`,
-        "view",
-        packPolylines(ringEllipse({ ...ring, centreM }, projection, viewport)),
-        selected ? "text" : "textMuted",
-        drawnPx(selected ? STROKE_PX.selected : STROKE_PX.thin),
-      ),
-    );
+    const token = selected ? "text" : "textMuted";
+    const widthPx = drawnPx(selected ? STROKE_PX.selected : STROKE_PX.thin);
+    const { edges, ticks } = ringEllipse({ ...ring, centreM }, projection, viewport);
+    lines.push(batch(`ring:${ring.body}`, "view", packPolylines(edges), token, widthPx));
+    // Its ticks a batch of their own, its grid, which the overlay's `GRID` may leave out (R08.T17).
+    if (ticks.length > 0) {
+      lines.push({
+        ...batch(`ring:${ring.body}:ticks`, "view", packPolylines(ticks), token, widthPx),
+        grid: true,
+      });
+    }
   }
 
   for (const orbit of scene.orbits) {

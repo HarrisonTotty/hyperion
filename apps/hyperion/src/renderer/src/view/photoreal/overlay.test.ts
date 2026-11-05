@@ -155,6 +155,17 @@ describe("the photorealistic overlay with the view's GRID at OFF (the owner's re
     ]);
   });
 
+  it("leaves out a ring's radial ticks, its grid, and keeps its two edges, which stand for it (R08.T17)", () => {
+    const rings = (grid: boolean): ReadonlyArray<string> =>
+      overlayDrawList(wireframeList(), TOKENS, grid)
+        .lines.filter((line) => line.id.startsWith("ring:"))
+        .map((line) => line.id);
+    expect({ on: rings(true), off: rings(false) }).toEqual({
+      on: [`ring:${FIXTURE_PLANET}`, `ring:${FIXTURE_PLANET}:ticks`],
+      off: [`ring:${FIXTURE_PLANET}`],
+    });
+  });
+
   it("keeps every occluder and mark anchor, so that a mark behind a body stays hidden", () => {
     const list = wireframeList();
     const overlay = overlayDrawList(list, TOKENS, false);
