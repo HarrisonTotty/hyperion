@@ -47,7 +47,7 @@
 //! each record that passes it is bounded again star by star, before its system is generated
 //! ([`StarBounds`]; decided 2026-10-05, `decision-r06-census-cost.md`, and amended 2026-10-07,
 //! `decision-p11-t16-hierarchy-bound.md`): plan 11's [`hierarchy_bound`] gives every star of
-//! every attempt the generator can keep, exactly, plan 11's [`pair_light_bound`] says what each
+//! every attempt the generator can keep, exactly, plan 11's [`pair_light_bound`](crate::stellar::binary::pair_light_bound) says what each
 //! pair of two stars can hold, and R06.T8.m's phase envelope ([`PhaseEnvelope`]) bounds each star
 //! at its own mass, \[Fe/H\], η and age relative to its lifetime. A record with a pair that plan
 //! 11 cannot bound keeps the widened bound alone. Both bounds are bounds, so a record either
@@ -79,7 +79,7 @@ use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, Layer, SystemId};
 use crate::math;
 use crate::observe::{Drift, Retardation, TraceMotionError, retarded};
-use crate::stellar::binary::{PairLight, pair_light_bound};
+use crate::stellar::binary::{PairLight, pair_light_bound_under};
 use crate::stellar::draws::{StandardNormal, StarDraws};
 use crate::stellar::multiplicity::{
     HierarchyBound, MAX_COMPANIONS, MultiplicityContext, RedrawAttempt, StarIndex, TIDAL_CUT_SHARE,
@@ -843,8 +843,8 @@ fn flux_bound_over(
 }
 
 /// What a star's pair leaves of the star's own bound (R06.T8.g): plan 11's
-/// [`pair_light_bound`] verdict, read for one of the pair's two stars
-/// (`decision-p11-t16-hierarchy-bound.md` §5).
+/// [`pair_light_bound`](crate::stellar::binary::pair_light_bound) verdict, read for one of the
+/// pair's two stars (`decision-p11-t16-hierarchy-bound.md` §5).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StarLight {
     /// The star is its own single-star model and takes its own bound: a star of no pair the
@@ -1073,7 +1073,8 @@ impl RecordLight {
 /// 2. plan 11's [`hierarchy_bound`], the generator's own draw at every redraw attempt it can keep,
 ///    so each star's initial mass is exact, with its body and attempt, and so is each star–star
 ///    pair's drawn periastron;
-/// 3. each such pair's [`pair_light_bound`] over the record's light-time ages;
+/// 3. each such pair's [`pair_light_bound`](crate::stellar::binary::pair_light_bound) over the
+///    record's light-time ages, under the galaxy's stellar rules;
 /// 4. for each star, R06.T8.m's phase envelope ([`PhaseEnvelope::brightest`]) at its own mass,
 ///    \[Fe/H\], η and age relative to its lifetime, read by [`brightest`](Self::brightest).
 ///
@@ -1177,7 +1178,16 @@ impl StarBounds {
             record,
             (composition, ages),
             hierarchy,
-            |a, b, periastron| pair_light_bound(a, b, periastron, &composition, ages.0..=ages.1),
+            |a, b, periastron| {
+                pair_light_bound_under(
+                    a,
+                    b,
+                    periastron,
+                    &composition,
+                    ages.0..=ages.1,
+                    galaxy.rules().stellar,
+                )
+            },
         )
     }
 
@@ -2385,9 +2395,27 @@ mod tests {
         cells
     }
 
+    /// [`milky_way_galaxy`] under every 29 hold, whose pair bound's `Detached` takes the wind's
+    /// reach (P11.T12's fix), built on first use.
+    fn milky_way_galaxy_29() -> &'static Galaxy {
+        static GALAXY: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
+        GALAXY.get_or_init(|| {
+            Galaxy::from_params_with_rules(
+                crate::rng::Seed::new(0x0926_0000),
+                GalaxyParams::milky_way_like(),
+                crate::galaxy::rules::GalaxyRules::every_29_hold(),
+            )
+            .expect("the fixture builds")
+        })
+    }
+
     /// At least `n` of `layer`'s records, from the cells of a growing cube about `at`.
     fn records_near(layer: Layer, at: [f64; 3], n: usize) -> Vec<SystemRecord> {
-        let galaxy = milky_way_galaxy();
+        records_near_in(milky_way_galaxy(), layer, at, n)
+    }
+
+    /// [`records_near`] in `galaxy`.
+    fn records_near_in(galaxy: &Galaxy, layer: Layer, at: [f64; 3], n: usize) -> Vec<SystemRecord> {
         let size = f64::from(layer.cell_size_ly());
         let mut out = Vec::new();
         let mut cell = Vec::new();
@@ -4106,8 +4134,8 @@ mod tests {
         faint_white_dwarfs: u64,
         /// Stars a detached partner's wind grew past their initial mass that outshine their bound:
         /// from generator version 27 a wide pair's star takes its partner's wind (P11.T12), which
-        /// the bound's `Detached` verdict reaches only at 29 (its wind reach, retargeted from 27 by
-        /// train 27's findings and from 28 by train 28), so they are counted, not asserted.
+        /// the version's `Detached` verdict does not bound. Under 29's rules, whose `Detached`
+        /// takes the wind's reach, there are none (asserted).
         wind_fed: u64,
     }
 
@@ -4124,12 +4152,11 @@ mod tests {
         }
     }
 
-    /// Holds every shining star of `records`' realised systems at the epoch and 900 years before
-    /// it no brighter than its bound: its own [`BoundStar`]'s at the attempt the generator kept,
-    /// its pairs' verdicts taken at the system's age then, or the widened envelope's
-    /// ([`flux_bound`]) where a pair of the record has none.
-    fn check_realised_of(records: &[SystemRecord]) -> RealisedCheck {
-        let galaxy = milky_way_galaxy();
+    /// Holds every shining star of `records`' realised systems in `galaxy` at the epoch and 900
+    /// years before it no brighter than its bound: its own [`BoundStar`]'s at the attempt the
+    /// generator kept, its pairs' verdicts taken at the system's age then, or the widened
+    /// envelope's ([`flux_bound`]) where a pair of the record has none.
+    fn check_realised_of(galaxy: &Galaxy, records: &[SystemRecord]) -> RealisedCheck {
         let phase = PhaseEnvelope::shared();
         let envelope = milky_way_envelope();
         let earlier = UniverseTime::EPOCH
@@ -4222,9 +4249,12 @@ mod tests {
     }
 
     /// [`check_realised_of`] over `per_place` records of each layer near the Sun and in the
-    /// bulge, in four shares; prints each layer's figures and returns them all, with the systems
-    /// born of each layer at both places together, by [`Layer::value`].
-    fn check_realised(per_place: usize) -> (RealisedCheck, [u64; Layer::ALL.len()]) {
+    /// bulge of `galaxy`, in four shares; prints each layer's figures and returns them all, with
+    /// the systems born of each layer at both places together, by [`Layer::value`].
+    fn check_realised(
+        galaxy: &Galaxy,
+        per_place: usize,
+    ) -> (RealisedCheck, [u64; Layer::ALL.len()]) {
         let mut all = RealisedCheck {
             least_margin: f64::INFINITY,
             ..RealisedCheck::default()
@@ -4239,7 +4269,7 @@ mod tests {
                 Layer::E,
                 Layer::BrownDwarf,
             ] {
-                let records = records_near(layer, at, per_place);
+                let records = records_near_in(galaxy, layer, at, per_place);
                 let records = &records[..per_place];
                 // Four shares, share k the records k, k + 4, …, on threads of their own (the four
                 // slots `.config/nextest.toml` reserves, or the fewer a run grants), or one after
@@ -4247,7 +4277,7 @@ mod tests {
                 let share = |k: usize| {
                     let mine: Vec<SystemRecord> =
                         records.iter().skip(k).step_by(4).copied().collect();
-                    check_realised_of(&mine)
+                    check_realised_of(galaxy, &mine)
                 };
                 let parts: Vec<RealisedCheck> = crate::planetary::testing::in_shares(4, 4, share);
                 let mut found = RealisedCheck {
@@ -4307,7 +4337,7 @@ mod tests {
             .iter()
             .find(|r| r.id().raw() == 0x61fe_c2d8_0200_0037)
             .expect("the record in its cell");
-        let check = check_realised_of(&[record]);
+        let check = check_realised_of(galaxy, &[record]);
         assert_eq!(
             (check.systems, check.own + check.widened, check.unbounded),
             (1, 0, 2),
@@ -4316,14 +4346,18 @@ mod tests {
     }
 
     /// The bound star by star holds for realised systems (R06.T8.g): 300 records of each layer
-    /// near the Sun and in the bulge, at two emitted times.
+    /// near the Sun and in the bulge, at two emitted times, under the version's rules and under
+    /// 29's, whose `Detached` takes the wind's reach (P11.T12's fix).
     #[test]
     fn the_star_bound_holds_for_some_realised_systems() {
-        let (all, _) = check_realised(300);
+        let (all, _) = check_realised(milky_way_galaxy(), 300);
         assert!(all.own > 3_000 && all.pairs.detached() > 50, "{all:?}");
         // A wind-fed star past its bound is rare (one, bulge system 0x4200217600000090's 0.70 M☉
         // companion grown to 0.95 M☉ at M_V 4.26 against its bound's 6.02, at 27).
         assert!(all.wind_fed * 1_000 < all.own, "{all:?}");
+        let (all, _) = check_realised(milky_way_galaxy_29(), 300);
+        assert!(all.own > 3_000 && all.pairs.detached() > 50, "{all:?}");
+        assert_eq!(all.wind_fed, 0, "{all:?}");
     }
 
     /// R06.T8.g's slow test: over 10⁵ records of each layer near the Sun and again in the bulge, at
@@ -4333,11 +4367,16 @@ mod tests {
     /// the widened envelope's. Each pair's verdict is taken at the system's age at that time, the
     /// tightest window the census asks. The figures, with the shares of plan 11's verdicts, are
     /// recorded in R06's Risks.
+    ///
+    /// It runs under every 29 hold: from 27 the version's `Detached` leaves a wide pair's
+    /// wind-fed star its own bound, which a layer C companion on its core helium burning outshone
+    /// at 28 (M<sub>V</sub> 0.79 against 2.55), and 29's takes the wind's reach (P11.T12's fix).
     #[test]
     #[ignore = "slow: generates 1.2 × 10⁶ systems, their pairs run through the binary engine"]
     fn the_star_bound_holds_for_realised_systems() {
-        let (all, per_layer) = check_realised(100_000);
+        let (all, per_layer) = check_realised(milky_way_galaxy_29(), 100_000);
         eprintln!("all: {all:?}");
+        assert_eq!(all.wind_fed, 0, "{all:?}");
         for layer in [
             Layer::A,
             Layer::B,

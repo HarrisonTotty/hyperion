@@ -33,6 +33,7 @@ pub mod binary_pair_light_d;
 )]
 pub mod binary_pair_light_e;
 pub mod binary_reach;
+pub mod binary_wind_reach;
 pub mod chabrier;
 pub mod class_boundaries;
 pub mod cluster_dynamics;
@@ -172,6 +173,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "binary_reach",
         revision: 0,
         since_generator_version: 26,
+        provisional: false,
+    },
+    TableInfo {
+        name: "binary_wind_reach",
+        revision: 0,
+        since_generator_version: 28,
         provisional: false,
     },
     TableInfo {

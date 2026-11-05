@@ -6,6 +6,7 @@ pub mod binary_classes;
 pub mod binary_cooling_floor;
 pub mod binary_pair_light;
 pub mod binary_reach;
+pub mod binary_wind_reach;
 pub mod bowl_permanent_shadow;
 pub mod chabrier;
 pub mod class_boundaries;

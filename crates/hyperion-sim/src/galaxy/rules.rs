@@ -97,7 +97,7 @@ impl GalaxyRules {
     /// version's rules from 29: the binary class tables refitted on the generator's own pairs
     /// (P15.T10.b, [`BinaryTableRules::Published`]), the alert walks' lists (P09.T36), the
     /// superbubbles' merge (P09.T5) and the stellar holds ([`StellarRules::every_29_hold`],
-    /// P11.T4's). The 29 bump deletes it with them.
+    /// P11.T4's and P11.T12's wind reach). The 29 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_29_hold() -> Self {

@@ -1,0 +1,1850 @@
+# generator_version = 28
+mass node 0 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.301 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.301 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.301 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.301 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.301 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.301 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.301 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.301 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -2.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.500 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -1.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.500 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] -0.250 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 0 [Fe/H] 0.176 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.301 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -2.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.500 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -1.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.500 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] -0.250 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 61 [Fe/H] 0.176 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.301 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -2.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.500 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -1.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.500 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] -0.250 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 122 [Fe/H] 0.176 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.301 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -2.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.500 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -1.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.500 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] -0.250 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.000 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 183 [Fe/H] 0.176 age bin 104: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.301 age bin 104: sum = 0x413c69c722fc566a  # 1862087.1366628655
+mass node 244 [Fe/H] -2.301 age bin 104: agb lost = 0x3fd05e197fc12dbc  # 0.25574338413272435
+mass node 244 [Fe/H] -2.301 age bin 104: agb least = 0x3fdf2a9d2db14875  # 0.48697595083388673
+mass node 244 [Fe/H] -2.301 age bin 104: agb dust = 0x40a690a99fb451e9  # 2888.331296572684
+mass node 244 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -2.000 age bin 104: sum = 0x41417a59d38de4fa  # 2290867.6527677746
+mass node 244 [Fe/H] -2.000 age bin 104: agb lost = 0x3fd31c887474844d  # 0.2986165177590621
+mass node 244 [Fe/H] -2.000 age bin 104: agb least = 0x3fded1e36e717c99  # 0.4815605715320515
+mass node 244 [Fe/H] -2.000 age bin 104: agb dust = 0x409fbf7bc2eb3062  # 2031.8708607433587
+mass node 244 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.500 age bin 104: sum = 0x414600dfc06673de  # 2884031.5031266054
+mass node 244 [Fe/H] -1.500 age bin 104: agb lost = 0x3fd5eee25e4dce27  # 0.34270533761375294
+mass node 244 [Fe/H] -1.500 age bin 104: agb least = 0x3fde752658cfce6d  # 0.4759002558996375
+mass node 244 [Fe/H] -1.500 age bin 104: agb dust = 0x40a72dee3186aa79  # 2966.965221603689
+mass node 244 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -1.000 age bin 104: sum = 0x4149da0cc7dbb1a7  # 3388441.5613920274
+mass node 244 [Fe/H] -1.000 age bin 104: agb lost = 0x3fd8734ee7874e67  # 0.38203785524567596
+mass node 244 [Fe/H] -1.000 age bin 104: agb least = 0x3fde1973bb9fa69b  # 0.47030347178097437
+mass node 244 [Fe/H] -1.000 age bin 104: agb dust = 0x40a7e5c26a1f0808  # 3058.8797158906273
+mass node 244 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.500 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.500 age bin 104: sum = 0x414c588c253e8fc4  # 3715352.290971728
+mass node 244 [Fe/H] -0.500 age bin 104: agb lost = 0x3fd9b063d9b9c621  # 0.4013909937121714
+mass node 244 [Fe/H] -0.500 age bin 104: agb least = 0x3fddeede14e038ce  # 0.46770431555422654
+mass node 244 [Fe/H] -0.500 age bin 104: agb dust = 0x40a84d63e08a0b8e  # 3110.6950724734406
+mass node 244 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.250 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.250 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.250 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.250 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.250 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.250 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.250 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] -0.250 age bin 104: sum = 0x414e5f87da4ef848  # 3981071.7055349685
+mass node 244 [Fe/H] -0.250 age bin 104: agb lost = 0x3fdaefceb0da58c1  # 0.4208866812781587
+mass node 244 [Fe/H] -0.250 age bin 104: agb least = 0x3fddc479bf68ab1b  # 0.4651169175364644
+mass node 244 [Fe/H] -0.250 age bin 104: agb dust = 0x40a85866f7e7e5ab  # 3116.2011101215226
+mass node 244 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.000 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.000 age bin 104: sum = 0x40564801897b580a  # 89.12509381337455
+mass node 244 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.176 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.176 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.176 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.176 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.176 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.176 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.176 age bin 91: sum = 0x0000000000000000  # 0.0
+mass node 244 [Fe/H] 0.176 age bin 104: sum = 0x40564801897b580a  # 89.12509381337455
+mass node 305 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -2.301 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -2.301 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -2.301 age bin 39: sum = 0x3e493b114f3ffbae  # 1.1748975549395304e-8
+mass node 305 [Fe/H] -2.301 age bin 52: sum = 0x3e493b114f3ffbae  # 1.1748975549395304e-8
+mass node 305 [Fe/H] -2.301 age bin 65: sum = 0x3e75d1ba90f8a09b  # 8.128305161640995e-8
+mass node 305 [Fe/H] -2.301 age bin 78: sum = 0x3ebb359f0f621a28  # 1.6218100973589302e-6
+mass node 305 [Fe/H] -2.301 age bin 91: sum = 0x4159ca5f704038ea  # 6760829.753919819
+mass node 305 [Fe/H] -2.301 age bin 91: agb lost = 0x3ff0790e7288c75a  # 1.029554793738916
+mass node 305 [Fe/H] -2.301 age bin 91: agb least = 0x3fe39d861ef9bac6  # 0.6129789929380756
+mass node 305 [Fe/H] -2.301 age bin 91: agb dust = 0x40a017ebb09a1f20  # 2059.9603317416186
+mass node 305 [Fe/H] -2.301 age bin 104: sum = 0x4159ca5f704038ea  # 6760829.753919819
+mass node 305 [Fe/H] -2.301 age bin 104: agb lost = 0x3ff0790e7288c75a  # 1.029554793738916
+mass node 305 [Fe/H] -2.301 age bin 104: agb least = 0x3fe39d861ef9bac6  # 0.6129789929380756
+mass node 305 [Fe/H] -2.301 age bin 104: agb dust = 0x40a017ebb09a1f20  # 2059.9603317416186
+mass node 305 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -2.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -2.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -2.000 age bin 39: sum = 0x3e48a80a91c14760  # 1.1481536214968817e-8
+mass node 305 [Fe/H] -2.000 age bin 52: sum = 0x3e48a80a91c14760  # 1.1481536214968817e-8
+mass node 305 [Fe/H] -2.000 age bin 65: sum = 0x3e75d1ba90f8a09b  # 8.128305161640995e-8
+mass node 305 [Fe/H] -2.000 age bin 78: sum = 0x3ebb359f0f621a28  # 1.6218100973589302e-6
+mass node 305 [Fe/H] -2.000 age bin 91: sum = 0x415f01cc4a585377  # 8128305.161640993
+mass node 305 [Fe/H] -2.000 age bin 91: agb lost = 0x3ff0d6b48766a53d  # 1.0524182595348315
+mass node 305 [Fe/H] -2.000 age bin 91: agb least = 0x3fe2e3de52ced9c9  # 0.5903159730285604
+mass node 305 [Fe/H] -2.000 age bin 91: agb dust = 0x409e9dbe58b1df40  # 1959.4358852188598
+mass node 305 [Fe/H] -2.000 age bin 104: sum = 0x415f01cc4a585377  # 8128305.161640993
+mass node 305 [Fe/H] -2.000 age bin 104: agb lost = 0x3ff0d6b48766a53d  # 1.0524182595348315
+mass node 305 [Fe/H] -2.000 age bin 104: agb least = 0x3fe2e3de52ced9c9  # 0.5903159730285604
+mass node 305 [Fe/H] -2.000 age bin 104: agb dust = 0x409e9dbe58b1df40  # 1959.4358852188598
+mass node 305 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.500 age bin 91: sum = 0x4161cce7e0414a1a  # 9332543.007969905
+mass node 305 [Fe/H] -1.500 age bin 91: agb lost = 0x3ff18f2a8da89ecc  # 1.0974526914159695
+mass node 305 [Fe/H] -1.500 age bin 91: agb least = 0x3fe1f5012af26268  # 0.5611577833943331
+mass node 305 [Fe/H] -1.500 age bin 91: agb dust = 0x409a3849a46c5fdc  # 1678.0719162877567
+mass node 305 [Fe/H] -1.500 age bin 104: sum = 0x4161cce7e0414a1a  # 9332543.007969905
+mass node 305 [Fe/H] -1.500 age bin 104: agb lost = 0x3ff18f2a8da89ecc  # 1.0974526914159695
+mass node 305 [Fe/H] -1.500 age bin 104: agb least = 0x3fe1f5012af26268  # 0.5611577833943331
+mass node 305 [Fe/H] -1.500 age bin 104: agb dust = 0x409a3849a46c5fdc  # 1678.0719162877567
+mass node 305 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -1.000 age bin 91: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 305 [Fe/H] -1.000 age bin 91: agb lost = 0x3ff257b4f488f00a  # 1.146412806715491
+mass node 305 [Fe/H] -1.000 age bin 91: agb least = 0x3fe10c19a546f300  # 0.5327270725316282
+mass node 305 [Fe/H] -1.000 age bin 91: agb dust = 0x40966337ca9bc46c  # 1432.804483827461
+mass node 305 [Fe/H] -1.000 age bin 104: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 305 [Fe/H] -1.000 age bin 104: agb lost = 0x3ff257b4f488f00a  # 1.146412806715491
+mass node 305 [Fe/H] -1.000 age bin 104: agb least = 0x3fe10c19a546f300  # 0.5327270725316282
+mass node 305 [Fe/H] -1.000 age bin 104: agb dust = 0x40966337ca9bc46c  # 1432.804483827461
+mass node 305 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.500 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.500 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.500 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.500 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.500 age bin 91: sum = 0x4164e9e5bec40cbb  # 10964781.961431852
+mass node 305 [Fe/H] -0.500 age bin 91: agb lost = 0x3ff2bdc9a4030312  # 1.1713348776540369
+mass node 305 [Fe/H] -0.500 age bin 91: agb least = 0x3fe09e4163a10b1c  # 0.5193182893638979
+mass node 305 [Fe/H] -0.500 age bin 91: agb dust = 0x4093761f8a82ea39  # 1245.5308018165072
+mass node 305 [Fe/H] -0.500 age bin 104: sum = 0x4164e9e5bec40cbb  # 10964781.961431852
+mass node 305 [Fe/H] -0.500 age bin 104: agb lost = 0x3ff2bdc9a4030312  # 1.1713348776540369
+mass node 305 [Fe/H] -0.500 age bin 104: agb least = 0x3fe09e4163a10b1c  # 0.5193182893638979
+mass node 305 [Fe/H] -0.500 age bin 104: agb dust = 0x4093761f8a82ea39  # 1245.5308018165072
+mass node 305 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.250 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.250 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.250 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.250 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.250 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.250 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] -0.250 age bin 91: sum = 0x416668cdf194a575  # 11748975.549395302
+mass node 305 [Fe/H] -0.250 age bin 91: agb lost = 0x3ff32cadb9ca7c04  # 1.1984078652819798
+mass node 305 [Fe/H] -0.250 age bin 91: agb least = 0x3fe0340a63735a44  # 0.5063526098627524
+mass node 305 [Fe/H] -0.250 age bin 91: agb dust = 0x40920edb77ca3938  # 1155.7143241498397
+mass node 305 [Fe/H] -0.250 age bin 104: sum = 0x416668cdf194a575  # 11748975.549395302
+mass node 305 [Fe/H] -0.250 age bin 104: agb lost = 0x3ff32cadb9ca7c04  # 1.1984078652819798
+mass node 305 [Fe/H] -0.250 age bin 104: agb least = 0x3fe0340a63735a44  # 0.5063526098627524
+mass node 305 [Fe/H] -0.250 age bin 104: agb dust = 0x40920edb77ca3938  # 1155.7143241498397
+mass node 305 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.000 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.000 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.000 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.000 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.000 age bin 91: sum = 0x416924ccec568a78  # 13182567.385564074
+mass node 305 [Fe/H] 0.000 age bin 91: agb lost = 0x3ff39fd712343e3b  # 1.2265234671684897
+mass node 305 [Fe/H] 0.000 age bin 91: agb least = 0x3fdf97b7233971bb  # 0.4936349719989967
+mass node 305 [Fe/H] 0.000 age bin 91: agb dust = 0x409083a245439e5f  # 1056.9084673467075
+mass node 305 [Fe/H] 0.000 age bin 104: sum = 0x416924ccec568a78  # 13182567.385564074
+mass node 305 [Fe/H] 0.000 age bin 104: agb lost = 0x3ff39fd712343e3b  # 1.2265234671684897
+mass node 305 [Fe/H] 0.000 age bin 104: agb least = 0x3fdf97b7233971bb  # 0.4936349719989967
+mass node 305 [Fe/H] 0.000 age bin 104: agb dust = 0x409083a245439e5f  # 1056.9084673467075
+mass node 305 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.176 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.176 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.176 age bin 39: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.176 age bin 52: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.176 age bin 65: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.176 age bin 78: sum = 0x0000000000000000  # 0.0
+mass node 305 [Fe/H] 0.176 age bin 91: sum = 0x416924ccec568a78  # 13182567.385564074
+mass node 305 [Fe/H] 0.176 age bin 91: agb lost = 0x3ff39fd712343e3b  # 1.2265234671684897
+mass node 305 [Fe/H] 0.176 age bin 91: agb least = 0x3fdf97b7233971bb  # 0.4936349719989967
+mass node 305 [Fe/H] 0.176 age bin 91: agb dust = 0x409083a245439e5f  # 1056.9084673467075
+mass node 305 [Fe/H] 0.176 age bin 104: sum = 0x416924ccec568a78  # 13182567.385564074
+mass node 305 [Fe/H] 0.176 age bin 104: agb lost = 0x3ff39fd712343e3b  # 1.2265234671684897
+mass node 305 [Fe/H] 0.176 age bin 104: agb least = 0x3fdf97b7233971bb  # 0.4936349719989967
+mass node 305 [Fe/H] 0.176 age bin 104: agb dust = 0x409083a245439e5f  # 1056.9084673467075
+mass node 366 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -2.301 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -2.301 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -2.301 age bin 39: sum = 0x3e96bd4c5bd4cfcf  # 3.3884415613920274e-7
+mass node 366 [Fe/H] -2.301 age bin 52: sum = 0x3ebf3d9a756ce683  # 1.862087136662866e-6
+mass node 366 [Fe/H] -2.301 age bin 65: sum = 0x3ef09e6a4f05e62c  # 1.5848931924611145e-5
+mass node 366 [Fe/H] -2.301 age bin 78: sum = 0x416e3abc7d966a1a  # 15848931.92461114
+mass node 366 [Fe/H] -2.301 age bin 78: agb lost = 0x40013485dea39f6e  # 2.150645961159106
+mass node 366 [Fe/H] -2.301 age bin 78: agb least = 0x3feb03e81845bba2  # 0.8442268823690606
+mass node 366 [Fe/H] -2.301 age bin 78: agb dust = 0x40a73e8f51be7f46  # 2975.279920533215
+mass node 366 [Fe/H] -2.301 age bin 91: sum = 0x416e3abc7d966a1a  # 15848931.92461114
+mass node 366 [Fe/H] -2.301 age bin 91: agb lost = 0x40013485dea39f6e  # 2.150645961159106
+mass node 366 [Fe/H] -2.301 age bin 91: agb least = 0x3feb03e81845bba2  # 0.8442268823690606
+mass node 366 [Fe/H] -2.301 age bin 91: agb dust = 0x40a73e8f51be7f46  # 2975.279920533215
+mass node 366 [Fe/H] -2.301 age bin 104: sum = 0x416e3abc7d966a1a  # 15848931.92461114
+mass node 366 [Fe/H] -2.301 age bin 104: agb lost = 0x40013485dea39f6e  # 2.150645961159106
+mass node 366 [Fe/H] -2.301 age bin 104: agb least = 0x3feb03e81845bba2  # 0.8442268823690606
+mass node 366 [Fe/H] -2.301 age bin 104: agb dust = 0x40a73e8f51be7f46  # 2975.279920533215
+mass node 366 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -2.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -2.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -2.000 age bin 39: sum = 0x3eade7c98a1bed82  # 8.912509381337458e-7
+mass node 366 [Fe/H] -2.000 age bin 52: sum = 0x3ed50574fa4843ef  # 5.011872336272725e-6
+mass node 366 [Fe/H] -2.000 age bin 65: sum = 0x3f076b4922ce2e00  # 4.466835921509635e-5
+mass node 366 [Fe/H] -2.000 age bin 78: sum = 0x417463a24e5202ed  # 21379620.89502232
+mass node 366 [Fe/H] -2.000 age bin 78: agb lost = 0x4001959d50b7902b  # 2.1980539613741903
+mass node 366 [Fe/H] -2.000 age bin 78: agb least = 0x3fea0f09b7216ea1  # 0.814335687329237
+mass node 366 [Fe/H] -2.000 age bin 78: agb dust = 0x40a67ee56b2b9c87  # 2879.448083269937
+mass node 366 [Fe/H] -2.000 age bin 91: sum = 0x417463a24e5202ed  # 21379620.89502232
+mass node 366 [Fe/H] -2.000 age bin 91: agb lost = 0x4001959d50b7902b  # 2.1980539613741903
+mass node 366 [Fe/H] -2.000 age bin 91: agb least = 0x3fea0f09b7216ea1  # 0.814335687329237
+mass node 366 [Fe/H] -2.000 age bin 91: agb dust = 0x40a67ee56b2b9c87  # 2879.448083269937
+mass node 366 [Fe/H] -2.000 age bin 104: sum = 0x417463a24e5202ed  # 21379620.89502232
+mass node 366 [Fe/H] -2.000 age bin 104: agb lost = 0x4001959d50b7902b  # 2.1980539613741903
+mass node 366 [Fe/H] -2.000 age bin 104: agb least = 0x3fea0f09b7216ea1  # 0.814335687329237
+mass node 366 [Fe/H] -2.000 age bin 104: agb dust = 0x40a67ee56b2b9c87  # 2879.448083269937
+mass node 366 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -1.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -1.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -1.500 age bin 39: sum = 0x3ec41f745801c315  # 2.39883291901949e-6
+mass node 366 [Fe/H] -1.500 age bin 52: sum = 0x3eec4a3077f3872b  # 1.3489628825916533e-5
+mass node 366 [Fe/H] -1.500 age bin 65: sum = 0x3f1a36e2eb1c432d  # 0.0001
+mass node 366 [Fe/H] -1.500 age bin 78: sum = 0x4179ab2140a0d8ad  # 26915348.039269138
+mass node 366 [Fe/H] -1.500 age bin 78: agb lost = 0x40022e03a8020266  # 2.272467911301919
+mass node 366 [Fe/H] -1.500 age bin 78: agb least = 0x3fe861269238695d  # 0.7618592124811517
+mass node 366 [Fe/H] -1.500 age bin 78: agb dust = 0x40a3ef902cd2ee92  # 2551.7815919796203
+mass node 366 [Fe/H] -1.500 age bin 91: sum = 0x4179ab2140a0d8ad  # 26915348.039269138
+mass node 366 [Fe/H] -1.500 age bin 91: agb lost = 0x40022e03a8020266  # 2.272467911301919
+mass node 366 [Fe/H] -1.500 age bin 91: agb least = 0x3fe861269238695d  # 0.7618592124811517
+mass node 366 [Fe/H] -1.500 age bin 91: agb dust = 0x40a3ef902cd2ee92  # 2551.7815919796203
+mass node 366 [Fe/H] -1.500 age bin 104: sum = 0x4179ab2140a0d8ad  # 26915348.039269138
+mass node 366 [Fe/H] -1.500 age bin 104: agb lost = 0x40022e03a8020266  # 2.272467911301919
+mass node 366 [Fe/H] -1.500 age bin 104: agb least = 0x3fe861269238695d  # 0.7618592124811517
+mass node 366 [Fe/H] -1.500 age bin 104: agb dust = 0x40a3ef902cd2ee92  # 2551.7815919796203
+mass node 366 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -1.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -1.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -1.000 age bin 39: sum = 0x3edb14a8d4b3a055  # 6.456542290346551e-6
+mass node 366 [Fe/H] -1.000 age bin 52: sum = 0x3efe3dc35b9c0eba  # 2.8840315031266056e-5
+mass node 366 [Fe/H] -1.000 age bin 65: sum = 0x3f2c05cf736e2e68  # 0.00021379620895022326
+mass node 366 [Fe/H] -1.000 age bin 78: sum = 0x417b8117b08010d6  # 28840315.031266056
+mass node 366 [Fe/H] -1.000 age bin 78: agb lost = 0x4002d97ddf25f290  # 2.3561971124129926
+mass node 366 [Fe/H] -1.000 age bin 78: agb least = 0x3fe631ae87e6ae4b  # 0.6935646681135464
+mass node 366 [Fe/H] -1.000 age bin 78: agb dust = 0x40a142f6ba7b0bd2  # 2209.4818914844445
+mass node 366 [Fe/H] -1.000 age bin 91: sum = 0x417b8117b08010d6  # 28840315.031266056
+mass node 366 [Fe/H] -1.000 age bin 91: agb lost = 0x4002d97ddf25f290  # 2.3561971124129926
+mass node 366 [Fe/H] -1.000 age bin 91: agb least = 0x3fe631ae87e6ae4b  # 0.6935646681135464
+mass node 366 [Fe/H] -1.000 age bin 91: agb dust = 0x40a142f6ba7b0bd2  # 2209.4818914844445
+mass node 366 [Fe/H] -1.000 age bin 104: sum = 0x417b8117b08010d6  # 28840315.031266056
+mass node 366 [Fe/H] -1.000 age bin 104: agb lost = 0x4002d97ddf25f290  # 2.3561971124129926
+mass node 366 [Fe/H] -1.000 age bin 104: agb least = 0x3fe631ae87e6ae4b  # 0.6935646681135464
+mass node 366 [Fe/H] -1.000 age bin 104: agb dust = 0x40a142f6ba7b0bd2  # 2209.4818914844445
+mass node 366 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -0.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -0.500 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -0.500 age bin 39: sum = 0x3ee5f5ba84983881  # 1.0471285480508987e-5
+mass node 366 [Fe/H] -0.500 age bin 52: sum = 0x3f07f6ef0f854016  # 4.570881896148752e-5
+mass node 366 [Fe/H] -0.500 age bin 65: sum = 0x3f320cd4387ccb06  # 0.0002754228703338166
+mass node 366 [Fe/H] -0.500 age bin 78: sum = 0x417cccedd343aaac  # 30199517.204020187
+mass node 366 [Fe/H] -0.500 age bin 78: agb lost = 0x400334bc8c799406  # 2.400750253162644
+mass node 366 [Fe/H] -0.500 age bin 78: agb least = 0x3fe53003a77abc12  # 0.6621111174662266
+mass node 366 [Fe/H] -0.500 age bin 78: agb dust = 0x409ce7fc5595ddb0  # 1849.9964202324445
+mass node 366 [Fe/H] -0.500 age bin 91: sum = 0x417cccedd343aaac  # 30199517.204020187
+mass node 366 [Fe/H] -0.500 age bin 91: agb lost = 0x400334bc8c799406  # 2.400750253162644
+mass node 366 [Fe/H] -0.500 age bin 91: agb least = 0x3fe53003a77abc12  # 0.6621111174662266
+mass node 366 [Fe/H] -0.500 age bin 91: agb dust = 0x409ce7fc5595ddb0  # 1849.9964202324445
+mass node 366 [Fe/H] -0.500 age bin 104: sum = 0x417cccedd343aaac  # 30199517.204020187
+mass node 366 [Fe/H] -0.500 age bin 104: agb lost = 0x400334bc8c799406  # 2.400750253162644
+mass node 366 [Fe/H] -0.500 age bin 104: agb least = 0x3fe53003a77abc12  # 0.6621111174662266
+mass node 366 [Fe/H] -0.500 age bin 104: agb dust = 0x409ce7fc5595ddb0  # 1849.9964202324445
+mass node 366 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -0.250 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -0.250 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] -0.250 age bin 39: sum = 0x3eea66cde934de7f  # 1.2589254117941665e-5
+mass node 366 [Fe/H] -0.250 age bin 52: sum = 0x3f0c27eb33acf585  # 5.370317963702534e-5
+mass node 366 [Fe/H] -0.250 age bin 65: sum = 0x3f30763f01e8e5ad  # 0.00025118864315095795
+mass node 366 [Fe/H] -0.250 age bin 78: sum = 0x417f9441825f44e9  # 33113112.148259077
+mass node 366 [Fe/H] -0.250 age bin 78: agb lost = 0x4003858e4c40481f  # 2.440212817870829
+mass node 366 [Fe/H] -0.250 age bin 78: agb least = 0x3fe452d946b91294  # 0.6351133710200707
+mass node 366 [Fe/H] -0.250 age bin 78: agb dust = 0x409a722a75bc7f55  # 1692.54146475341
+mass node 366 [Fe/H] -0.250 age bin 91: sum = 0x417f9441825f44e9  # 33113112.148259077
+mass node 366 [Fe/H] -0.250 age bin 91: agb lost = 0x4003858e4c40481f  # 2.440212817870829
+mass node 366 [Fe/H] -0.250 age bin 91: agb least = 0x3fe452d946b91294  # 0.6351133710200707
+mass node 366 [Fe/H] -0.250 age bin 91: agb dust = 0x409a722a75bc7f55  # 1692.54146475341
+mass node 366 [Fe/H] -0.250 age bin 104: sum = 0x417f9441825f44e9  # 33113112.148259077
+mass node 366 [Fe/H] -0.250 age bin 104: agb lost = 0x4003858e4c40481f  # 2.440212817870829
+mass node 366 [Fe/H] -0.250 age bin 104: agb least = 0x3fe452d946b91294  # 0.6351133710200707
+mass node 366 [Fe/H] -0.250 age bin 104: agb dust = 0x409a722a75bc7f55  # 1692.54146475341
+mass node 366 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] 0.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] 0.000 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] 0.000 age bin 39: sum = 0x3ee40713d0e2f460  # 9.549925860214369e-6
+mass node 366 [Fe/H] 0.000 age bin 52: sum = 0x3f029a3985b8eb6e  # 3.548133892335754e-5
+mass node 366 [Fe/H] 0.000 age bin 65: sum = 0x3f136ed94c0a37f9  # 7.413102413009178e-5
+mass node 366 [Fe/H] 0.000 age bin 78: sum = 0x4183e0bcd2c6b987  # 41686938.34703355
+mass node 366 [Fe/H] 0.000 age bin 78: agb lost = 0x4003b5440d350586  # 2.46350870435771
+mass node 366 [Fe/H] 0.000 age bin 78: agb least = 0x3fe3cfa98722e173  # 0.6190993918781217
+mass node 366 [Fe/H] 0.000 age bin 78: agb dust = 0x40984ab94e9846b8  # 1554.6809638779796
+mass node 366 [Fe/H] 0.000 age bin 91: sum = 0x4183e0bcd2c6b987  # 41686938.34703355
+mass node 366 [Fe/H] 0.000 age bin 91: agb lost = 0x4003b5440d350586  # 2.46350870435771
+mass node 366 [Fe/H] 0.000 age bin 91: agb least = 0x3fe3cfa98722e173  # 0.6190993918781217
+mass node 366 [Fe/H] 0.000 age bin 91: agb dust = 0x40984ab94e9846b8  # 1554.6809638779796
+mass node 366 [Fe/H] 0.000 age bin 104: sum = 0x4183e0bcd2c6b987  # 41686938.34703355
+mass node 366 [Fe/H] 0.000 age bin 104: agb lost = 0x4003b5440d350586  # 2.46350870435771
+mass node 366 [Fe/H] 0.000 age bin 104: agb least = 0x3fe3cfa98722e173  # 0.6190993918781217
+mass node 366 [Fe/H] 0.000 age bin 104: agb dust = 0x40984ab94e9846b8  # 1554.6809638779796
+mass node 366 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] 0.176 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] 0.176 age bin 26: sum = 0x0000000000000000  # 0.0
+mass node 366 [Fe/H] 0.176 age bin 39: sum = 0x3ee40713d0e2f460  # 9.549925860214369e-6
+mass node 366 [Fe/H] 0.176 age bin 52: sum = 0x3f029a3985b8eb6e  # 3.548133892335754e-5
+mass node 366 [Fe/H] 0.176 age bin 65: sum = 0x3f136ed94c0a37f9  # 7.413102413009178e-5
+mass node 366 [Fe/H] 0.176 age bin 78: sum = 0x4183e0bcd2c6b987  # 41686938.34703355
+mass node 366 [Fe/H] 0.176 age bin 78: agb lost = 0x4003b5440d350586  # 2.46350870435771
+mass node 366 [Fe/H] 0.176 age bin 78: agb least = 0x3fe3cfa98722e173  # 0.6190993918781217
+mass node 366 [Fe/H] 0.176 age bin 78: agb dust = 0x40984ab94e9846b8  # 1554.6809638779796
+mass node 366 [Fe/H] 0.176 age bin 91: sum = 0x4183e0bcd2c6b987  # 41686938.34703355
+mass node 366 [Fe/H] 0.176 age bin 91: agb lost = 0x4003b5440d350586  # 2.46350870435771
+mass node 366 [Fe/H] 0.176 age bin 91: agb least = 0x3fe3cfa98722e173  # 0.6190993918781217
+mass node 366 [Fe/H] 0.176 age bin 91: agb dust = 0x40984ab94e9846b8  # 1554.6809638779796
+mass node 366 [Fe/H] 0.176 age bin 104: sum = 0x4183e0bcd2c6b987  # 41686938.34703355
+mass node 366 [Fe/H] 0.176 age bin 104: agb lost = 0x4003b5440d350586  # 2.46350870435771
+mass node 366 [Fe/H] 0.176 age bin 104: agb least = 0x3fe3cfa98722e173  # 0.6190993918781217
+mass node 366 [Fe/H] 0.176 age bin 104: agb dust = 0x40984ab94e9846b8  # 1554.6809638779796
+mass node 427 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -2.301 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -2.301 age bin 26: sum = 0x3ebbd7df1a1ecbc6  # 1.65958690743756e-6
+mass node 427 [Fe/H] -2.301 age bin 39: sum = 0x3edf17c213438cc2  # 7.413102413009178e-6
+mass node 427 [Fe/H] -2.301 age bin 52: sum = 0x3f14d2a58423da81  # 7.943282347242822e-5
+mass node 427 [Fe/H] -2.301 age bin 65: sum = 0x4187e6021ae6dd8a  # 50118723.36272724
+mass node 427 [Fe/H] -2.301 age bin 65: agb lost = 0x4012b9a4526a78e3  # 4.681290900944279
+mass node 427 [Fe/H] -2.301 age bin 65: agb least = 0x3ff18d74f28e355f  # 1.097035357935361
+mass node 427 [Fe/H] -2.301 age bin 65: agb dust = 0x40b3d54c14e2c259  # 5077.297193691681
+mass node 427 [Fe/H] -2.301 age bin 78: sum = 0x4187e6021ae6dd8a  # 50118723.36272724
+mass node 427 [Fe/H] -2.301 age bin 78: agb lost = 0x4012b9a4526a78e3  # 4.681290900944279
+mass node 427 [Fe/H] -2.301 age bin 78: agb least = 0x3ff18d74f28e355f  # 1.097035357935361
+mass node 427 [Fe/H] -2.301 age bin 78: agb dust = 0x40b3d54c14e2c259  # 5077.297193691681
+mass node 427 [Fe/H] -2.301 age bin 91: sum = 0x4187e6021ae6dd8a  # 50118723.36272724
+mass node 427 [Fe/H] -2.301 age bin 91: agb lost = 0x4012b9a4526a78e3  # 4.681290900944279
+mass node 427 [Fe/H] -2.301 age bin 91: agb least = 0x3ff18d74f28e355f  # 1.097035357935361
+mass node 427 [Fe/H] -2.301 age bin 91: agb dust = 0x40b3d54c14e2c259  # 5077.297193691681
+mass node 427 [Fe/H] -2.301 age bin 104: sum = 0x4187e6021ae6dd8a  # 50118723.36272724
+mass node 427 [Fe/H] -2.301 age bin 104: agb lost = 0x4012b9a4526a78e3  # 4.681290900944279
+mass node 427 [Fe/H] -2.301 age bin 104: agb least = 0x3ff18d74f28e355f  # 1.097035357935361
+mass node 427 [Fe/H] -2.301 age bin 104: agb dust = 0x40b3d54c14e2c259  # 5077.297193691681
+mass node 427 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -2.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -2.000 age bin 26: sum = 0x3ed822bd4166a0fb  # 5.754399373371568e-6
+mass node 427 [Fe/H] -2.000 age bin 39: sum = 0x3efaf3da882eb9be  # 2.570395782768865e-5
+mass node 427 [Fe/H] -2.000 age bin 52: sum = 0x3f2e06e054620033  # 0.00022908676527677723
+mass node 427 [Fe/H] -2.000 age bin 65: sum = 0x418f811b0667f4ac  # 66069344.80075964
+mass node 427 [Fe/H] -2.000 age bin 65: agb lost = 0x4012c416c31a3f39  # 4.691493080594051
+mass node 427 [Fe/H] -2.000 age bin 65: agb least = 0x3ff15b02900c00e1  # 1.0847192408401087
+mass node 427 [Fe/H] -2.000 age bin 65: agb dust = 0x40b2d812da9dfbfb  # 4824.073648332614
+mass node 427 [Fe/H] -2.000 age bin 78: sum = 0x418f811b0667f4ac  # 66069344.80075964
+mass node 427 [Fe/H] -2.000 age bin 78: agb lost = 0x4012c416c31a3f39  # 4.691493080594051
+mass node 427 [Fe/H] -2.000 age bin 78: agb least = 0x3ff15b02900c00e1  # 1.0847192408401087
+mass node 427 [Fe/H] -2.000 age bin 78: agb dust = 0x40b2d812da9dfbfb  # 4824.073648332614
+mass node 427 [Fe/H] -2.000 age bin 91: sum = 0x418f811b0667f4ac  # 66069344.80075964
+mass node 427 [Fe/H] -2.000 age bin 91: agb lost = 0x4012c416c31a3f39  # 4.691493080594051
+mass node 427 [Fe/H] -2.000 age bin 91: agb least = 0x3ff15b02900c00e1  # 1.0847192408401087
+mass node 427 [Fe/H] -2.000 age bin 91: agb dust = 0x40b2d812da9dfbfb  # 4824.073648332614
+mass node 427 [Fe/H] -2.000 age bin 104: sum = 0x418f811b0667f4ac  # 66069344.80075964
+mass node 427 [Fe/H] -2.000 age bin 104: agb lost = 0x4012c416c31a3f39  # 4.691493080594051
+mass node 427 [Fe/H] -2.000 age bin 104: agb least = 0x3ff15b02900c00e1  # 1.0847192408401087
+mass node 427 [Fe/H] -2.000 age bin 104: agb dust = 0x40b2d812da9dfbfb  # 4824.073648332614
+mass node 427 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -1.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -1.500 age bin 26: sum = 0x3ef166eb70533f5c  # 1.65958690743756e-5
+mass node 427 [Fe/H] -1.500 age bin 39: sum = 0x3f136ed94c0a37f9  # 7.413102413009178e-5
+mass node 427 [Fe/H] -1.500 age bin 52: sum = 0x3f42db23db182dc4  # 0.0005754399373371567
+mass node 427 [Fe/H] -1.500 age bin 65: sum = 0x419281d61ea6c729  # 77624711.66286911
+mass node 427 [Fe/H] -1.500 age bin 65: agb lost = 0x4012f67696930666  # 4.740686753009504
+mass node 427 [Fe/H] -1.500 age bin 65: agb least = 0x3ff0996b978e7b09  # 1.0374561233690562
+mass node 427 [Fe/H] -1.500 age bin 65: agb dust = 0x40afd6c441282e79  # 4075.3833096081476
+mass node 427 [Fe/H] -1.500 age bin 78: sum = 0x419281d61ea6c729  # 77624711.66286911
+mass node 427 [Fe/H] -1.500 age bin 78: agb lost = 0x4012f67696930666  # 4.740686753009504
+mass node 427 [Fe/H] -1.500 age bin 78: agb least = 0x3ff0996b978e7b09  # 1.0374561233690562
+mass node 427 [Fe/H] -1.500 age bin 78: agb dust = 0x40afd6c441282e79  # 4075.3833096081476
+mass node 427 [Fe/H] -1.500 age bin 91: sum = 0x419281d61ea6c729  # 77624711.66286911
+mass node 427 [Fe/H] -1.500 age bin 91: agb lost = 0x4012f67696930666  # 4.740686753009504
+mass node 427 [Fe/H] -1.500 age bin 91: agb least = 0x3ff0996b978e7b09  # 1.0374561233690562
+mass node 427 [Fe/H] -1.500 age bin 91: agb dust = 0x40afd6c441282e79  # 4075.3833096081476
+mass node 427 [Fe/H] -1.500 age bin 104: sum = 0x419281d61ea6c729  # 77624711.66286911
+mass node 427 [Fe/H] -1.500 age bin 104: agb lost = 0x4012f67696930666  # 4.740686753009504
+mass node 427 [Fe/H] -1.500 age bin 104: agb least = 0x3ff0996b978e7b09  # 1.0374561233690562
+mass node 427 [Fe/H] -1.500 age bin 104: agb dust = 0x40afd6c441282e79  # 4075.3833096081476
+mass node 427 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -1.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -1.000 age bin 26: sum = 0x3f0918107987a07f  # 4.7863009232263804e-5
+mass node 427 [Fe/H] -1.000 age bin 39: sum = 0x3f2b6283b5f2c2c8  # 0.0002089296130854039
+mass node 427 [Fe/H] -1.000 age bin 52: sum = 0x3f5a925d5505cd8a  # 0.00162181009735893
+mass node 427 [Fe/H] -1.000 age bin 65: sum = 0x4193611fae77342a  # 81283051.61640993
+mass node 427 [Fe/H] -1.000 age bin 65: agb lost = 0x40135bf394962555  # 4.839796373047041
+mass node 427 [Fe/H] -1.000 age bin 65: agb least = 0x3fef2faa26fdcf1b  # 0.9745684396316138
+mass node 427 [Fe/H] -1.000 age bin 65: agb dust = 0x40ab5a4ad772298f  # 3501.146174972127
+mass node 427 [Fe/H] -1.000 age bin 78: sum = 0x4193611fae77342a  # 81283051.61640993
+mass node 427 [Fe/H] -1.000 age bin 78: agb lost = 0x40135bf394962555  # 4.839796373047041
+mass node 427 [Fe/H] -1.000 age bin 78: agb least = 0x3fef2faa26fdcf1b  # 0.9745684396316138
+mass node 427 [Fe/H] -1.000 age bin 78: agb dust = 0x40ab5a4ad772298f  # 3501.146174972127
+mass node 427 [Fe/H] -1.000 age bin 91: sum = 0x4193611fae77342a  # 81283051.61640993
+mass node 427 [Fe/H] -1.000 age bin 91: agb lost = 0x40135bf394962555  # 4.839796373047041
+mass node 427 [Fe/H] -1.000 age bin 91: agb least = 0x3fef2faa26fdcf1b  # 0.9745684396316138
+mass node 427 [Fe/H] -1.000 age bin 91: agb dust = 0x40ab5a4ad772298f  # 3501.146174972127
+mass node 427 [Fe/H] -1.000 age bin 104: sum = 0x4193611fae77342a  # 81283051.61640993
+mass node 427 [Fe/H] -1.000 age bin 104: agb lost = 0x40135bf394962555  # 4.839796373047041
+mass node 427 [Fe/H] -1.000 age bin 104: agb least = 0x3fef2faa26fdcf1b  # 0.9745684396316138
+mass node 427 [Fe/H] -1.000 age bin 104: agb dust = 0x40ab5a4ad772298f  # 3501.146174972127
+mass node 427 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -0.500 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -0.500 age bin 26: sum = 0x3f14d2a58423da81  # 7.943282347242822e-5
+mass node 427 [Fe/H] -0.500 age bin 39: sum = 0x3f36b9476ed9da43  # 0.00034673685045253174
+mass node 427 [Fe/H] -0.500 age bin 52: sum = 0x3f641be5d0733c49  # 0.0024547089156850316
+mass node 427 [Fe/H] -0.500 age bin 65: sum = 0x4193611fae77342a  # 81283051.61640993
+mass node 427 [Fe/H] -0.500 age bin 65: agb lost = 0x4013877097488840  # 4.8822654378910215
+mass node 427 [Fe/H] -0.500 age bin 65: agb least = 0x3fee25307c2db903  # 0.9420397210467687
+mass node 427 [Fe/H] -0.500 age bin 65: agb dust = 0x40a7b98267b29614  # 3036.7546973999215
+mass node 427 [Fe/H] -0.500 age bin 78: sum = 0x4193611fae77342a  # 81283051.61640993
+mass node 427 [Fe/H] -0.500 age bin 78: agb lost = 0x4013877097488840  # 4.8822654378910215
+mass node 427 [Fe/H] -0.500 age bin 78: agb least = 0x3fee25307c2db903  # 0.9420397210467687
+mass node 427 [Fe/H] -0.500 age bin 78: agb dust = 0x40a7b98267b29614  # 3036.7546973999215
+mass node 427 [Fe/H] -0.500 age bin 91: sum = 0x4193611fae77342a  # 81283051.61640993
+mass node 427 [Fe/H] -0.500 age bin 91: agb lost = 0x4013877097488840  # 4.8822654378910215
+mass node 427 [Fe/H] -0.500 age bin 91: agb least = 0x3fee25307c2db903  # 0.9420397210467687
+mass node 427 [Fe/H] -0.500 age bin 91: agb dust = 0x40a7b98267b29614  # 3036.7546973999215
+mass node 427 [Fe/H] -0.500 age bin 104: sum = 0x4193611fae77342a  # 81283051.61640993
+mass node 427 [Fe/H] -0.500 age bin 104: agb lost = 0x4013877097488840  # 4.8822654378910215
+mass node 427 [Fe/H] -0.500 age bin 104: agb least = 0x3fee25307c2db903  # 0.9420397210467687
+mass node 427 [Fe/H] -0.500 age bin 104: agb dust = 0x40a7b98267b29614  # 3036.7546973999215
+mass node 427 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -0.250 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] -0.250 age bin 26: sum = 0x3f20e2a5f050114d  # 0.0001288249551693134
+mass node 427 [Fe/H] -0.250 age bin 39: sum = 0x3f426d42cce9b24c  # 0.0005623413251903491
+mass node 427 [Fe/H] -0.250 age bin 52: sum = 0x3f6f25264783b5e0  # 0.003801893963205613
+mass node 427 [Fe/H] -0.250 age bin 65: sum = 0x41953fc39740e545  # 89125093.8133746
+mass node 427 [Fe/H] -0.250 age bin 65: agb lost = 0x4013aabdc68b35fd  # 4.91673956131626
+mass node 427 [Fe/H] -0.250 age bin 65: agb least = 0x3fed381904a7dc5e  # 0.9130978671008838
+mass node 427 [Fe/H] -0.250 age bin 65: agb dust = 0x40a5cac94755f266  # 2789.393122373428
+mass node 427 [Fe/H] -0.250 age bin 78: sum = 0x41953fc39740e545  # 89125093.8133746
+mass node 427 [Fe/H] -0.250 age bin 78: agb lost = 0x4013aabdc68b35fd  # 4.91673956131626
+mass node 427 [Fe/H] -0.250 age bin 78: agb least = 0x3fed381904a7dc5e  # 0.9130978671008838
+mass node 427 [Fe/H] -0.250 age bin 78: agb dust = 0x40a5cac94755f266  # 2789.393122373428
+mass node 427 [Fe/H] -0.250 age bin 91: sum = 0x41953fc39740e545  # 89125093.8133746
+mass node 427 [Fe/H] -0.250 age bin 91: agb lost = 0x4013aabdc68b35fd  # 4.91673956131626
+mass node 427 [Fe/H] -0.250 age bin 91: agb least = 0x3fed381904a7dc5e  # 0.9130978671008838
+mass node 427 [Fe/H] -0.250 age bin 91: agb dust = 0x40a5cac94755f266  # 2789.393122373428
+mass node 427 [Fe/H] -0.250 age bin 104: sum = 0x41953fc39740e545  # 89125093.8133746
+mass node 427 [Fe/H] -0.250 age bin 104: agb lost = 0x4013aabdc68b35fd  # 4.91673956131626
+mass node 427 [Fe/H] -0.250 age bin 104: agb least = 0x3fed381904a7dc5e  # 0.9130978671008838
+mass node 427 [Fe/H] -0.250 age bin 104: agb dust = 0x40a5cac94755f266  # 2789.393122373428
+mass node 427 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] 0.000 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] 0.000 age bin 26: sum = 0x3f298e97c1f54245  # 0.00019498445997580459
+mass node 427 [Fe/H] 0.000 age bin 39: sum = 0x3f4be3dd04ec48a2  # 0.0008511380382023768
+mass node 427 [Fe/H] 0.000 age bin 52: sum = 0x3f7791ecd1de3935  # 0.0057543993733715675
+mass node 427 [Fe/H] 0.000 age bin 65: sum = 0x419ac041d5b88571  # 112201845.43019654
+mass node 427 [Fe/H] 0.000 age bin 65: agb lost = 0x4013bb83151a5b51  # 4.933117227300344
+mass node 427 [Fe/H] 0.000 age bin 65: agb least = 0x3fecb6c5a4e2b423  # 0.8973110409184567
+mass node 427 [Fe/H] 0.000 age bin 65: agb dust = 0x40a3da8e6219e1a3  # 2541.2780922019897
+mass node 427 [Fe/H] 0.000 age bin 78: sum = 0x419ac041d5b88571  # 112201845.43019654
+mass node 427 [Fe/H] 0.000 age bin 78: agb lost = 0x4013bb83151a5b51  # 4.933117227300344
+mass node 427 [Fe/H] 0.000 age bin 78: agb least = 0x3fecb6c5a4e2b423  # 0.8973110409184567
+mass node 427 [Fe/H] 0.000 age bin 78: agb dust = 0x40a3da8e6219e1a3  # 2541.2780922019897
+mass node 427 [Fe/H] 0.000 age bin 91: sum = 0x419ac041d5b88571  # 112201845.43019654
+mass node 427 [Fe/H] 0.000 age bin 91: agb lost = 0x4013bb83151a5b51  # 4.933117227300344
+mass node 427 [Fe/H] 0.000 age bin 91: agb least = 0x3fecb6c5a4e2b423  # 0.8973110409184567
+mass node 427 [Fe/H] 0.000 age bin 91: agb dust = 0x40a3da8e6219e1a3  # 2541.2780922019897
+mass node 427 [Fe/H] 0.000 age bin 104: sum = 0x419ac041d5b88571  # 112201845.43019654
+mass node 427 [Fe/H] 0.000 age bin 104: agb lost = 0x4013bb83151a5b51  # 4.933117227300344
+mass node 427 [Fe/H] 0.000 age bin 104: agb least = 0x3fecb6c5a4e2b423  # 0.8973110409184567
+mass node 427 [Fe/H] 0.000 age bin 104: agb dust = 0x40a3da8e6219e1a3  # 2541.2780922019897
+mass node 427 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] 0.176 age bin 13: sum = 0x0000000000000000  # 0.0
+mass node 427 [Fe/H] 0.176 age bin 26: sum = 0x3f298e97c1f54245  # 0.00019498445997580459
+mass node 427 [Fe/H] 0.176 age bin 39: sum = 0x3f4be3dd04ec48a2  # 0.0008511380382023768
+mass node 427 [Fe/H] 0.176 age bin 52: sum = 0x3f7791ecd1de3935  # 0.0057543993733715675
+mass node 427 [Fe/H] 0.176 age bin 65: sum = 0x419ac041d5b88571  # 112201845.43019654
+mass node 427 [Fe/H] 0.176 age bin 65: agb lost = 0x4013bb83151a5b51  # 4.933117227300344
+mass node 427 [Fe/H] 0.176 age bin 65: agb least = 0x3fecb6c5a4e2b423  # 0.8973110409184567
+mass node 427 [Fe/H] 0.176 age bin 65: agb dust = 0x40a3da8e6219e1a3  # 2541.2780922019897
+mass node 427 [Fe/H] 0.176 age bin 78: sum = 0x419ac041d5b88571  # 112201845.43019654
+mass node 427 [Fe/H] 0.176 age bin 78: agb lost = 0x4013bb83151a5b51  # 4.933117227300344
+mass node 427 [Fe/H] 0.176 age bin 78: agb least = 0x3fecb6c5a4e2b423  # 0.8973110409184567
+mass node 427 [Fe/H] 0.176 age bin 78: agb dust = 0x40a3da8e6219e1a3  # 2541.2780922019897
+mass node 427 [Fe/H] 0.176 age bin 91: sum = 0x419ac041d5b88571  # 112201845.43019654
+mass node 427 [Fe/H] 0.176 age bin 91: agb lost = 0x4013bb83151a5b51  # 4.933117227300344
+mass node 427 [Fe/H] 0.176 age bin 91: agb least = 0x3fecb6c5a4e2b423  # 0.8973110409184567
+mass node 427 [Fe/H] 0.176 age bin 91: agb dust = 0x40a3da8e6219e1a3  # 2541.2780922019897
+mass node 427 [Fe/H] 0.176 age bin 104: sum = 0x419ac041d5b88571  # 112201845.43019654
+mass node 427 [Fe/H] 0.176 age bin 104: agb lost = 0x4013bb83151a5b51  # 4.933117227300344
+mass node 427 [Fe/H] 0.176 age bin 104: agb least = 0x3fecb6c5a4e2b423  # 0.8973110409184567
+mass node 427 [Fe/H] 0.176 age bin 104: agb dust = 0x40a3da8e6219e1a3  # 2541.2780922019897
+mass node 488 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 488 [Fe/H] -2.301 age bin 13: sum = 0x3eb728b48cbb192b  # 1.380384264602884e-6
+mass node 488 [Fe/H] -2.301 age bin 26: sum = 0x3ed2bc3a823e8b34  # 4.4668359215096355e-6
+mass node 488 [Fe/H] -2.301 age bin 39: sum = 0x3efa56cb36416f84  # 2.5118864315095825e-5
+mass node 488 [Fe/H] -2.301 age bin 52: sum = 0x40d9afab83cac9a4  # 26302.679918953814
+mass node 488 [Fe/H] -2.301 age bin 52: agb lost = 0x3fc0b027869ccc2d  # 0.13037580559611808
+mass node 488 [Fe/H] -2.301 age bin 52: agb least = 0x40211c0d16e51b83  # 8.554787364451618
+mass node 488 [Fe/H] -2.301 age bin 52: agb dust = 0x40b24d82aaeaa8e7  # 4685.510420480953
+mass node 488 [Fe/H] -2.301 age bin 65: sum = 0x40d9afab83cac9a4  # 26302.679918953814
+mass node 488 [Fe/H] -2.301 age bin 65: agb lost = 0x3fc0b027869ccc2d  # 0.13037580559611808
+mass node 488 [Fe/H] -2.301 age bin 65: agb least = 0x40211c0d16e51b83  # 8.554787364451618
+mass node 488 [Fe/H] -2.301 age bin 65: agb dust = 0x40b24d82aaeaa8e7  # 4685.510420480953
+mass node 488 [Fe/H] -2.301 age bin 78: sum = 0x40d9afab83cac9a4  # 26302.679918953814
+mass node 488 [Fe/H] -2.301 age bin 78: agb lost = 0x3fc0b027869ccc2d  # 0.13037580559611808
+mass node 488 [Fe/H] -2.301 age bin 78: agb least = 0x40211c0d16e51b83  # 8.554787364451618
+mass node 488 [Fe/H] -2.301 age bin 78: agb dust = 0x40b24d82aaeaa8e7  # 4685.510420480953
+mass node 488 [Fe/H] -2.301 age bin 91: sum = 0x40d9afab83cac9a4  # 26302.679918953814
+mass node 488 [Fe/H] -2.301 age bin 91: agb lost = 0x3fc0b027869ccc2d  # 0.13037580559611808
+mass node 488 [Fe/H] -2.301 age bin 91: agb least = 0x40211c0d16e51b83  # 8.554787364451618
+mass node 488 [Fe/H] -2.301 age bin 91: agb dust = 0x40b24d82aaeaa8e7  # 4685.510420480953
+mass node 488 [Fe/H] -2.301 age bin 104: sum = 0x40d9afab83cac9a4  # 26302.679918953814
+mass node 488 [Fe/H] -2.301 age bin 104: agb lost = 0x3fc0b027869ccc2d  # 0.13037580559611808
+mass node 488 [Fe/H] -2.301 age bin 104: agb least = 0x40211c0d16e51b83  # 8.554787364451618
+mass node 488 [Fe/H] -2.301 age bin 104: agb dust = 0x40b24d82aaeaa8e7  # 4685.510420480953
+mass node 488 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 488 [Fe/H] -2.000 age bin 13: sum = 0x3ece750ab70d85c6  # 3.630780547701011e-6
+mass node 488 [Fe/H] -2.000 age bin 26: sum = 0x3ee8141a5256bfb4  # 1.1481536214968817e-5
+mass node 488 [Fe/H] -2.000 age bin 39: sum = 0x3f10ece984f04435  # 6.45654229034655e-5
+mass node 488 [Fe/H] -2.000 age bin 52: sum = 0x40e37056f21e0f8a  # 39810.71705534968
+mass node 488 [Fe/H] -2.000 age bin 52: agb lost = 0x3fc381b021414d67  # 0.1523952638986927
+mass node 488 [Fe/H] -2.000 age bin 52: agb least = 0x4020efa26ac10971  # 8.468036018432686
+mass node 488 [Fe/H] -2.000 age bin 52: agb dust = 0x40b2df303f078410  # 4831.188461751692
+mass node 488 [Fe/H] -2.000 age bin 65: sum = 0x40e37056f21e0f8a  # 39810.71705534968
+mass node 488 [Fe/H] -2.000 age bin 65: agb lost = 0x3fc381b021414d67  # 0.1523952638986927
+mass node 488 [Fe/H] -2.000 age bin 65: agb least = 0x4020efa26ac10971  # 8.468036018432686
+mass node 488 [Fe/H] -2.000 age bin 65: agb dust = 0x40b2df303f078410  # 4831.188461751692
+mass node 488 [Fe/H] -2.000 age bin 78: sum = 0x40e37056f21e0f8a  # 39810.71705534968
+mass node 488 [Fe/H] -2.000 age bin 78: agb lost = 0x3fc381b021414d67  # 0.1523952638986927
+mass node 488 [Fe/H] -2.000 age bin 78: agb least = 0x4020efa26ac10971  # 8.468036018432686
+mass node 488 [Fe/H] -2.000 age bin 78: agb dust = 0x40b2df303f078410  # 4831.188461751692
+mass node 488 [Fe/H] -2.000 age bin 91: sum = 0x40e37056f21e0f8a  # 39810.71705534968
+mass node 488 [Fe/H] -2.000 age bin 91: agb lost = 0x3fc381b021414d67  # 0.1523952638986927
+mass node 488 [Fe/H] -2.000 age bin 91: agb least = 0x4020efa26ac10971  # 8.468036018432686
+mass node 488 [Fe/H] -2.000 age bin 91: agb dust = 0x40b2df303f078410  # 4831.188461751692
+mass node 488 [Fe/H] -2.000 age bin 104: sum = 0x40e37056f21e0f8a  # 39810.71705534968
+mass node 488 [Fe/H] -2.000 age bin 104: agb lost = 0x3fc381b021414d67  # 0.1523952638986927
+mass node 488 [Fe/H] -2.000 age bin 104: agb least = 0x4020efa26ac10971  # 8.468036018432686
+mass node 488 [Fe/H] -2.000 age bin 104: agb dust = 0x40b2df303f078410  # 4831.188461751692
+mass node 488 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 488 [Fe/H] -1.500 age bin 13: sum = 0x3ee3925ef1ba398c  # 9.332543007969906e-6
+mass node 488 [Fe/H] -1.500 age bin 26: sum = 0x3efef21789b7122c  # 2.9512092266663844e-5
+mass node 488 [Fe/H] -1.500 age bin 39: sum = 0x3f25c0a64c680f38  # 0.00016595869074375615
+mass node 488 [Fe/H] -1.500 age bin 52: sum = 0x40e90ac46dc4069d  # 51286.138399136464
+mass node 488 [Fe/H] -1.500 age bin 52: agb lost = 0x3fc3ca9e0672afba  # 0.15462088885158015
+mass node 488 [Fe/H] -1.500 age bin 52: agb least = 0x4020c05ad0c0d2f4  # 8.375692866838541
+mass node 488 [Fe/H] -1.500 age bin 52: agb dust = 0x40b2d303dcd137b7  # 4819.015088153937
+mass node 488 [Fe/H] -1.500 age bin 65: sum = 0x40e90ac46dc4069d  # 51286.138399136464
+mass node 488 [Fe/H] -1.500 age bin 65: agb lost = 0x3fc3ca9e0672afba  # 0.15462088885158015
+mass node 488 [Fe/H] -1.500 age bin 65: agb least = 0x4020c05ad0c0d2f4  # 8.375692866838541
+mass node 488 [Fe/H] -1.500 age bin 65: agb dust = 0x40b2d303dcd137b7  # 4819.015088153937
+mass node 488 [Fe/H] -1.500 age bin 78: sum = 0x40e90ac46dc4069d  # 51286.138399136464
+mass node 488 [Fe/H] -1.500 age bin 78: agb lost = 0x3fc3ca9e0672afba  # 0.15462088885158015
+mass node 488 [Fe/H] -1.500 age bin 78: agb least = 0x4020c05ad0c0d2f4  # 8.375692866838541
+mass node 488 [Fe/H] -1.500 age bin 78: agb dust = 0x40b2d303dcd137b7  # 4819.015088153937
+mass node 488 [Fe/H] -1.500 age bin 91: sum = 0x40e90ac46dc4069d  # 51286.138399136464
+mass node 488 [Fe/H] -1.500 age bin 91: agb lost = 0x3fc3ca9e0672afba  # 0.15462088885158015
+mass node 488 [Fe/H] -1.500 age bin 91: agb least = 0x4020c05ad0c0d2f4  # 8.375692866838541
+mass node 488 [Fe/H] -1.500 age bin 91: agb dust = 0x40b2d303dcd137b7  # 4819.015088153937
+mass node 488 [Fe/H] -1.500 age bin 104: sum = 0x40e90ac46dc4069d  # 51286.138399136464
+mass node 488 [Fe/H] -1.500 age bin 104: agb lost = 0x3fc3ca9e0672afba  # 0.15462088885158015
+mass node 488 [Fe/H] -1.500 age bin 104: agb least = 0x4020c05ad0c0d2f4  # 8.375692866838541
+mass node 488 [Fe/H] -1.500 age bin 104: agb dust = 0x40b2d303dcd137b7  # 4819.015088153937
+mass node 488 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 488 [Fe/H] -1.000 age bin 13: sum = 0x3f0c27eb33acf585  # 5.370317963702534e-5
+mass node 488 [Fe/H] -1.000 age bin 26: sum = 0x3f20e2a5f050114d  # 0.0001288249551693134
+mass node 488 [Fe/H] -1.000 age bin 39: sum = 0x3f533fe0a4c680af  # 0.0011748975549395293
+mass node 488 [Fe/H] -1.000 age bin 52: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 488 [Fe/H] -1.000 age bin 52: agb lost = 0x3fc3c0a4227a8a40  # 0.15431644137886913
+mass node 488 [Fe/H] -1.000 age bin 52: agb least = 0x4020821457b3f28d  # 8.254061451641315
+mass node 488 [Fe/H] -1.000 age bin 52: agb dust = 0x40b19d2a07fb7e7e  # 4509.1641843017405
+mass node 488 [Fe/H] -1.000 age bin 65: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 488 [Fe/H] -1.000 age bin 65: agb lost = 0x3fc3c0a4227a8a40  # 0.15431644137886913
+mass node 488 [Fe/H] -1.000 age bin 65: agb least = 0x4020821457b3f28d  # 8.254061451641315
+mass node 488 [Fe/H] -1.000 age bin 65: agb dust = 0x40b19d2a07fb7e7e  # 4509.1641843017405
+mass node 488 [Fe/H] -1.000 age bin 78: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 488 [Fe/H] -1.000 age bin 78: agb lost = 0x3fc3c0a4227a8a40  # 0.15431644137886913
+mass node 488 [Fe/H] -1.000 age bin 78: agb least = 0x4020821457b3f28d  # 8.254061451641315
+mass node 488 [Fe/H] -1.000 age bin 78: agb dust = 0x40b19d2a07fb7e7e  # 4509.1641843017405
+mass node 488 [Fe/H] -1.000 age bin 91: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 488 [Fe/H] -1.000 age bin 91: agb lost = 0x3fc3c0a4227a8a40  # 0.15431644137886913
+mass node 488 [Fe/H] -1.000 age bin 91: agb least = 0x4020821457b3f28d  # 8.254061451641315
+mass node 488 [Fe/H] -1.000 age bin 91: agb dust = 0x40b19d2a07fb7e7e  # 4509.1641843017405
+mass node 488 [Fe/H] -1.000 age bin 104: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 488 [Fe/H] -1.000 age bin 104: agb lost = 0x3fc3c0a4227a8a40  # 0.15431644137886913
+mass node 488 [Fe/H] -1.000 age bin 104: agb least = 0x4020821457b3f28d  # 8.254061451641315
+mass node 488 [Fe/H] -1.000 age bin 104: agb dust = 0x40b19d2a07fb7e7e  # 4509.1641843017405
+mass node 488 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 488 [Fe/H] -0.500 age bin 13: sum = 0x3f23d6ab3666bf26  # 0.0001513561248436209
+mass node 488 [Fe/H] -0.500 age bin 26: sum = 0x3f3df4aad366901b  # 0.0004570881896148752
+mass node 488 [Fe/H] -0.500 age bin 39: sum = 0x3f6b2052abfc5b70  # 0.0033113112148259113
+mass node 488 [Fe/H] -0.500 age bin 52: sum = 0x40ecc08bb277a0d8  # 58884.36553555884
+mass node 488 [Fe/H] -0.500 age bin 52: agb lost = 0x3fc17679ad36d1cd  # 0.1364280792019045
+mass node 488 [Fe/H] -0.500 age bin 52: agb least = 0x40208dffdf43f61d  # 8.277342774435107
+mass node 488 [Fe/H] -0.500 age bin 52: agb dust = 0x40ae755fd2611e61  # 3898.6871519422134
+mass node 488 [Fe/H] -0.500 age bin 65: sum = 0x40ecc08bb277a0d8  # 58884.36553555884
+mass node 488 [Fe/H] -0.500 age bin 65: agb lost = 0x3fc17679ad36d1cd  # 0.1364280792019045
+mass node 488 [Fe/H] -0.500 age bin 65: agb least = 0x40208dffdf43f61d  # 8.277342774435107
+mass node 488 [Fe/H] -0.500 age bin 65: agb dust = 0x40ae755fd2611e61  # 3898.6871519422134
+mass node 488 [Fe/H] -0.500 age bin 78: sum = 0x40ecc08bb277a0d8  # 58884.36553555884
+mass node 488 [Fe/H] -0.500 age bin 78: agb lost = 0x3fc17679ad36d1cd  # 0.1364280792019045
+mass node 488 [Fe/H] -0.500 age bin 78: agb least = 0x40208dffdf43f61d  # 8.277342774435107
+mass node 488 [Fe/H] -0.500 age bin 78: agb dust = 0x40ae755fd2611e61  # 3898.6871519422134
+mass node 488 [Fe/H] -0.500 age bin 91: sum = 0x40ecc08bb277a0d8  # 58884.36553555884
+mass node 488 [Fe/H] -0.500 age bin 91: agb lost = 0x3fc17679ad36d1cd  # 0.1364280792019045
+mass node 488 [Fe/H] -0.500 age bin 91: agb least = 0x40208dffdf43f61d  # 8.277342774435107
+mass node 488 [Fe/H] -0.500 age bin 91: agb dust = 0x40ae755fd2611e61  # 3898.6871519422134
+mass node 488 [Fe/H] -0.500 age bin 104: sum = 0x40ecc08bb277a0d8  # 58884.36553555884
+mass node 488 [Fe/H] -0.500 age bin 104: agb lost = 0x3fc17679ad36d1cd  # 0.1364280792019045
+mass node 488 [Fe/H] -0.500 age bin 104: agb least = 0x40208dffdf43f61d  # 8.277342774435107
+mass node 488 [Fe/H] -0.500 age bin 104: agb dust = 0x40ae755fd2611e61  # 3898.6871519422134
+mass node 488 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 488 [Fe/H] -0.250 age bin 13: sum = 0x3f38ea850602f7e7  # 0.00038018939632056135
+mass node 488 [Fe/H] -0.250 age bin 26: sum = 0x3f54281f08b310cc  # 0.0012302687708123814
+mass node 488 [Fe/H] -0.250 age bin 39: sum = 0x3f831cf0b80fdc38  # 0.009332543007969915
+mass node 488 [Fe/H] -0.250 age bin 52: sum = 0x40f1afb9893f28ca  # 72443.59600749906
+mass node 488 [Fe/H] -0.250 age bin 52: agb lost = 0x3fc392ec4ade4b00  # 0.1529212346618678
+mass node 488 [Fe/H] -0.250 age bin 52: agb least = 0x4020402030b5a2c7  # 8.12524559228167
+mass node 488 [Fe/H] -0.250 age bin 52: agb dust = 0x40abd20419281d4c  # 3561.008004430367
+mass node 488 [Fe/H] -0.250 age bin 65: sum = 0x40f1afb9893f28ca  # 72443.59600749906
+mass node 488 [Fe/H] -0.250 age bin 65: agb lost = 0x3fc392ec4ade4b00  # 0.1529212346618678
+mass node 488 [Fe/H] -0.250 age bin 65: agb least = 0x4020402030b5a2c7  # 8.12524559228167
+mass node 488 [Fe/H] -0.250 age bin 65: agb dust = 0x40abd20419281d4c  # 3561.008004430367
+mass node 488 [Fe/H] -0.250 age bin 78: sum = 0x40f1afb9893f28ca  # 72443.59600749906
+mass node 488 [Fe/H] -0.250 age bin 78: agb lost = 0x3fc392ec4ade4b00  # 0.1529212346618678
+mass node 488 [Fe/H] -0.250 age bin 78: agb least = 0x4020402030b5a2c7  # 8.12524559228167
+mass node 488 [Fe/H] -0.250 age bin 78: agb dust = 0x40abd20419281d4c  # 3561.008004430367
+mass node 488 [Fe/H] -0.250 age bin 91: sum = 0x40f1afb9893f28ca  # 72443.59600749906
+mass node 488 [Fe/H] -0.250 age bin 91: agb lost = 0x3fc392ec4ade4b00  # 0.1529212346618678
+mass node 488 [Fe/H] -0.250 age bin 91: agb least = 0x4020402030b5a2c7  # 8.12524559228167
+mass node 488 [Fe/H] -0.250 age bin 91: agb dust = 0x40abd20419281d4c  # 3561.008004430367
+mass node 488 [Fe/H] -0.250 age bin 104: sum = 0x40f1afb9893f28ca  # 72443.59600749906
+mass node 488 [Fe/H] -0.250 age bin 104: agb lost = 0x3fc392ec4ade4b00  # 0.1529212346618678
+mass node 488 [Fe/H] -0.250 age bin 104: agb least = 0x4020402030b5a2c7  # 8.12524559228167
+mass node 488 [Fe/H] -0.250 age bin 104: agb dust = 0x40abd20419281d4c  # 3561.008004430367
+mass node 488 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 488 [Fe/H] 0.000 age bin 13: sum = 0x3f4732adfee1f757  # 0.000707945784384138
+mass node 488 [Fe/H] 0.000 age bin 26: sum = 0x3f62c44c34bd4020  # 0.0022908676527677724
+mass node 488 [Fe/H] 0.000 age bin 39: sum = 0x3f93f7668f879bc6  # 0.01949844599758046
+mass node 488 [Fe/H] 0.000 age bin 52: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.000 age bin 52: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.000 age bin 52: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.000 age bin 52: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.000 age bin 65: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.000 age bin 65: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.000 age bin 65: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.000 age bin 65: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.000 age bin 78: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.000 age bin 78: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.000 age bin 78: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.000 age bin 78: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.000 age bin 91: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.000 age bin 91: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.000 age bin 91: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.000 age bin 91: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.000 age bin 104: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.000 age bin 104: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.000 age bin 104: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.000 age bin 104: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 488 [Fe/H] 0.176 age bin 13: sum = 0x3f4732adfee1f757  # 0.000707945784384138
+mass node 488 [Fe/H] 0.176 age bin 26: sum = 0x3f62c44c34bd4020  # 0.0022908676527677724
+mass node 488 [Fe/H] 0.176 age bin 39: sum = 0x3f93f7668f879bc6  # 0.01949844599758046
+mass node 488 [Fe/H] 0.176 age bin 52: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.176 age bin 52: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.176 age bin 52: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.176 age bin 52: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.176 age bin 65: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.176 age bin 65: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.176 age bin 65: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.176 age bin 65: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.176 age bin 78: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.176 age bin 78: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.176 age bin 78: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.176 age bin 78: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.176 age bin 91: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.176 age bin 91: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.176 age bin 91: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.176 age bin 91: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 488 [Fe/H] 0.176 age bin 104: sum = 0x40fd5a27186b56c0  # 120226.44346174132
+mass node 488 [Fe/H] 0.176 age bin 104: agb lost = 0x3fc828e6c877b13a  # 0.18874821461157315
+mass node 488 [Fe/H] 0.176 age bin 104: agb least = 0x401f92ce5531d179  # 7.893365222135224
+mass node 488 [Fe/H] 0.176 age bin 104: agb dust = 0x40a976b2387ee868  # 3259.348087278242
+mass node 549 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 549 [Fe/H] -2.301 age bin 13: sum = 0x3ed48af5c4701163  # 4.897788193684467e-6
+mass node 549 [Fe/H] -2.301 age bin 26: sum = 0x3efe3dc35b9c0eba  # 2.8840315031266056e-5
+mass node 549 [Fe/H] -2.301 age bin 39: sum = 0x3f452823e62c5548  # 0.0006456542290346557
+mass node 549 [Fe/H] -2.301 age bin 52: sum = 0x40cfad0cecb3dbe6  # 16218.100973589299
+mass node 549 [Fe/H] -2.301 age bin 52: agb lost = 0x3faf3321791af5ce  # 0.06093697169624655
+mass node 549 [Fe/H] -2.301 age bin 52: agb least = 0x402d87ca9c989949  # 14.76521767962244
+mass node 549 [Fe/H] -2.301 age bin 52: agb dust = 0x40b71188e54a7eb6  # 5905.534748702941
+mass node 549 [Fe/H] -2.301 age bin 65: sum = 0x40cfad0cecb3dbe6  # 16218.100973589299
+mass node 549 [Fe/H] -2.301 age bin 65: agb lost = 0x3faf3321791af5ce  # 0.06093697169624655
+mass node 549 [Fe/H] -2.301 age bin 65: agb least = 0x402d87ca9c989949  # 14.76521767962244
+mass node 549 [Fe/H] -2.301 age bin 65: agb dust = 0x40b71188e54a7eb6  # 5905.534748702941
+mass node 549 [Fe/H] -2.301 age bin 78: sum = 0x40cfad0cecb3dbe6  # 16218.100973589299
+mass node 549 [Fe/H] -2.301 age bin 78: agb lost = 0x3faf3321791af5ce  # 0.06093697169624655
+mass node 549 [Fe/H] -2.301 age bin 78: agb least = 0x402d87ca9c989949  # 14.76521767962244
+mass node 549 [Fe/H] -2.301 age bin 78: agb dust = 0x40b71188e54a7eb6  # 5905.534748702941
+mass node 549 [Fe/H] -2.301 age bin 91: sum = 0x40cfad0cecb3dbe6  # 16218.100973589299
+mass node 549 [Fe/H] -2.301 age bin 91: agb lost = 0x3faf3321791af5ce  # 0.06093697169624655
+mass node 549 [Fe/H] -2.301 age bin 91: agb least = 0x402d87ca9c989949  # 14.76521767962244
+mass node 549 [Fe/H] -2.301 age bin 91: agb dust = 0x40b71188e54a7eb6  # 5905.534748702941
+mass node 549 [Fe/H] -2.301 age bin 104: sum = 0x40cfad0cecb3dbe6  # 16218.100973589299
+mass node 549 [Fe/H] -2.301 age bin 104: agb lost = 0x3faf3321791af5ce  # 0.06093697169624655
+mass node 549 [Fe/H] -2.301 age bin 104: agb least = 0x402d87ca9c989949  # 14.76521767962244
+mass node 549 [Fe/H] -2.301 age bin 104: agb dust = 0x40b71188e54a7eb6  # 5905.534748702941
+mass node 549 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 549 [Fe/H] -2.000 age bin 13: sum = 0x3eed9f80d1983295  # 1.412537544622756e-5
+mass node 549 [Fe/H] -2.000 age bin 26: sum = 0x3f154ed03192ccd8  # 8.128305161640996e-5
+mass node 549 [Fe/H] -2.000 age bin 39: sum = 0x3f5960352e725dee  # 0.0015488166189124813
+mass node 549 [Fe/H] -2.000 age bin 52: sum = 0x40d7f8c5b4beef0d  # 24547.08915685029
+mass node 549 [Fe/H] -2.000 age bin 52: agb lost = 0x3fb7f55de84a6b34  # 0.09358775063666941
+mass node 549 [Fe/H] -2.000 age bin 52: agb least = 0x402d4fefff8e9812  # 14.656127916485307
+mass node 549 [Fe/H] -2.000 age bin 52: agb dust = 0x40b758db14ed880c  # 5976.855788083758
+mass node 549 [Fe/H] -2.000 age bin 65: sum = 0x40d7f8c5b4beef0d  # 24547.08915685029
+mass node 549 [Fe/H] -2.000 age bin 65: agb lost = 0x3fb7f55de84a6b34  # 0.09358775063666941
+mass node 549 [Fe/H] -2.000 age bin 65: agb least = 0x402d4fefff8e9812  # 14.656127916485307
+mass node 549 [Fe/H] -2.000 age bin 65: agb dust = 0x40b758db14ed880c  # 5976.855788083758
+mass node 549 [Fe/H] -2.000 age bin 78: sum = 0x40d7f8c5b4beef0d  # 24547.08915685029
+mass node 549 [Fe/H] -2.000 age bin 78: agb lost = 0x3fb7f55de84a6b34  # 0.09358775063666941
+mass node 549 [Fe/H] -2.000 age bin 78: agb least = 0x402d4fefff8e9812  # 14.656127916485307
+mass node 549 [Fe/H] -2.000 age bin 78: agb dust = 0x40b758db14ed880c  # 5976.855788083758
+mass node 549 [Fe/H] -2.000 age bin 91: sum = 0x40d7f8c5b4beef0d  # 24547.08915685029
+mass node 549 [Fe/H] -2.000 age bin 91: agb lost = 0x3fb7f55de84a6b34  # 0.09358775063666941
+mass node 549 [Fe/H] -2.000 age bin 91: agb least = 0x402d4fefff8e9812  # 14.656127916485307
+mass node 549 [Fe/H] -2.000 age bin 91: agb dust = 0x40b758db14ed880c  # 5976.855788083758
+mass node 549 [Fe/H] -2.000 age bin 104: sum = 0x40d7f8c5b4beef0d  # 24547.08915685029
+mass node 549 [Fe/H] -2.000 age bin 104: agb lost = 0x3fb7f55de84a6b34  # 0.09358775063666941
+mass node 549 [Fe/H] -2.000 age bin 104: agb least = 0x402d4fefff8e9812  # 14.656127916485307
+mass node 549 [Fe/H] -2.000 age bin 104: agb dust = 0x40b758db14ed880c  # 5976.855788083758
+mass node 549 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 549 [Fe/H] -1.500 age bin 13: sum = 0x3f055bc3f9e5d5aa  # 4.07380277804113e-5
+mass node 549 [Fe/H] -1.500 age bin 26: sum = 0x3f2eb9ed381f5325  # 0.00023442288153199226
+mass node 549 [Fe/H] -1.500 age bin 39: sum = 0x3f71e13343c90558  # 0.004365158322401662
+mass node 549 [Fe/H] -1.500 age bin 52: sum = 0x40ea38e5bf96259d  # 53703.17963702532
+mass node 549 [Fe/H] -1.500 age bin 52: agb lost = 0x3fbdf9d9d8d717da  # 0.11709367317152389
+mass node 549 [Fe/H] -1.500 age bin 52: agb least = 0x402cf1c1b10efefe  # 14.472180874901365
+mass node 549 [Fe/H] -1.500 age bin 52: agb dust = 0x40b77badfb416d1b  # 6011.67961510576
+mass node 549 [Fe/H] -1.500 age bin 65: sum = 0x40ea38e5bf96259d  # 53703.17963702532
+mass node 549 [Fe/H] -1.500 age bin 65: agb lost = 0x3fbdf9d9d8d717da  # 0.11709367317152389
+mass node 549 [Fe/H] -1.500 age bin 65: agb least = 0x402cf1c1b10efefe  # 14.472180874901365
+mass node 549 [Fe/H] -1.500 age bin 65: agb dust = 0x40b77badfb416d1b  # 6011.67961510576
+mass node 549 [Fe/H] -1.500 age bin 78: sum = 0x40ea38e5bf96259d  # 53703.17963702532
+mass node 549 [Fe/H] -1.500 age bin 78: agb lost = 0x3fbdf9d9d8d717da  # 0.11709367317152389
+mass node 549 [Fe/H] -1.500 age bin 78: agb least = 0x402cf1c1b10efefe  # 14.472180874901365
+mass node 549 [Fe/H] -1.500 age bin 78: agb dust = 0x40b77badfb416d1b  # 6011.67961510576
+mass node 549 [Fe/H] -1.500 age bin 91: sum = 0x40ea38e5bf96259d  # 53703.17963702532
+mass node 549 [Fe/H] -1.500 age bin 91: agb lost = 0x3fbdf9d9d8d717da  # 0.11709367317152389
+mass node 549 [Fe/H] -1.500 age bin 91: agb least = 0x402cf1c1b10efefe  # 14.472180874901365
+mass node 549 [Fe/H] -1.500 age bin 91: agb dust = 0x40b77badfb416d1b  # 6011.67961510576
+mass node 549 [Fe/H] -1.500 age bin 104: sum = 0x40ea38e5bf96259d  # 53703.17963702532
+mass node 549 [Fe/H] -1.500 age bin 104: agb lost = 0x3fbdf9d9d8d717da  # 0.11709367317152389
+mass node 549 [Fe/H] -1.500 age bin 104: agb least = 0x402cf1c1b10efefe  # 14.472180874901365
+mass node 549 [Fe/H] -1.500 age bin 104: agb dust = 0x40b77badfb416d1b  # 6011.67961510576
+mass node 549 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 549 [Fe/H] -1.000 age bin 13: sum = 0x3f1ecc9aa13d9ab2  # 0.00011748975549395293
+mass node 549 [Fe/H] -1.000 age bin 26: sum = 0x3f45a64c603d6918  # 0.0006606934480075958
+mass node 549 [Fe/H] -1.000 age bin 39: sum = 0x3f8ba0735523d200  # 0.013489628825916533
+mass node 549 [Fe/H] -1.000 age bin 52: sum = 0x411c8c5c90ad975c  # 467735.14128719806
+mass node 549 [Fe/H] -1.000 age bin 52: agb lost = 0x3fcb488c09d46d67  # 0.2131514595028918
+mass node 549 [Fe/H] -1.000 age bin 52: agb least = 0x4029d6495452b224  # 12.918528208822927
+mass node 549 [Fe/H] -1.000 age bin 52: agb dust = 0x40b737879fd38140  # 5943.529782504134
+mass node 549 [Fe/H] -1.000 age bin 65: sum = 0x411c8c5c90ad975c  # 467735.14128719806
+mass node 549 [Fe/H] -1.000 age bin 65: agb lost = 0x3fcb488c09d46d67  # 0.2131514595028918
+mass node 549 [Fe/H] -1.000 age bin 65: agb least = 0x4029d6495452b224  # 12.918528208822927
+mass node 549 [Fe/H] -1.000 age bin 65: agb dust = 0x40b737879fd38140  # 5943.529782504134
+mass node 549 [Fe/H] -1.000 age bin 78: sum = 0x411c8c5c90ad975c  # 467735.14128719806
+mass node 549 [Fe/H] -1.000 age bin 78: agb lost = 0x3fcb488c09d46d67  # 0.2131514595028918
+mass node 549 [Fe/H] -1.000 age bin 78: agb least = 0x4029d6495452b224  # 12.918528208822927
+mass node 549 [Fe/H] -1.000 age bin 78: agb dust = 0x40b737879fd38140  # 5943.529782504134
+mass node 549 [Fe/H] -1.000 age bin 91: sum = 0x411c8c5c90ad975c  # 467735.14128719806
+mass node 549 [Fe/H] -1.000 age bin 91: agb lost = 0x3fcb488c09d46d67  # 0.2131514595028918
+mass node 549 [Fe/H] -1.000 age bin 91: agb least = 0x4029d6495452b224  # 12.918528208822927
+mass node 549 [Fe/H] -1.000 age bin 91: agb dust = 0x40b737879fd38140  # 5943.529782504134
+mass node 549 [Fe/H] -1.000 age bin 104: sum = 0x411c8c5c90ad975c  # 467735.14128719806
+mass node 549 [Fe/H] -1.000 age bin 104: agb lost = 0x3fcb488c09d46d67  # 0.2131514595028918
+mass node 549 [Fe/H] -1.000 age bin 104: agb least = 0x4029d6495452b224  # 12.918528208822927
+mass node 549 [Fe/H] -1.000 age bin 104: agb dust = 0x40b737879fd38140  # 5943.529782504134
+mass node 549 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 549 [Fe/H] -0.500 age bin 13: sum = 0x3f2a26fd472780c3  # 0.00019952623149688793
+mass node 549 [Fe/H] -0.500 age bin 26: sum = 0x3f57249ca3bee77b  # 0.001412537544622754
+mass node 549 [Fe/H] -0.500 age bin 39: sum = 0x3f9eec9f4afc2a87  # 0.030199517204020167
+mass node 549 [Fe/H] -0.500 age bin 52: sum = 0x413258586f431638  # 1202264.4346174132
+mass node 549 [Fe/H] -0.500 age bin 52: agb lost = 0x3fd2e6a34490ac74  # 0.2953270120221483
+mass node 549 [Fe/H] -0.500 age bin 52: agb least = 0x40269286d980cead  # 11.286185070966292
+mass node 549 [Fe/H] -0.500 age bin 52: agb dust = 0x40b5991d48add6a7  # 5529.114390244394
+mass node 549 [Fe/H] -0.500 age bin 65: sum = 0x413258586f431638  # 1202264.4346174132
+mass node 549 [Fe/H] -0.500 age bin 65: agb lost = 0x3fd2e6a34490ac74  # 0.2953270120221483
+mass node 549 [Fe/H] -0.500 age bin 65: agb least = 0x40269286d980cead  # 11.286185070966292
+mass node 549 [Fe/H] -0.500 age bin 65: agb dust = 0x40b5991d48add6a7  # 5529.114390244394
+mass node 549 [Fe/H] -0.500 age bin 78: sum = 0x413258586f431638  # 1202264.4346174132
+mass node 549 [Fe/H] -0.500 age bin 78: agb lost = 0x3fd2e6a34490ac74  # 0.2953270120221483
+mass node 549 [Fe/H] -0.500 age bin 78: agb least = 0x40269286d980cead  # 11.286185070966292
+mass node 549 [Fe/H] -0.500 age bin 78: agb dust = 0x40b5991d48add6a7  # 5529.114390244394
+mass node 549 [Fe/H] -0.500 age bin 91: sum = 0x413258586f431638  # 1202264.4346174132
+mass node 549 [Fe/H] -0.500 age bin 91: agb lost = 0x3fd2e6a34490ac74  # 0.2953270120221483
+mass node 549 [Fe/H] -0.500 age bin 91: agb least = 0x40269286d980cead  # 11.286185070966292
+mass node 549 [Fe/H] -0.500 age bin 91: agb dust = 0x40b5991d48add6a7  # 5529.114390244394
+mass node 549 [Fe/H] -0.500 age bin 104: sum = 0x413258586f431638  # 1202264.4346174132
+mass node 549 [Fe/H] -0.500 age bin 104: agb lost = 0x3fd2e6a34490ac74  # 0.2953270120221483
+mass node 549 [Fe/H] -0.500 age bin 104: agb least = 0x40269286d980cead  # 11.286185070966292
+mass node 549 [Fe/H] -0.500 age bin 104: agb dust = 0x40b5991d48add6a7  # 5529.114390244394
+mass node 549 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 549 [Fe/H] -0.250 age bin 13: sum = 0x3f3740c7e7272649  # 0.0003548133892335754
+mass node 549 [Fe/H] -0.250 age bin 26: sum = 0x3f6493cec2631f18  # 0.0025118864315095794
+mass node 549 [Fe/H] -0.250 age bin 39: sum = 0x3fce0191a8ce9732  # 0.23442288153199226
+mass node 549 [Fe/H] -0.250 age bin 52: sum = 0x4150a6d994a23a8f  # 4365158.322401657
+mass node 549 [Fe/H] -0.250 age bin 52: agb lost = 0x3ff564d31f867e42  # 1.3371154052218945
+mass node 549 [Fe/H] -0.250 age bin 52: agb least = 0x4020caf0991d374d  # 8.396366867844018
+mass node 549 [Fe/H] -0.250 age bin 52: agb dust = 0x40b48c6224cae479  # 5260.38337390974
+mass node 549 [Fe/H] -0.250 age bin 65: sum = 0x4150a6d994a23a8f  # 4365158.322401657
+mass node 549 [Fe/H] -0.250 age bin 65: agb lost = 0x3ff564d31f867e42  # 1.3371154052218945
+mass node 549 [Fe/H] -0.250 age bin 65: agb least = 0x4020caf0991d374d  # 8.396366867844018
+mass node 549 [Fe/H] -0.250 age bin 65: agb dust = 0x40b48c6224cae479  # 5260.38337390974
+mass node 549 [Fe/H] -0.250 age bin 78: sum = 0x4150a6d994a23a8f  # 4365158.322401657
+mass node 549 [Fe/H] -0.250 age bin 78: agb lost = 0x3ff564d31f867e42  # 1.3371154052218945
+mass node 549 [Fe/H] -0.250 age bin 78: agb least = 0x4020caf0991d374d  # 8.396366867844018
+mass node 549 [Fe/H] -0.250 age bin 78: agb dust = 0x40b48c6224cae479  # 5260.38337390974
+mass node 549 [Fe/H] -0.250 age bin 91: sum = 0x4150a6d994a23a8f  # 4365158.322401657
+mass node 549 [Fe/H] -0.250 age bin 91: agb lost = 0x3ff564d31f867e42  # 1.3371154052218945
+mass node 549 [Fe/H] -0.250 age bin 91: agb least = 0x4020caf0991d374d  # 8.396366867844018
+mass node 549 [Fe/H] -0.250 age bin 91: agb dust = 0x40b48c6224cae479  # 5260.38337390974
+mass node 549 [Fe/H] -0.250 age bin 104: sum = 0x4150a6d994a23a8f  # 4365158.322401657
+mass node 549 [Fe/H] -0.250 age bin 104: agb lost = 0x3ff564d31f867e42  # 1.3371154052218945
+mass node 549 [Fe/H] -0.250 age bin 104: agb least = 0x4020caf0991d374d  # 8.396366867844018
+mass node 549 [Fe/H] -0.250 age bin 104: agb dust = 0x40b48c6224cae479  # 5260.38337390974
+mass node 549 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 549 [Fe/H] 0.000 age bin 13: sum = 0x3f4201e20a5f5073  # 0.0005495408738576249
+mass node 549 [Fe/H] 0.000 age bin 26: sum = 0x3f6fdede37d052d7  # 0.0038904514499428044
+mass node 549 [Fe/H] 0.000 age bin 39: sum = 0x4123415ab05fb535  # 630957.3444801929
+mass node 549 [Fe/H] 0.000 age bin 52: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.000 age bin 52: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.000 age bin 52: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.000 age bin 52: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.000 age bin 65: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.000 age bin 65: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.000 age bin 65: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.000 age bin 65: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.000 age bin 78: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.000 age bin 78: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.000 age bin 78: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.000 age bin 78: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.000 age bin 91: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.000 age bin 91: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.000 age bin 91: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.000 age bin 91: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.000 age bin 104: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.000 age bin 104: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.000 age bin 104: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.000 age bin 104: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 549 [Fe/H] 0.176 age bin 13: sum = 0x3f4201e20a5f5073  # 0.0005495408738576249
+mass node 549 [Fe/H] 0.176 age bin 26: sum = 0x3f6fdede37d052d7  # 0.0038904514499428044
+mass node 549 [Fe/H] 0.176 age bin 39: sum = 0x4123415ab05fb535  # 630957.3444801929
+mass node 549 [Fe/H] 0.176 age bin 52: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.176 age bin 52: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.176 age bin 52: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.176 age bin 52: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.176 age bin 65: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.176 age bin 65: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.176 age bin 65: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.176 age bin 65: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.176 age bin 78: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.176 age bin 78: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.176 age bin 78: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.176 age bin 78: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.176 age bin 91: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.176 age bin 91: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.176 age bin 91: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.176 age bin 91: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 549 [Fe/H] 0.176 age bin 104: sum = 0x4170f580a19b31bc  # 17782794.100389227
+mass node 549 [Fe/H] 0.176 age bin 104: agb lost = 0x401255fe149074b0  # 4.5839770520371275
+mass node 549 [Fe/H] 0.176 age bin 104: agb least = 0x4013322c57b20ee6  # 4.7989972784450625
+mass node 549 [Fe/H] 0.176 age bin 104: agb dust = 0x40d9302b8654e448  # 25792.6800739507
+mass node 610 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 610 [Fe/H] -2.301 age bin 13: sum = 0x3ee243f33e3f96ee  # 8.709635899560816e-6
+mass node 610 [Fe/H] -2.301 age bin 26: sum = 0x3f20e2a5f050114d  # 0.0001288249551693134
+mass node 610 [Fe/H] -2.301 age bin 39: sum = 0x415c475b9a6ebe0a  # 7413102.413009176
+mass node 610 [Fe/H] -2.301 age bin 39: agb lost = 0x403447167150619f  # 20.277686197399472
+mass node 610 [Fe/H] -2.301 age bin 39: agb least = 0x40273e801ff4cb37  # 11.622071264869744
+mass node 610 [Fe/H] -2.301 age bin 39: agb dust = 0x40db3ca71c226fcb  # 27890.611092194722
+mass node 610 [Fe/H] -2.301 age bin 52: sum = 0x415c475b9a6ebe0a  # 7413102.413009176
+mass node 610 [Fe/H] -2.301 age bin 52: agb lost = 0x403447167150619f  # 20.277686197399472
+mass node 610 [Fe/H] -2.301 age bin 52: agb least = 0x40273e801ff4cb37  # 11.622071264869744
+mass node 610 [Fe/H] -2.301 age bin 52: agb dust = 0x40db3ca71c226fcb  # 27890.611092194722
+mass node 610 [Fe/H] -2.301 age bin 65: sum = 0x415c475b9a6ebe0a  # 7413102.413009176
+mass node 610 [Fe/H] -2.301 age bin 65: agb lost = 0x403447167150619f  # 20.277686197399472
+mass node 610 [Fe/H] -2.301 age bin 65: agb least = 0x40273e801ff4cb37  # 11.622071264869744
+mass node 610 [Fe/H] -2.301 age bin 65: agb dust = 0x40db3ca71c226fcb  # 27890.611092194722
+mass node 610 [Fe/H] -2.301 age bin 78: sum = 0x415c475b9a6ebe0a  # 7413102.413009176
+mass node 610 [Fe/H] -2.301 age bin 78: agb lost = 0x403447167150619f  # 20.277686197399472
+mass node 610 [Fe/H] -2.301 age bin 78: agb least = 0x40273e801ff4cb37  # 11.622071264869744
+mass node 610 [Fe/H] -2.301 age bin 78: agb dust = 0x40db3ca71c226fcb  # 27890.611092194722
+mass node 610 [Fe/H] -2.301 age bin 91: sum = 0x415c475b9a6ebe0a  # 7413102.413009176
+mass node 610 [Fe/H] -2.301 age bin 91: agb lost = 0x403447167150619f  # 20.277686197399472
+mass node 610 [Fe/H] -2.301 age bin 91: agb least = 0x40273e801ff4cb37  # 11.622071264869744
+mass node 610 [Fe/H] -2.301 age bin 91: agb dust = 0x40db3ca71c226fcb  # 27890.611092194722
+mass node 610 [Fe/H] -2.301 age bin 104: sum = 0x415c475b9a6ebe0a  # 7413102.413009176
+mass node 610 [Fe/H] -2.301 age bin 104: agb lost = 0x403447167150619f  # 20.277686197399472
+mass node 610 [Fe/H] -2.301 age bin 104: agb least = 0x40273e801ff4cb37  # 11.622071264869744
+mass node 610 [Fe/H] -2.301 age bin 104: agb dust = 0x40db3ca71c226fcb  # 27890.611092194722
+mass node 610 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 610 [Fe/H] -2.000 age bin 13: sum = 0x3efb94926699d888  # 2.6302679918953814e-5
+mass node 610 [Fe/H] -2.000 age bin 26: sum = 0x3f385953a885509a  # 0.0003715352290971724
+mass node 610 [Fe/H] -2.000 age bin 39: sum = 0x4161652d8c98093f  # 9120108.393559096
+mass node 610 [Fe/H] -2.000 age bin 39: agb lost = 0x4033b06e8d16d0e3  # 19.689186876364044
+mass node 610 [Fe/H] -2.000 age bin 39: agb least = 0x402775f38bc7fe64  # 11.730373733676238
+mass node 610 [Fe/H] -2.000 age bin 39: agb dust = 0x40db61d17e440d65  # 28039.273331654626
+mass node 610 [Fe/H] -2.000 age bin 52: sum = 0x4161652d8c98093f  # 9120108.393559096
+mass node 610 [Fe/H] -2.000 age bin 52: agb lost = 0x4033b06e8d16d0e3  # 19.689186876364044
+mass node 610 [Fe/H] -2.000 age bin 52: agb least = 0x402775f38bc7fe64  # 11.730373733676238
+mass node 610 [Fe/H] -2.000 age bin 52: agb dust = 0x40db61d17e440d65  # 28039.273331654626
+mass node 610 [Fe/H] -2.000 age bin 65: sum = 0x4161652d8c98093f  # 9120108.393559096
+mass node 610 [Fe/H] -2.000 age bin 65: agb lost = 0x4033b06e8d16d0e3  # 19.689186876364044
+mass node 610 [Fe/H] -2.000 age bin 65: agb least = 0x402775f38bc7fe64  # 11.730373733676238
+mass node 610 [Fe/H] -2.000 age bin 65: agb dust = 0x40db61d17e440d65  # 28039.273331654626
+mass node 610 [Fe/H] -2.000 age bin 78: sum = 0x4161652d8c98093f  # 9120108.393559096
+mass node 610 [Fe/H] -2.000 age bin 78: agb lost = 0x4033b06e8d16d0e3  # 19.689186876364044
+mass node 610 [Fe/H] -2.000 age bin 78: agb least = 0x402775f38bc7fe64  # 11.730373733676238
+mass node 610 [Fe/H] -2.000 age bin 78: agb dust = 0x40db61d17e440d65  # 28039.273331654626
+mass node 610 [Fe/H] -2.000 age bin 91: sum = 0x4161652d8c98093f  # 9120108.393559096
+mass node 610 [Fe/H] -2.000 age bin 91: agb lost = 0x4033b06e8d16d0e3  # 19.689186876364044
+mass node 610 [Fe/H] -2.000 age bin 91: agb least = 0x402775f38bc7fe64  # 11.730373733676238
+mass node 610 [Fe/H] -2.000 age bin 91: agb dust = 0x40db61d17e440d65  # 28039.273331654626
+mass node 610 [Fe/H] -2.000 age bin 104: sum = 0x4161652d8c98093f  # 9120108.393559096
+mass node 610 [Fe/H] -2.000 age bin 104: agb lost = 0x4033b06e8d16d0e3  # 19.689186876364044
+mass node 610 [Fe/H] -2.000 age bin 104: agb least = 0x402775f38bc7fe64  # 11.730373733676238
+mass node 610 [Fe/H] -2.000 age bin 104: agb dust = 0x40db61d17e440d65  # 28039.273331654626
+mass node 610 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 610 [Fe/H] -1.500 age bin 13: sum = 0x3f15cddf4727f4e9  # 8.317637711026709e-5
+mass node 610 [Fe/H] -1.500 age bin 26: sum = 0x3f52cfb49053c5cc  # 0.0011481536214968833
+mass node 610 [Fe/H] -1.500 age bin 39: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.500 age bin 39: agb lost = 0x403194f43c78ba06  # 17.5818517489188
+mass node 610 [Fe/H] -1.500 age bin 39: agb least = 0x402814826707622a  # 12.040057391787816
+mass node 610 [Fe/H] -1.500 age bin 39: agb dust = 0x40db6155c0ca6ea6  # 28037.339892013602
+mass node 610 [Fe/H] -1.500 age bin 52: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.500 age bin 52: agb lost = 0x403194f43c78ba06  # 17.5818517489188
+mass node 610 [Fe/H] -1.500 age bin 52: agb least = 0x402814826707622a  # 12.040057391787816
+mass node 610 [Fe/H] -1.500 age bin 52: agb dust = 0x40db6155c0ca6ea6  # 28037.339892013602
+mass node 610 [Fe/H] -1.500 age bin 65: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.500 age bin 65: agb lost = 0x403194f43c78ba06  # 17.5818517489188
+mass node 610 [Fe/H] -1.500 age bin 65: agb least = 0x402814826707622a  # 12.040057391787816
+mass node 610 [Fe/H] -1.500 age bin 65: agb dust = 0x40db6155c0ca6ea6  # 28037.339892013602
+mass node 610 [Fe/H] -1.500 age bin 78: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.500 age bin 78: agb lost = 0x403194f43c78ba06  # 17.5818517489188
+mass node 610 [Fe/H] -1.500 age bin 78: agb least = 0x402814826707622a  # 12.040057391787816
+mass node 610 [Fe/H] -1.500 age bin 78: agb dust = 0x40db6155c0ca6ea6  # 28037.339892013602
+mass node 610 [Fe/H] -1.500 age bin 91: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.500 age bin 91: agb lost = 0x403194f43c78ba06  # 17.5818517489188
+mass node 610 [Fe/H] -1.500 age bin 91: agb least = 0x402814826707622a  # 12.040057391787816
+mass node 610 [Fe/H] -1.500 age bin 91: agb dust = 0x40db6155c0ca6ea6  # 28037.339892013602
+mass node 610 [Fe/H] -1.500 age bin 104: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.500 age bin 104: agb lost = 0x403194f43c78ba06  # 17.5818517489188
+mass node 610 [Fe/H] -1.500 age bin 104: agb least = 0x402814826707622a  # 12.040057391787816
+mass node 610 [Fe/H] -1.500 age bin 104: agb dust = 0x40db6155c0ca6ea6  # 28037.339892013602
+mass node 610 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 610 [Fe/H] -1.000 age bin 13: sum = 0x3f320cd4387ccb06  # 0.0002754228703338166
+mass node 610 [Fe/H] -1.000 age bin 26: sum = 0x3f6fdede37d052d7  # 0.0038904514499428044
+mass node 610 [Fe/H] -1.000 age bin 39: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.000 age bin 39: agb lost = 0x40270730759ba679  # 11.514041590929297
+mass node 610 [Fe/H] -1.000 age bin 39: agb least = 0x4026b42ef43df033  # 11.351920731125665
+mass node 610 [Fe/H] -1.000 age bin 39: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -1.000 age bin 52: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.000 age bin 52: agb lost = 0x40270730759ba679  # 11.514041590929297
+mass node 610 [Fe/H] -1.000 age bin 52: agb least = 0x4026b42ef43df033  # 11.351920731125665
+mass node 610 [Fe/H] -1.000 age bin 52: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -1.000 age bin 65: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.000 age bin 65: agb lost = 0x40270730759ba679  # 11.514041590929297
+mass node 610 [Fe/H] -1.000 age bin 65: agb least = 0x4026b42ef43df033  # 11.351920731125665
+mass node 610 [Fe/H] -1.000 age bin 65: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -1.000 age bin 78: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.000 age bin 78: agb lost = 0x40270730759ba679  # 11.514041590929297
+mass node 610 [Fe/H] -1.000 age bin 78: agb least = 0x4026b42ef43df033  # 11.351920731125665
+mass node 610 [Fe/H] -1.000 age bin 78: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -1.000 age bin 91: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.000 age bin 91: agb lost = 0x40270730759ba679  # 11.514041590929297
+mass node 610 [Fe/H] -1.000 age bin 91: agb least = 0x4026b42ef43df033  # 11.351920731125665
+mass node 610 [Fe/H] -1.000 age bin 91: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -1.000 age bin 104: sum = 0x4163f8eeaf605461  # 10471285.480508985
+mass node 610 [Fe/H] -1.000 age bin 104: agb lost = 0x40270730759ba679  # 11.514041590929297
+mass node 610 [Fe/H] -1.000 age bin 104: agb least = 0x4026b42ef43df033  # 11.351920731125665
+mass node 610 [Fe/H] -1.000 age bin 104: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 610 [Fe/H] -0.500 age bin 13: sum = 0x3f40ce316f9161d2  # 0.0005128613839913648
+mass node 610 [Fe/H] -0.500 age bin 26: sum = 0x3f7e5d3386cff775  # 0.007413102413009178
+mass node 610 [Fe/H] -0.500 age bin 39: sum = 0x4165669b11606ab3  # 11220184.543019628
+mass node 610 [Fe/H] -0.500 age bin 39: agb lost = 0x3ff8842a3a2e8705  # 1.5322668335651894
+mass node 610 [Fe/H] -0.500 age bin 39: agb least = 0x40261899c026cc0f  # 11.048048023925757
+mass node 610 [Fe/H] -0.500 age bin 39: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -0.500 age bin 52: sum = 0x4165669b11606ab3  # 11220184.543019628
+mass node 610 [Fe/H] -0.500 age bin 52: agb lost = 0x3ff8842a3a2e8705  # 1.5322668335651894
+mass node 610 [Fe/H] -0.500 age bin 52: agb least = 0x40261899c026cc0f  # 11.048048023925757
+mass node 610 [Fe/H] -0.500 age bin 52: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -0.500 age bin 65: sum = 0x4165669b11606ab3  # 11220184.543019628
+mass node 610 [Fe/H] -0.500 age bin 65: agb lost = 0x3ff8842a3a2e8705  # 1.5322668335651894
+mass node 610 [Fe/H] -0.500 age bin 65: agb least = 0x40261899c026cc0f  # 11.048048023925757
+mass node 610 [Fe/H] -0.500 age bin 65: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -0.500 age bin 78: sum = 0x4165669b11606ab3  # 11220184.543019628
+mass node 610 [Fe/H] -0.500 age bin 78: agb lost = 0x3ff8842a3a2e8705  # 1.5322668335651894
+mass node 610 [Fe/H] -0.500 age bin 78: agb least = 0x40261899c026cc0f  # 11.048048023925757
+mass node 610 [Fe/H] -0.500 age bin 78: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -0.500 age bin 91: sum = 0x4165669b11606ab3  # 11220184.543019628
+mass node 610 [Fe/H] -0.500 age bin 91: agb lost = 0x3ff8842a3a2e8705  # 1.5322668335651894
+mass node 610 [Fe/H] -0.500 age bin 91: agb least = 0x40261899c026cc0f  # 11.048048023925757
+mass node 610 [Fe/H] -0.500 age bin 91: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -0.500 age bin 104: sum = 0x4165669b11606ab3  # 11220184.543019628
+mass node 610 [Fe/H] -0.500 age bin 104: agb lost = 0x3ff8842a3a2e8705  # 1.5322668335651894
+mass node 610 [Fe/H] -0.500 age bin 104: agb least = 0x40261899c026cc0f  # 11.048048023925757
+mass node 610 [Fe/H] -0.500 age bin 104: agb dust = 0x40ea2e482128d4be  # 53618.25404779006
+mass node 610 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 610 [Fe/H] -0.250 age bin 13: sum = 0x3f50624dd2f1a9fc  # 0.001
+mass node 610 [Fe/H] -0.250 age bin 26: sum = 0x3f90fe81ebb14be1  # 0.016595869074375606
+mass node 610 [Fe/H] -0.250 age bin 39: sum = 0x41689247f08ab39d  # 12882495.51693135
+mass node 610 [Fe/H] -0.250 age bin 52: sum = 0x41689247f08ab39d  # 12882495.51693135
+mass node 610 [Fe/H] -0.250 age bin 65: sum = 0x41689247f08ab39d  # 12882495.51693135
+mass node 610 [Fe/H] -0.250 age bin 78: sum = 0x41689247f08ab39d  # 12882495.51693135
+mass node 610 [Fe/H] -0.250 age bin 91: sum = 0x41689247f08ab39d  # 12882495.51693135
+mass node 610 [Fe/H] -0.250 age bin 104: sum = 0x41689247f08ab39d  # 12882495.51693135
+mass node 610 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 610 [Fe/H] 0.000 age bin 13: sum = 0x3f5b30cfdf821307  # 0.0016595869074375617
+mass node 610 [Fe/H] 0.000 age bin 26: sum = 0x3f9fa50628b47862  # 0.030902954325135908
+mass node 610 [Fe/H] 0.000 age bin 39: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.000 age bin 52: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.000 age bin 65: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.000 age bin 78: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.000 age bin 91: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.000 age bin 104: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 610 [Fe/H] 0.176 age bin 13: sum = 0x3f5b30cfdf821307  # 0.0016595869074375617
+mass node 610 [Fe/H] 0.176 age bin 26: sum = 0x3f9fa50628b47862  # 0.030902954325135908
+mass node 610 [Fe/H] 0.176 age bin 39: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.176 age bin 52: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.176 age bin 65: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.176 age bin 78: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.176 age bin 91: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 610 [Fe/H] 0.176 age bin 104: sum = 0x416c36357c36bd52  # 14791083.881682072
+mass node 671 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 671 [Fe/H] -2.301 age bin 13: sum = 0x3ee3205227359f61  # 9.120108393559098e-6
+mass node 671 [Fe/H] -2.301 age bin 26: sum = 0x3f2e06e054620033  # 0.00022908676527677723
+mass node 671 [Fe/H] -2.301 age bin 39: sum = 0x40e9a017df6fc5e5  # 52480.74602497722
+mass node 671 [Fe/H] -2.301 age bin 52: sum = 0x40e9a017df6fc5e5  # 52480.74602497722
+mass node 671 [Fe/H] -2.301 age bin 65: sum = 0x40e9a017df6fc5e5  # 52480.74602497722
+mass node 671 [Fe/H] -2.301 age bin 78: sum = 0x40e9a017df6fc5e5  # 52480.74602497722
+mass node 671 [Fe/H] -2.301 age bin 91: sum = 0x40e9a017df6fc5e5  # 52480.74602497722
+mass node 671 [Fe/H] -2.301 age bin 104: sum = 0x40e9a017df6fc5e5  # 52480.74602497722
+mass node 671 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 671 [Fe/H] -2.000 age bin 13: sum = 0x3efb94926699d888  # 2.6302679918953814e-5
+mass node 671 [Fe/H] -2.000 age bin 26: sum = 0x3f44345faf166f0e  # 0.0006165950018614823
+mass node 671 [Fe/H] -2.000 age bin 39: sum = 0x40f3d830d36bba89  # 81283.05161640992
+mass node 671 [Fe/H] -2.000 age bin 52: sum = 0x40f3d830d36bba89  # 81283.05161640992
+mass node 671 [Fe/H] -2.000 age bin 65: sum = 0x40f3d830d36bba89  # 81283.05161640992
+mass node 671 [Fe/H] -2.000 age bin 78: sum = 0x40f3d830d36bba89  # 81283.05161640992
+mass node 671 [Fe/H] -2.000 age bin 91: sum = 0x40f3d830d36bba89  # 81283.05161640992
+mass node 671 [Fe/H] -2.000 age bin 104: sum = 0x40f3d830d36bba89  # 81283.05161640992
+mass node 671 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 671 [Fe/H] -1.500 age bin 13: sum = 0x3f15cddf4727f4e9  # 8.317637711026709e-5
+mass node 671 [Fe/H] -1.500 age bin 26: sum = 0x3f60585e4c78b07a  # 0.0019952623149688794
+mass node 671 [Fe/H] -1.500 age bin 39: sum = 0x40fac4fd1d23e755  # 109647.8196143185
+mass node 671 [Fe/H] -1.500 age bin 52: sum = 0x40fac4fd1d23e755  # 109647.8196143185
+mass node 671 [Fe/H] -1.500 age bin 65: sum = 0x40fac4fd1d23e755  # 109647.8196143185
+mass node 671 [Fe/H] -1.500 age bin 78: sum = 0x40fac4fd1d23e755  # 109647.8196143185
+mass node 671 [Fe/H] -1.500 age bin 91: sum = 0x40fac4fd1d23e755  # 109647.8196143185
+mass node 671 [Fe/H] -1.500 age bin 104: sum = 0x40fac4fd1d23e755  # 109647.8196143185
+mass node 671 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 671 [Fe/H] -1.000 age bin 13: sum = 0x3f3440a7c82194bd  # 0.00030902954325135926
+mass node 671 [Fe/H] -1.000 age bin 26: sum = 0x3f8044914f3c02b0  # 0.007943282347242814
+mass node 671 [Fe/H] -1.000 age bin 39: sum = 0x410536a0a9ba55d6  # 173780.08287493762
+mass node 671 [Fe/H] -1.000 age bin 52: sum = 0x410536a0a9ba55d6  # 173780.08287493762
+mass node 671 [Fe/H] -1.000 age bin 65: sum = 0x410536a0a9ba55d6  # 173780.08287493762
+mass node 671 [Fe/H] -1.000 age bin 78: sum = 0x410536a0a9ba55d6  # 173780.08287493762
+mass node 671 [Fe/H] -1.000 age bin 91: sum = 0x410536a0a9ba55d6  # 173780.08287493762
+mass node 671 [Fe/H] -1.000 age bin 104: sum = 0x410536a0a9ba55d6  # 173780.08287493762
+mass node 671 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 671 [Fe/H] -0.500 age bin 13: sum = 0x3f44acda94717d67  # 0.0006309573444801931
+mass node 671 [Fe/H] -0.500 age bin 26: sum = 0x3f93830d0ab2d700  # 0.019054607179632477
+mass node 671 [Fe/H] -0.500 age bin 39: sum = 0x410d485a55d0b064  # 239883.29190194898
+mass node 671 [Fe/H] -0.500 age bin 52: sum = 0x410d485a55d0b064  # 239883.29190194898
+mass node 671 [Fe/H] -0.500 age bin 65: sum = 0x410d485a55d0b064  # 239883.29190194898
+mass node 671 [Fe/H] -0.500 age bin 78: sum = 0x410d485a55d0b064  # 239883.29190194898
+mass node 671 [Fe/H] -0.500 age bin 91: sum = 0x410d485a55d0b064  # 239883.29190194898
+mass node 671 [Fe/H] -0.500 age bin 104: sum = 0x410d485a55d0b064  # 239883.29190194898
+mass node 671 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 671 [Fe/H] -0.250 age bin 13: sum = 0x3f5619f5ddb6419a  # 0.0013489628825916534
+mass node 671 [Fe/H] -0.250 age bin 26: sum = 0x3fa46211ff90ea2b  # 0.03981071705534974
+mass node 671 [Fe/H] -0.250 age bin 39: sum = 0x41261ba7eb8ef2fc  # 724435.9600749905
+mass node 671 [Fe/H] -0.250 age bin 52: sum = 0x41261ba7eb8ef2fc  # 724435.9600749905
+mass node 671 [Fe/H] -0.250 age bin 65: sum = 0x41261ba7eb8ef2fc  # 724435.9600749905
+mass node 671 [Fe/H] -0.250 age bin 78: sum = 0x41261ba7eb8ef2fc  # 724435.9600749905
+mass node 671 [Fe/H] -0.250 age bin 91: sum = 0x41261ba7eb8ef2fc  # 724435.9600749905
+mass node 671 [Fe/H] -0.250 age bin 104: sum = 0x41261ba7eb8ef2fc  # 724435.9600749905
+mass node 671 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 671 [Fe/H] 0.000 age bin 13: sum = 0x3f62c44c34bd4020  # 0.0022908676527677724
+mass node 671 [Fe/H] 0.000 age bin 26: sum = 0x3fb28ba9dba826f6  # 0.07244359600749903
+mass node 671 [Fe/H] 0.000 age bin 39: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.000 age bin 52: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.000 age bin 65: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.000 age bin 78: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.000 age bin 91: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.000 age bin 104: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 671 [Fe/H] 0.176 age bin 13: sum = 0x3f62c44c34bd4020  # 0.0022908676527677724
+mass node 671 [Fe/H] 0.176 age bin 26: sum = 0x3fb28ba9dba826f6  # 0.07244359600749903
+mass node 671 [Fe/H] 0.176 age bin 39: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.176 age bin 52: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.176 age bin 65: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.176 age bin 78: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.176 age bin 91: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 671 [Fe/H] 0.176 age bin 104: sum = 0x416fa773a26148ee  # 16595869.074375596
+mass node 732 [Fe/H] -2.301 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 732 [Fe/H] -2.301 age bin 13: sum = 0x3edbb624523a2027  # 6.606934480075965e-6
+mass node 732 [Fe/H] -2.301 age bin 26: sum = 0x3f3440a7c82194bd  # 0.00030902954325135926
+mass node 732 [Fe/H] -2.301 age bin 39: sum = 0x40c6f27cdecd763a  # 11748.975549395302
+mass node 732 [Fe/H] -2.301 age bin 52: sum = 0x40c6f27cdecd763a  # 11748.975549395302
+mass node 732 [Fe/H] -2.301 age bin 65: sum = 0x40c6f27cdecd763a  # 11748.975549395302
+mass node 732 [Fe/H] -2.301 age bin 78: sum = 0x40c6f27cdecd763a  # 11748.975549395302
+mass node 732 [Fe/H] -2.301 age bin 91: sum = 0x40c6f27cdecd763a  # 11748.975549395302
+mass node 732 [Fe/H] -2.301 age bin 104: sum = 0x40c6f27cdecd763a  # 11748.975549395302
+mass node 732 [Fe/H] -2.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 732 [Fe/H] -2.000 age bin 13: sum = 0x3ef314b8e87f9ded  # 1.8197008586099827e-5
+mass node 732 [Fe/H] -2.000 age bin 26: sum = 0x3f48db68f028485d  # 0.0007585775750291835
+mass node 732 [Fe/H] -2.000 age bin 39: sum = 0x40c896a086efcc62  # 12589.254117941662
+mass node 732 [Fe/H] -2.000 age bin 52: sum = 0x40c896a086efcc62  # 12589.254117941662
+mass node 732 [Fe/H] -2.000 age bin 65: sum = 0x40c896a086efcc62  # 12589.254117941662
+mass node 732 [Fe/H] -2.000 age bin 78: sum = 0x40c896a086efcc62  # 12589.254117941662
+mass node 732 [Fe/H] -2.000 age bin 91: sum = 0x40c896a086efcc62  # 12589.254117941662
+mass node 732 [Fe/H] -2.000 age bin 104: sum = 0x40c896a086efcc62  # 12589.254117941662
+mass node 732 [Fe/H] -1.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 732 [Fe/H] -1.500 age bin 13: sum = 0x3f0f976af90da665  # 6.025595860743581e-5
+mass node 732 [Fe/H] -1.500 age bin 26: sum = 0x3f660c8ebeaf67f8  # 0.002691534803926917
+mass node 732 [Fe/H] -1.500 age bin 39: sum = 0x40ca58d07d5e1d32  # 13489.628825916534
+mass node 732 [Fe/H] -1.500 age bin 52: sum = 0x40ca58d07d5e1d32  # 13489.628825916534
+mass node 732 [Fe/H] -1.500 age bin 65: sum = 0x40ca58d07d5e1d32  # 13489.628825916534
+mass node 732 [Fe/H] -1.500 age bin 78: sum = 0x40ca58d07d5e1d32  # 13489.628825916534
+mass node 732 [Fe/H] -1.500 age bin 91: sum = 0x40ca58d07d5e1d32  # 13489.628825916534
+mass node 732 [Fe/H] -1.500 age bin 104: sum = 0x40ca58d07d5e1d32  # 13489.628825916534
+mass node 732 [Fe/H] -1.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 732 [Fe/H] -1.000 age bin 13: sum = 0x3f30763f01e8e5ad  # 0.00025118864315095795
+mass node 732 [Fe/H] -1.000 age bin 26: sum = 0x3f8cedc3ccaea15a  # 0.01412537544622754
+mass node 732 [Fe/H] -1.000 age bin 39: sum = 0x40d30a9c8b396f8a  # 19498.445997580457
+mass node 732 [Fe/H] -1.000 age bin 52: sum = 0x40d30a9c8b396f8a  # 19498.445997580457
+mass node 732 [Fe/H] -1.000 age bin 65: sum = 0x40d30a9c8b396f8a  # 19498.445997580457
+mass node 732 [Fe/H] -1.000 age bin 78: sum = 0x40d30a9c8b396f8a  # 19498.445997580457
+mass node 732 [Fe/H] -1.000 age bin 91: sum = 0x40d30a9c8b396f8a  # 19498.445997580457
+mass node 732 [Fe/H] -1.000 age bin 104: sum = 0x40d30a9c8b396f8a  # 19498.445997580457
+mass node 732 [Fe/H] -0.500 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 732 [Fe/H] -0.500 age bin 13: sum = 0x3f426d42cce9b24c  # 0.0005623413251903491
+mass node 732 [Fe/H] -0.500 age bin 26: sum = 0x3fa1594c51cfccca  # 0.03388441561392026
+mass node 732 [Fe/H] -0.500 age bin 39: sum = 0x40df99d7678374e9  # 32359.36569296281
+mass node 732 [Fe/H] -0.500 age bin 52: sum = 0x40df99d7678374e9  # 32359.36569296281
+mass node 732 [Fe/H] -0.500 age bin 65: sum = 0x40df99d7678374e9  # 32359.36569296281
+mass node 732 [Fe/H] -0.500 age bin 78: sum = 0x40df99d7678374e9  # 32359.36569296281
+mass node 732 [Fe/H] -0.500 age bin 91: sum = 0x40df99d7678374e9  # 32359.36569296281
+mass node 732 [Fe/H] -0.500 age bin 104: sum = 0x40df99d7678374e9  # 32359.36569296281
+mass node 732 [Fe/H] -0.250 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 732 [Fe/H] -0.250 age bin 13: sum = 0x3f55992b651bf521  # 0.0013182567385564075
+mass node 732 [Fe/H] -0.250 age bin 26: sum = 0x3fb2fa403441faa9  # 0.07413102413009177
+mass node 732 [Fe/H] -0.250 age bin 39: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 732 [Fe/H] -0.250 age bin 52: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 732 [Fe/H] -0.250 age bin 65: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 732 [Fe/H] -0.250 age bin 78: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 732 [Fe/H] -0.250 age bin 91: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 732 [Fe/H] -0.250 age bin 104: sum = 0x40f08184c2b87658  # 67608.29753919819
+mass node 732 [Fe/H] 0.000 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 732 [Fe/H] 0.000 age bin 13: sum = 0x3f633434431393f7  # 0.0023442288153199225
+mass node 732 [Fe/H] 0.000 age bin 26: sum = 0x3fbec72902c856a2  # 0.1202264434617413
+mass node 732 [Fe/H] 0.000 age bin 39: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.000 age bin 52: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.000 age bin 65: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.000 age bin 78: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.000 age bin 91: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.000 age bin 104: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.176 age bin 0: sum = 0x0000000000000000  # 0.0
+mass node 732 [Fe/H] 0.176 age bin 13: sum = 0x3f633434431393f7  # 0.0023442288153199225
+mass node 732 [Fe/H] 0.176 age bin 26: sum = 0x3fbec72902c856a2  # 0.1202264434617413
+mass node 732 [Fe/H] 0.176 age bin 39: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.176 age bin 52: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.176 age bin 65: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.176 age bin 78: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.176 age bin 91: sum = 0x41013e2e0923847c  # 141253.75446227554
+mass node 732 [Fe/H] 0.176 age bin 104: sum = 0x41013e2e0923847c  # 141253.75446227554
+query 000: 43.764387 + 9.589412 M☉, periastron 5.144580e3 R☉, age 5.065140e6 yr, [Fe/H] -1.9234: Some(Bright(Magnitudes(-10.63)))
+query 000: M_V = 0xc025428f5c28f5c3  # -10.63
+query 001: 15.430373 + 5.819959 M☉, periastron 9.316226e5 R☉, age 1.384013e10 yr, [Fe/H] -1.7076: Some(Remnants)
+query 002: 38.532484 + 0.252258 M☉, periastron 1.997019e4 R☉, age 1.633576e9 yr, [Fe/H] -1.2974: Some(Bright(Magnitudes(-4.85)))
+query 002: M_V = 0xc013666666666666  # -4.85
+query 003: 16.600660 + 3.652774 M☉, periastron 5.958038e4 R☉, age 5.836658e9 yr, [Fe/H] -1.1831: Some(Unchanged)
+query 004: 0.093287 + 0.084781 M☉, periastron 7.045055e3 R☉, age 2.736478e9 yr, [Fe/H] -0.4577: Some(Detached)
+query 005: 1.834393 + 0.536504 M☉, periastron 2.485248e2 R☉, age 1.199547e10 yr, [Fe/H] -2.0649: Some(Bright(Magnitudes(-6.44)))
+query 005: M_V = 0xc019c28f5c28f5c3  # -6.44
+query 006: 0.260023 + 0.086215 M☉, periastron 4.206959e3 R☉, age 4.073156e7 yr, [Fe/H] -2.1605: Some(Detached)
+query 007: 0.105851 + 0.085149 M☉, periastron 1.190666e1 R☉, age 3.538069e5 yr, [Fe/H] -2.2360: Some(Detached)
+query 008: 2.905481 + 0.081429 M☉, periastron 4.214806e1 R☉, age 2.331622e7 yr, [Fe/H] -1.1004: Some(Bright(Magnitudes(12.52)))
+query 008: M_V = 0x40290a3d70a3d70a  # 12.52
+query 009: 15.525466 + 0.919745 M☉, periastron 3.934151e3 R☉, age 2.120946e6 yr, [Fe/H] -1.6807: Some(Detached)
+query 010: 15.699983 + 1.636071 M☉, periastron 9.138939e0 R☉, age 9.103791e5 yr, [Fe/H] -2.0210: Some(Bright(Magnitudes(-5.22)))
+query 010: M_V = 0xc014e147ae147ae1  # -5.22
+query 011: 0.530033 + 0.178047 M☉, periastron 1.528098e5 R☉, age 5.408545e7 yr, [Fe/H] -1.3441: Some(Detached)
+query 012: 0.247618 + 0.194987 M☉, periastron 1.903549e1 R☉, age 7.934346e8 yr, [Fe/H] -2.4889: Some(Detached)
+query 013: 7.977680 + 0.380893 M☉, periastron 2.717246e2 R☉, age 3.942063e9 yr, [Fe/H] -1.2471: None
+query 014: 0.104063 + 0.086459 M☉, periastron 2.440591e3 R☉, age 9.465119e6 yr, [Fe/H] -0.6026: Some(Detached)
+query 015: 77.338107 + 0.146875 M☉, periastron 3.376245e0 R☉, age 3.331556e5 yr, [Fe/H] -0.2389: Some(Bright(Magnitudes(-8.07)))
+query 015: M_V = 0xc02023d70a3d70a4  # -8.07
+query 016: 12.221599 + 0.088672 M☉, periastron 2.817696e1 R☉, age 1.147700e5 yr, [Fe/H] -0.5198: Some(Unchanged)
+query 017: 7.249329 + 4.006669 M☉, periastron 4.177307e2 R☉, age 2.160213e8 yr, [Fe/H] -1.7654: Some(Bright(Magnitudes(-7.98)))
+query 017: M_V = 0xc01feb851eb851ec  # -7.98
+query 018: 1.300301 + 0.095741 M☉, periastron 3.440377e5 R☉, age 7.608425e6 yr, [Fe/H] -1.6760: Some(Detached)
+query 019: 5.994801 + 0.776632 M☉, periastron 1.623178e5 R☉, age 1.606017e5 yr, [Fe/H] -0.5664: Some(Detached)
+query 020: 1.350609 + 1.122048 M☉, periastron 1.110717e5 R☉, age 4.372388e9 yr, [Fe/H] -1.5357: Some(Bright(Magnitudes(-5.77)))
+query 020: M_V = 0xc017147ae147ae14  # -5.77
+query 021: 64.122310 + 0.164856 M☉, periastron 2.372871e4 R☉, age 2.451237e9 yr, [Fe/H] -1.0918: Some(Bright(Magnitudes(16.26)))
+query 021: M_V = 0x4030428f5c28f5c3  # 16.26
+query 022: 0.588372 + 0.479968 M☉, periastron 3.775447e4 R☉, age 5.153187e6 yr, [Fe/H] -2.0215: Some(Detached)
+query 023: 0.353318 + 0.287722 M☉, periastron 1.858013e0 R☉, age 2.445063e9 yr, [Fe/H] -1.4098: None
+query 024: 0.187879 + 0.092991 M☉, periastron 9.181599e0 R☉, age 1.877184e7 yr, [Fe/H] -2.2621: Some(Detached)
+query 025: 44.050084 + 0.196926 M☉, periastron 2.043100e5 R☉, age 7.662179e8 yr, [Fe/H] -1.3443: Some(Bright(Magnitudes(-6.5)))
+query 025: M_V = 0xc01a000000000000  # -6.5
+query 026: 20.902261 + 6.654285 M☉, periastron 2.810462e1 R☉, age 1.099555e9 yr, [Fe/H] -0.9945: Some(Bright(Magnitudes(-6.36)))
+query 026: M_V = 0xc01970a3d70a3d71  # -6.36
+query 027: 23.203323 + 7.053359 M☉, periastron 5.366169e1 R☉, age 4.830041e9 yr, [Fe/H] -0.0766: Some(Bright(Magnitudes(0.51)))
+query 027: M_V = 0x3fe051eb851eb852  # 0.51
+query 028: 3.512774 + 0.313197 M☉, periastron 1.969409e4 R☉, age 1.772027e7 yr, [Fe/H] -1.1001: Some(Detached)
+query 029: 1.047419 + 0.173164 M☉, periastron 6.159177e3 R☉, age 3.876085e9 yr, [Fe/H] -0.3381: Some(Detached)
+query 030: 0.488027 + 0.328486 M☉, periastron 1.932444e2 R☉, age 6.579243e5 yr, [Fe/H] 0.0303: Some(Detached)
+query 031: 1.400167 + 0.184315 M☉, periastron 1.638952e2 R☉, age 1.784254e7 yr, [Fe/H] -0.0847: Some(Detached)
+query 032: 0.296847 + 0.116238 M☉, periastron 4.477305e2 R☉, age 1.523406e5 yr, [Fe/H] -0.5991: Some(Detached)
+query 033: 3.415701 + 0.088558 M☉, periastron 6.212092e1 R☉, age 3.755267e6 yr, [Fe/H] -1.4638: Some(Bright(Magnitudes(10.74)))
+query 033: M_V = 0x40257ae147ae147b  # 10.74
+query 034: 9.365602 + 0.180311 M☉, periastron 1.577605e5 R☉, age 3.098972e7 yr, [Fe/H] -2.0384: Some(Bright(Magnitudes(12.02)))
+query 034: M_V = 0x40280a3d70a3d70a  # 12.02
+query 035: 4.860165 + 3.928424 M☉, periastron 1.198853e2 R☉, age 1.534640e6 yr, [Fe/H] -0.0137: Some(Detached)
+query 036: 104.156553 + 3.383072 M☉, periastron 1.887341e0 R☉, age 7.268246e6 yr, [Fe/H] -1.6743: Some(Bright(Magnitudes(-10.46)))
+query 036: M_V = 0xc024eb851eb851ec  # -10.46
+query 037: 125.369169 + 0.220307 M☉, periastron 1.027072e5 R☉, age 6.517717e7 yr, [Fe/H] 0.2426: Some(Bright(Magnitudes(12.48)))
+query 037: M_V = 0x4028f5c28f5c28f6  # 12.48
+query 038: 118.037329 + 1.425317 M☉, periastron 5.772222e2 R☉, age 4.560448e8 yr, [Fe/H] -2.4346: Some(Bright(Magnitudes(-6.6)))
+query 038: M_V = 0xc01a666666666666  # -6.6
+query 039: 2.819112 + 0.368243 M☉, periastron 1.786603e3 R☉, age 6.704944e9 yr, [Fe/H] -1.3221: Some(Bright(Magnitudes(-5.42)))
+query 039: M_V = 0xc015ae147ae147ae  # -5.42
+query 040: 5.347426 + 0.582007 M☉, periastron 2.002550e5 R☉, age 1.905277e6 yr, [Fe/H] -2.0304: Some(Detached)
+query 041: 0.228701 + 0.106186 M☉, periastron 8.832326e5 R☉, age 2.498943e8 yr, [Fe/H] -1.7929: Some(Detached)
+query 042: 2.314963 + 2.302387 M☉, periastron 3.268269e5 R☉, age 5.459053e8 yr, [Fe/H] -1.9562: Some(Bright(Magnitudes(-6.94)))
+query 042: M_V = 0xc01bc28f5c28f5c3  # -6.94
+query 043: 4.918719 + 3.156181 M☉, periastron 1.719299e5 R☉, age 3.435027e7 yr, [Fe/H] -0.1378: Some(Detached)
+query 044: 106.262596 + 6.302485 M☉, periastron 3.238003e3 R☉, age 3.969231e5 yr, [Fe/H] -1.1014: Some(Detached)
+query 045: 4.771352 + 1.906583 M☉, periastron 4.328835e4 R☉, age 2.736418e5 yr, [Fe/H] -2.4915: Some(Detached)
+query 046: 0.087984 + 0.080561 M☉, periastron 8.112940e3 R☉, age 3.695278e5 yr, [Fe/H] -2.3602: Some(Detached)
+query 047: 0.215581 + 0.125325 M☉, periastron 1.047378e4 R☉, age 1.869273e6 yr, [Fe/H] -1.7081: Some(Detached)
+query 048: 1.173120 + 0.092731 M☉, periastron 1.161469e4 R☉, age 3.072318e8 yr, [Fe/H] -1.7586: Some(Detached)
+query 049: 0.689648 + 0.231246 M☉, periastron 6.896762e1 R☉, age 2.773649e8 yr, [Fe/H] 0.1898: Some(Detached)
+query 050: 28.954076 + 0.479137 M☉, periastron 2.126929e3 R☉, age 7.970881e5 yr, [Fe/H] -0.0019: Some(Bright(Magnitudes(10.72)))
+query 050: M_V = 0x402570a3d70a3d71  # 10.72
+query 051: 0.248676 + 0.110645 M☉, periastron 9.598590e4 R☉, age 1.322531e8 yr, [Fe/H] -1.7417: Some(Detached)
+query 052: 83.092630 + 13.036942 M☉, periastron 3.213092e2 R☉, age 7.154221e9 yr, [Fe/H] -0.9073: Some(Bright(Magnitudes(-4.89)))
+query 052: M_V = 0xc0138f5c28f5c28f  # -4.89
+query 053: 0.084168 + 0.080489 M☉, periastron 8.407900e5 R☉, age 8.431589e9 yr, [Fe/H] -1.0748: Some(Detached)
+query 054: 3.542107 + 0.229847 M☉, periastron 7.003566e1 R☉, age 5.319226e8 yr, [Fe/H] -1.7257: Some(Bright(Magnitudes(-5.76)))
+query 054: M_V = 0xc0170a3d70a3d70a  # -5.76
+query 055: 2.819317 + 0.787551 M☉, periastron 5.790023e5 R☉, age 6.416310e8 yr, [Fe/H] -1.2717: Some(Detached)
+query 056: 8.027809 + 0.209655 M☉, periastron 2.638021e1 R☉, age 3.292714e5 yr, [Fe/H] -0.7247: Some(Bright(Magnitudes(10.84)))
+query 056: M_V = 0x4025ae147ae147ae  # 10.84
+query 057: 0.119414 + 0.102842 M☉, periastron 2.272972e4 R☉, age 4.164692e9 yr, [Fe/H] -1.6744: Some(Detached)
+query 058: 0.171520 + 0.092556 M☉, periastron 7.895005e4 R☉, age 8.305442e9 yr, [Fe/H] -1.9641: Some(Detached)
+query 059: 123.349698 + 31.064214 M☉, periastron 3.690411e0 R☉, age 1.346231e10 yr, [Fe/H] -1.7355: Some(Remnants)
+query 060: 0.108094 + 0.099774 M☉, periastron 1.578754e1 R☉, age 2.496090e5 yr, [Fe/H] -1.2363: Some(Detached)
+query 061: 0.433406 + 0.313883 M☉, periastron 3.249604e5 R☉, age 3.885098e5 yr, [Fe/H] 0.2918: Some(Detached)
+query 062: 13.874434 + 0.167367 M☉, periastron 5.818148e2 R☉, age 1.215751e9 yr, [Fe/H] -2.3295: Some(Bright(Magnitudes(-6.32)))
+query 062: M_V = 0xc01947ae147ae148  # -6.32
+query 063: 2.682420 + 0.639179 M☉, periastron 8.752450e3 R☉, age 4.358126e9 yr, [Fe/H] -0.5729: Some(Bright(Magnitudes(-5.78)))
+query 063: M_V = 0xc0171eb851eb851f  # -5.78
+query 064: 50.528781 + 26.058702 M☉, periastron 4.605371e0 R☉, age 4.650576e7 yr, [Fe/H] -1.3796: Some(Bright(Magnitudes(-9.14)))
+query 064: M_V = 0xc02247ae147ae148  # -9.14
+query 065: 0.087276 + 0.085388 M☉, periastron 1.421382e1 R☉, age 9.575655e7 yr, [Fe/H] 0.2183: Some(Detached)
+query 066: 5.232198 + 4.636028 M☉, periastron 5.773456e4 R☉, age 2.565737e8 yr, [Fe/H] -2.3581: Some(Bright(Magnitudes(-7.76)))
+query 066: M_V = 0xc01f0a3d70a3d70a  # -7.76
+query 067: 83.018493 + 0.136200 M☉, periastron 1.699949e1 R☉, age 4.494141e5 yr, [Fe/H] -0.3142: Some(Bright(Magnitudes(-8.4)))
+query 067: M_V = 0xc020cccccccccccd  # -8.4
+query 068: 9.406608 + 0.153025 M☉, periastron 6.884857e5 R☉, age 6.644428e8 yr, [Fe/H] -0.1343: Some(Bright(Magnitudes(1.45)))
+query 068: M_V = 0x3ff7333333333333  # 1.45
+query 069: 33.434799 + 3.338570 M☉, periastron 3.246411e3 R☉, age 4.278116e8 yr, [Fe/H] -1.3122: Some(Bright(Magnitudes(-7.38)))
+query 069: M_V = 0xc01d851eb851eb85  # -7.38
+query 070: 7.455088 + 1.396779 M☉, periastron 1.183235e1 R☉, age 2.126986e6 yr, [Fe/H] -0.1554: Some(Bright(Magnitudes(-2.8)))
+query 070: M_V = 0xc006666666666666  # -2.8
+query 071: 7.157667 + 0.116419 M☉, periastron 2.688934e1 R☉, age 7.966826e8 yr, [Fe/H] -0.0413: Some(Bright(Magnitudes(0.94)))
+query 071: M_V = 0x3fee147ae147ae14  # 0.94
+query 072: 0.095626 + 0.088343 M☉, periastron 2.046148e0 R☉, age 4.725720e5 yr, [Fe/H] -1.9750: None
+query 073: 104.562464 + 4.058063 M☉, periastron 7.568137e4 R☉, age 1.085074e5 yr, [Fe/H] -0.4359: Some(Detached)
+query 074: 0.189282 + 0.174200 M☉, periastron 7.374897e2 R☉, age 3.674283e9 yr, [Fe/H] -0.1334: Some(Detached)
+query 075: 40.983072 + 5.649546 M☉, periastron 6.323134e1 R☉, age 6.851176e5 yr, [Fe/H] -1.4928: Some(Bright(Magnitudes(-6.13)))
+query 075: M_V = 0xc018851eb851eb85  # -6.13
+query 076: 9.362168 + 0.784377 M☉, periastron 3.373867e0 R☉, age 5.296644e6 yr, [Fe/H] -0.8421: Some(Bright(Magnitudes(-8.48)))
+query 076: M_V = 0xc020f5c28f5c28f6  # -8.48
+query 077: 93.880103 + 3.720301 M☉, periastron 1.578271e3 R☉, age 1.899646e9 yr, [Fe/H] -1.6116: Some(Bright(Magnitudes(-5.46)))
+query 077: M_V = 0xc015d70a3d70a3d7  # -5.46
+query 078: 12.645235 + 0.245825 M☉, periastron 6.048110e1 R☉, age 1.086409e7 yr, [Fe/H] -1.0649: Some(Bright(Magnitudes(-9.23)))
+query 078: M_V = 0xc02275c28f5c28f6  # -9.23
+query 079: 94.258639 + 0.093263 M☉, periastron 9.924676e1 R☉, age 1.536432e6 yr, [Fe/H] -1.1106: Some(Bright(Magnitudes(-10.46)))
+query 079: M_V = 0xc024eb851eb851ec  # -10.46
+query 080: 0.083413 + 0.080051 M☉, periastron 2.034257e3 R☉, age 2.465618e9 yr, [Fe/H] -1.1168: Some(Detached)
+query 081: 0.164978 + 0.135680 M☉, periastron 2.087797e5 R☉, age 1.227309e5 yr, [Fe/H] -2.3435: Some(Detached)
+query 082: 0.167711 + 0.144527 M☉, periastron 5.385902e2 R☉, age 1.150336e5 yr, [Fe/H] -1.1910: Some(Detached)
+query 083: 10.971209 + 0.470729 M☉, periastron 2.337287e3 R☉, age 5.365524e8 yr, [Fe/H] -2.2326: Some(Bright(Magnitudes(-6.75)))
+query 083: M_V = 0xc01b000000000000  # -6.75
+query 084: 0.123227 + 0.102306 M☉, periastron 1.863288e3 R☉, age 1.339614e6 yr, [Fe/H] -0.1090: Some(Detached)
+query 085: 8.205622 + 1.419198 M☉, periastron 2.772909e2 R☉, age 2.491826e6 yr, [Fe/H] -0.0778: Some(Detached)
+query 086: 95.968279 + 80.001644 M☉, periastron 4.079481e1 R☉, age 1.225940e5 yr, [Fe/H] -1.2301: Some(Unchanged)
+query 087: 67.449000 + 10.487212 M☉, periastron 1.008650e2 R☉, age 8.723935e9 yr, [Fe/H] 0.2809: Some(Bright(Magnitudes(-2.5)))
+query 087: M_V = 0xc004000000000000  # -2.5
+query 088: 14.748928 + 0.210644 M☉, periastron 4.160692e1 R☉, age 1.110423e8 yr, [Fe/H] -1.9595: Some(Bright(Magnitudes(-7.35)))
+query 088: M_V = 0xc01d666666666666  # -7.35
+query 089: 0.846855 + 0.376143 M☉, periastron 2.074156e0 R☉, age 1.030775e5 yr, [Fe/H] 0.2272: Some(Unchanged)
+query 090: 1.520345 + 0.175677 M☉, periastron 1.676130e1 R☉, age 1.294207e10 yr, [Fe/H] 0.1068: Some(Bright(Magnitudes(-5.51)))
+query 090: M_V = 0xc0160a3d70a3d70a  # -5.51
+query 091: 11.461999 + 2.809723 M☉, periastron 6.918842e3 R☉, age 6.131801e9 yr, [Fe/H] 0.1400: Some(Bright(Magnitudes(-5.53)))
+query 091: M_V = 0xc0161eb851eb851f  # -5.53
+query 092: 12.586853 + 3.908372 M☉, periastron 2.222193e3 R☉, age 8.838477e9 yr, [Fe/H] -2.1081: Some(Bright(Magnitudes(2.69)))
+query 092: M_V = 0x4005851eb851eb85  # 2.69
+query 093: 2.026117 + 1.998104 M☉, periastron 3.197937e0 R☉, age 1.625019e9 yr, [Fe/H] -0.5847: None
+query 094: 12.959007 + 5.020386 M☉, periastron 4.022404e1 R☉, age 8.536924e5 yr, [Fe/H] -2.4079: Some(Detached)
+query 095: 4.632848 + 0.516821 M☉, periastron 2.057446e5 R☉, age 2.979666e5 yr, [Fe/H] -2.2586: Some(Detached)
+query 096: 12.509775 + 0.113349 M☉, periastron 1.612729e5 R☉, age 1.699777e5 yr, [Fe/H] -0.5465: Some(Detached)
+query 097: 1.963263 + 0.183373 M☉, periastron 6.904614e5 R☉, age 2.805210e9 yr, [Fe/H] -2.1165: Some(Detached)
+query 098: 0.100263 + 0.099149 M☉, periastron 2.650343e2 R☉, age 5.558325e7 yr, [Fe/H] -0.9397: Some(Detached)
+query 099: 0.684852 + 0.495210 M☉, periastron 3.270456e2 R☉, age 3.330880e7 yr, [Fe/H] -1.9862: Some(Detached)
+query 100: 4.166583 + 0.140600 M☉, periastron 2.571437e5 R☉, age 7.020204e5 yr, [Fe/H] -0.1397: Some(Detached)
+query 101: 0.109905 + 0.086871 M☉, periastron 3.653933e0 R☉, age 2.302830e7 yr, [Fe/H] 0.2492: None
+query 102: 86.037822 + 79.670433 M☉, periastron 1.473093e5 R☉, age 9.319592e6 yr, [Fe/H] 0.0325: Some(Bright(Magnitudes(-10.43)))
+query 102: M_V = 0xc024dc28f5c28f5c  # -10.43
+query 103: 0.253222 + 0.123158 M☉, periastron 1.403836e1 R☉, age 2.952038e6 yr, [Fe/H] -2.0893: Some(Detached)
+query 104: 0.144017 + 0.090742 M☉, periastron 1.641803e4 R☉, age 7.846087e6 yr, [Fe/H] -2.3828: Some(Detached)
+query 105: 0.140224 + 0.080306 M☉, periastron 8.105408e2 R☉, age 8.401146e6 yr, [Fe/H] -0.8051: Some(Detached)
+query 106: 1.113279 + 0.089826 M☉, periastron 2.258240e0 R☉, age 1.010577e9 yr, [Fe/H] -0.1814: Some(Bright(Magnitudes(1.59)))
+query 106: M_V = 0x3ff970a3d70a3d71  # 1.59
+query 107: 42.909734 + 0.182755 M☉, periastron 3.236994e0 R☉, age 2.169022e8 yr, [Fe/H] -1.8153: Some(Bright(Magnitudes(-8.43)))
+query 107: M_V = 0xc020dc28f5c28f5c  # -8.43
+query 108: 0.902382 + 0.261414 M☉, periastron 1.347308e1 R☉, age 1.150895e5 yr, [Fe/H] -0.0533: Some(Detached)
+query 109: 0.122766 + 0.121537 M☉, periastron 4.654687e0 R☉, age 1.241357e9 yr, [Fe/H] -0.2908: Some(Detached)
+query 110: 12.493445 + 0.095767 M☉, periastron 9.094393e0 R☉, age 1.648954e8 yr, [Fe/H] -2.4542: Some(Bright(Magnitudes(-6.78)))
+query 110: M_V = 0xc01b1eb851eb851f  # -6.78
+query 111: 3.111948 + 1.923218 M☉, periastron 1.161172e4 R☉, age 1.028380e7 yr, [Fe/H] -0.8359: Some(Detached)
+query 112: 146.924263 + 34.498748 M☉, periastron 3.829816e1 R☉, age 5.562708e8 yr, [Fe/H] -0.1508: Some(Remnants)
+query 113: 0.084874 + 0.083260 M☉, periastron 3.459048e0 R☉, age 1.647610e9 yr, [Fe/H] -1.3192: None
+query 114: 0.372994 + 0.119647 M☉, periastron 4.667555e2 R☉, age 1.310028e7 yr, [Fe/H] -1.2644: Some(Detached)
+query 115: 2.704590 + 1.054188 M☉, periastron 1.335202e0 R☉, age 2.928118e5 yr, [Fe/H] -0.5801: Some(Unchanged)
+query 116: 0.354065 + 0.196319 M☉, periastron 3.197038e5 R☉, age 1.075201e9 yr, [Fe/H] -1.7847: Some(Detached)
+query 117: 60.523623 + 0.297624 M☉, periastron 2.136481e4 R☉, age 6.444503e7 yr, [Fe/H] -0.6911: Some(Bright(Magnitudes(-7.67)))
+query 117: M_V = 0xc01eae147ae147ae  # -7.67
+query 118: 8.150374 + 0.278911 M☉, periastron 1.355653e4 R☉, age 1.260653e5 yr, [Fe/H] -0.8443: Some(Detached)
+query 119: 0.440764 + 0.262705 M☉, periastron 7.969112e3 R☉, age 9.146103e7 yr, [Fe/H] -1.2146: Some(Detached)
+query 120: 4.500800 + 1.231591 M☉, periastron 3.122424e1 R☉, age 4.430363e5 yr, [Fe/H] -1.9550: Some(Detached)
+query 121: 2.399370 + 0.112373 M☉, periastron 1.166355e4 R☉, age 1.830222e5 yr, [Fe/H] -1.6108: Some(Detached)
+query 122: 32.407459 + 0.195721 M☉, periastron 4.440950e2 R☉, age 6.609401e7 yr, [Fe/H] -0.7928: Some(Bright(Magnitudes(-8.43)))
+query 122: M_V = 0xc020dc28f5c28f5c  # -8.43
+query 123: 12.650534 + 0.179185 M☉, periastron 3.253279e0 R☉, age 9.630263e9 yr, [Fe/H] -2.1409: Some(Bright(Magnitudes(-4.91)))
+query 123: M_V = 0xc013a3d70a3d70a4  # -4.91
+query 124: 1.158778 + 0.221674 M☉, periastron 4.500139e0 R☉, age 2.328299e6 yr, [Fe/H] -0.3503: Some(Unchanged)
+query 125: 0.691882 + 0.563239 M☉, periastron 3.240341e5 R☉, age 8.926451e6 yr, [Fe/H] 0.1658: Some(Detached)
+query 126: 0.091947 + 0.090845 M☉, periastron 1.356647e3 R☉, age 1.413893e5 yr, [Fe/H] 0.1020: Some(Detached)
+query 127: 10.921918 + 1.276546 M☉, periastron 3.415330e3 R☉, age 4.213818e8 yr, [Fe/H] -2.3460: Some(Bright(Magnitudes(-5.91)))
+query 127: M_V = 0xc017a3d70a3d70a4  # -5.91
+query 128: 16.799582 + 2.825492 M☉, periastron 8.927687e5 R☉, age 7.333630e8 yr, [Fe/H] -2.4678: Some(Bright(Magnitudes(16.73)))
+query 128: M_V = 0x4030bae147ae147b  # 16.73
+query 129: 108.368666 + 0.186120 M☉, periastron 1.498364e2 R☉, age 1.085997e9 yr, [Fe/H] -0.1077: Some(Bright(Magnitudes(-3.73)))
+query 129: M_V = 0xc00dd70a3d70a3d7  # -3.73
+query 130: 0.132639 + 0.105630 M☉, periastron 7.525641e5 R☉, age 3.099474e5 yr, [Fe/H] -0.9188: Some(Detached)
+query 131: 58.902072 + 4.311454 M☉, periastron 1.721087e1 R☉, age 1.148445e8 yr, [Fe/H] -0.4002: Some(Bright(Magnitudes(-8.33)))
+query 131: M_V = 0xc020a8f5c28f5c29  # -8.33
+query 132: 0.483985 + 0.342879 M☉, periastron 1.559713e2 R☉, age 3.465457e9 yr, [Fe/H] -0.2504: Some(Detached)
+query 133: 103.849330 + 0.433482 M☉, periastron 1.475304e5 R☉, age 3.872946e9 yr, [Fe/H] -2.3136: Some(Bright(Magnitudes(16.46)))
+query 133: M_V = 0x403075c28f5c28f6  # 16.46
+query 134: 105.603342 + 0.209233 M☉, periastron 2.665547e0 R☉, age 1.976108e9 yr, [Fe/H] -0.6214: Some(Bright(Magnitudes(-5.64)))
+query 134: M_V = 0xc0168f5c28f5c28f  # -5.64
+query 135: 0.403435 + 0.316155 M☉, periastron 5.518535e5 R☉, age 8.348251e9 yr, [Fe/H] -1.1733: Some(Detached)
+query 136: 0.087790 + 0.085478 M☉, periastron 9.321470e2 R☉, age 2.657419e8 yr, [Fe/H] -1.4496: Some(Detached)
+query 137: 0.104583 + 0.094465 M☉, periastron 7.216323e0 R☉, age 3.108291e7 yr, [Fe/H] -2.1528: Some(Detached)
+query 138: 26.162426 + 0.813995 M☉, periastron 3.864010e0 R☉, age 1.368608e6 yr, [Fe/H] -2.0256: Some(Bright(Magnitudes(-6.55)))
+query 138: M_V = 0xc01a333333333333  # -6.55
+query 139: 0.568260 + 0.272289 M☉, periastron 3.479996e0 R☉, age 9.991389e9 yr, [Fe/H] -0.9902: None
+query 140: 0.192003 + 0.171635 M☉, periastron 5.926117e4 R☉, age 3.616515e9 yr, [Fe/H] -0.9458: Some(Detached)
+query 141: 0.437104 + 0.084742 M☉, periastron 1.091375e2 R☉, age 7.508025e8 yr, [Fe/H] -2.3436: Some(Detached)
+query 142: 73.894757 + 17.122434 M☉, periastron 4.115283e3 R☉, age 1.167968e8 yr, [Fe/H] -2.2585: Some(Bright(Magnitudes(-3.09)))
+query 142: M_V = 0xc008b851eb851eb8  # -3.09
+query 143: 0.644262 + 0.129885 M☉, periastron 1.456555e2 R☉, age 1.036474e7 yr, [Fe/H] -0.0011: Some(Detached)
+query 144: 0.153231 + 0.082846 M☉, periastron 4.046125e0 R☉, age 4.116028e7 yr, [Fe/H] -2.4953: Some(Detached)
+query 145: 1.375845 + 0.111922 M☉, periastron 9.511213e0 R☉, age 3.251925e7 yr, [Fe/H] -1.3213: Some(Bright(Magnitudes(2.72)))
+query 145: M_V = 0x4005c28f5c28f5c3  # 2.72
+query 146: 36.611308 + 0.679876 M☉, periastron 2.777305e2 R☉, age 4.569086e7 yr, [Fe/H] -2.1362: Some(Bright(Magnitudes(-8.43)))
+query 146: M_V = 0xc020dc28f5c28f5c  # -8.43
+query 147: 13.721649 + 1.585134 M☉, periastron 3.726184e5 R☉, age 1.248923e7 yr, [Fe/H] -1.2336: Some(Detached)
+query 148: 89.232417 + 0.586292 M☉, periastron 2.209855e1 R☉, age 3.220476e5 yr, [Fe/H] -1.0820: Some(Bright(Magnitudes(-7.4)))
+query 148: M_V = 0xc01d99999999999a  # -7.4
+query 149: 0.320061 + 0.213488 M☉, periastron 5.978827e4 R☉, age 2.377340e8 yr, [Fe/H] 0.2370: Some(Detached)
+query 150: 16.224647 + 3.500996 M☉, periastron 1.846390e3 R☉, age 2.374175e7 yr, [Fe/H] -1.9856: None
+query 151: 0.287853 + 0.228796 M☉, periastron 1.659991e2 R☉, age 1.150106e10 yr, [Fe/H] -0.7671: Some(Detached)
+query 152: 5.625261 + 1.685386 M☉, periastron 1.062000e3 R☉, age 9.473158e6 yr, [Fe/H] -0.4458: Some(Detached)
+query 153: 0.171712 + 0.131186 M☉, periastron 7.093230e3 R☉, age 6.239331e6 yr, [Fe/H] -1.4257: Some(Detached)
+query 154: 2.112766 + 0.833167 M☉, periastron 2.870964e4 R☉, age 2.707239e5 yr, [Fe/H] -1.7845: Some(Detached)
+query 155: 0.355249 + 0.196469 M☉, periastron 1.042631e0 R☉, age 1.539390e6 yr, [Fe/H] -2.0348: None
+query 156: 0.174653 + 0.140147 M☉, periastron 2.998115e4 R☉, age 9.028488e8 yr, [Fe/H] -0.9954: Some(Detached)
+query 157: 1.474514 + 0.165013 M☉, periastron 4.068074e4 R☉, age 1.605246e5 yr, [Fe/H] -1.4309: Some(Detached)
+query 158: 43.770186 + 19.434145 M☉, periastron 1.312758e0 R☉, age 2.939910e8 yr, [Fe/H] -1.0161: Some(Bright(Magnitudes(-7.17)))
+query 158: M_V = 0xc01cae147ae147ae  # -7.17
+query 159: 0.098195 + 0.087239 M☉, periastron 1.053775e5 R☉, age 5.623628e9 yr, [Fe/H] -2.1597: Some(Detached)
+query 160: 2.986412 + 0.117099 M☉, periastron 4.276252e5 R☉, age 3.741468e6 yr, [Fe/H] -1.2436: Some(Detached)
+query 161: 0.321199 + 0.099387 M☉, periastron 1.595658e4 R☉, age 1.960375e9 yr, [Fe/H] -2.3481: Some(Detached)
+query 162: 108.223022 + 17.634470 M☉, periastron 9.651853e1 R☉, age 6.598243e6 yr, [Fe/H] -1.6714: Some(Bright(Magnitudes(-10.65)))
+query 162: M_V = 0xc0254ccccccccccd  # -10.65
+query 163: 0.086696 + 0.084493 M☉, periastron 8.180147e3 R☉, age 3.015561e5 yr, [Fe/H] -2.1556: Some(Detached)
+query 164: 0.183444 + 0.179768 M☉, periastron 9.227451e4 R☉, age 7.652139e6 yr, [Fe/H] -2.4535: Some(Detached)
+query 165: 9.176707 + 2.199400 M☉, periastron 2.979341e2 R☉, age 3.675646e9 yr, [Fe/H] -1.6364: Some(Bright(Magnitudes(-5.54)))
+query 165: M_V = 0xc01628f5c28f5c29  # -5.54
+query 166: 9.312439 + 0.632654 M☉, periastron 6.020730e4 R☉, age 1.118783e9 yr, [Fe/H] -1.8097: Some(Bright(Magnitudes(17.96)))
+query 166: M_V = 0x4031f5c28f5c28f6  # 17.96
+query 167: 0.359952 + 0.130868 M☉, periastron 1.087520e1 R☉, age 7.190085e9 yr, [Fe/H] -0.1486: Some(Detached)
+query 168: 0.130821 + 0.087587 M☉, periastron 2.168611e4 R☉, age 2.187877e8 yr, [Fe/H] -1.1137: Some(Detached)
+query 169: 0.224835 + 0.157336 M☉, periastron 5.021953e5 R☉, age 1.126041e5 yr, [Fe/H] -2.3138: Some(Detached)
+query 170: 0.503122 + 0.378066 M☉, periastron 2.394784e5 R☉, age 2.678699e9 yr, [Fe/H] -1.3414: Some(Detached)
+query 171: 0.705464 + 0.220898 M☉, periastron 1.394452e1 R☉, age 1.021698e6 yr, [Fe/H] -0.6321: Some(Detached)
+query 172: 84.310927 + 0.306255 M☉, periastron 1.829737e4 R☉, age 9.112382e9 yr, [Fe/H] -1.0905: Some(Bright(Magnitudes(16.26)))
+query 172: M_V = 0x4030428f5c28f5c3  # 16.26
+query 173: 0.188773 + 0.108455 M☉, periastron 2.575378e2 R☉, age 6.559290e8 yr, [Fe/H] -0.4234: Some(Detached)
+query 174: 4.362359 + 0.094679 M☉, periastron 4.665156e2 R☉, age 2.464344e5 yr, [Fe/H] -2.1053: Some(Unchanged)
+query 175: 0.338001 + 0.135839 M☉, periastron 8.577994e5 R☉, age 2.415346e8 yr, [Fe/H] -0.3107: Some(Detached)
+query 176: 0.371717 + 0.186780 M☉, periastron 2.133811e3 R☉, age 4.594223e9 yr, [Fe/H] -1.0490: Some(Detached)
+query 177: 0.434216 + 0.181246 M☉, periastron 2.729000e4 R☉, age 1.667183e5 yr, [Fe/H] 0.1571: Some(Detached)
+query 178: 3.926383 + 0.715286 M☉, periastron 1.002853e4 R☉, age 1.007648e10 yr, [Fe/H] -0.9783: Some(Bright(Magnitudes(-5.09)))
+query 178: M_V = 0xc0145c28f5c28f5c  # -5.09
+query 179: 0.085199 + 0.082408 M☉, periastron 1.277460e4 R☉, age 8.004718e6 yr, [Fe/H] -1.6605: Some(Detached)
+query 180: 0.331122 + 0.163986 M☉, periastron 7.009231e3 R☉, age 2.666434e9 yr, [Fe/H] -1.7969: Some(Detached)
+query 181: 0.162796 + 0.082101 M☉, periastron 4.380992e1 R☉, age 2.436355e6 yr, [Fe/H] -1.5201: Some(Detached)
+query 182: 1.432906 + 0.982842 M☉, periastron 1.413297e0 R☉, age 2.665036e5 yr, [Fe/H] -0.3557: Some(Unchanged)
+query 183: 8.337822 + 2.671025 M☉, periastron 1.913752e2 R☉, age 1.295761e10 yr, [Fe/H] -0.2346: Some(Bright(Magnitudes(0.78)))
+query 183: M_V = 0x3fe8f5c28f5c28f6  # 0.78
+query 184: 0.097457 + 0.087943 M☉, periastron 2.268308e5 R☉, age 1.486936e7 yr, [Fe/H] 0.1038: Some(Detached)
+query 185: 2.968833 + 0.374427 M☉, periastron 1.945567e2 R☉, age 1.322597e10 yr, [Fe/H] -0.0817: Some(Bright(Magnitudes(-7.01)))
+query 185: M_V = 0xc01c0a3d70a3d70a  # -7.01
+query 186: 9.995076 + 1.425986 M☉, periastron 8.922727e1 R☉, age 1.366025e9 yr, [Fe/H] -0.2899: Some(Bright(Magnitudes(-6.35)))
+query 186: M_V = 0xc019666666666666  # -6.35
+query 187: 1.752804 + 0.095318 M☉, periastron 1.450490e2 R☉, age 3.862551e6 yr, [Fe/H] -0.0745: Some(Detached)
+query 188: 2.271471 + 0.196490 M☉, periastron 7.792576e3 R☉, age 5.249123e9 yr, [Fe/H] -0.6479: Some(Bright(Magnitudes(7.11)))
+query 188: M_V = 0x401c70a3d70a3d71  # 7.11
+query 189: 0.194101 + 0.132883 M☉, periastron 2.767697e1 R☉, age 1.031652e8 yr, [Fe/H] -1.8200: Some(Detached)
+query 190: 1.594291 + 0.917885 M☉, periastron 1.715567e2 R☉, age 8.911729e7 yr, [Fe/H] -2.1662: Some(Detached)
+query 191: 2.237688 + 0.481424 M☉, periastron 2.060402e2 R☉, age 6.460043e6 yr, [Fe/H] 0.1577: Some(Detached)
+query 192: 0.121587 + 0.107368 M☉, periastron 2.121550e3 R☉, age 3.023077e5 yr, [Fe/H] -0.3642: Some(Detached)
+query 193: 1.813786 + 0.262406 M☉, periastron 6.627965e4 R☉, age 2.161630e7 yr, [Fe/H] -0.3195: Some(Detached)
+query 194: 7.691732 + 7.450123 M☉, periastron 3.959082e5 R☉, age 1.239138e6 yr, [Fe/H] -1.2504: Some(Detached)
+query 195: 35.917119 + 6.141726 M☉, periastron 7.494574e4 R☉, age 2.268646e6 yr, [Fe/H] -1.0169: Some(Detached)
+query 196: 112.283214 + 13.927617 M☉, periastron 6.860570e3 R☉, age 1.866542e5 yr, [Fe/H] -1.6567: Some(Detached)
+query 197: 5.045665 + 1.640579 M☉, periastron 9.194793e5 R☉, age 4.386584e9 yr, [Fe/H] -1.8063: Some(Detached)
+query 198: 0.684482 + 0.326006 M☉, periastron 6.537993e2 R☉, age 2.195760e9 yr, [Fe/H] -0.9426: Some(Detached)
+query 199: 17.818940 + 3.252590 M☉, periastron 2.780281e3 R☉, age 2.291997e9 yr, [Fe/H] -0.9316: Some(Bright(Magnitudes(-5.49)))
+query 199: M_V = 0xc015f5c28f5c28f6  # -5.49
+query 200: 0.155043 + 0.080446 M☉, periastron 2.540748e2 R☉, age 1.062996e9 yr, [Fe/H] -0.4988: Some(Detached)
+query 201: 1.679804 + 0.450230 M☉, periastron 4.149635e3 R☉, age 6.236810e5 yr, [Fe/H] 0.2909: Some(Detached)
+query 202: 142.614796 + 0.381392 M☉, periastron 1.731765e4 R☉, age 3.274624e7 yr, [Fe/H] -1.1681: Some(Bright(Magnitudes(12.5)))
+query 202: M_V = 0x4029000000000000  # 12.5
+query 203: 0.379490 + 0.123818 M☉, periastron 1.158977e5 R☉, age 2.163193e5 yr, [Fe/H] -2.3200: Some(Detached)
+query 204: 23.501490 + 6.508142 M☉, periastron 3.835684e1 R☉, age 2.800422e8 yr, [Fe/H] -1.3676: Some(Bright(Magnitudes(-8.2)))
+query 204: M_V = 0xc020666666666666  # -8.2
+query 205: 100.916124 + 0.091356 M☉, periastron 3.224156e4 R☉, age 2.272190e8 yr, [Fe/H] -0.0012: Some(Bright(Magnitudes(13.35)))
+query 205: M_V = 0x402ab33333333333  # 13.35
+query 206: 12.687600 + 0.109064 M☉, periastron 2.960790e4 R☉, age 1.797876e9 yr, [Fe/H] 0.1312: Some(Bright(Magnitudes(-5.46)))
+query 206: M_V = 0xc015d70a3d70a3d7  # -5.46
+query 207: 127.703421 + 86.630734 M☉, periastron 1.874462e4 R☉, age 6.150931e7 yr, [Fe/H] -1.7420: Some(Remnants)
+query 208: 3.323987 + 2.275445 M☉, periastron 3.112146e2 R☉, age 3.032261e9 yr, [Fe/H] -1.8052: Some(Bright(Magnitudes(-7.42)))
+query 208: M_V = 0xc01dae147ae147ae  # -7.42
+query 209: 0.430294 + 0.194630 M☉, periastron 7.495337e1 R☉, age 1.478726e7 yr, [Fe/H] -2.3563: Some(Detached)
+query 210: 145.063954 + 19.298267 M☉, periastron 4.194961e0 R☉, age 1.221150e5 yr, [Fe/H] -0.1311: Some(Unchanged)
+query 211: 16.576154 + 1.044958 M☉, periastron 1.603684e5 R☉, age 7.407522e7 yr, [Fe/H] -0.9167: Some(Bright(Magnitudes(12.62)))
+query 211: M_V = 0x40293d70a3d70a3d  # 12.62
+query 212: 2.128712 + 0.750094 M☉, periastron 7.154379e5 R☉, age 2.652335e9 yr, [Fe/H] -2.2808: Some(Detached)
+query 213: 10.584334 + 1.981659 M☉, periastron 2.815082e0 R☉, age 9.466579e6 yr, [Fe/H] -1.3428: Some(Bright(Magnitudes(-9.27)))
+query 213: M_V = 0xc0228a3d70a3d70a  # -9.27
+query 214: 1.584431 + 0.223056 M☉, periastron 4.069973e3 R☉, age 1.143653e5 yr, [Fe/H] -0.3986: Some(Detached)
+query 215: 0.166700 + 0.142446 M☉, periastron 1.506119e2 R☉, age 8.336534e8 yr, [Fe/H] 0.2215: Some(Detached)
+query 216: 11.451174 + 0.843565 M☉, periastron 2.728831e1 R☉, age 1.258711e8 yr, [Fe/H] -0.6428: Some(Bright(Magnitudes(-7.72)))
+query 216: M_V = 0xc01ee147ae147ae1  # -7.72
+query 217: 83.720037 + 0.452442 M☉, periastron 6.228726e0 R☉, age 1.463027e8 yr, [Fe/H] -0.9429: Some(Bright(Magnitudes(-7.75)))
+query 217: M_V = 0xc01f000000000000  # -7.75
+query 218: 10.045389 + 1.246261 M☉, periastron 7.900851e1 R☉, age 2.102501e9 yr, [Fe/H] -0.1999: Some(Bright(Magnitudes(-6.12)))
+query 218: M_V = 0xc0187ae147ae147b  # -6.12
+query 219: 0.913155 + 0.371341 M☉, periastron 3.830173e4 R☉, age 4.232231e9 yr, [Fe/H] -0.4237: Some(Detached)
+query 220: 100.807328 + 12.064704 M☉, periastron 9.495850e4 R☉, age 9.720444e8 yr, [Fe/H] -1.4435: Some(Bright(Magnitudes(16.92)))
+query 220: M_V = 0x4030eb851eb851ec  # 16.92
+query 221: 0.087725 + 0.082305 M☉, periastron 4.666619e3 R☉, age 6.428269e5 yr, [Fe/H] -1.2720: Some(Detached)
+query 222: 15.583050 + 1.045335 M☉, periastron 1.633820e3 R☉, age 5.246419e9 yr, [Fe/H] -2.1413: Some(Bright(Magnitudes(-5.21)))
+query 222: M_V = 0xc014d70a3d70a3d7  # -5.21
+query 223: 0.216586 + 0.109239 M☉, periastron 2.700138e5 R☉, age 3.401881e8 yr, [Fe/H] -2.1217: Some(Detached)
+query 224: 15.573618 + 0.690831 M☉, periastron 1.715294e4 R☉, age 1.545427e7 yr, [Fe/H] -1.4014: Some(Bright(Magnitudes(11.95)))
+query 224: M_V = 0x4027e66666666666  # 11.95
+query 225: 0.346783 + 0.220981 M☉, periastron 5.895997e1 R☉, age 4.752881e9 yr, [Fe/H] -0.1025: Some(Detached)
+query 226: 0.345489 + 0.242190 M☉, periastron 3.742161e0 R☉, age 1.274196e9 yr, [Fe/H] 0.2703: Some(Detached)
+query 227: 1.372598 + 0.982806 M☉, periastron 3.248166e0 R☉, age 9.837680e6 yr, [Fe/H] -2.1118: Some(Bright(Magnitudes(0.2)))
+query 227: M_V = 0x3fc999999999999a  # 0.2
+query 228: 1.626773 + 0.105725 M☉, periastron 1.130497e2 R☉, age 2.094200e6 yr, [Fe/H] -1.0452: Some(Detached)
+query 229: 0.194598 + 0.114046 M☉, periastron 2.825834e1 R☉, age 2.951082e9 yr, [Fe/H] -2.4593: Some(Detached)
+query 230: 2.800712 + 0.310746 M☉, periastron 2.216645e5 R☉, age 1.018857e10 yr, [Fe/H] -0.3911: Some(Detached)
+query 231: 1.728874 + 1.322308 M☉, periastron 3.730177e2 R☉, age 7.304338e6 yr, [Fe/H] -0.8923: Some(Detached)
+query 232: 0.529477 + 0.154066 M☉, periastron 1.011342e0 R☉, age 3.894523e7 yr, [Fe/H] -1.4126: None
+query 233: 2.875946 + 0.681158 M☉, periastron 5.220258e5 R☉, age 9.586288e8 yr, [Fe/H] -0.2757: Some(Detached)
+query 234: 0.272677 + 0.238336 M☉, periastron 1.340620e4 R☉, age 1.683622e9 yr, [Fe/H] -2.2618: Some(Detached)
+query 235: 1.183126 + 0.390864 M☉, periastron 1.649331e0 R☉, age 8.633903e6 yr, [Fe/H] -2.1981: Some(Bright(Magnitudes(1.54)))
+query 235: M_V = 0x3ff8a3d70a3d70a4  # 1.54
+query 236: 0.213123 + 0.158346 M☉, periastron 2.174648e1 R☉, age 9.473884e6 yr, [Fe/H] -1.6516: Some(Detached)
+query 237: 66.400516 + 18.115191 M☉, periastron 5.341149e1 R☉, age 1.621263e8 yr, [Fe/H] 0.0535: Some(Bright(Magnitudes(-7.83)))
+query 237: M_V = 0xc01f51eb851eb852  # -7.83
+query 238: 1.129427 + 0.190087 M☉, periastron 6.797182e0 R☉, age 2.174027e5 yr, [Fe/H] -0.5318: Some(Unchanged)
+query 239: 7.605040 + 0.386387 M☉, periastron 3.471791e1 R☉, age 3.814382e6 yr, [Fe/H] 0.0138: Some(Bright(Magnitudes(11.4)))
+query 239: M_V = 0x4026cccccccccccd  # 11.4
+query 240: 0.246002 + 0.099640 M☉, periastron 1.048671e0 R☉, age 2.517010e6 yr, [Fe/H] 0.1627: None
+query 241: 16.704181 + 0.285905 M☉, periastron 3.886887e1 R☉, age 3.402154e9 yr, [Fe/H] -1.1563: Some(Bright(Magnitudes(-5.55)))
+query 241: M_V = 0xc016333333333333  # -5.55
+query 242: 62.534800 + 31.709528 M☉, periastron 4.950659e0 R☉, age 9.189333e8 yr, [Fe/H] -0.6526: Some(Remnants)
+query 243: 0.103578 + 0.101780 M☉, periastron 1.003018e5 R☉, age 2.428418e6 yr, [Fe/H] -0.6821: Some(Detached)
+query 244: 53.668179 + 0.193434 M☉, periastron 8.962401e3 R☉, age 8.281431e8 yr, [Fe/H] 0.1844: Some(Bright(Magnitudes(-5.73)))
+query 244: M_V = 0xc016eb851eb851ec  # -5.73
+query 245: 0.426210 + 0.094697 M☉, periastron 4.945080e2 R☉, age 4.619664e7 yr, [Fe/H] -2.1473: Some(Detached)
+query 246: 146.699573 + 122.918477 M☉, periastron 3.844083e4 R☉, age 1.666194e9 yr, [Fe/H] -0.8226: Some(Remnants)
+query 247: 0.330099 + 0.141834 M☉, periastron 1.252916e0 R☉, age 5.400586e9 yr, [Fe/H] -2.2326: None
+query 248: 1.167299 + 0.207523 M☉, periastron 1.037194e2 R☉, age 1.411075e8 yr, [Fe/H] -1.0990: Some(Detached)
+query 249: 0.568721 + 0.426397 M☉, periastron 4.516117e5 R☉, age 1.670531e8 yr, [Fe/H] -0.7591: Some(Detached)
+query 250: 0.089093 + 0.084513 M☉, periastron 5.287249e3 R☉, age 5.893530e9 yr, [Fe/H] -1.6976: Some(Detached)
+query 251: 5.206708 + 0.376712 M☉, periastron 1.986321e3 R☉, age 9.351132e9 yr, [Fe/H] -1.5366: Some(Bright(Magnitudes(-7.85)))
+query 251: M_V = 0xc01f666666666666  # -7.85
+query 252: 1.960336 + 0.493624 M☉, periastron 9.780904e3 R☉, age 4.226515e7 yr, [Fe/H] -1.6677: Some(Detached)
+query 253: 0.268959 + 0.144742 M☉, periastron 5.558196e5 R☉, age 5.183879e7 yr, [Fe/H] -0.4126: Some(Detached)
+query 254: 64.076441 + 2.728444 M☉, periastron 2.010067e4 R☉, age 1.309387e9 yr, [Fe/H] -1.9666: Some(Bright(Magnitudes(16.26)))
+query 254: M_V = 0x4030428f5c28f5c3  # 16.26
+query 255: 0.197796 + 0.080342 M☉, periastron 1.123266e2 R☉, age 1.348539e8 yr, [Fe/H] -0.4226: Some(Detached)

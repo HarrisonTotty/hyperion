@@ -1863,7 +1863,8 @@ Files: `crates/hyperion-sim/tests/binaries_statistical.rs`.
 Acceptance: `just test-slow` passes; `just ci` stays green.
 
 _As built (lane `p11-t12`, 2026-11-01; tests only, nothing generated moves): see Risks, "P11.T12,
-as built". Its fix, the wide pairs' wind held at 27: see Risks, "P11.T12's fix"._
+as built". Its fix, the wide pairs' wind held at 27: see Risks, "P11.T12's fix"; the pair bound's
+wind reach, held at 29: see Risks, "P11.T12's wind reach"._
 
 ### P11.T13 Protocol and server
 
@@ -7722,3 +7723,20 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     stars 1,800 → 1,818). Added in turn (the galaxy's holds at 29, swollen dwarf, dwarf limit,
     core endings), all but `core_endings` move it by 0, and it by +18. The black holes and the most
     gained are unchanged.
+- **P11.T12's wind reach: the pair bound's `Detached` takes the partner's wind, held at 29** (lane
+  `p11-t12-wind-reach`, 2026-11-05; nothing moves at 28).
+  - _The hold._ `WIND_REACH_VERSION` = 29 (`stellar/binary/wind_reach.rs`), `StellarRules::wind_reach`
+    (`WindReachRules::{LobeAndDecay, Wind}`), read at `light::detached` (its item 5). The census
+    (`StarBounds`) and the brief's gate (`pair_keeps_own_models`) pass the galaxy's rules through
+    `pair_light_bound_under`; `pair_light_bound` stays the version's.
+  - _The screen._ New fitted `binary_wind_reach` (fast, since 28) on the reach table's grid: per
+    cell and bin the walk's Bondi–Hoyle sum S = Σ ΔM (R ÷ β_W M)², per cell the AGB's start, loss,
+    least mass and dust radius. A star of at most m takes at most α m² S ÷ (8 r_p²) plus the AGB
+    overflow at its worst q and x. Pair-light, reach and sky binary-light read no `Detached`: unchanged.
+  - _Leans (2026-11-05)._ The accretor at its initial mass, as the walk feeds it on its own track
+    (not the engine screen's m + 0.8 ΔM); S rather than the product of each factor's worst; S's
+    margin 0.1 dex, the AGB's 10%; e = 0, the bound knowing only the periastron.
+  - _Tests._ `the_star_bound_holds_for_realised_systems` runs under 29 only, since 28's `Detached`
+    fails it on a wind-fed star (a layer C companion at M_V 0.79 against 2.55).
+  - _For the bump to 29._ Delete `LobeAndDecay`, the field, the `match`, the tallies' held column
+    and the tripwire; the census tests' 29 galaxy becomes the fixture.

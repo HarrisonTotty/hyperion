@@ -183,8 +183,40 @@ fn wind_roche_lobe_share(m_donor: f64, r_donor: f64, t_eff_k: f64, m_accretor: f
 /// Whether a star in `phase` loses an AGB star's dust-driven wind: the early and the thermally
 /// pulsing asymptotic giant branch (HPT types 5 and 6).
 #[must_use]
-const fn on_the_agb(phase: Phase) -> bool {
+pub(super) const fn on_the_agb(phase: Phase) -> bool {
     matches!(phase, Phase::EarlyAgb | Phase::ThermallyPulsingAgb)
+}
+
+/// The steps of a walk over the track `donor` from `start` to `end`, years, in age order: the
+/// spans between the track's mass knots and phase boundaries ([`Track::mass_breaks`]), each cut
+/// into `n` equal steps. [`Walk`] takes them, and the wind's reach table
+/// ([`wind_reach`](super::wind_reach)) samples its stars along them.
+pub(super) fn walk_steps(
+    donor: &Track,
+    start: f64,
+    end: f64,
+    n: u32,
+) -> impl Iterator<Item = (f64, f64)> + '_ {
+    let mut nodes = std::iter::once(start)
+        .chain(donor.mass_breaks(start, end))
+        .chain(std::iter::once(end));
+    let first = nodes.next();
+    nodes
+        .scan(first, |previous, node| {
+            let from = previous.replace(node)?;
+            Some((from, node))
+        })
+        .filter(|&(from, to)| to > from)
+        .flat_map(move |(from, to)| {
+            let at = move |k: u32| {
+                if k == n {
+                    to
+                } else {
+                    from + (to - from) * f64::from(k) / f64::from(n)
+                }
+            };
+            (0..n).map(move |k| (at(k), at(k + 1)))
+        })
 }
 
 /// The share of a wind-losing star's wind that its companion accretes: BSE equation 6, with
@@ -355,30 +387,9 @@ impl<'a> Walk<'a> {
             .sum()
     }
 
-    /// The walk's steps from `start` to `end`, years, in age order: the spans between the
-    /// partner's mass knots and phase boundaries, each cut into `steps_per_interval` equal steps.
+    /// The walk's steps from `start` to `end`, years, in age order ([`walk_steps`]).
     fn steps(&self, start: f64, end: f64) -> impl Iterator<Item = (f64, f64)> + '_ {
-        let n = self.steps_per_interval;
-        let mut nodes = std::iter::once(start)
-            .chain(self.donor.mass_breaks(start, end))
-            .chain(std::iter::once(end));
-        let first = nodes.next();
-        nodes
-            .scan(first, |previous, node| {
-                let from = previous.replace(node)?;
-                Some((from, node))
-            })
-            .filter(|&(from, to)| to > from)
-            .flat_map(move |(from, to)| {
-                let at = move |k: u32| {
-                    if k == n {
-                        to
-                    } else {
-                        from + (to - from) * f64::from(k) / f64::from(n)
-                    }
-                };
-                (0..n).map(move |k| (at(k), at(k + 1)))
-            })
+        walk_steps(self.donor, start, end, self.steps_per_interval)
     }
 
     /// What an accretor of `m_accretor` M☉ takes of the partner's wind over the step from `t0` to

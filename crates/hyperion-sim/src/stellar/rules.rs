@@ -47,8 +47,14 @@
 //!   binary engine through its input's rules and by the track's builder through its options. The
 //!   fitted tables keep the version's rules until the bump refits them
 //!   (`stellar/rules/core_endings_hold.rs` lists the movers).
+//! - [`wind_reach`](StellarRules::wind_reach), whether the census's pair bound reads the wind's
+//!   reach for its `Detached`, from 29 ([`WIND_REACH_VERSION`]; P11.T12's fix). Its one reader is
+//!   `light::detached`, which `pair_light_bound_under` reaches with the galaxy's rules from the
+//!   census (`StarBounds`) and the brief's gate.
 //!
 //! The 27 folds put P11's 27 holds on the record; the holds above but `kick_rank` are at 29.
+//!
+//! [`WIND_REACH_VERSION`]: crate::stellar::binary::wind_reach::WIND_REACH_VERSION
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
@@ -58,6 +64,7 @@ use crate::GeneratorVersion;
 use crate::stellar::binary::core_endings::{CORE_ENDINGS_VERSION, CoreEndingRules};
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::swollen_dwarf::{SWOLLEN_DWARF_VERSION, SwollenDwarfRules};
+use crate::stellar::binary::wind_reach::WindReachRules;
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -77,12 +84,15 @@ pub(crate) struct StellarRules {
     /// How a white dwarf's core that a giant keeps ends, and where an oxygen–neon core collapses,
     /// the hold of [`CORE_ENDINGS_VERSION`].
     pub(crate) core_endings: CoreEndingRules,
+    /// Whether the census's pair bound reads the wind's reach for its `Detached`
+    /// ([`WindReachRules`]), from 29.
+    pub(crate) wind_reach: WindReachRules,
 }
 
 impl StellarRules {
     /// Each field's arm at `version`: the new arm from its `*_VERSION`, the held arm below it.
     ///
-    /// Every version takes the committed kick-rank table.
+    /// Every version takes the committed kick-rank table; the wind's reach is held below 29.
     #[must_use]
     pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
@@ -102,15 +112,14 @@ impl StellarRules {
             } else {
                 CoreEndingRules::Held
             },
+            wind_reach: WindReachRules::of_version(version),
         }
     }
 
     /// Every stellar hold at 29 in force, for a test that asserts a 29 figure without a galaxy:
-    /// P11.T4's `dwarf_limit`, `swollen_dwarf` and `core_endings`. The stellar part of
-    /// `GalaxyRules::every_29_hold()`, so a later hold at 29 joins both with nothing to edit; the
-    /// 29 bump deletes it with it.
-    /// `GalaxyRules::every_29_hold()`, so a later hold at 29 joins both with nothing to edit; the
-    /// 29 bump deletes it with it.
+    /// P11.T4's `dwarf_limit`, `swollen_dwarf` and `core_endings`, and P11.T12's `wind_reach`. The
+    /// stellar part of `GalaxyRules::every_29_hold()`, so a later hold at 29 joins both with nothing
+    /// to edit; the 29 bump deletes it with it.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_29_hold() -> Self {
@@ -160,5 +169,7 @@ mod swollen_dwarf_hold;
 mod tests;
 #[cfg(test)]
 mod wind_accretion_hold;
+#[cfg(test)]
+mod wind_reach_hold;
 #[cfg(test)]
 mod xrb_class_hold;

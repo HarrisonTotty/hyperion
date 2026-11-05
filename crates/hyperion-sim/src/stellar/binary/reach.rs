@@ -340,7 +340,7 @@ pub fn reach_node(m_msun: f64, fe_h: f64) -> ReachNode {
 /// The draws of a sample: η at the standard-normal `z`, the companion-stripped mark `stripped`,
 /// and every other draw at its median.
 #[must_use]
-fn draws_at(z: f64, stripped: Mark) -> StarDraws {
+pub(super) fn draws_at(z: f64, stripped: Mark) -> StarDraws {
     StarDraws::from_parts(StarDrawsParts {
         eta: StandardNormal::new(z).expect("the draws of the table are finite"),
         stripped,
@@ -655,7 +655,7 @@ impl ReachTable<'_> {
 /// The mass interval holding `m_msun` (M☉, at least [`LOWEST_MASS_MSUN`]): a mass on an edge may
 /// be read in either interval it bounds, since both hold the edge's samples.
 #[must_use]
-fn mass_cell(m_msun: f64) -> usize {
+pub(super) fn mass_cell(m_msun: f64) -> usize {
     let x = math::ln(m_msun.min(HIGHEST_MASS_MSUN) / LOWEST_MASS_MSUN) / mass_step();
     #[expect(
         clippy::cast_possible_truncation,
@@ -668,7 +668,7 @@ fn mass_cell(m_msun: f64) -> usize {
 
 /// The metallicity interval holding `fe_h` (dex, inside [`FE_H_NODES`]).
 #[must_use]
-fn fe_h_cell(fe_h: f64) -> usize {
+pub(super) fn fe_h_cell(fe_h: f64) -> usize {
     (1..FE_H_CELLS)
         .take_while(|&j| fe_h >= FE_H_NODES[j])
         .last()
