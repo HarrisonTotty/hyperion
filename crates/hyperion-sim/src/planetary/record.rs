@@ -1263,6 +1263,17 @@ impl BeltRecord {
         }
     }
 
+    /// The same record with its largest body's diameter `largest_diameter`: from generator version
+    /// 29, the belt's largest member left once its members' rock has evaporated (P14.T55.b.a's
+    /// follow-up).
+    #[must_use]
+    pub(crate) fn with_largest_diameter(self, largest_diameter: Metres) -> Self {
+        Self {
+            largest_diameter,
+            ..self
+        }
+    }
+
     /// The orbit host it goes round.
     #[must_use]
     pub const fn host(&self) -> OrbitHost {

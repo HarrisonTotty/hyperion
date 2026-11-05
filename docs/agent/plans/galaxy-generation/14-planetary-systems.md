@@ -34395,3 +34395,18 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Leans (2026-11-03):_ a belt loses its named members' share of mass lost (the gone ones' and
     the rest's losses) from its mass and its dust's shine, and with none left ends at the last one's
     evaporation; a moon's bulk is still read at its formed mass, its record's mass alone moving.
+- **P14.T55.b.a's evaporated bulk, as built (lane `fix-p14-moon-evaporated-bulk`, 2026-11-05).**
+  Held at 29 (`fate::evaporation::EVAPORATED_BULK_VERSION`; `EvaporatedBulkRules::{Formed, Left}`,
+  the switch `with_evaporated_bulk` over 28's rules, a line in `HeldRules`). Nothing below 29.
+  - _New items:_ `MoonPart::{at_mass_left, at_mass}`; `Satellite::with_mass` and each kind's;
+    `BeltEvaporation::largest`; `BeltRecord::with_largest_diameter`.
+  - _Readers:_ a present moon's record, surface seed and rotation law read it at its mass left (its
+    orbit, and its μ's mass, as formed); from 29 this replaces the 2026-11-03 lean on a moon's bulk.
+  - _Leans (2026-11-05):_ a capture keeps its density, its radius shrunk by the cube root of its
+    mass's share; a belt's largest body is its members' law's diameters so shrunk, an evaporated
+    member's none and one gone by another cause as formed; impactors keep their belts unevaporated
+    at `SOURCE_MASS_AGE` (their rate is constant in time).
+  - _Left out:_ a belt's member list keeps its gone members, as a planet's moons do; a moon's
+    neighbouring belt (its composition only) and a member-parent's moons (none losing) move nothing.
+  - _For 29's bump:_ delete and restate what `the_evaporated_bulk_is_held_only_until_the_29_bump`
+    lists.

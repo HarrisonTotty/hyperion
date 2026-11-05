@@ -155,6 +155,7 @@ use crate::planetary::derive::{
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
 use crate::planetary::error::ResolveBodyError;
+use crate::planetary::fate::evaporation::EvaporatedBulkRules;
 use crate::planetary::fate::{
     BodyFate, BodyState, DestructionCause, FateAt, FateBody, FateHost, ScatterDraws,
 };
@@ -452,6 +453,38 @@ impl MoonPart {
             }
         }
     }
+
+    /// The moon as its record derives its bulk, figure and class at `t`, in `state` then, along its
+    /// planet's history `fate`: [`at_mass`](Self::at_mass) of its mass then
+    /// ([`mass_at`](Self::mass_at)), which its rock's evaporation may have left it.
+    #[must_use]
+    fn at_mass_left(&self, fate: &BodyFate<'_>, state: BodyState, t: UniverseTime) -> Self {
+        match EvaporatedBulkRules::in_force() {
+            EvaporatedBulkRules::Formed => *self,
+            EvaporatedBulkRules::Left => self.at_mass(self.mass_at(fate, state, t)),
+        }
+    }
+
+    /// The moon as a record whose mass section states `mass` derives its bulk, figure and class:
+    /// from generator version 29 (`EVAPORATED_BULK_VERSION`), at that mass
+    /// ([`Satellite::with_mass`]), as a planet's derivation reads its fate's mass; itself, to the
+    /// bit, below it and at the mass it formed with. Its orbit and state stay the moon's as it
+    /// formed.
+    #[must_use]
+    fn at_mass(&self, mass: EarthMasses) -> Self {
+        let formed = mass
+            .value()
+            .total_cmp(&self.satellite.mass().value())
+            .is_eq();
+        match EvaporatedBulkRules::in_force() {
+            EvaporatedBulkRules::Formed => *self,
+            EvaporatedBulkRules::Left if formed => *self,
+            EvaporatedBulkRules::Left => Self {
+                satellite: self.satellite.with_mass(mass),
+                ..*self
+            },
+        }
+    }
 }
 
 /// What its named members' evaporation has taken of a belt by a time (P14.T55.b.a,
@@ -462,6 +495,9 @@ struct BeltEvaporation {
     share: f64,
     /// When the last of its members evaporated, if none is left.
     ended: Option<UniverseTime>,
+    /// The diameter of its largest named member left: each present one's shrunk by the cube root
+    /// of the share of its mass its rock has left, each gone one's none, the rest's as formed.
+    largest: Metres,
 }
 
 /// A belt member's primordial state: the member, its belt and what the fate transform reads.
@@ -2768,11 +2804,13 @@ impl PlanetarySystem {
                 let record = self.satellite_record(&epoch, &cosines, body, label, &now, &fate);
                 let (state, _) = moon.state_at(now.state, &fate, ctx, t);
                 let present = state == BodyState::Present && now.position.is_some();
+                // From 29 its bulk at the mass its rock has left, as its record's.
+                let left = moon.at_mass_left(&fate, state, t);
                 let derived = if present {
                     let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
                     let at = MoonNow {
                         body,
-                        moon,
+                        moon: &left,
                         orbit,
                         parent: &now,
                         fate: &fate,
@@ -2784,7 +2822,7 @@ impl PlanetarySystem {
                 };
                 let bulk = match &derived {
                     Some(derived) => {
-                        let properties = Self::moon_bulk_of(moon, derived, &now);
+                        let properties = Self::moon_bulk_of(&left, derived, &now);
                         bulk_composition(ctx, properties.fractions(), *derived.element_inventory())
                     }
                     None if present => Section::NotModelled,
@@ -3260,9 +3298,15 @@ impl PlanetarySystem {
             Part::Planet(_) | Part::Member(_) | Part::Moon(_) => ObliquityLaw::Rayleigh,
         };
         let elements = self.elements_at_parent_time(ctx, body, recorded);
+        // A moon's elements are about its parent with the mass it formed with, μ = G (M_p + m),
+        // which its rock's evaporation does not move (from 29 `mass` is its mass left).
+        let orbiting = match body.part {
+            Part::Moon(_) => body.mass(),
+            Part::Planet(_) | Part::Member(_) | Part::Ring(_) => mass,
+        };
         let mass = Kilograms::from(mass);
-        let primary =
-            elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value();
+        let primary = elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT
+            - Kilograms::from(orbiting).value();
         let own = SpinDraws::for_body(self.seed, index.body_id(self.system));
         let draws = match &body.part {
             Part::Planet(planet) => planet.spin.over(own),
@@ -3488,9 +3532,12 @@ impl PlanetarySystem {
         }
         let seasonal = fate.at(t).orbit().copied()?;
         let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+        // From 29 at the mass its rock has left then, as its record then reads it.
+        let left = moon.at_mass_left(fate, state, t);
+        let mass = left.satellite.mass();
         let case = MoonNow {
             body,
-            moon,
+            moon: &left,
             orbit,
             parent: now,
             fate,
@@ -3498,7 +3545,7 @@ impl PlanetarySystem {
         // Its bulk before its passes, the same in both rounds: what its law reads of its record.
         let before = Self::moon_bulk_before_passes(epoch, &case)?;
         let bulk = SpinBulk::from(&Self::moon_figure_of_shape(
-            moon,
+            &left,
             &before.shape,
             &before.bulk.fractions(),
             now,
@@ -3513,11 +3560,10 @@ impl PlanetarySystem {
                 frame: &frame,
             });
             let derived = self.moon_derived(epoch, &case, spun, PassDriver::Solve)?;
-            self.rotation_from(ctx, body, &orbit, bulk, body.mass(), derived.spin_tides())
+            self.rotation_from(ctx, body, &orbit, bulk, mass, derived.spin_tides())
         };
         // Round 1, under the locked spin.
-        let inputs =
-            self.spin_inputs(ctx, body, &orbit, (bulk, body.mass()), SpinTides::OfClass)?;
+        let inputs = self.spin_inputs(ctx, body, &orbit, (bulk, mass), SpinTides::OfClass)?;
         let locked = BodyRotation::locked_frame(&inputs).expect(
             "a present moon's record has a positive mass and radius, and the despinning time is \
              positive",
@@ -4365,13 +4411,13 @@ impl PlanetarySystem {
         let identity =
             BodyIdentity::new(self.system, body.index, body.kind(), Some(body.host), state)
                 .with_label(label);
+        let mass = body.satellite_mass_at(fate, state, t);
         let builder = BodyRecord::builder(identity)
-            .mass(Section::Ok(body.satellite_mass_at(fate, state, t)))
+            .mass(Section::Ok(mass))
             .moons(Section::NotApplicable)
             .rings(Section::NotApplicable)
             .envelope(Section::NotApplicable);
-        let present = state == BodyState::Present;
-        let builder = match (&body.part, present, parent.position) {
+        let builder = match (&body.part, state == BodyState::Present, parent.position) {
             (Part::Ring(ring), true, Some(centre)) => builder
                 .population(Section::Ok(Population::Ring(ring.clone())))
                 .position(centre)
@@ -4382,10 +4428,12 @@ impl PlanetarySystem {
                 .photometry(Section::NotApplicable)
                 .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
-            (Part::Moon(moon), true, Some(centre)) => {
-                let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+            (Part::Moon(formed), true, Some(centre)) => {
+                let orbit = formed.satellite.orbit_at(&formed.parent, ctx.age_at(t));
                 let (trajectory, valid_until) =
-                    moon_trajectory(ctx, moon, t, (parent.changes_at, evaporated));
+                    moon_trajectory(ctx, formed, t, (parent.changes_at, evaporated));
+                // From 29 its bulk, figure and class at its mass left; its orbit as it formed.
+                let moon = &formed.at_mass(mass);
                 let now = MoonNow {
                     body,
                     moon,
@@ -4437,7 +4485,7 @@ impl PlanetarySystem {
                             .with_drift(trajectory.drift().copied()),
                     ))
                     .position(centre.translated(trajectory.relative_state_at(t).0))
-                    .figure(body.figure_section(bulk.ok(), body.mass(), t))
+                    .figure(body.figure_section(bulk.ok(), moon.satellite.mass(), t))
                     .photometry(photometry)
                     .bulk(bulk)
                     .surface(surface)
@@ -4491,12 +4539,14 @@ impl PlanetarySystem {
         (now, fate): (&ParentNow, &BodyFate<'_>),
         driver: PassDriver,
     ) -> Option<DerivedMoon> {
-        let Part::Moon(moon) = &body.part else {
+        let Part::Moon(formed) = &body.part else {
             return None;
         };
-        let orbit = moon
+        let orbit = formed
             .satellite
-            .orbit_at(&moon.parent, epoch.ctx.age_at(epoch.t));
+            .orbit_at(&formed.parent, epoch.ctx.age_at(epoch.t));
+        let (state, _) = formed.state_at(now.state, fate, epoch.ctx, epoch.t);
+        let moon = &formed.at_mass_left(fate, state, epoch.t);
         let case = MoonNow {
             body,
             moon,
@@ -4925,13 +4975,20 @@ impl PlanetarySystem {
                 let luminosity = epoch.luminosity(zone);
                 let shine = luminosity.map_or(0.0, |l| kept(belt.fractional_luminosity(age, l)));
                 let members = belt.members().iter().map(BeltMember::index).collect();
+                let record = BeltRecord::new(belt, expansion, shine, members);
+                // From 29 its largest body is its largest member left, each one's diameter shrunk
+                // by the cube root of its published mass's share (P14.T55.b.a's follow-up).
+                let record = match (EvaporatedBulkRules::in_force(), evaporated) {
+                    (EvaporatedBulkRules::Left, Some(evaporated)) => {
+                        record.with_largest_diameter(evaporated.largest)
+                    }
+                    (EvaporatedBulkRules::Left, None) | (EvaporatedBulkRules::Formed, _) => record,
+                };
                 builder
                     .mass(Section::Ok(EarthMasses::new(kept(
                         belt.mass_at(age).value(),
                     ))))
-                    .population(Section::Ok(Population::Belt(BeltRecord::new(
-                        belt, expansion, shine, members,
-                    ))))
+                    .population(Section::Ok(Population::Belt(record)))
             }
             _ => builder
                 .mass(Section::Ok(belt.initial_mass()))
@@ -4945,8 +5002,9 @@ impl PlanetarySystem {
     /// What its named members' evaporation has taken of `belt`, whose host is `host`, by `t`
     /// (P14.T55.b.a): the share of its members' mass their rock has lost, those gone and what the
     /// rest have lost, which stands for the belt's own, since its cascade's smaller bodies go
-    /// before them about the same light (lean, 2026-11-03); and, where none is left and the last
-    /// to go evaporated, when. `None` for a belt with no named member.
+    /// before them about the same light (lean, 2026-11-03); where none is left and the last to go
+    /// evaporated, when; and the diameter of its largest member left. `None` for a belt with no
+    /// named member.
     #[must_use]
     fn belt_evaporation(
         &self,
@@ -4956,6 +5014,7 @@ impl PlanetarySystem {
     ) -> Option<BeltEvaporation> {
         let (mut formed, mut lost, mut left) = (0.0, 0.0, 0_usize);
         let mut latest: Option<BodyState> = None;
+        let mut largest = Metres::new(0.0);
         for body in &self.bodies {
             let Part::Member(member) = &body.part else {
                 continue;
@@ -4967,17 +5026,32 @@ impl PlanetarySystem {
             let mass = member.fate.mass().value();
             formed += mass;
             let state = at.state();
-            match state {
+            let diameter = member.member.diameter();
+            let diameter = match state {
                 BodyState::Present => {
                     left += 1;
                     lost += mass - at.mass().value();
+                    if at.mass().value().total_cmp(&mass).is_eq() {
+                        diameter
+                    } else {
+                        Metres::new(diameter.value() * math::cbrt(at.mass().value() / mass))
+                    }
                 }
-                BodyState::NotYetFormed => left += 1,
+                BodyState::NotYetFormed => {
+                    left += 1;
+                    diameter
+                }
                 BodyState::Destroyed {
                     cause: DestructionCause::Evaporated,
                     ..
-                } => lost += mass,
-                BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {}
+                } => {
+                    lost += mass;
+                    Metres::new(0.0)
+                }
+                BodyState::Destroyed { .. } | BodyState::Unbound { .. } => diameter,
+            };
+            if diameter.value() > largest.value() {
+                largest = diameter;
             }
             if state.ended_at() > latest.and_then(|latest| latest.ended_at()) {
                 latest = Some(state);
@@ -4996,6 +5070,7 @@ impl PlanetarySystem {
         Some(BeltEvaporation {
             share: lost / formed,
             ended,
+            largest,
         })
     }
 

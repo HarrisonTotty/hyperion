@@ -309,8 +309,8 @@ pub const MOON_ICE_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new
 /// (0.4639 f + 1.1193), with M in M⊕ and f the ice fraction; below it an uncompressed sphere of
 /// rock at [`MOON_ROCK_DENSITY`] and ice at [`MOON_ICE_DENSITY`], so that Zeng et al.'s curves
 /// are never extrapolated below their range. The two meet 10% apart at 0.01 M⊕ for dry rock
-/// (Eq. 7's 1,804 km against the sphere's 1,629), a step in mass only, since a moon's mass never
-/// changes.
+/// (Eq. 7's 1,804 km against the sphere's 1,629), a step in mass only, which no moon crosses: its
+/// mass changes only as its rock evaporates, below 10⁻³ M⊕ (P14.T55.b.a).
 ///
 /// # Examples
 ///
@@ -382,6 +382,14 @@ impl RegularMoon {
     #[must_use]
     pub const fn mass(&self) -> EarthMasses {
         self.mass
+    }
+
+    /// The same moon at the mass `mass`, its orbit and draws kept: as its record derives it once
+    /// its rock's evaporation has left it that much (P14.T55.b.a's follow-up), its radius then read
+    /// at that mass ([`moon_radius`]).
+    #[must_use]
+    pub(crate) const fn with_mass(self, mass: EarthMasses) -> Self {
+        Self { mass, ..self }
     }
 
     /// The moon's orbit about its planet, referred to the planet's equator, with μ = G (`M_p` + m).

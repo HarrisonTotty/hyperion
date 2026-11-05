@@ -185,6 +185,19 @@ impl Satellite {
         }
     }
 
+    /// The same moon at the mass `mass`, its orbit, plane and draws kept: as its record derives it
+    /// once its rock's evaporation has left it that much (P14.T55.b.a's follow-up), each kind's
+    /// radius read at that mass.
+    #[must_use]
+    pub(crate) fn with_mass(self, mass: EarthMasses) -> Self {
+        let moon = match self.moon {
+            SatelliteMoon::Regular(moon) => SatelliteMoon::Regular(moon.with_mass(mass)),
+            SatelliteMoon::GiantImpact(moon) => SatelliteMoon::GiantImpact(moon.with_mass(mass)),
+            SatelliteMoon::Captured(moon) => SatelliteMoon::Captured(moon.with_mass(mass)),
+        };
+        Self { moon, ..self }
+    }
+
     /// Its radius rank, word 0 of its own `planet.radius` stream (design note 8), which a regular
     /// moon's derivation reads (P14.T17.b): keyed by its candidate's identity, not its sub-index
     /// (ruling 112.5; see the [module](self) documentation).

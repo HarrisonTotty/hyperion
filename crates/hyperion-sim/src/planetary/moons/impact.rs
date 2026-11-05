@@ -124,6 +124,15 @@ impl ImpactMoon {
         self.density
     }
 
+    /// The same moon at the mass `mass`, its density and orbit kept: as its record derives it once
+    /// its rock's evaporation has left it that much (P14.T55.b.a's follow-up), its radius shrunk at
+    /// its density. Its orbit is read from the moon as it formed, whose recession its wind does
+    /// not move.
+    #[must_use]
+    pub(crate) const fn with_mass(self, mass: EarthMasses) -> Self {
+        Self { mass, ..self }
+    }
+
     /// The moon's orbit as it formed, circular on the parent's equator at a₀.
     #[must_use]
     pub const fn formed(&self) -> &KeplerElements {

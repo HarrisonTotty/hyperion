@@ -61,6 +61,32 @@ fn main_sequence_end_gyr(star: &StarModel) -> f64 {
         / 1e9
 }
 
+/// The evaporated bulk is held until the 28 → 29 bump: the rules in force are 28's, and the tests'
+/// switch reaches 29's.
+#[test]
+fn the_evaporated_bulk_is_held_only_until_the_29_bump() {
+    assert!(
+        GENERATOR_VERSION < EVAPORATED_BULK_VERSION,
+        "the 28 → 29 bump reads a present moon's bulk, figure and class at the mass its rock has \
+         left, and a belt's largest body at its largest member left: delete \
+         `EVAPORATED_BULK_VERSION`, `EvaporatedBulkRules` with its `Formed` arm and its matches in \
+         `MoonPart::at_mass_left`, `MoonPart::at_mass` and `PlanetarySystem::belt_record`, the \
+         tests' `with_evaporated_bulk`, its line in `HeldRules`, and this test; restate the tests \
+         held below 29, and have `a_moon_s_published_conditions_read_its_planet_s_orbit` and \
+         `every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk` read a moon's bulk at its mass \
+         left (`MoonPart::at_mass_left`), as `moon_laws_are_held_after_at_most_two_rounds` does"
+    );
+    assert_eq!(EvaporatedBulkRules::in_force(), EvaporatedBulkRules::Formed);
+    assert_eq!(
+        with_evaporated_bulk(EvaporatedBulkRules::Left, EvaporatedBulkRules::in_force),
+        EvaporatedBulkRules::Left
+    );
+    assert_eq!(
+        with_evaporated_bulk(EvaporatedBulkRules::Formed, EvaporatedBulkRules::in_force),
+        EvaporatedBulkRules::Formed
+    );
+}
+
 /// The vapour's flux ρ `c_s` at KIC 12557548b's 2,145 K is PBC13's eqs. 7, 9 and 14 worked in their
 /// own CGS units: olivine's vapour pressure of 6.72 × 10¹⁴ exp(−169 `m_H` 3.21 × 10¹⁰ ÷ (k T)) dyn
 /// cm⁻², about 33 dyn cm⁻², at μ = 30 `m_H` and γ = 1.3; the radius falls at `f_duty` = 0.5 of it

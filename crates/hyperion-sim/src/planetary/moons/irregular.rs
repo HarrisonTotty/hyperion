@@ -365,6 +365,19 @@ impl CapturedMoon {
         self.mass
     }
 
+    /// The same capture at the mass `mass`, its orbit kept: as its record derives it once its
+    /// rock's evaporation has left it that much (P14.T55.b.a's follow-up), its radius shrunk by
+    /// the cube root of the share of its mass left, so that it keeps its density.
+    #[must_use]
+    pub(crate) fn with_mass(self, mass: EarthMasses) -> Self {
+        let share = mass.value() / self.mass.value();
+        Self {
+            radius: Metres::new(self.radius.value() * math::cbrt(share)),
+            mass,
+            ..self
+        }
+    }
+
     /// Whether it goes round its parent prograde or retrograde.
     #[must_use]
     pub const fn sense(&self) -> OrbitSense {

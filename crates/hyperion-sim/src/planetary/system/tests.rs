@@ -6191,9 +6191,18 @@ fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, Planet
             let state = |law: &BodyRotation| law.frame().state_at(t);
             let record = system.record_moon(&epoch, body, (&now, &fate)).unwrap();
             let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-            let bulk = SpinBulk::from(&PlanetarySystem::moon_bulk_of(moon, &record, &now));
+            // Its record and law read it at its mass left then, from 29 (`MoonPart::at_mass_left`).
+            let left = moon.at_mass_left(&fate, moon.state_at(now.state, &fate, ctx, t).0, t);
+            let bulk = SpinBulk::from(&PlanetarySystem::moon_bulk_of(&left, &record, &now));
             let record_law = system
-                .rotation_from(ctx, body, &orbit, bulk, body.mass(), record.spin_tides())
+                .rotation_from(
+                    ctx,
+                    body,
+                    &orbit,
+                    bulk,
+                    left.satellite.mass(),
+                    record.spin_tides(),
+                )
                 .unwrap();
             *states
                 .entry(format!(
@@ -6213,7 +6222,7 @@ fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, Planet
                     // Test 1: its record is round 1's derivation, and its law the held one.
                     let case = MoonNow {
                         body,
-                        moon,
+                        moon: &left,
                         orbit,
                         parent: &now,
                         fate: &fate,
@@ -6238,7 +6247,7 @@ fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, Planet
                     if *law == held.law {
                         let case = MoonNow {
                             body,
-                            moon,
+                            moon: &left,
                             orbit,
                             parent: &now,
                             fate: &fate,
