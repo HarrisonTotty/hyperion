@@ -163,15 +163,18 @@ fn galaxy_scan(c: &mut Criterion) {
         .expect("a runtime");
     let supernovae = query(AlertBand::Photometric(Band::V), 1e-12, 1_000);
     let magnetars = query(AlertBand::XRay, 1e-14, 100);
-    // Research's counts: 4 onsets, and 27,059 magnetar detections from 71 hosts.
+    // The tree's counts, the slow tests' pins, which move with them (`alerts_galaxy_scan`'s
+    // `..._finds_the_whole_cubes_supernovae_as_the_walk_as_built` and `..._magnetars_...`): at
+    // generator version 28 one onset, and 6,628 magnetar detections from 17 hosts (research's
+    // 4 and 27,059 from 71 were 26's, before the young field gave its stars to the features).
     let seen = walk(&runtime, &pool, &galaxy, &supernovae, Walk::Supernovae);
     let onsets = seen
         .iter()
         .filter(|detection| detection.phase() == DetectionPhase::Onset)
         .count();
-    assert_eq!(onsets, 4, "{seen:?}");
+    assert_eq!(onsets, 1, "{seen:?}");
     let bursts = walk(&runtime, &pool, &galaxy, &magnetars, Walk::Magnetars);
-    assert_eq!(bursts.len(), 27_059);
+    assert_eq!(bursts.len(), 6_628);
     let mut group = c.benchmark_group("oneshot_scan_galaxy");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(30));
