@@ -618,6 +618,53 @@ pub fn entries_when<P: ClassProcess>(
     key: CatalogueCellKey,
     wanted: impl Fn(UniverseTime) -> bool,
 ) -> Vec<CatalogueEntry<P::Entry>> {
+    entries_when_in(galaxy, process, key, 0..u32::MAX, wanted)
+}
+
+/// [`entries_when`]'s entries of the candidates of cell `key` whose indices lie in `indices`, held
+/// to the cell's count, in index order.
+///
+/// It is a part of the cell's candidates, which a background walk splits a dense cell into (plan
+/// 12). Over the parts of any partition of `0..u32::MAX`, or of `0..` the count, in order, they
+/// are `entries_when`'s entries exactly, since each candidate is a pure function of its ID and
+/// every part evaluates the cell's one bound and count.
+///
+/// # Panics
+///
+/// As [`CatalogueClassCell::generate`].
+///
+/// # Examples
+///
+/// A cell's core collapses that go off in the clock window, read in two parts that a walk's jobs
+/// could take apart, which put together in order are the whole cell's:
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+/// use hyperion_sim::galaxy::catalogue_classes::{
+///     CatalogueCellKey, ClassId, entries_when, entries_when_in, occupied_cells,
+/// };
+/// use hyperion_sim::time::ClockWindow;
+///
+/// let galaxy = Galaxy::new(Seed::new(9));
+/// let process = CoreCollapseProcess::new(&galaxy);
+/// let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, 50, 0])?;
+/// let count = occupied_cells(&galaxy, &process, [key]).first().map_or(0, |&(_, n)| n);
+/// let mut parts = entries_when_in(&galaxy, &process, key, 0..count / 2, ClockWindow::contains);
+/// parts.extend(entries_when_in(&galaxy, &process, key, count / 2..count, ClockWindow::contains));
+/// let whole = entries_when(&galaxy, &process, key, ClockWindow::contains);
+/// assert_eq!(parts.len(), whole.len());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn entries_when_in<P: ClassProcess>(
+    galaxy: &Galaxy,
+    process: &P,
+    key: CatalogueCellKey,
+    indices: std::ops::Range<u32>,
+    wanted: impl Fn(UniverseTime) -> bool,
+) -> Vec<CatalogueEntry<P::Entry>> {
     assert_eq!(
         key.class(),
         process.class(),
@@ -625,7 +672,7 @@ pub fn entries_when<P: ClassProcess>(
     );
     let bound = process.bound(galaxy, &key);
     let candidates = candidate_count(galaxy.seed(), &key, bound);
-    (0..candidates)
+    (indices.start.min(candidates)..indices.end.min(candidates))
         .filter_map(|index| {
             let id = key
                 .candidate_id(index, 0)

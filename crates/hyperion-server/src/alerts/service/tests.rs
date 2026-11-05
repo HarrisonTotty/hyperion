@@ -13,7 +13,7 @@ use tokio::time::timeout;
 
 use super::*;
 use crate::alerts::Subscription;
-use crate::alerts::scan::ScanSpec;
+use crate::alerts::scan::{ScanSpec, background_plan};
 use crate::alerts::testing::{
     DAY, after, arrival, beside, core_collapses, galaxy, key, pinned, reaching, server,
 };
@@ -98,7 +98,10 @@ async fn two_subscriptions_with_one_key_share_one_walk() {
 /// three of six, and is never passed.
 #[tokio::test]
 async fn the_walks_are_kept_within_their_budget() {
-    let empty = ByteLru::<WalkKey, ScanResult>::charge(&ScanResult::of_jobs([]));
+    let empty = ByteLru::<WalkKey, ScanResult>::charge(&ScanResult::of_pieces(
+        &BackgroundWork::new(Vec::new()),
+        [],
+    ));
     let budget = 3 * empty;
     let (server, _data_dir) = server(|config| config.alert_cache_bytes(budget)).await;
     let state = server.state();
@@ -178,9 +181,9 @@ async fn a_background_walk_given_up_keeps_nothing_and_runs_nothing() {
     server.shutdown().await.unwrap();
 }
 
-/// A background walk whose waiter gives up once its plan has run, its slabs' jobs queued and two
-/// of them held at the gate by the pool's two workers, stores nothing and walks no slab: let
-/// through, every one of its jobs is skipped as cancelled, and only the plan has run.
+/// A background walk whose waiter gives up once its plan has run, its slabs' census jobs queued
+/// and two of them held at the gate by the pool's two workers, stores nothing and counts no slab:
+/// let through, every one of its jobs is skipped as cancelled, and only the plan has run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_background_walk_given_up_among_its_jobs_walks_no_slab() {
     let gate = BulkGate::default();
@@ -239,5 +242,111 @@ async fn a_background_walk_of_a_class_read_in_no_cells_draws_nothing() {
         .await
         .unwrap();
     assert_eq!((walked.drawn(), walked.tracks().len()), (None, 0));
+    server.shutdown().await.unwrap();
+}
+
+/// A background walk whose waiter gives up once its census has run and two of its walk's jobs are
+/// held at the gate by the pool's two workers stores nothing and walks no piece: let through, the
+/// two are skipped as cancelled, no more is queued, and only the plan and the census have run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_background_walk_given_up_among_its_pieces_walks_none() {
+    let gate = BulkGate::default();
+    gate.close();
+    let (server, _data_dir) = server(|config| config.bulk_gate(gate.clone())).await;
+    let state = server.state();
+    let scans = AlertScans::with_slabs_per_job(1 << 20, 1);
+    let supernova = pinned();
+    let far = beside(&supernova, 0.2);
+    let (subscription, first) =
+        core_collapses(far, after(arrival(&supernova, &far), -DAY), reaching(700.0));
+    let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
+    let class = ClassId::CORE_COLLAPSE;
+    let census = background_plan(galaxy(), &spec, class, 1)
+        .unwrap()
+        .jobs()
+        .len();
+    let pool = || state.pool.counters();
+    let start = pool();
+    let given_up = tokio::spawn(scans.background(state, galaxy(), &spec, class));
+    // The plan, then each census job: the walk's jobs are queued only once the census is whole.
+    for admitted in 0..=census {
+        until("the plan or a census job at the gate", || gate.held() > 0).await;
+        gate.admit();
+        until("it to run", || {
+            pool().completed() == start.completed() + u64::try_from(admitted).unwrap() + 1
+        })
+        .await;
+    }
+    until("two of the walk's jobs to be held", || gate.held() == 2).await;
+    given_up.abort();
+    assert!(given_up.await.unwrap_err().is_cancelled());
+    gate.open();
+    until("the walk's jobs to be skipped", || {
+        pool().running() == 0 && pool().queued_bulk() == 0
+    })
+    .await;
+    let after_all = pool();
+    assert_eq!(
+        after_all.completed(),
+        start.completed() + 1 + u64::try_from(census).unwrap(),
+        "the plan and the census alone ran: {after_all:?}"
+    );
+    assert_eq!(
+        after_all.cancelled(),
+        start.cancelled() + 2,
+        "the two held: {after_all:?}"
+    );
+    assert_eq!(scans.counters().entries(), 0);
+    server.shutdown().await.unwrap();
+}
+
+/// A background walk is the same whatever its jobs' budget: the core collapses 0.2 ly from the
+/// pinned supernova, through a sensor that reaches some 700 ly, walked by jobs that take every
+/// piece they can, two at once on the pool's two workers; by jobs of one piece each, a job for
+/// each piece; and by the service's jobs of about a second each. All find the supernova.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_background_walk_is_the_same_whatever_its_jobs_budget() {
+    let (server, _data_dir) = server(|config| config).await;
+    let state = server.state();
+    let supernova = pinned();
+    let far = beside(&supernova, 0.2);
+    let (subscription, first) =
+        core_collapses(far, after(arrival(&supernova, &far), -DAY), reaching(700.0));
+    let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
+    let class = ClassId::CORE_COLLAPSE;
+    let census = background_plan(galaxy(), &spec, class, 1)
+        .unwrap()
+        .jobs()
+        .len();
+    let completed = || state.pool.counters().completed();
+    // The walk's jobs, less its plan and census.
+    let walk = |budget| {
+        let spec = spec.clone();
+        async move {
+            let before = completed();
+            let scans = AlertScans::new(1 << 20).with_job_budget(budget);
+            let walked = timeout(WAIT, scans.background(state, galaxy(), &spec, class))
+                .await
+                .expect("the walk finishes")
+                .unwrap();
+            let jobs = completed() - before - 1 - u64::try_from(census).unwrap();
+            (walked, jobs)
+        }
+    };
+    let (whole, two) = walk(Duration::MAX).await;
+    assert_eq!(two, 2, "two jobs that take every piece");
+    let (one_each, pieces) = walk(Duration::ZERO).await;
+    assert_eq!(*one_each, *whole);
+    assert!(pieces > 10, "a job a piece: {pieces} jobs");
+    let (budgeted, _) = walk(JOB_BUDGET).await;
+    assert_eq!(*budgeted, *whole);
+    assert!(
+        whole
+            .tracks()
+            .iter()
+            .any(|track| track.detection().event() == supernova.event()),
+        "{} tracks",
+        whole.tracks().len()
+    );
     server.shutdown().await.unwrap();
 }

@@ -78,7 +78,7 @@ pub use listed::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache, 
 pub use local::{LocalEventsCache, local_events};
 pub use oneshot::{
     NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, OneShotLight, one_shot_detections,
-    one_shot_scan_cell, one_shot_scan_plan,
+    one_shot_scan_cell, one_shot_scan_cell_in, one_shot_scan_plan,
 };
 pub use reach::{
     ROOT_CUBE_DIAGONAL, class_reach, flux, inverse_square_flux, kind_reach, reach, transmission,

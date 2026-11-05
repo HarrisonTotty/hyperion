@@ -60,10 +60,12 @@ mod nsm;
 
 pub(crate) use merger::donor_product;
 pub(crate) use merger::merger_marks_at;
+pub(crate) use merger::scan_merger_cell_in;
 pub use merger::{MergerScanMarks, horizon_time, merger_scan_marks, scan_merger_cell};
 pub(crate) use nsm::nsm_marks_at;
 #[cfg(test)]
 pub(crate) use nsm::remnant_mass_of;
+pub(crate) use nsm::scan_nsm_cell_in;
 pub use nsm::{NsbhOutflow, NsmScanMarks, nsm_scan_marks, scan_nsm_cell};
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};

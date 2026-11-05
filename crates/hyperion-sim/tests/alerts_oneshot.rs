@@ -32,9 +32,10 @@ use std::collections::BTreeSet;
 use common::observe::{KeepCells, Seen, brute_force_detections, entry_events, observer_at};
 use hyperion_sim::Seed;
 use hyperion_sim::alerts::{
-    AlertBand, AlertContext, AlertQuery, BandLimits, ClassSet, DetectionLight, DetectionPhase,
-    NoOneShotCells, OneShotClass, OneShotEvent, OneShotLight, SensorHorizon, TransientKind,
-    inverse_square_flux, one_shot_detections, supernova_luminosity, supernova_peak,
+    AlertBand, AlertContext, AlertQuery, BandLimits, ClassSet, Detection, DetectionLight,
+    DetectionPhase, NoOneShotCells, OneShotClass, OneShotEvent, OneShotLight, SensorHorizon,
+    TransientKind, inverse_square_flux, one_shot_detections, one_shot_scan_cell,
+    one_shot_scan_cell_in, one_shot_scan_plan, supernova_luminosity, supernova_peak,
 };
 use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
 use hyperion_sim::events::TimeWindow;
@@ -44,7 +45,7 @@ use hyperion_sim::galaxy::catalogue_classes::supernova::{SupernovaEntry, Superno
 use hyperion_sim::galaxy::catalogue_classes::type_ia::{IaChannel, TypeIaProcess};
 use hyperion_sim::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMember, CatalogueMotion, CatalogueSystem,
-    ClassId, ClassProcess,
+    ClassId, ClassProcess, occupied_cells,
 };
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
@@ -393,6 +394,83 @@ fn one_shot_alerts_of_a_toy_class_are_the_brute_forces() {
     let mut none = Vec::new();
     one_shot_detections(&galaxy, &mut context, &other, &process, &mut none);
     assert_eq!(none, []);
+}
+
+/// A cell walked in parts of its candidates, each part's detections merged by arrival and then by
+/// event with a stable sort, in the parts' order, is the whole cell's walk to the bit and in its
+/// order (plan 12, the mergers' balance): each of the toy class's cells that the Sun-like target
+/// sees anything of over a century, in parts of one candidate, of two and of three, after an empty
+/// part and before one past the cell's count. Some cells see several.
+#[test]
+fn one_shot_alerts_of_a_cell_in_parts_are_the_whole_cells() {
+    let galaxy = Galaxy::new(Seed::new(0x0125_0b00));
+    let process = ToyTypeIa::new();
+    let sensor = sensor(&[
+        (AlertBand::Photometric(Band::V), 1.25e-4),
+        (AlertBand::Photometric(Band::B), 2.2e-4),
+        (AlertBand::Photometric(Band::K), 1.5e-5),
+    ]);
+    let target = TARGETS[0];
+    let century = window(target.years, -50.0, 100.0);
+    let query = AlertQuery::builder(observer_at(target.position), century, sensor)
+        .build()
+        .unwrap();
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let by_arrival = |a: &Detection, b: &Detection| {
+        a.arrival()
+            .cmp(&b.arrival())
+            .then_with(|| a.event().cmp(&b.event()))
+    };
+    let (mut cells, mut seen, mut most) = (0, 0, 0);
+    for (cell, count) in occupied_cells(&galaxy, &process, one_shot_scan_plan(&process, &query)) {
+        let mut context = AlertContext::new(&mut noise, &NoModifiers);
+        let mut whole = Vec::new();
+        one_shot_scan_cell(&galaxy, &mut context, &query, &process, cell, &mut whole);
+        if whole.is_empty() {
+            continue;
+        }
+        for step in 1..=3_u32 {
+            let parts = std::iter::once(0..0)
+                .chain(
+                    (0..count)
+                        .step_by(usize::try_from(step).unwrap())
+                        .map(|first| first..first + step),
+                )
+                .chain(std::iter::once(count..u32::MAX));
+            let mut merged = Vec::new();
+            for part in parts {
+                let mut context = AlertContext::new(&mut noise, &NoModifiers);
+                let mut out = Vec::new();
+                one_shot_scan_cell_in(
+                    &galaxy,
+                    &mut context,
+                    &query,
+                    &process,
+                    cell,
+                    part,
+                    &mut out,
+                );
+                assert!(
+                    out.windows(2)
+                        .all(|pair| by_arrival(&pair[0], &pair[1]).is_lt())
+                );
+                merged.extend(out);
+            }
+            merged.sort_by(by_arrival);
+            let bits =
+                |detections: &[Detection]| detections.iter().map(Seen::of).collect::<Vec<_>>();
+            assert_eq!(bits(&merged), bits(&whole), "{cell:?} in parts of {step}");
+            assert_eq!(merged, whole, "{cell:?} in parts of {step}");
+        }
+        cells += 1;
+        seen += whole.len();
+        most = usize::max(most, whole.len());
+    }
+    eprintln!("{seen} detections in {cells} cells, at most {most} a cell");
+    assert!(
+        cells >= 5 && most >= 2,
+        "{seen} in {cells} cells, at most {most}"
+    );
 }
 
 /// Each detection's light (P12.T8.b.1) is its template's in its band through its line of sight:
@@ -855,10 +933,32 @@ fn one_shot_alerts_of_the_core_collapses_are_the_brute_forces() {
     }
 }
 
+/// `process`'s events of cell `key` read in `parts` parts of its candidates, in order, after an
+/// empty one, the last ending at the cell's count as the server's census counts it
+/// ([`occupied_cells`]), past which there is none (plan 12, the mergers' balance).
+fn events_in_parts<P: OneShotClass>(
+    galaxy: &Galaxy,
+    process: &P,
+    key: CatalogueCellKey,
+    parts: u32,
+) -> Vec<OneShotEvent> {
+    let count = occupied_cells(galaxy, process, [key])
+        .first()
+        .map_or(0, |&(_, count)| count);
+    let at =
+        |part: u32| u32::try_from(u64::from(count) * u64::from(part) / u64::from(parts)).unwrap();
+    let past = process.cell_events_when_in(galaxy, key, count..u32::MAX, |_| true);
+    assert_eq!(past, [], "{key:?} past its count {count}");
+    std::iter::once(0..0)
+        .chain((0..parts).map(|part| at(part)..at(part + 1)))
+        .flat_map(|part| process.cell_events_when_in(galaxy, key, part, |_| true))
+        .collect()
+}
+
 /// The merger classes' walk reads each cell's events from its scan marks, and they are its
-/// entries' own events, event for event: the stellar mergers of a stretch of the solar circle and
-/// every neutron-star merger cell of the galaxy, where a black hole's merger that ejects nothing
-/// lists none.
+/// entries' own events, event for event, and its events read in parts of its candidates are its
+/// own in order: the stellar mergers of a stretch of the solar circle and every neutron-star
+/// merger cell of the galaxy, where a black hole's merger that ejects nothing lists none.
 #[test]
 fn the_merger_classes_scan_marks_give_their_entries_events() {
     let galaxy = Galaxy::new(Seed::new(9));
@@ -868,6 +968,11 @@ fn the_merger_classes_scan_marks_give_their_entries_events() {
         let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [x, 6, 0]).unwrap();
         let events = mergers.cell_events(&galaxy, key);
         assert_eq!(events, entry_events(&galaxy, &mergers, key), "{key:?}");
+        assert_eq!(
+            events_in_parts(&galaxy, &mergers, key, 3),
+            events,
+            "{key:?}"
+        );
         assert!(events.iter().all(|event| matches!(
             event.light(),
             OneShotLight::Binary(BinaryLightCurve::LuminousRedNova(_))
@@ -887,6 +992,15 @@ fn the_merger_classes_scan_marks_give_their_entries_events() {
                     entry_events(&galaxy, &neutron_stars, key),
                     "{key:?}"
                 );
+                if !listed.is_empty() {
+                    // A part a candidate.
+                    let count = occupied_cells(&galaxy, &neutron_stars, [key])[0].1;
+                    assert_eq!(
+                        events_in_parts(&galaxy, &neutron_stars, key, count),
+                        listed,
+                        "{key:?}"
+                    );
+                }
                 events += listed.len();
                 entries += CatalogueClassCell::generate(&galaxy, &neutron_stars, key)
                     .entries()

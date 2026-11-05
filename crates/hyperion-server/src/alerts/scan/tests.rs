@@ -1,15 +1,21 @@
 //! The scans' walks (plan 12, P12.T8.b and P12.T8.b.2): how far a first scan walks back, what keys
-//! a walk, a background walk in jobs of x-slabs, which gives the interactive walk's pushes, each
-//! once, and a whole galaxy's plan, which lists no cell.
+//! a walk, a background walk counted in jobs of x-slabs and walked in pieces, which gives the
+//! interactive walk's pushes, each once, a merger class's cells split by candidate index, which
+//! give the whole cells' tracks in their order, and a whole galaxy's plan, which lists no cell.
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use hyperion_sim::alerts::{
-    AlertBand, BandLimits, ClassSet, LocalEventsCache, LongestRise, SensorHorizon, TransientKind,
+    AlertBand, BandLimits, ClassSet, LocalEventsCache, LongestRise, OneShotClass, OneShotEvent,
+    SensorHorizon, TransientKind,
 };
 use hyperion_sim::coords::GalacticPosition;
+use hyperion_sim::galaxy::catalogue_classes::binary::StellarMergers;
 use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
-use hyperion_sim::galaxy::catalogue_classes::{ClassId, cells_in_sphere, occupied_cells};
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueCellKey, ClassId, cells_in_sphere, occupied_cells,
+};
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::id::EventId;
 use hyperion_sim::observe::Observer;
@@ -120,6 +126,32 @@ fn a_scans_key_is_what_its_walk_reads() {
     assert_ne!(renewals.key(), firsts.key());
 }
 
+/// The background walk of `plan` for `spec` in `galaxy`, its jobs run here in turn: its census
+/// jobs' slabs, a merger class's cells in `parts`, and its pieces by jobs of `budget` each.
+fn walked(
+    state: &AppState,
+    galaxy: &Galaxy,
+    spec: &ScanSpec,
+    plan: &BackgroundPlan,
+    parts: CellParts,
+    budget: Duration,
+) -> ScanResult {
+    let token = CancelToken::new();
+    let census: Vec<_> = plan
+        .jobs()
+        .iter()
+        .cloned()
+        .map(|slabs| census_slabs(galaxy, plan, slabs, parts, &token).expect("not cancelled"))
+        .collect();
+    let work = BackgroundWork::new(census);
+    let mut jobs = Vec::new();
+    while !work.is_taken() {
+        let job = walk_pieces(state, galaxy, spec, plan, &work, budget, &token);
+        jobs.push(job.expect("not cancelled"));
+    }
+    ScanResult::of_pieces(&work, jobs)
+}
+
 /// The pushes of `tracks` merged as `request`'s, the scan of `subscription`, to the window's end:
 /// each push's time, event and crossing.
 fn pushes_of(
@@ -138,10 +170,11 @@ fn pushes_of(
         .collect()
 }
 
-/// A background walk of the core collapses in jobs gives the whole's pushes, each once, in jobs of
-/// one slab, of three and of all, and they are the interactive walk's: 0.2 ly from the pinned
-/// supernova, through a V sensor that reaches some 700 ly, over the first scan's year and its walk
-/// back. The jobs draw every candidate of the sphere's cells.
+/// A background walk of the core collapses in jobs gives the whole's pushes, each once, counted in
+/// jobs of one slab, of three and of all, and walked a piece a job or in the service's budget, and
+/// they are the interactive walk's: 0.2 ly from the pinned supernova, through a V sensor that
+/// reaches some 700 ly, over the first scan's year and its walk back. The jobs draw every candidate
+/// of the sphere's cells.
 #[tokio::test]
 async fn a_background_walk_in_slab_jobs_gives_the_interactive_walks_pushes_each_once() {
     let (server, _data_dir) = server(|config| config).await;
@@ -152,19 +185,12 @@ async fn a_background_walk_in_slab_jobs_gives_the_interactive_walks_pushes_each_
     let (subscription, first) = core_collapses(far, start, reaching(700.0));
     let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
     let class = ClassId::CORE_COLLAPSE;
-    let token = CancelToken::new();
-    let walk = |per_job| {
+    let walk = |per_job, budget| {
         let plan = background_plan(galaxy(), &spec, class, per_job).unwrap();
-        let jobs = plan.jobs().to_vec();
-        let walked = jobs.into_iter().map(|slabs| {
-            walk_slabs(state, galaxy(), &spec, &plan, slabs, &token).expect("not cancelled")
-        });
-        (
-            plan.jobs().len(),
-            ScanResult::of_jobs(walked.collect::<Vec<_>>()),
-        )
+        let walked = walked(state, galaxy(), &spec, &plan, CellParts::SERVICE, budget);
+        (plan.jobs().len(), walked)
     };
-    let (slabs, whole) = walk(usize::MAX);
+    let (slabs, whole) = walk(usize::MAX, JOB_BUDGET);
     assert_eq!(slabs, 1, "one job of every slab");
     let plan = background_plan(galaxy(), &spec, class, 1).unwrap();
     assert!(
@@ -185,9 +211,13 @@ async fn a_background_walk_in_slab_jobs_gives_the_interactive_walks_pushes_each_
     .map(|&(_, count)| u64::from(count))
     .sum();
     assert_eq!(whole.drawn(), Some(drawn));
-    for per_job in [1, 3] {
-        let (_, jobs) = walk(per_job);
-        assert_eq!(jobs, whole, "in jobs of {per_job} slabs");
+    for (per_job, budget) in [
+        (1, JOB_BUDGET),
+        (3, Duration::ZERO),
+        (usize::MAX, Duration::ZERO),
+    ] {
+        let (_, jobs) = walk(per_job, budget);
+        assert_eq!(jobs, whole, "in jobs of {per_job} slabs, {budget:?}");
     }
     let interactive = walk_interactive(state, galaxy(), &spec, &mut LocalEventsCache::default());
     assert_eq!(
@@ -257,15 +287,8 @@ async fn from_29_a_background_walk_gives_the_interactive_walks_listed_pushes() {
     let (subscription, first) = core_collapses(far, start, reaching(700.0));
     let spec = ScanSpec::new(key, &subscription, &first).unwrap();
     let class = ClassId::CORE_COLLAPSE;
-    let token = CancelToken::new();
     let plan = background_plan(galaxy, &spec, class, 1).unwrap();
-    let jobs: Vec<_> = plan
-        .jobs()
-        .iter()
-        .cloned()
-        .map(|slabs| walk_slabs(state, galaxy, &spec, &plan, slabs, &token).unwrap())
-        .collect();
-    let whole = ScanResult::of_jobs(jobs);
+    let whole = walked(state, galaxy, &spec, &plan, CellParts::SERVICE, JOB_BUDGET);
     let sphere = plan.sphere.as_ref().expect("the sensor sees the class");
     let cells: u64 = occupied_cells(
         galaxy,
@@ -342,17 +365,8 @@ async fn from_29_a_background_walk_of_the_slow_novae_gives_the_interactive_walks
         hyperion_sim::alerts::DEFAULT_HOST_LIMIT,
     );
     let spec = ScanSpec::new(key, &subscription, &first).unwrap();
-    let token = CancelToken::new();
     let plan = background_plan(galaxy, &spec, class, 1).unwrap();
-    let walk = || {
-        let jobs: Vec<_> = plan
-            .jobs()
-            .iter()
-            .cloned()
-            .map(|slabs| walk_slabs(state, galaxy, &spec, &plan, slabs, &token).unwrap())
-            .collect();
-        ScanResult::of_jobs(jobs)
-    };
+    let walk = || walked(state, galaxy, &spec, &plan, CellParts::SERVICE, JOB_BUDGET);
     let whole = walk();
     let listed = state.listed_hosts.counters();
     assert!(listed.entries() > 0, "the walk keeps its lists: {listed:?}");
@@ -436,19 +450,37 @@ fn a_class_the_sensor_cannot_see_plans_no_job_and_draws_nothing() {
     let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
     let plan = background_plan(galaxy(), &spec, ClassId::CORE_COLLAPSE, SLABS_PER_JOB).unwrap();
     assert_eq!(plan.jobs(), []);
-    assert_eq!(ScanResult::of_jobs([]).drawn(), Some(0));
+    let work = BackgroundWork::new(Vec::new());
+    assert!(work.is_taken(), "no piece to take");
+    assert_eq!(ScanResult::of_pieces(&work, []).drawn(), Some(0));
 }
 
-/// A merger class, whose candidates read no time first, walked in jobs of one slab gives its
-/// interactive walk's tracks: the stellar mergers through a V sensor reaching some 700 ly of the
-/// core collapses' reach, from the Sun-like point over the first scan's year.
+/// Seed 9's red nova of stellar merger cell [−2, 7, −1], one of its 231 candidates, which goes off
+/// 727.1 years after the epoch at [−6,820.3, 29,961.6, −858.1] ly, out by the solar circle.
+fn red_nova() -> OneShotEvent {
+    let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [-2, 7, -1]).unwrap();
+    let host = hyperion_sim::id::SystemId::from_raw(0xfc27_0b87_8000_0040).unwrap();
+    StellarMergers::new(galaxy())
+        .cell_events(galaxy(), key)
+        .into_iter()
+        .find(|event| event.host() == host)
+        .expect("the cell's merger makes its red nova")
+}
+
+/// A merger class, whose candidates read no time first, walked in pieces gives its interactive
+/// walk's tracks, and its cells split by candidate index among one-piece jobs give the whole
+/// cells' tracks in their order, each to the bit (plan 12, the mergers' balance): the stellar
+/// mergers 1 ly from the pinned red nova, through a V sensor through which red novae reach some
+/// 400 ly, over the first scan's year. The red nova is detected.
 #[tokio::test]
-async fn a_merger_class_in_slab_jobs_gives_its_interactive_walks_tracks() {
+async fn a_merger_class_in_pieces_gives_its_interactive_walks_tracks_and_its_whole_cells() {
     let (server, _data_dir) = server(|config| config).await;
     let state = server.state();
     let class = ClassId::STELLAR_MERGER;
+    let nova = red_nova();
+    let far = beside(&nova, 1.0);
     let (subscription, first) = Subscription::new(
-        Observer::new(sun(), UniverseTime::EPOCH).unwrap(),
+        Observer::new(far, after(arrival(&nova, &far), -DAY)).unwrap(),
         reaching(700.0),
         ClassSet::of(class),
         hyperion_sim::alerts::DEFAULT_HOST_LIMIT,
@@ -456,20 +488,35 @@ async fn a_merger_class_in_slab_jobs_gives_its_interactive_walks_tracks() {
     let spec = ScanSpec::new(key(), &subscription, &first).unwrap();
     let plan = background_plan(galaxy(), &spec, class, 1).unwrap();
     assert_ne!(plan.jobs(), []);
-    let token = CancelToken::new();
-    let jobs: Vec<_> = plan
-        .jobs()
-        .iter()
-        .cloned()
-        .map(|slabs| walk_slabs(state, galaxy(), &spec, &plan, slabs, &token).unwrap())
-        .collect();
-    let walked = ScanResult::of_jobs(jobs);
+    let whole = walked(
+        state,
+        galaxy(),
+        &spec,
+        &plan,
+        CellParts::new(u32::MAX, 1),
+        JOB_BUDGET,
+    );
+    let split = walked(
+        state,
+        galaxy(),
+        &spec,
+        &plan,
+        CellParts::new(1, 3),
+        Duration::ZERO,
+    );
+    assert_eq!(split, whole, "split three ways, a piece a job");
     assert!(
-        walked.drawn().is_some_and(|drawn| drawn > 0),
+        whole.drawn().is_some_and(|drawn| drawn > 0),
         "{:?}",
-        walked.drawn()
+        whole.drawn()
     );
     let interactive = walk_interactive(state, galaxy(), &spec, &mut LocalEventsCache::default());
+    assert_eq!(
+        interactive.background().count(),
+        0,
+        "{:?}",
+        interactive.census()
+    );
     let interactive: Vec<_> = interactive
         .tracks()
         .iter()
@@ -484,8 +531,95 @@ async fn a_merger_class_in_slab_jobs_gives_its_interactive_walks_tracks() {
         events.sort_unstable();
         events
     };
-    assert_eq!(events(walked.tracks()), events(&interactive));
+    assert_eq!(events(whole.tracks()), events(&interactive));
+    assert!(
+        events(whole.tracks()).contains(&nova.event()),
+        "the red nova is detected: {:?}",
+        events(whole.tracks())
+    );
     server.shutdown().await.unwrap();
+}
+
+/// A cell's parts cover its candidates in order, each of at least the fewest a part but in a cell
+/// of fewer, and at most the most: the service's split one of the eight central cells' 12.15
+/// million candidates into 64, an inner disc cell's 10,377 into 20, and keep 1,023 whole.
+#[test]
+fn a_cells_parts_cover_its_candidates_in_order() {
+    for (parts, count, expected) in [
+        (CellParts::SERVICE, 12_153_859, 64),
+        (CellParts::SERVICE, 10_377, 20),
+        (CellParts::SERVICE, 2_028, 3),
+        (CellParts::SERVICE, 1_024, 2),
+        (CellParts::SERVICE, 1_023, 1),
+        (CellParts::SERVICE, 1, 1),
+        (CellParts::new(1, 3), 2, 2),
+        (CellParts::new(1, 3), 231, 3),
+        (CellParts::new(u32::MAX, 1), 12_153_859, 1),
+        (CellParts::new(0, 0), 5, 1),
+    ] {
+        let of: Vec<_> = parts.of(count).collect();
+        assert_eq!(of.len(), expected, "{parts:?} of {count}: {of:?}");
+        assert_eq!(of.first().map(|part| part.start), Some(0), "{of:?}");
+        assert_eq!(of.last().map(|part| part.end), Some(count), "{of:?}");
+        assert!(
+            of.windows(2).all(|pair| pair[0].end == pair[1].start),
+            "{of:?}"
+        );
+        let least = if expected > 1 { parts.fewest } else { 1 };
+        assert!(
+            of.iter().all(|part| part.end - part.start >= least),
+            "{of:?}"
+        );
+    }
+}
+
+/// The pieces' items in the walk's order: each piece's in turn, the parts of each split cell
+/// merged by their key with a stable sort, ties in the parts' order, and a cell walked whole or a
+/// slab's lists kept in their own order, as the core collapses' supernovae and then their
+/// magnetars.
+#[test]
+fn the_parts_of_a_split_cell_are_merged_by_arrival_and_event_and_the_rest_kept() {
+    let cell = |x| CatalogueCellKey::new(ClassId::STELLAR_MERGER, [x, 0, 0]).unwrap();
+    let part = |x, indices| Piece::Part {
+        cell: cell(x),
+        indices,
+    };
+    let pieces = [
+        part(0, 0..2),
+        part(0, 2..5),
+        part(0, 5..6),
+        Piece::Listed(0),
+        Piece::Cell(cell(1)),
+        part(2, 0..1),
+        part(2, 1..2),
+        Piece::Listed(1),
+        Piece::Cell(cell(3)),
+    ];
+    // Each part sorted by its key, as a part's walk sorts its detections.
+    let walked = [
+        vec![(2, 'a'), (5, 'b')],
+        vec![(1, 'c'), (5, 'd'), (7, 'e')],
+        vec![(0, 'f')],
+        vec![(9, 'g'), (3, 'h')],
+        vec![(8, 'i'), (2, 'j')],
+        vec![(4, 'k')],
+        vec![(1, 'l'), (4, 'm')],
+        vec![],
+        vec![(6, 'n'), (0, 'o')],
+    ];
+    let merged = in_walk_order(pieces.iter().zip(walked.clone()), |&(key, _)| key);
+    let labels: String = merged.iter().map(|&(_, label)| label).collect();
+    assert_eq!(labels, "fcabdeghijlkmno");
+    // The same with the pieces that found nothing left out.
+    let found = pieces
+        .iter()
+        .zip(walked)
+        .filter(|(_, items)| !items.is_empty());
+    let merged = in_walk_order(found, |&(key, _)| key);
+    assert_eq!(
+        merged.iter().map(|&(_, label)| label).collect::<String>(),
+        labels
+    );
 }
 
 /// Every class `ProductionAlertClasses` walks has a background plan, so that none its census sends
@@ -547,6 +681,90 @@ async fn every_class_the_census_walks_has_a_background_plan() {
         [ClassId::XRAY_BINARY],
         "{:?}",
         interactive.census()
+    );
+    server.shutdown().await.unwrap();
+}
+
+/// The process's CPU time so far, s: user and system, from `/proc/self/stat` at Linux's 100 clock
+/// ticks a second; `None` where there is none.
+fn cpu_seconds() -> Option<f64> {
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // The fields after the command's closing parenthesis, from the state (field 3): utime and
+    // stime are fields 14 and 15.
+    let fields: Vec<&str> = stat.get(stat.rfind(')')? + 2..)?.split(' ').collect();
+    let ticks = |field: usize| fields.get(field - 3)?.parse::<f64>().ok();
+    Some((ticks(14)? + ticks(15)?) / 100.0)
+}
+
+/// FNV-1a of `bytes`, 64-bit: a digest the same on any toolchain, to compare two trees' walks.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// Times the stellar mergers' background walk of the whole galaxy through the service, the walk
+/// that one x-slab's job held at 119.7 s (plan 12, the mergers' balance): V 10⁻¹² W m⁻² over the
+/// first 1,000 years from the Sun-like point, in the Milky Way-like galaxy of seed `0x0926_0000`,
+/// on `HYPERION_WALK_WORKERS` workers (16 if unset). It prints the wall and CPU seconds, the
+/// tracks, the candidates drawn and the tracks' digest, which two trees' walks share to the bit.
+///
+/// Measured (pod, 48 vCPU, release, 2026-11-05), whole x-slab jobs before and pieces after: on 16
+/// workers 120.4 s and 442 CPU-s before, 27.2 s and 433 after; on 31, 120.5 s and 444 before,
+/// 16.3 s and 498 after (31 threads on 24 cores). 69 tracks of 97,706,200 candidates either way,
+/// digest `c0e74d1a42e93c81`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "measurement, run by hand: HYPERION_WALK_WORKERS=16 cargo test --release -p hyperion-server --lib alerts::scan::tests::stellar_mergers_whole_galaxy_walk_wall_and_cpu -- --ignored --nocapture"]
+async fn stellar_mergers_whole_galaxy_walk_wall_and_cpu() {
+    let workers = std::env::var("HYPERION_WALK_WORKERS").map_or(16, |n| n.parse().unwrap());
+    let (server, _data_dir) =
+        server(|config| config.workers(std::num::NonZeroUsize::new(workers).unwrap())).await;
+    let state = server.state();
+    let seed = 0x0926_0000;
+    let galaxy = Arc::new(
+        Galaxy::from_params(
+            hyperion_sim::Seed::new(seed),
+            hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+        )
+        .unwrap()
+        .with_full_potential(),
+    );
+    let class = ClassId::STELLAR_MERGER;
+    let (subscription, first) = Subscription::new(
+        Observer::new(sun(), UniverseTime::EPOCH).unwrap(),
+        v_sensor(1e-12, 1e-10),
+        ClassSet::of(class),
+        hyperion_sim::alerts::DEFAULT_HOST_LIMIT,
+    );
+    let mut spec = ScanSpec::new(
+        GalaxyKey::new(seed, hyperion_sim::GENERATOR_VERSION),
+        &subscription,
+        &first,
+    )
+    .unwrap();
+    let millennium = hyperion_sim::events::TimeWindow::new(
+        UniverseTime::EPOCH,
+        UniverseTime::from_julian_years(1_000).unwrap(),
+    )
+    .unwrap();
+    spec.query = AlertQuery::builder(sun(), millennium, v_sensor(1e-12, 1e-10))
+        .classes(ClassSet::of(class))
+        .build()
+        .unwrap();
+    let scans = crate::alerts::service::AlertScans::new(1 << 30);
+    let (cpu, wall) = (cpu_seconds(), std::time::Instant::now());
+    let walked = scans
+        .background(state, &galaxy, &spec, class)
+        .await
+        .unwrap();
+    let wall = wall.elapsed().as_secs_f64();
+    let cpu = cpu.zip(cpu_seconds()).map(|(before, after)| after - before);
+    eprintln!(
+        "{class} on {workers} workers: {wall:.2} s wall, {cpu:.1?} CPU-s, {} tracks of {:?} \
+         candidates, digest {:016x}",
+        walked.tracks().len(),
+        walked.drawn(),
+        fnv1a(format!("{:?}", walked.tracks()).as_bytes())
     );
     server.shutdown().await.unwrap();
 }

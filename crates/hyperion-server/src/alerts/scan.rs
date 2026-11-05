@@ -5,10 +5,12 @@
 //! and the local events of the systems an observed range query finds within
 //! [`LOCAL_EVENTS_RADIUS`] of the observer (P12.T5.d, P12.T5.e). [`walk_interactive`] walks what
 //! the census lets it walk at once, one interactive job. A class the census sends to the background
-//! is planned by [`background_plan`] and walked by [`walk_slabs`] in bulk jobs of a few x-slabs of
-//! its sphere each (the service's): each job sweeps its slabs' occupied cells and builds only the
-//! candidates whose event time, read first, can light the window (P12.T8.b.2), so that a sensor
-//! that sees across the galaxy is walked in seconds, its class `complete` or over its host limit.
+//! is planned by [`background_plan`], counted by [`census_slabs`] in bulk jobs of a few x-slabs of
+//! its sphere each, and walked by [`walk_pieces`] in bulk jobs that take its pieces in turn (the
+//! service's; plan 12, the mergers' balance): each piece one occupied cell, or a part of a merger
+//! class's dense cell by candidate index, or one slab's lists. Each builds only the candidates
+//! whose event time, read first, can light the window (P12.T8.b.2), so that a sensor that sees
+//! across the galaxy is walked in seconds, its class `complete` or over its host limit.
 //!
 //! The first scan after a schedule starts or restarts walks each class back from its window's start
 //! by the class's longest rise to peak ([`class_longest_rise`]; research's lean of 2026-10-30), and
@@ -28,12 +30,15 @@
 use std::mem::size_of;
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use hyperion_sim::alerts::{
     AlertBand, AlertContext, AlertQuery, BuildAlertQueryError, ClassCensus, ClassSet, ClassStatus,
     Detection, LocalEventsCache, LongestRise, ProductionAlertClasses, RecurrentProcess, Route,
     TransientKind, TransientRow, alerts_in_with, class_longest_rise, class_reach, kind_reach,
-    listed_scan_slab, magnetar_scan_cell, one_shot_scan_cell, recurrent_reach,
+    listed_scan_slab, magnetar_scan_cell, one_shot_scan_cell, one_shot_scan_cell_in,
+    recurrent_reach,
 };
 use hyperion_sim::events::TimeWindow;
 use hyperion_sim::galaxy::Galaxy;
@@ -62,17 +67,72 @@ use crate::{AppState, FeatureMembers};
 /// out reaches few sensors' limits, and a wider query reads every one of its stars at each scan.
 pub(crate) const LOCAL_EVENTS_RADIUS: LightYears = LightYears::new(10.0);
 
-/// The x-slabs of a background class's sphere each job sweeps: 1, so 256 jobs over the root cube's
-/// 256 slabs of 512 ly cells, each some 24 ms of bounds and counts (research-alerts-galaxy-scan),
-/// long beside a job's round trip. Four a job left the dense slabs about the centre to a few
-/// workers: on 47 workers a whole-cube scan took 12.65 s of the fast white dwarfs, 0.69 s of the
-/// magnetars and 0.25 s of the supernovae, one a job 7.78 s, 0.38 s and 0.20 s (`awd_scan_cold`
-/// and `oneshot_scan_galaxy`, pod, 48 vCPU, 2026-11-01).
+/// The x-slabs of a background class's sphere each census job counts: 1, so 256 jobs over the root
+/// cube's 256 slabs of 512 ly cells, each some 24 ms of bounds and counts
+/// (research-alerts-galaxy-scan), long beside a job's round trip. Four a job left the dense slabs
+/// about the centre to a few workers: on 47 workers a whole-cube scan took 12.65 s of the fast
+/// white dwarfs, 0.69 s of the magnetars and 0.25 s of the supernovae, one a job 7.78 s, 0.38 s
+/// and 0.20 s (`awd_scan_cold` and `oneshot_scan_galaxy`, pod, 48 vCPU, 2026-11-01).
 pub(crate) const SLABS_PER_JOB: usize = 1;
 
-/// The most jobs a background walk is split into: 256 (the brief for P12.T8.b.2), more slabs to a
-/// job past it.
+/// The most census jobs a background walk is split into: 256 (the brief for P12.T8.b.2), more
+/// slabs to a job past it; and the most of its walk's jobs queued at once.
 pub(crate) const MAX_BACKGROUND_JOBS: usize = 256;
+
+/// How long a background walk's job takes pieces for before it hands its worker back, to the
+/// pool's interactive jobs first: 1 s. A job takes one piece more whatever it has run, so a piece
+/// is the least it walks. Whole x-slabs a job, the stellar mergers' two slabs about the centre
+/// held a 4,096 ly whole-cube walk at 119.7 s on 16 workers, their neighbours' 36–39 s against a
+/// median of 2.3 s (V 10⁻¹² W m⁻², 1,000 yr, the Milky Way-like seed `0x0926_0000`; pod, 48 vCPU,
+/// release, 2026-11-05).
+pub(crate) const JOB_BUDGET: Duration = Duration::from_secs(1);
+
+/// How a background walk splits each occupied cell of a merger class among its jobs, by candidate
+/// index (plan 12, the mergers' balance): into parts of at least `fewest` candidates, and into at
+/// most `most`. A merger's candidates read no time first, so its walk builds every candidate's scan
+/// marks: the eight 4,096 ly cells that meet at the galactic centre each draw some 12.15 million
+/// candidates on the nuclear components' bound, at some 2 µs each, 23–25 s a cell; and the inner
+/// disc's cells some 10,000, nearly all kept, at about 0.45 ms each, up to 5.7 s a cell (the
+/// Milky Way-like seed `0x0926_0000`; pod, 48 vCPU, release, 2026-11-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CellParts {
+    fewest: u32,
+    most: u32,
+}
+
+impl CellParts {
+    /// The service's: parts of at least 512 candidates, at most 64 a cell. An inner disc cell's
+    /// 10,000 candidates are then 19 parts of some 0.3 s, a cell of 1,000 to 2,000 two or three of
+    /// under a second, and a central cell's 64 of some 190,000, some 0.4 s each. At 1,024 the
+    /// cells of 1,600 to 2,047 stayed whole, the walk's longest pieces at up to 1.9 s.
+    pub(crate) const SERVICE: Self = Self {
+        fewest: 512,
+        most: 64,
+    };
+
+    /// Parts of at least `fewest` candidates and at most `most` a cell, each at least 1.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn new(fewest: u32, most: u32) -> Self {
+        Self {
+            fewest: if fewest == 0 { 1 } else { fewest },
+            most: if most == 0 { 1 } else { most },
+        }
+    }
+
+    /// The parts of a cell of `count` candidates: consecutive ranges of their indices, in order,
+    /// that cover `0..count`, each of at least `fewest` candidates but in a cell of fewer, which is
+    /// one part, and of at least one.
+    fn of(self, count: u32) -> impl ExactSizeIterator<Item = Range<u32>> {
+        let parts = (count / self.fewest).clamp(1, self.most);
+        let at = move |part: u32| {
+            // A count under 2²⁴ times at most `parts` fits in u64, and the quotient in the count.
+            u32::try_from(u64::from(count) * u64::from(part) / u64::from(parts))
+                .expect("a part's first index lies within the count")
+        };
+        (0..parts).map(move |part| at(part)..at(part + 1))
+    }
+}
 
 /// The stars a subscription's local events cache keeps: every star of a 10 ly query's few dozen,
 /// many times over, at a few dozen bytes each.
@@ -233,16 +293,45 @@ pub(crate) struct ScanResult {
 }
 
 impl ScanResult {
-    /// A background walk's, of every job's in the plan's order: no census.
+    /// A background walk's, of every piece of `work` that `jobs` walked, in the walk's order: no
+    /// census. The tracks of the parts of a cell split among its jobs are merged by arrival and
+    /// then by event, with a stable sort, as the whole cell's walk sorts its detections
+    /// ([`one_shot_scan_cell_in`]), so that they are the whole cell's in its order.
+    ///
+    /// # Panics
+    ///
+    /// If the jobs did not take every piece of `work`, or one twice: the jobs of a finished walk
+    /// take each once.
     #[must_use]
-    pub(crate) fn of_jobs(jobs: impl IntoIterator<Item = SlabsWalked>) -> Self {
-        let mut tracks = Vec::new();
-        let mut drawn: u64 = 0;
+    pub(crate) fn of_pieces(
+        work: &BackgroundWork,
+        jobs: impl IntoIterator<Item = PiecesWalked>,
+    ) -> Self {
+        let (mut taken, mut found) = (0, Vec::new());
         for job in jobs {
-            tracks.extend(job.tracks);
-            // Each count is under 2^24 a cell, of under 2^24 cells.
-            drawn += job.drawn;
+            taken += job.taken;
+            found.extend(job.found);
         }
+        assert_eq!(
+            taken,
+            work.pieces().len(),
+            "every piece of a finished walk walked"
+        );
+        found.sort_unstable_by_key(|&(index, _)| index);
+        assert!(
+            found.windows(2).all(|pair| pair[0].0 < pair[1].0),
+            "a piece walked twice"
+        );
+        let mut drawn = work.drawn;
+        let walked = found.into_iter().map(|(index, walked)| {
+            // Each count is under 2^24 a slab's lists, of under 2^24 slabs.
+            drawn += walked.drawn;
+            (&work.pieces()[index], walked.tracks)
+        });
+        let tracks = in_walk_order(walked, |track| {
+            let detection = track.detection();
+            (detection.arrival(), detection.event())
+        });
         Self {
             tracks,
             census: Vec::new(),
@@ -303,6 +392,43 @@ fn tracks_bytes(tracks: &[Tracked]) -> usize {
         .iter()
         .map(|track| size_of::<Tracked>() + size_of_val(track.crossings()))
         .sum()
+}
+
+/// The items of each of the pieces `walked`, given in the walk's order (any that found nothing may
+/// be left out): each piece's in turn, and the parts of a cell split among a walk's jobs merged by
+/// `key` with a stable sort, in the parts' order, as the whole cell's walk sorts them; a cell
+/// walked whole keeps its own order. A cell's parts are consecutive pieces, so the parts of one
+/// cell met in turn are all of it that found anything.
+#[must_use]
+fn in_walk_order<'a, T, K: Ord>(
+    walked: impl IntoIterator<Item = (&'a Piece, Vec<T>)>,
+    key: impl Fn(&T) -> K,
+) -> Vec<T> {
+    let mut items = Vec::new();
+    // The cell whose parts' items end the list: its key, where they begin, and its parts.
+    let mut cell: Option<(CatalogueCellKey, usize, usize)> = None;
+    let merge = |items: &mut [T], cell: Option<(CatalogueCellKey, usize, usize)>| {
+        if let Some((_, start, parts)) = cell
+            && parts > 1
+        {
+            items[start..].sort_by_key(&key);
+        }
+    };
+    for (piece, walked) in walked {
+        match (piece, &mut cell) {
+            (Piece::Part { cell: key, .. }, Some((last, _, parts))) if key == last => {
+                *parts += 1;
+            }
+            (Piece::Part { cell: key, .. }, _) => {
+                let start = items.len();
+                merge(&mut items, cell.replace((*key, start, 1)));
+            }
+            (Piece::Cell(_) | Piece::Listed(_), _) => merge(&mut items, cell.take()),
+        }
+        items.extend(walked);
+    }
+    merge(&mut items, cell);
+    items
 }
 
 /// Whether `track` bears on a window from `start`: it is lit then, or crosses a limit from then
@@ -462,8 +588,8 @@ impl BackgroundProcess {
 }
 
 /// A background walk of one class, planned: its process, the sphere of its reach about the
-/// observer, and its x-slabs in the jobs that sweep them (P12.T8.b.2). It holds no cell keys: each
-/// job lists its slabs' cells as it sweeps them ([`walk_slabs`]).
+/// observer, and its x-slabs in the census jobs that count them (P12.T8.b.2). It holds no cell
+/// keys: each census job lists its slabs' occupied cells as it sweeps them ([`census_slabs`]).
 #[derive(Debug, Clone)]
 pub(crate) struct BackgroundPlan {
     process: Arc<BackgroundProcess>,
@@ -473,7 +599,7 @@ pub(crate) struct BackgroundPlan {
 }
 
 impl BackgroundPlan {
-    /// The slabs of each job, in x order.
+    /// The slabs of each census job, in x order.
     #[must_use]
     pub(crate) fn jobs(&self) -> &[Range<i32>] {
         &self.jobs
@@ -481,7 +607,7 @@ impl BackgroundPlan {
 }
 
 /// The plan of `class`'s background walk for `spec` in `galaxy`, its slabs `slabs_per_job` to a
-/// job, more where they would make over [`MAX_BACKGROUND_JOBS`] jobs; `None` for a class no
+/// census job, more where they would make over [`MAX_BACKGROUND_JOBS`] jobs; `None` for a class no
 /// background walk reads in cells. A class the sensor cannot see has no slabs and no job.
 ///
 /// The sphere is the class's reach ([`class_reach`]), within which every kind of the class has its
@@ -525,12 +651,138 @@ pub(crate) fn background_plan(
     })
 }
 
-/// What a background job found: the tracks of what bears on the window, and the candidates its
-/// slabs' cells drew.
+/// One piece of a background walk, which one of its jobs walks whole (plan 12, the mergers'
+/// balance).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Piece {
+    /// Every candidate of an occupied cell.
+    Cell(CatalogueCellKey),
+    /// The candidates `indices` of an occupied cell of a merger class, a part of a dense cell
+    /// ([`CellParts`]): one of two or more, consecutive in the walk.
+    Part {
+        cell: CatalogueCellKey,
+        indices: Range<u32>,
+    },
+    /// The class's hosts on the lists of the features whose centres lie in the x-slab, from
+    /// generator version 29 (the sim's `listed`).
+    Listed(i32),
+}
+
+/// What a census job found in its slabs: the pieces of their occupied cells and lists, in the
+/// walk's order, and the candidates their cells drew.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SlabsCensus {
+    pieces: Vec<Piece>,
+    drawn: u64,
+}
+
+/// Counts the slabs `slabs` of `plan` in `galaxy`, on a pool worker: in x order, each slab's
+/// occupied cells ([`occupied_cells`]) in its order, each one piece, or for a merger class the
+/// parts `parts` makes of it, in index order, where it makes more than one; and then the slab's
+/// lists. `None` if `token` was cancelled before the last slab.
+#[must_use]
+pub(crate) fn census_slabs(
+    galaxy: &Galaxy,
+    plan: &BackgroundPlan,
+    slabs: Range<i32>,
+    parts: CellParts,
+    token: &CancelToken,
+) -> Option<SlabsCensus> {
+    let mut census = SlabsCensus::default();
+    let Some(sphere) = plan.sphere.as_ref() else {
+        return Some(census);
+    };
+    let process = plan.process.as_ref();
+    let class = process.class();
+    for x in slabs {
+        if token.is_cancelled() {
+            return None;
+        }
+        let cells = cells_in_slab(class, sphere, x);
+        let (occupied, split) = match process {
+            BackgroundProcess::CoreCollapse(p) => (occupied_cells(galaxy, p, cells), false),
+            BackgroundProcess::TypeIa(p) => (occupied_cells(galaxy, p, cells), false),
+            BackgroundProcess::StellarMergers(p) => (occupied_cells(galaxy, p, cells), true),
+            BackgroundProcess::NeutronStarMergers(p) => (occupied_cells(galaxy, p, cells), true),
+            BackgroundProcess::Recurrent(p) => (p.occupied_cells(galaxy, cells), false),
+        };
+        for (cell, count) in occupied {
+            // Each count is under 2^24 a cell, of under 2^24 cells.
+            census.drawn += u64::from(count);
+            let of = parts.of(count);
+            if split && of.len() > 1 {
+                census
+                    .pieces
+                    .extend(of.map(|indices| Piece::Part { cell, indices }));
+            } else {
+                census.pieces.push(Piece::Cell(cell));
+            }
+        }
+        census.pieces.push(Piece::Listed(x));
+    }
+    Some(census)
+}
+
+/// A background walk's pieces, in the walk's order, which its jobs take in turn: each piece is
+/// walked by whichever job takes it next ([`walk_pieces`]), so that no job waits on a dense one
+/// that another has (plan 12, the mergers' balance).
+#[derive(Debug, Default)]
+pub(crate) struct BackgroundWork {
+    pieces: Vec<Piece>,
+    drawn: u64,
+    next: AtomicUsize,
+}
+
+impl BackgroundWork {
+    /// The pieces of every census job's slabs, in the plan's order.
+    #[must_use]
+    pub(crate) fn new(census: Vec<SlabsCensus>) -> Self {
+        let mut work = Self::default();
+        // Some 549,000 pieces for the slow accreting white dwarfs' whole cube.
+        work.pieces
+            .reserve_exact(census.iter().map(|job| job.pieces.len()).sum());
+        for job in census {
+            work.pieces.extend(job.pieces);
+            work.drawn += job.drawn;
+        }
+        work
+    }
+
+    /// The pieces, in the walk's order.
+    #[must_use]
+    pub(crate) fn pieces(&self) -> &[Piece] {
+        &self.pieces
+    }
+
+    /// Whether every piece has been taken by a job.
+    #[must_use]
+    pub(crate) fn is_taken(&self) -> bool {
+        self.next.load(Ordering::Relaxed) >= self.pieces.len()
+    }
+
+    /// The next piece no job has taken, with its place in the walk.
+    fn take(&self) -> Option<(usize, &Piece)> {
+        // Each place is handed out once; what a job walks returns with the job.
+        let index = self.next.fetch_add(1, Ordering::Relaxed);
+        self.pieces.get(index).map(|piece| (index, piece))
+    }
+}
+
+/// What one piece of a background walk found: the tracks of what bears on the window, and the
+/// candidates a slab's lists drew.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct SlabsWalked {
+struct PieceWalked {
     tracks: Vec<Tracked>,
     drawn: u64,
+}
+
+/// What a background job walked: how many pieces it took, and each of them that found anything,
+/// with its place in the walk. A whole-cube walk of the slow accreting white dwarfs takes some
+/// 549,000 pieces, nearly all of which find nothing.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PiecesWalked {
+    taken: usize,
+    found: Vec<(usize, PieceWalked)>,
 }
 
 /// Whether events of `key`'s cell seen within `reach` can reach `query`'s sensor: its box within
@@ -553,27 +805,35 @@ fn reaches(query: &AlertQuery, reach: LightYears, key: &CatalogueCellKey) -> boo
     gap_squared <= padded * padded
 }
 
-/// Walks the slabs `slabs` of `plan` for `spec` in `galaxy`, on a pool worker: every occupied cell
-/// of each slab ([`occupied_cells`]), its one-shot events and, for the core collapses, its
-/// magnetars, each kind where it can reach the sensor, cut to the candidates whose time read first
-/// can light the window (`one_shot_scan_cell`, `magnetar_scan_cell`); or, for a class walked
-/// through its recurrent events alone, those events where they can reach the sensor
-/// (`RecurrentProcess::scan_cell`, every candidate read). From generator version 29, each slab's
-/// features' lists of the class's hosts too (`listed_scan_slab`, through the server's listed
-/// hosts), their candidates counted with the cells'. `None` if `token` was cancelled before the
-/// last cell.
+/// Walks the pieces of `work` that no other job has taken, for `spec` in `galaxy` by `plan`, on a
+/// pool worker, until none is left or `budget` has run, and at least one if any is left: each
+/// cell's one-shot events and, for the core collapses, its magnetars, each kind where it can reach
+/// the sensor, cut to the candidates whose time read first can light the window
+/// ([`one_shot_scan_cell`], [`magnetar_scan_cell`]), or of a merger class's part its candidates
+/// ([`one_shot_scan_cell_in`]); or, for a class walked through its recurrent events alone, those
+/// events where they can reach the sensor (`RecurrentProcess::scan_cell`, every candidate read).
+/// And from generator version 29 each slab's features' lists of the class's hosts
+/// (`listed_scan_slab`, through the server's listed hosts), their candidates counted with the
+/// cells'. `None` if `token` was cancelled before the last piece.
 ///
-/// Over every job of the plan, in any order, the tracks are the class's own in
-/// [`walk_interactive`], each to the bit: each cell's walk is a pure function of the cell.
+/// Over every piece of the walk, however its jobs took them, the tracks merged in the walk's order
+/// ([`ScanResult::of_pieces`]) are the class's own in [`walk_interactive`], each to the bit: each
+/// piece's walk is a pure function of the piece.
 #[must_use]
-pub(crate) fn walk_slabs(
+pub(crate) fn walk_pieces(
     state: &AppState,
     galaxy: &Galaxy,
     spec: &ScanSpec,
     plan: &BackgroundPlan,
-    slabs: Range<i32>,
+    work: &BackgroundWork,
+    budget: Duration,
     token: &CancelToken,
-) -> Option<SlabsWalked> {
+) -> Option<PiecesWalked> {
+    let started = Instant::now();
+    let mut walked = PiecesWalked::default();
+    let Some(sphere) = plan.sphere.as_ref() else {
+        return Some(walked);
+    };
     let feature_cells = state.feature_cells.handle(spec.galaxy);
     let listed = state.listed_hosts.handle(spec.galaxy);
     let gas = WalkGas::of(state, galaxy, &feature_cells);
@@ -581,8 +841,6 @@ pub(crate) fn walk_slabs(
     let mut ctx = AlertContext::new(&mut noise, gas.source())
         .with_feature_cells(&feature_cells)
         .with_listed_hosts(&listed);
-    let mut detections = Vec::new();
-    let mut drawn: u64 = 0;
     let process = plan.process.as_ref();
     let class = process.class();
     let query = spec.class_query(class);
@@ -592,67 +850,65 @@ pub(crate) fn walk_slabs(
         kind_reach(TransientKind::MagnetarBurst, sensor),
         recurrent_reach(class, sensor),
     );
-    let Some(sphere) = plan.sphere.as_ref() else {
-        return Some(SlabsWalked::default());
-    };
-    for x in slabs {
+    while walked.taken == 0 || started.elapsed() < budget {
         if token.is_cancelled() {
             return None;
         }
-        let cells = cells_in_slab(class, sphere, x);
-        let occupied = match process {
-            BackgroundProcess::CoreCollapse(p) => occupied_cells(galaxy, p, cells),
-            BackgroundProcess::TypeIa(p) => occupied_cells(galaxy, p, cells),
-            BackgroundProcess::StellarMergers(p) => occupied_cells(galaxy, p, cells),
-            BackgroundProcess::NeutronStarMergers(p) => occupied_cells(galaxy, p, cells),
-            BackgroundProcess::Recurrent(p) => p.occupied_cells(galaxy, cells),
+        let Some((index, piece)) = work.take() else {
+            break;
         };
-        for (cell, count) in occupied {
-            if token.is_cancelled() {
-                return None;
+        let mut detections = Vec::new();
+        let out = &mut detections;
+        let mut drawn = 0;
+        match (piece, process) {
+            (&Piece::Cell(cell), BackgroundProcess::CoreCollapse(p)) => {
+                if reaches(&query, supernovae, &cell) {
+                    one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+                }
+                if reaches(&query, magnetars, &cell) {
+                    magnetar_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+                }
             }
-            drawn += u64::from(count);
-            let out = &mut detections;
-            match process {
-                BackgroundProcess::CoreCollapse(p) => {
-                    if reaches(&query, supernovae, &cell) {
-                        one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
-                    }
-                    if reaches(&query, magnetars, &cell) {
-                        magnetar_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
-                    }
+            (&Piece::Cell(cell), BackgroundProcess::TypeIa(p)) => {
+                one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+            }
+            (&Piece::Cell(cell), BackgroundProcess::StellarMergers(p)) => {
+                one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+            }
+            (&Piece::Cell(cell), BackgroundProcess::NeutronStarMergers(p)) => {
+                one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
+            }
+            (&Piece::Cell(cell), BackgroundProcess::Recurrent(p)) => {
+                if reaches(&query, recurrent, &cell) {
+                    p.scan_cell(galaxy, &mut ctx, cell, &query, out);
                 }
-                BackgroundProcess::TypeIa(p) => {
-                    one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
-                }
-                BackgroundProcess::StellarMergers(p) => {
-                    one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
-                }
-                BackgroundProcess::NeutronStarMergers(p) => {
-                    one_shot_scan_cell(galaxy, &mut ctx, &query, p, cell, out);
-                }
-                BackgroundProcess::Recurrent(p) => {
-                    if reaches(&query, recurrent, &cell) {
-                        p.scan_cell(galaxy, &mut ctx, cell, &query, out);
-                    }
-                }
+            }
+            (Piece::Part { cell, indices }, BackgroundProcess::StellarMergers(p)) => {
+                let part = indices.clone();
+                one_shot_scan_cell_in(galaxy, &mut ctx, &query, p, *cell, part, out);
+            }
+            (Piece::Part { cell, indices }, BackgroundProcess::NeutronStarMergers(p)) => {
+                let part = indices.clone();
+                one_shot_scan_cell_in(galaxy, &mut ctx, &query, p, *cell, part, out);
+            }
+            (
+                Piece::Part { .. },
+                BackgroundProcess::CoreCollapse(_)
+                | BackgroundProcess::TypeIa(_)
+                | BackgroundProcess::Recurrent(_),
+            ) => unreachable!("the census splits the merger classes' cells alone"),
+            // Nothing for a class no list holds, or below 29.
+            (&Piece::Listed(x), _) => {
+                drawn = listed_scan_slab(galaxy, &mut ctx, &query, (class, sphere), x, out);
             }
         }
-        // The class's hosts on the lists of the features whose centres lie in the slab, from 29
-        // (the sim's `listed`): nothing for a class no list holds, or below 29.
-        drawn += listed_scan_slab(
-            galaxy,
-            &mut ctx,
-            &query,
-            (class, sphere),
-            x,
-            &mut detections,
-        );
+        walked.taken += 1;
+        let tracks = spec.tracked(detections);
+        if !tracks.is_empty() || drawn > 0 {
+            walked.found.push((index, PieceWalked { tracks, drawn }));
+        }
     }
-    Some(SlabsWalked {
-        tracks: spec.tracked(detections),
-        drawn,
-    })
+    Some(walked)
 }
 
 #[cfg(test)]

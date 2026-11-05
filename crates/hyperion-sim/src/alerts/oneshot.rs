@@ -65,6 +65,8 @@
 //! [`InProgress`]: DetectionPhase::InProgress
 //! [`Retardation`]: crate::observe::Retardation
 
+use std::ops::Range;
+
 use crate::coords::GalacticPosition;
 use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
@@ -79,14 +81,14 @@ use crate::galaxy::catalogue_classes::supernova::{
 use crate::galaxy::catalogue_classes::type_ia::{TypeIaEntry, TypeIaProcess};
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassId, ClassProcess, cells_in_sphere,
-    entries_when,
+    entries_when_in,
 };
 use crate::galaxy::query::QuerySphere;
 use crate::id::{EventId, SystemId};
 use crate::observe::{Retardation, bearing, light_time};
 use crate::stellar::binary::events::{BinaryEvent, BinarySystem, events_in};
 use crate::stellar::binary::light_curves::BinaryLightCurve;
-use crate::stellar::binary::scan::{scan_merger_cell, scan_nsm_cell};
+use crate::stellar::binary::scan::{scan_merger_cell_in, scan_nsm_cell_in};
 use crate::time::{Span, UniverseTime};
 use crate::units::{LightYears, Metres, Watts, WattsPerSquareMetre, Years};
 
@@ -261,11 +263,13 @@ pub trait OneShotClass: ClassProcess {
             .collect()
     }
 
-    /// The events of the class's cell `key` whose time `wanted` may accept, in index order:
-    /// [`cell_events`](Self::cell_events)' own, less any of a candidate whose time, read first,
-    /// `wanted` refuses (plan 12, P12.T8.b.2). By default those of the entries [`entries_when`]
-    /// keeps; a class whose candidates read no time first gives every event, and may give them
-    /// its own way.
+    /// The events of the class's cell `key` whose time `wanted` may accept, in index order.
+    ///
+    /// They are [`cell_events`](Self::cell_events)' own, less any of a candidate whose time, read
+    /// first, `wanted` refuses (plan 12, P12.T8.b.2): those of all its candidates
+    /// ([`cell_events_when_in`](Self::cell_events_when_in) of `0..u32::MAX`). The walks read a
+    /// cell through `cell_events_when_in` alone, so a class that reads its events its own way
+    /// overrides that method, never this one.
     #[must_use]
     fn cell_events_when(
         &self,
@@ -276,7 +280,29 @@ pub trait OneShotClass: ClassProcess {
     where
         Self: Sized,
     {
-        entries_when(galaxy, self, key, wanted)
+        self.cell_events_when_in(galaxy, key, 0..u32::MAX, wanted)
+    }
+
+    /// The events of [`cell_events_when`](Self::cell_events_when) of the candidates of cell `key`
+    /// whose indices lie in `indices`, held to the cell's count, in index order.
+    ///
+    /// They are a part of the cell's candidates, which a background walk splits a dense cell into
+    /// (plan 12). By default those of the entries [`entries_when_in`] keeps; a class whose
+    /// candidates read no time first gives every event of the part, and may give them its own
+    /// way. Over the parts of any partition of `0..u32::MAX`, in order, they must be the whole
+    /// cell's events exactly.
+    #[must_use]
+    fn cell_events_when_in(
+        &self,
+        galaxy: &Galaxy,
+        key: CatalogueCellKey,
+        indices: Range<u32>,
+        wanted: impl Fn(UniverseTime) -> bool,
+    ) -> Vec<OneShotEvent>
+    where
+        Self: Sized,
+    {
+        entries_when_in(galaxy, self, key, indices, wanted)
             .iter()
             .filter_map(|entry| self.event(galaxy, entry.value()))
             .collect()
@@ -320,22 +346,28 @@ impl OneShotClass for StellarMergers {
         stellar_merger_event(galaxy, entry)
     }
 
-    /// Every event of the cell ([`cell_events`](Self::cell_events)): a merger's candidates read no
-    /// time first.
-    fn cell_events_when(
+    /// The cell's events from its scan marks, which are its entries' exactly (the marks of all its
+    /// candidates, [`scan_merger_cell`]'s), without the contact pairs and merged stars the
+    /// entries build.
+    ///
+    /// [`scan_merger_cell`]: crate::stellar::binary::scan::scan_merger_cell
+    fn cell_events(&self, galaxy: &Galaxy, key: CatalogueCellKey) -> Vec<OneShotEvent> {
+        self.cell_events_when_in(galaxy, key, 0..u32::MAX, |_| true)
+    }
+
+    /// Every event of the candidates `indices` of the cell, from their scan marks (those of
+    /// [`scan_merger_cell`] of the indices): a merger's candidates read no time first.
+    ///
+    /// [`scan_merger_cell`]: crate::stellar::binary::scan::scan_merger_cell
+    fn cell_events_when_in(
         &self,
         galaxy: &Galaxy,
         key: CatalogueCellKey,
+        indices: Range<u32>,
         _wanted: impl Fn(UniverseTime) -> bool,
     ) -> Vec<OneShotEvent> {
-        self.cell_events(galaxy, key)
-    }
-
-    /// The cell's events from its scan marks, which are its entries' exactly
-    /// ([`scan_merger_cell`]), without the contact pairs and merged stars the entries build.
-    fn cell_events(&self, galaxy: &Galaxy, key: CatalogueCellKey) -> Vec<OneShotEvent> {
         let mut marks = Vec::new();
-        scan_merger_cell(galaxy, self, key, &mut marks);
+        scan_merger_cell_in(galaxy, self, key, indices, &mut marks);
         let mut listed = Vec::with_capacity(1);
         marks
             .iter()
@@ -357,22 +389,27 @@ impl OneShotClass for NeutronStarMergers {
         neutron_star_merger_event(galaxy, entry)
     }
 
-    /// Every event of the cell ([`cell_events`](Self::cell_events)): a merger's candidates read no
-    /// time first.
-    fn cell_events_when(
+    /// The cell's events from its scan marks, which are its entries' exactly (the marks of all its
+    /// candidates, [`scan_nsm_cell`]'s), without the inspirals and remnants the entries build.
+    ///
+    /// [`scan_nsm_cell`]: crate::stellar::binary::scan::scan_nsm_cell
+    fn cell_events(&self, galaxy: &Galaxy, key: CatalogueCellKey) -> Vec<OneShotEvent> {
+        self.cell_events_when_in(galaxy, key, 0..u32::MAX, |_| true)
+    }
+
+    /// Every event of the candidates `indices` of the cell, from their scan marks (those of
+    /// [`scan_nsm_cell`] of the indices): a merger's candidates read no time first.
+    ///
+    /// [`scan_nsm_cell`]: crate::stellar::binary::scan::scan_nsm_cell
+    fn cell_events_when_in(
         &self,
         galaxy: &Galaxy,
         key: CatalogueCellKey,
+        indices: Range<u32>,
         _wanted: impl Fn(UniverseTime) -> bool,
     ) -> Vec<OneShotEvent> {
-        self.cell_events(galaxy, key)
-    }
-
-    /// The cell's events from its scan marks, which are its entries' exactly ([`scan_nsm_cell`]),
-    /// without the inspirals and remnants the entries build.
-    fn cell_events(&self, galaxy: &Galaxy, key: CatalogueCellKey) -> Vec<OneShotEvent> {
         let mut marks = Vec::new();
-        scan_nsm_cell(galaxy, self, key, &mut marks);
+        scan_nsm_cell_in(galaxy, self, key, indices, &mut marks);
         let mut listed = Vec::with_capacity(1);
         marks
             .iter()
@@ -683,6 +720,77 @@ pub fn one_shot_scan_cell<P: OneShotClass>(
     cell: CatalogueCellKey,
     out: &mut Vec<Detection>,
 ) {
+    one_shot_scan_cell_in(galaxy, ctx, query, process, cell, 0..u32::MAX, out);
+}
+
+/// Appends to `out` [`one_shot_scan_cell`]'s detections of the candidates of `cell` whose indices
+/// lie in `indices`, held to the cell's count, sorted by arrival and then by event.
+///
+/// It walks a part of a dense cell, which a background walk splits among its jobs (plan 12). Over
+/// the parts of any partition of `0..u32::MAX` (or of `0..` the cell's count), merged by
+/// arrival and then by event with a stable sort, in the parts' order, the detections are
+/// `one_shot_scan_cell`'s own, each to the bit and in its order: a part's candidates are the
+/// whole cell's of those indices ([`cell_events_when_in`](OneShotClass::cell_events_when_in)), and
+/// each is detected or not on its own.
+///
+/// # Panics
+///
+/// As [`one_shot_detections`].
+///
+/// # Examples
+///
+/// A cell's core collapses that a visual sensor near the Sun sees over a year, walked in two parts
+/// of its candidates as two jobs could take them, and merged as the whole cell's walk sorts them:
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::alerts::{
+///     AlertBand, AlertContext, AlertQuery, BandLimits, SensorHorizon, one_shot_scan_cell,
+///     one_shot_scan_cell_in,
+/// };
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::events::TimeWindow;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+/// use hyperion_sim::galaxy::catalogue_classes::{CatalogueCellKey, ClassId, occupied_cells};
+/// use hyperion_sim::galaxy::gas::ccm::Band;
+/// use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::WattsPerSquareMetre;
+///
+/// let galaxy = Galaxy::new(Seed::new(9));
+/// let w = WattsPerSquareMetre::new;
+/// let v = BandLimits::new(w(1e-6), w(1e-5))?;
+/// let sensor = SensorHorizon::new([(AlertBand::Photometric(Band::V), v)])?;
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).ok_or("in the cube")?;
+/// let end = UniverseTime::from_julian_years(1).ok_or("on the clock")?;
+/// let year = TimeWindow::new(UniverseTime::EPOCH, end)?;
+/// let query = AlertQuery::builder(sun, year, sensor).build()?;
+/// let process = CoreCollapseProcess::new(&galaxy);
+/// let cell = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, 50, 0])?;
+/// let count = occupied_cells(&galaxy, &process, [cell]).first().map_or(0, |&(_, n)| n);
+/// let mut noise = NoiseCache::with_capacity(4_096);
+/// let mut ctx = AlertContext::new(&mut noise, &NoModifiers);
+/// let mut parts = Vec::new();
+/// for half in [0..count / 2, count / 2..count] {
+///     one_shot_scan_cell_in(&galaxy, &mut ctx, &query, &process, cell, half, &mut parts);
+/// }
+/// parts.sort_by(|a, b| a.arrival().cmp(&b.arrival()).then_with(|| a.event().cmp(&b.event())));
+/// let mut whole = Vec::new();
+/// one_shot_scan_cell(&galaxy, &mut ctx, &query, &process, cell, &mut whole);
+/// assert_eq!(parts, whole);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn one_shot_scan_cell_in<P: OneShotClass>(
+    galaxy: &Galaxy,
+    ctx: &mut AlertContext<'_>,
+    query: &AlertQuery,
+    process: &P,
+    cell: CatalogueCellKey,
+    indices: Range<u32>,
+    out: &mut Vec<Detection>,
+) {
     let class = process.class();
     if cell.class() != class || !query.classes().contains(class) {
         return;
@@ -690,7 +798,7 @@ pub fn one_shot_scan_cell<P: OneShotClass>(
     let kind = process.kind();
     let observer = *query.observer_position();
     let candidates: Vec<Candidate> = process
-        .cell_events_when(galaxy, cell, cut::one_shot(query, &cell))
+        .cell_events_when_in(galaxy, cell, indices, cut::one_shot(query, &cell))
         .iter()
         .filter_map(|event| candidate(event, &observer, query))
         .collect();

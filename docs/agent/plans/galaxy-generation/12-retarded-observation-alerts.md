@@ -3108,3 +3108,16 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
     `small_envelope_factor` returns the clamp's ends without the power where they decide it.
   - _Not cut (lean, 2026-11-05)._ No memo of fates across records or calls (no input repeats, and
     a hidden one would warm the cold benches); `table_fate`'s domain as it was.
+- **P12 perf, the stellar mergers' walk balanced (lane `perf-mergers-walk-balance`, 2026-11-05, at
+  28; no output moves: the walk's tracks, in their order, and its candidates are the slab jobs').**
+  - _Names (sim)._ `one_shot_scan_cell_in`, `OneShotClass::cell_events_when_in` and
+    `entries_when_in` (crate-private `scan_merger_cell_in`, `scan_nsm_cell_in`) read a cell's
+    candidates of an index range; each whole-cell form is its range `0..u32::MAX`. A class reads
+    its events its own way by overriding `cell_events_when_in`, never `cell_events_when`.
+  - _Names (server)._ `walk_slabs`, `SlabsWalked` and `ScanResult::of_jobs` are gone: the plan's
+    slab jobs are `census_slabs` (occupied cells as `Piece::Cell`, a merger class's dense ones as
+    `Piece::Part`s by `CellParts::SERVICE`, then each slab's lists), then `walk_pieces` jobs take
+    pieces from a shared `BackgroundWork`, keeping only those that found anything.
+  - _Leans (2026-11-05)._ Only the merger classes' cells split (parts of at least 512 candidates,
+    at most 64 a cell); a walk job hands its worker back after `JOB_BUDGET` = 1 s; as many at once
+    as the pool has workers; `ScanResult::of_pieces` merges a split cell's parts by arrival, event.

@@ -5,27 +5,31 @@
 //! keyed by [`ScanKey`], under a [`SingleFlight`], so two subscriptions at one place with one
 //! sensor, classes and window share one walk. A scan's interactive classes and local events are
 //! one `Priority::Interactive` job. A class its census sends to the background is planned in one
-//! `Priority::Bulk` job, which builds its process once, and walked in at most
-//! [`MAX_BACKGROUND_JOBS`] bulk jobs of [`SLABS_PER_JOB`] x-slabs each, all under one
-//! [`CancelToken`] and sharing the process (P12.T8.b.2). It is complete only when every job has
-//! finished: one cancelled or failed fails the class's walk, which yields nothing (Design note 7).
-//! A walk whose last waiter gives up is cancelled, its jobs still queued skipped and its running
-//! ones stopped at their next cell.
+//! `Priority::Bulk` job, which builds its process once; counted in at most
+//! [`MAX_BACKGROUND_JOBS`] bulk jobs of [`SLABS_PER_JOB`] x-slabs each, which list their slabs'
+//! occupied cells and split a merger class's dense ones by candidate index; and walked by bulk
+//! jobs that take its pieces in turn, as many at once as the pool has workers, each for about
+//! [`JOB_BUDGET`] before it hands its worker back and another is queued (plan 12, the mergers'
+//! balance). All run under one [`CancelToken`] and share the process (P12.T8.b.2). It is complete
+//! only when every job has finished: one cancelled or failed fails the class's walk, which yields
+//! nothing (Design note 7). A walk whose last waiter gives up is cancelled, its jobs still queued
+//! skipped and its running ones stopped at their next slab or piece.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
+use std::time::Duration;
 
-use futures_util::FutureExt;
 use futures_util::future::{self, BoxFuture};
+use futures_util::stream::FuturesUnordered;
+use futures_util::{FutureExt, StreamExt};
 use hyperion_sim::alerts::LocalEventsCache;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::ClassId;
 
-#[cfg(doc)]
-use super::scan::MAX_BACKGROUND_JOBS;
 use super::scan::{
-    SLABS_PER_JOB, ScanKey, ScanResult, ScanSpec, background_plan, walk_interactive, walk_slabs,
+    BackgroundWork, CellParts, JOB_BUDGET, MAX_BACKGROUND_JOBS, SLABS_PER_JOB, ScanKey, ScanResult,
+    ScanSpec, background_plan, census_slabs, walk_interactive, walk_pieces,
 };
 use crate::AppState;
 use crate::cache::{LruCounters, SharedByteLru};
@@ -49,29 +53,42 @@ pub(crate) type Walked = Result<Arc<ScanResult>, ComputeError>;
 pub(crate) struct AlertScans {
     walks: Arc<SharedByteLru<WalkKey, ScanResult>>,
     flights: SingleFlight<WalkKey, ScanResult, ComputeError>,
-    /// The x-slabs each background job sweeps, at the least.
+    /// The x-slabs each background census job counts, at the least.
     slabs_per_job: usize,
+    /// How long each background walk's job takes pieces for.
+    job_budget: Duration,
     /// The walks run so far, interactive and background, each counted once its first job starts.
     walked: Arc<AtomicU64>,
 }
 
 impl AlertScans {
-    /// A service keeping at most `budget_bytes` of walks, whose background jobs sweep
+    /// A service keeping at most `budget_bytes` of walks, whose background census jobs count
     /// [`SLABS_PER_JOB`] x-slabs each.
     #[must_use]
     pub(crate) fn new(budget_bytes: usize) -> Self {
         Self::with_slabs_per_job(budget_bytes, SLABS_PER_JOB)
     }
 
-    /// [`new`](Self::new), with `slabs_per_job` x-slabs in each background job, at least one.
+    /// [`new`](Self::new), with `slabs_per_job` x-slabs in each background census job, at least
+    /// one.
     #[must_use]
     pub(crate) fn with_slabs_per_job(budget_bytes: usize, slabs_per_job: usize) -> Self {
         Self {
             walks: Arc::new(SharedByteLru::new(budget_bytes)),
             flights: SingleFlight::new(),
             slabs_per_job: slabs_per_job.max(1),
+            job_budget: JOB_BUDGET,
             walked: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// This service, its background walks' jobs each taking pieces for `budget`: one piece each
+    /// for none.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn with_job_budget(mut self, budget: Duration) -> Self {
+        self.job_budget = budget;
+        self
     }
 
     /// The interactive walk of `spec` in `galaxy`, the galaxy its key names, through `state`'s
@@ -139,8 +156,8 @@ impl AlertScans {
     }
 
     /// The background walk of `class` for `spec` in `galaxy`, through `state`'s caches: held,
-    /// joined, or planned in one bulk job and walked in bulk jobs of the service's slabs each
-    /// (module documentation).
+    /// joined, or planned in one bulk job, counted in bulk jobs of the service's slabs each, and
+    /// walked in bulk jobs that take its pieces in turn (module documentation).
     ///
     /// The future fails as [`interactive`](Self::interactive)'s does, for any of the jobs: the
     /// class's walk is whole or not at all. A class no background walk reads in cells is not
@@ -158,7 +175,7 @@ impl AlertScans {
         }
         let (state, galaxy, spec) = (Arc::clone(state), Arc::clone(galaxy), spec.clone());
         let (walks, walked) = (Arc::clone(&self.walks), Arc::clone(&self.walked));
-        let per_job = self.slabs_per_job;
+        let (per_job, budget) = (self.slabs_per_job, self.job_budget);
         self.flights
             .run(key.clone(), move || async move {
                 if let Some(held) = walks.get(&key) {
@@ -189,30 +206,60 @@ impl AlertScans {
                     drop(walks.insert(key, Arc::clone(&unwalked)));
                     return Ok(unwalked);
                 };
-                let mut jobs = Vec::with_capacity(plan.jobs().len());
+                // The census: each job its slabs' occupied cells, a few milliseconds a slab.
+                let mut census = Vec::with_capacity(plan.jobs().len());
                 for slabs in plan.jobs().iter().cloned() {
-                    let (state, galaxy, spec, plan) = (
-                        Arc::clone(&state),
-                        Arc::clone(&galaxy),
-                        spec.clone(),
-                        Arc::clone(&plan),
-                    );
-                    jobs.push(
+                    let (galaxy, plan) = (Arc::clone(&galaxy), Arc::clone(&plan));
+                    census.push(
                         pool.submit(Priority::Bulk, token.clone(), move |token: &CancelToken| {
-                            walk_slabs(&state, &galaxy, &spec, &plan, slabs, token)
+                            census_slabs(&galaxy, &plan, slabs, CellParts::SERVICE, token)
                         })
                         .await?,
                     );
                 }
-                let mut parts = Vec::with_capacity(jobs.len());
-                for job in jobs {
-                    parts.push(
+                let mut counted = Vec::with_capacity(census.len());
+                for job in census {
+                    counted.push(
                         job.await
                             .unwrap_or_else(|closed| Err(JobError::from(closed)))?
                             .ok_or(JobError::Cancelled)?,
                     );
                 }
-                let result = Arc::new(ScanResult::of_jobs(parts));
+                let work = Arc::new(BackgroundWork::new(counted));
+                // The walk: as many jobs at once as the pool has workers, each taking pieces for
+                // its budget, and one more queued as each hands its worker back with pieces left.
+                let submit = || {
+                    let (state, galaxy, spec, plan, work) = (
+                        Arc::clone(&state),
+                        Arc::clone(&galaxy),
+                        spec.clone(),
+                        Arc::clone(&plan),
+                        Arc::clone(&work),
+                    );
+                    pool.submit(Priority::Bulk, token.clone(), move |token: &CancelToken| {
+                        walk_pieces(&state, &galaxy, &spec, &plan, &work, budget, token)
+                    })
+                };
+                let at_once = pool
+                    .workers()
+                    .get()
+                    .min(MAX_BACKGROUND_JOBS)
+                    .min(work.pieces().len());
+                let mut running = FuturesUnordered::new();
+                for _ in 0..at_once {
+                    running.push(submit().await?);
+                }
+                let mut parts = Vec::new();
+                while let Some(job) = running.next().await {
+                    parts.push(
+                        job.unwrap_or_else(|closed| Err(JobError::from(closed)))?
+                            .ok_or(JobError::Cancelled)?,
+                    );
+                    if !work.is_taken() {
+                        running.push(submit().await?);
+                    }
+                }
+                let result = Arc::new(ScanResult::of_pieces(&work, parts));
                 drop(walks.insert(key, Arc::clone(&result)));
                 Ok(result)
             })
@@ -240,6 +287,7 @@ impl fmt::Debug for AlertScans {
             .field("counters", &self.counters())
             .field("walking", &self.flights.len())
             .field("slabs_per_job", &self.slabs_per_job)
+            .field("job_budget", &self.job_budget)
             .finish_non_exhaustive()
     }
 }

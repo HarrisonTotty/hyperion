@@ -43,11 +43,13 @@
 //! The class's own test cannot refuse a candidate the scan keeps: a merger in the horizon of a
 //! pair with a living star is a stellar merger.
 
+use std::ops::Range;
+
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
-use crate::galaxy::catalogue_classes::CatalogueCellKey;
 use crate::galaxy::catalogue_classes::binary::{BinaryHost, StellarMergers};
+use crate::galaxy::catalogue_classes::{CatalogueCellKey, ClassProcess};
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::imf::MassBand;
 use crate::id::{BodyId, CatalogueSystemId, SystemId};
@@ -766,15 +768,38 @@ pub fn scan_merger_cell(
     key: CatalogueCellKey,
     out: &mut Vec<MergerScanMarks>,
 ) {
-    let bound = process.hosts().bound(galaxy, &key);
+    scan_merger_cell_in(galaxy, process, key, 0..u32::MAX, out);
+}
+
+/// Appends to `out` the scan marks of the entries of the stellar merger class cell `key` whose
+/// candidates' indices lie in `indices`, held to the cell's count, in index order.
+///
+/// It is a part of [`scan_merger_cell`]'s marks, which a background walk splits a dense cell
+/// into (plan 12). Over the parts of any partition of `0..u32::MAX`, or of `0..` the count, in
+/// order, they are `scan_merger_cell`'s marks exactly: every part evaluates the cell's one bound
+/// ([`ClassProcess::bound`]) and count, and each candidate's marks are a pure function of its ID.
+///
+/// # Panics
+///
+/// As [`scan_merger_cell`].
+pub(crate) fn scan_merger_cell_in(
+    galaxy: &Galaxy,
+    process: &StellarMergers,
+    key: CatalogueCellKey,
+    indices: Range<u32>,
+    out: &mut Vec<MergerScanMarks>,
+) {
+    let bound = ClassProcess::bound(process, galaxy, &key);
     let candidates =
         crate::galaxy::catalogue_classes::grid::candidate_count(galaxy.seed(), &key, bound);
-    out.extend((0..candidates).filter_map(|index| {
-        let id = key
-            .candidate_id(index, 0)
-            .expect("a count held under 2^24 numbers every candidate");
-        merger_scan_marks(galaxy, process, &key, id, bound)
-    }));
+    out.extend(
+        (indices.start.min(candidates)..indices.end.min(candidates)).filter_map(|index| {
+            let id = key
+                .candidate_id(index, 0)
+                .expect("a count held under 2^24 numbers every candidate");
+            merger_scan_marks(galaxy, process, &key, id, bound)
+        }),
+    );
 }
 
 #[cfg(test)]
