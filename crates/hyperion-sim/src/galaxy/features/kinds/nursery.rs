@@ -53,11 +53,11 @@
 //! interior is log-normal about 0.005 cm⁻³ with 0.3 dex (the scatter is ours), truncated at two
 //! standard deviations (1.26 × 10⁻³ to 0.020 cm⁻³; ruling 136.3), at 10^6.2 K.
 //!
-//! # The merge and the wall (from generator version 29, P09.T5)
+//! # The merge and the wall (P09.T5, from generator version 29)
 //!
 //! Grown as Weaver's to blow-out, the bubbles filled 0.96 of the plane at the solar circle and
 //! carried no dust, against a hot filling of 0.2–0.5 there (Ferrière 2001, Rev. Mod. Phys. 73,
-//! 1031). From [`SUPERBUBBLE_MERGE_VERSION`] ([`Superbubble::merging`]):
+//! 1031). So every galaxy's bubble is [`Superbubble::merging`]'s:
 //!
 //! - **The merge.** A bubble's shell stops growing once it has slowed to the speed at which a
 //!   remnant's shell merges with the gas, `v_m = β c_net` (the shell window's: β = 2,
@@ -75,7 +75,6 @@
 //!   its hot core is the hole: the cores fill a fifth of the plane at the solar circle, and with the
 //!   field's own hot phase half of it is hot.
 
-use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::consts::YEARS_PER_MEGAYEAR;
@@ -165,37 +164,6 @@ pub const WALL_COMPRESSION: f64 = MERGE_FACTOR * MERGE_FACTOR;
 /// The share of a superbubble's radius at which its wall begins, `(1 − 1 ÷ β²)^⅓` = `∛¾`, so that
 /// the wall from it to the edge holds the gas of the whole sphere at [`WALL_COMPRESSION`].
 pub const WALL_INNER_SHARE: f64 = 0.908_560_296_416_069_8;
-
-/// The generator version from which a superbubble stops growing at the remnants' merge speed and
-/// keeps its swept-up gas in a wall (P09.T5, module documentation): 29, a lean of 2026-11-05.
-///
-/// Below it every galaxy's `SuperbubbleRules` is `Weaver`: a bubble grows as Weaver's to
-/// blow-out, with no wall, and every figure is version 28's bit for bit. 29's bump deletes this
-/// hold, `SuperbubbleRules` with its `Weaver` arm and its field in `GalaxyRules`,
-/// [`Superbubble::of`]'s use as an arm of [`Superbubble::in_galaxy`], and the tripwire
-/// `the_superbubbles_merge_only_from_29`.
-pub const SUPERBUBBLE_MERGE_VERSION: GeneratorVersion = GeneratorVersion::new(29);
-
-/// How a galaxy's superbubbles grow (its hold, [`SUPERBUBBLE_MERGE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SuperbubbleRules {
-    /// Version 28's and before: as Weaver's to blow-out, with no wall ([`Superbubble::of`]).
-    Weaver,
-    /// Version 29's: to the merge, with a wall ([`Superbubble::merging`]).
-    Merging,
-}
-
-impl SuperbubbleRules {
-    /// The rules of generator version `version`.
-    #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
-        if version.get() >= SUPERBUBBLE_MERGE_VERSION.get() {
-            Self::Merging
-        } else {
-            Self::Weaver
-        }
-    }
-}
 
 /// The share `G(age)` of associations born `age` ago that have dissolved: uniform dissolution ages
 /// on [`DISSOLUTION_AGE_MYR`] (Design note 2).
@@ -497,8 +465,8 @@ impl Superbubble {
         })
     }
 
-    /// The bubble of `marks` at `age` as from generator version 29 (module documentation, "The
-    /// merge and the wall"): [`of`](Self::of)'s, stopped where its shell slows to the merge speed
+    /// The bubble of `marks` at `age` (module documentation, "The merge and the wall"):
+    /// [`of`](Self::of)'s, stopped where its shell slows to the merge speed
     /// in gas of smooth density `ambient` at thermal pressure `pressure`, and lined by a wall of
     /// the gas it swept up. `None` where `of` gives none.
     #[must_use]
@@ -537,10 +505,9 @@ impl Superbubble {
         })
     }
 
-    /// The bubble the nursery of `marks` at `centre` in `galaxy` blows at `age`, by the galaxy's
-    /// rules: [`of`](Self::of)'s below generator version 29, [`merging`](Self::merging)'s from it,
-    /// each in the smooth gas at `centre`. What the features' gas, the recently dead and a
-    /// feature's answers read.
+    /// The bubble the nursery of `marks` at `centre` in `galaxy` blows at `age`:
+    /// [`merging`](Self::merging)'s, in the smooth gas at `centre`. What the features' gas, the
+    /// recently dead and a feature's answers read.
     #[must_use]
     pub fn in_galaxy(
         galaxy: &Galaxy,
@@ -549,30 +516,28 @@ impl Superbubble {
         age: Years,
     ) -> Option<Self> {
         let gas = galaxy.gas();
-        Self::by_rules(galaxy, marks, age, gas.mean_density(centre), || {
-            gas.pressure(centre)
-        })
+        Self::in_centre_gas(
+            galaxy,
+            marks,
+            age,
+            gas.mean_density(centre),
+            gas.pressure(centre),
+        )
     }
 
     /// [`in_galaxy`](Self::in_galaxy)'s bubble from the smooth gas at its centre, read by the
-    /// caller: the mean density `ambient`, and the thermal pressure `pressure` gives, which only
-    /// 29's rules read.
+    /// caller: the mean density `ambient` and the thermal pressure `pressure`.
     #[must_use]
-    pub(crate) fn by_rules(
+    pub(crate) fn in_centre_gas(
         galaxy: &Galaxy,
         marks: &NurseryMarks,
         age: Years,
         ambient: HydrogenPerCm3,
-        pressure: impl FnOnce() -> KelvinPerCm3,
+        pressure: KelvinPerCm3,
     ) -> Option<Self> {
         let height = galaxy.gas().params().neutral_height();
         let clock = galaxy.feature_shares().supernova_clock();
-        match galaxy.rules().superbubbles {
-            SuperbubbleRules::Weaver => Self::of(marks, age, ambient, height, clock),
-            SuperbubbleRules::Merging => {
-                Self::merging(marks, age, ambient, pressure(), height, clock)
-            }
-        }
+        Self::merging(marks, age, ambient, pressure, height, clock)
     }
 
     /// The bubble's radius.
@@ -729,29 +694,6 @@ mod tests {
         assert!((WALL_COMPRESSION - 4.0).abs() < f64::EPSILON);
     }
 
-    /// The superbubbles' merge is held until the 28 → 29 bump: the version's galaxy grows them as
-    /// Weaver's, and 29's rules merge them.
-    #[test]
-    fn the_superbubbles_merge_only_from_29() {
-        use crate::GENERATOR_VERSION;
-        use crate::galaxy::rules::GalaxyRules;
-        assert!(
-            GENERATOR_VERSION < SUPERBUBBLE_MERGE_VERSION,
-            "the 28 → 29 bump merges the superbubbles and gives them walls: delete \
-             `SUPERBUBBLE_MERGE_VERSION`, `SuperbubbleRules` with its `Weaver` arm, its field in \
-             `GalaxyRules` and its match in `Superbubble::in_galaxy`, and this test; restate the \
-             tests held below 29 (`nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges`' radii)"
-        );
-        assert_eq!(
-            GalaxyRules::of_version(GENERATOR_VERSION).superbubbles,
-            SuperbubbleRules::Weaver
-        );
-        assert_eq!(
-            GalaxyRules::every_29_hold().superbubbles,
-            SuperbubbleRules::Merging
-        );
-    }
-
     /// Under a constant power (the winds' first 4 Myr) a merging bubble is Weaver's until its shell
     /// slows to the merge speed and keeps that radius after; its wall holds the gas of its whole
     /// sphere, and a nursery that blows no bubble blows none merging.
@@ -822,30 +764,21 @@ mod tests {
         );
     }
 
-    /// D2 and D3 of the galaxy holds: under the version's rules a galaxy's bubbles are Weaver's bit
-    /// for bit; under 29's every bubble near the Sun is at most Weaver's and walled, and some are
-    /// smaller.
+    /// A galaxy's every bubble near the Sun is at most Weaver's and walled, and most are smaller.
     #[test]
-    fn a_galaxy_s_bubbles_merge_under_29_s_rules_only() {
+    fn a_galaxy_s_bubbles_merge() {
         use crate::Seed;
         use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureMarks};
         use crate::galaxy::params::GalaxyParams;
-        use crate::galaxy::rules::GalaxyRules;
         use crate::id::FeatureCell;
         let seed = Seed::new(0x0905_b0bb_0000_0001);
-        let held = Galaxy::from_params(seed, GalaxyParams::milky_way_like()).unwrap();
-        let merging = Galaxy::from_params_with_rules(
-            seed,
-            GalaxyParams::milky_way_like(),
-            GalaxyRules::every_29_hold(),
-        )
-        .unwrap();
-        let gas = held.gas();
-        let clock = held.feature_shares().supernova_clock();
+        let galaxy = Galaxy::from_params(seed, GalaxyParams::milky_way_like()).unwrap();
+        let gas = galaxy.gas();
+        let clock = galaxy.feature_shares().supernova_clock();
         let (mut bubbles, mut smaller) = (0, 0);
         for cell in [[0, 6, 0], [0, 6, -1], [-1, 6, 0]] {
             let cell = FeatureCell::new(cell).unwrap();
-            for feature in FeatureCatalogue::cell(&held, cell).features() {
+            for feature in FeatureCatalogue::cell(&galaxy, cell).features() {
                 let FeatureMarks::Nursery(marks) = feature.marks() else {
                     continue;
                 };
@@ -857,8 +790,7 @@ mod tests {
                     gas.params().neutral_height(),
                     clock,
                 );
-                assert_eq!(Superbubble::in_galaxy(&held, centre, marks, age), weaver);
-                let new = Superbubble::in_galaxy(&merging, centre, marks, age);
+                let new = Superbubble::in_galaxy(&galaxy, centre, marks, age);
                 assert_eq!(new.is_some(), weaver.is_some());
                 let (Some(weaver), Some(new)) = (weaver, new) else {
                     continue;

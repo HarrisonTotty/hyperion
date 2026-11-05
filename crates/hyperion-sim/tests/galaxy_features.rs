@@ -199,7 +199,7 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
     let galaxy = milky_way();
     let clock = galaxy.feature_shares().supernova_clock();
     let gas = galaxy.gas();
-    let mut radii = Vec::new();
+    let (mut radii, mut merged) = (Vec::new(), Vec::new());
     let mut stages = [0_u32; 3];
     for feature in disc_features(&galaxy) {
         let FeatureMarks::Nursery(marks) = feature.marks() else {
@@ -216,18 +216,25 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
                 panic!("{:?} is not alive", feature.id())
             }
         }
-        if let Some(bubble) = Superbubble::of(
+        let weaver = Superbubble::of(
             marks,
             age,
             gas.mean_density(feature.position()),
             gas.params().neutral_height(),
             clock,
-        ) {
-            radii.push(bubble.radius().value());
+        );
+        let bubble = Superbubble::in_galaxy(&galaxy, feature.position(), marks, age);
+        assert_eq!(bubble.is_some(), weaver.is_some(), "{:?}", feature.id());
+        if let (Some(weaver), Some(bubble)) = (weaver, bubble) {
+            assert!(bubble.radius() <= weaver.radius(), "{bubble:?} {weaver:?}");
+            radii.push(weaver.radius().value());
+            merged.push(bubble.radius().value());
         }
     }
     // Ruling 118.4: 80% of radii in 100–1,000 ly, every one at or below the blow-out cap and
-    // 3,300 ly (McClure-Griffiths et al. 2002: 40 pc to 1 kpc).
+    // 3,300 ly (McClure-Griffiths et al. 2002: 40 pc to 1 kpc), of the bubbles as grown to
+    // blow-out (`Superbubble::of`), which the merge (P09.T5) stops sooner: 0.403 of the merged
+    // radii lie in 100–1,000 ly (measured at 29, a finding), the rest below.
     assert!(radii.len() > 1_000, "{}", radii.len());
     let cap = BLOW_OUT_HEIGHTS * gas.params().neutral_height().value();
     for &r in &radii {
@@ -240,6 +247,13 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
     let share =
         f64::from(u32::try_from(inside).unwrap()) / f64::from(u32::try_from(radii.len()).unwrap());
     assert!(share >= 0.8, "{share} of radii in 100–1,000 ly");
+    let inside = merged
+        .iter()
+        .filter(|&&r| (100.0..=1_000.0).contains(&r))
+        .count();
+    let share =
+        f64::from(u32::try_from(inside).unwrap()) / f64::from(u32::try_from(merged.len()).unwrap());
+    assert!(share >= 0.4, "{share} of the merged radii in 100–1,000 ly");
     // About ten thousand star-forming regions, and 1.2–2.1 × 10⁵ associations (ruling 140.3: the
     // birth rate of ruling 140.2 × (1 − Γ_b) × their mean stage of about 61 Myr).
     let [embedded, bound, associations] = stages;
@@ -643,33 +657,15 @@ fn gas_index_finds_what_the_cells_find() {
     });
 }
 
-/// The features' gas about the Sun-like point, bit for bit, before the superbubbles' merge (P09.T5,
-/// the D1 pre-pin of its hold at 29): the bubbles of the nurseries in the Sun's cell, and the
-/// modifiers and the served lines' extinction over a kiloparsec of the plane in four directions,
-/// at the epoch and a million years on. The hold leaves it as it is.
+/// The features' gas about the Sun-like point, bit for bit, its superbubbles merged and walled
+/// (P09.T5): the bubbles of the nurseries in the Sun's cell, and the modifiers and the served lines'
+/// extinction over a kiloparsec of the plane in four directions, at the epoch and a million years
+/// on.
 #[test]
 fn feature_gas_about_the_sun_is_pinned() {
     golden!(
         "galaxy/features/gas",
         &feature_gas_about_the_sun(&milky_way())
-    );
-}
-
-/// [`feature_gas_about_the_sun_is_pinned`]'s figures under 29's rules, merged and walled (P09.T5):
-/// the new arm's arithmetic, bit for bit on every target, until the 29 bump makes it the version's
-/// and deletes this test.
-#[cfg(feature = "testing")]
-#[test]
-fn feature_gas_about_the_sun_under_29_s_rules_is_pinned() {
-    let galaxy = Galaxy::from_params_at_version(
-        Seed::new(SEED),
-        GalaxyParams::milky_way_like(),
-        hyperion_sim::GeneratorVersion::new(29),
-    )
-    .expect("the Milky Way fixture builds");
-    golden!(
-        "galaxy/features/gas_merging",
-        &feature_gas_about_the_sun(&galaxy)
     );
 }
 
@@ -757,21 +753,14 @@ fn feature_gas_about_the_sun(galaxy: &Galaxy) -> String {
     w.as_str().to_owned()
 }
 
-/// Under 29's rules (P09.T5) the superbubbles' hot cores fill a fifth to a half of the plane at the
-/// solar circle, against a hot filling of 0.2–0.5 there (Ferrière 2001, Rev. Mod. Phys. 73, 1031),
+/// The superbubbles' hot cores (P09.T5) fill a fifth to a half of the plane at the solar circle, against a hot filling of 0.2–0.5 there (Ferrière 2001, Rev. Mod. Phys. 73, 1031),
 /// where grown as Weaver's they filled 0.96; and their walls keep the plane's extinction from the
 /// Sun-like point within a factor of two of 1.8 mag/kpc (Whittet 2003, *Dust in the Galactic
 /// Environment*, 2nd ed.), where it fell to 0.32. Measured: 0.216 of 8,000 midplane points within
 /// 500 ly of the solar circle in a core, and 2.14 mag/kpc over 64 directions of a kiloparsec.
-#[cfg(feature = "testing")]
 #[test]
-fn under_29_s_rules_the_bubbles_cores_fill_a_fifth_of_the_plane_and_keep_its_extinction() {
-    let galaxy = Galaxy::from_params_at_version(
-        Seed::new(SEED),
-        GalaxyParams::milky_way_like(),
-        hyperion_sim::GeneratorVersion::new(29),
-    )
-    .expect("the Milky Way fixture builds");
+fn the_bubbles_cores_fill_a_fifth_of_the_plane_and_keep_its_extinction() {
+    let galaxy = milky_way();
     let cells = KeepCells::default();
     let source = FeatureGas::new(&galaxy, &cells, Years::ZERO);
     let mut lcg = Lcg::new(0x0905_f111);

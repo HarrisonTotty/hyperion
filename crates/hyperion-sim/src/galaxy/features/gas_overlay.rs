@@ -149,11 +149,13 @@ impl<'a> FeatureGas<'a> {
         let centre = *feature.position();
         let age = marks.age_at_epoch() + self.time;
         let gas = self.galaxy.gas();
-        if let Some(bubble) =
-            Bubble::by_rules(self.galaxy, marks, age, centre_gas.mean_density, || {
-                centre_gas.pressure
-            })
-        {
+        if let Some(bubble) = Bubble::in_centre_gas(
+            self.galaxy,
+            marks,
+            age,
+            centre_gas.mean_density,
+            centre_gas.pressure,
+        ) {
             push_valid(
                 out,
                 GasModifier::Hole {
