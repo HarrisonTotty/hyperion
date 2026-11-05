@@ -195,3 +195,84 @@ fn mergers_of(
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stellar::system::{PairTimeline, grid_multiplicity};
+
+    /// The fits' census galaxy (`hyperion-fit`'s binary manifests) at generator version 31's
+    /// rules, at which the merger step is held (P15.T10.b).
+    fn census_galaxy() -> Galaxy {
+        Galaxy::from_params_for_binary_refit(
+            crate::rng::Seed::new(0x0b17_15a0_0000_0001),
+            crate::galaxy::params::GalaxyParams::milky_way_like(),
+            crate::GeneratorVersion::new(31),
+        )
+        .expect("the Milky Way fixture builds")
+    }
+
+    /// The grid record of ID `raw` in `galaxy`.
+    fn grid_record(galaxy: &Galaxy, raw: u64) -> SystemRecord {
+        let id = crate::id::SystemId::from_raw(raw).expect("a grid ID");
+        let mut cell = Vec::new();
+        generate_cell(galaxy, CellKey::of(id).expect("a grid cell"), &mut cell);
+        *cell
+            .iter()
+            .find(|record| record.id() == id)
+            .expect("the cell holds its record")
+    }
+
+    /// From 31 a merger census's mergers of a record are those of its pairs at the generator's
+    /// first attempt, as the class census's members are (P15.T10.b; train 27's finding): under the
+    /// record's own multiplicity, so that a displaced record, which the generator shows single,
+    /// has none, and on its primary's kept attempt of plan 08's kick loop. On the fits' census
+    /// galaxy the census took the displaced remnant `0x81d8b2e000000008` and the retained
+    /// `0x81d8b2e000000002` for stellar mergers their primaries' own draws make; the retained
+    /// `0x81d8b2e000000001` is a stellar merger and `0x81dbb2e00000000d` a neutron-star merger at
+    /// the generator's first attempt too.
+    #[test]
+    fn from_31_a_record_s_mergers_are_its_pairs_at_the_generator_s_first_attempt() {
+        let galaxy = census_galaxy();
+        let mut generated_mergers = 0;
+        for (raw, class) in [
+            (0x81d8_b2e0_0000_0008, CarvedClass::StellarMerger),
+            (0x81d8_b2e0_0000_0002, CarvedClass::StellarMerger),
+            (0x81d8_b2e0_0000_0001, CarvedClass::StellarMerger),
+            (0x81db_b2e0_0000_000d, CarvedClass::NeutronStarMerger),
+        ] {
+            let record = grid_record(&galaxy, raw);
+            let mut found = Vec::new();
+            mergers_of(&galaxy, &record, class, &mut found);
+            let stars = SystemStars::generate_at(
+                &galaxy,
+                &record,
+                &draw_metallicity(&galaxy, &record),
+                grid_multiplicity(&record),
+                RedrawAttempt::FIRST,
+            );
+            let generated: Vec<&BinaryTimeline> = stars
+                .pairs()
+                .iter()
+                .map(PairTimeline::timeline)
+                .filter(|timeline| {
+                    timeline
+                        .merger_age()
+                        .is_some_and(|t| carved_class(timeline, t) == Some(class))
+                })
+                .collect();
+            let census: Vec<&BinaryTimeline> = found.iter().map(MergerMember::timeline).collect();
+            assert!(
+                census == generated,
+                "{raw:#x}: the census's {} mergers against the generator's {}",
+                census.len(),
+                generated.len()
+            );
+            generated_mergers += generated.len();
+        }
+        assert_eq!(
+            generated_mergers, 2,
+            "the last two records keep their mergers"
+        );
+    }
+}
