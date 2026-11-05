@@ -62,7 +62,13 @@ export interface InspectionProfileDeps {
   readonly api: Pick<ViewsCheckApi, "startProfile" | "endProfile" | "writeTimingResults">;
   readonly views: Pick<
     ViewsProbe,
-    "drawTimes" | "window" | "passTimes" | "memoryTraffic" | "timer" | "marchCensus"
+    | "drawTimes"
+    | "window"
+    | "passTimes"
+    | "memoryTraffic"
+    | "timer"
+    | "marchCensus"
+    | "atmosphereReads"
   >;
   /** Marks a window in the trace as a `performance.measure` span. */
   readonly markWindow: (window: ViewsCheckWindow) => void;
@@ -74,8 +80,9 @@ export interface InspectionProfileDeps {
   readonly setting: QualitySetting;
   readonly timing: InspectionProfileTiming;
   /**
-   * The counter of the engine's WebGPU calls (`--count-gpu-calls`; plan R14), whose count over
-   * each window is the window's, or `null` on a launch that does not count them.
+   * The counter of the engine's WebGPU calls and its render passes' attachments
+   * (`--count-gpu-calls`; plan R14), whose count over each window is the window's, or `null` on a
+   * launch that does not count them.
    */
   readonly calls: Pick<GpuCallCounter, "begin" | "take"> | null;
   /**
@@ -139,13 +146,16 @@ export class InspectionProfiler {
     let ending = false;
     let endMs: number;
     let gpuCalls: InspectionTimingWindow["gpuCalls"] = null;
+    let gpuAttachments: InspectionTimingWindow["gpuAttachments"] = null;
     let react: InspectionTimingWindow["react"] = null;
     let said: ProfiledPlate;
     try {
       await waited();
       endMs = this.#deps.nowMs();
       // Over the window's draws alone, as its figures are, not the settling after them.
-      gpuCalls = this.#deps.calls?.take() ?? null;
+      const counted = this.#deps.calls?.take() ?? null;
+      gpuCalls = counted?.calls ?? null;
+      gpuAttachments = counted?.attachments ?? null;
       react = this.#deps.react?.take() ?? null;
       this.#deps.markWindow({ startMs, endMs });
       said = plate();
@@ -193,6 +203,8 @@ export class InspectionProfiler {
       untimedFrames: figures.untimedFrames,
       memory: views.memoryTraffic(startMs, endMs),
       gpuCalls,
+      gpuAttachments,
+      atmosphereReads: views.atmosphereReads(startMs, endMs),
       react,
       clusters: this.#deps.clusters(),
       // The floor's air at the low setting's sizes while it stands stepped (the owner's report).

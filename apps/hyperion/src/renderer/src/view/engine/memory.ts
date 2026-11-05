@@ -153,14 +153,19 @@ const BYTES_PER_TEXEL: Readonly<Partial<Record<GPUTextureFormat, number>>> = {
   "depth32float-stencil8": 5,
 };
 
+/** Bytes per texel of `format`, or `null` for a compressed or unknown one. */
+export function texelBytesOf(format: GPUTextureFormat): number | null {
+  return BYTES_PER_TEXEL[format] ?? null;
+}
+
 /**
  * Bytes per texel of `format`.
  *
  * @throws Error for a compressed or unknown format, which no creation here makes.
  */
 export function bytesPerTexel(format: GPUTextureFormat): number {
-  const bytes = BYTES_PER_TEXEL[format];
-  if (bytes === undefined) {
+  const bytes = texelBytesOf(format);
+  if (bytes === null) {
     throw new Error(`no texel size is known for ${format}`);
   }
   return bytes;

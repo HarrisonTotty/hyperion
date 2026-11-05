@@ -109,6 +109,16 @@ function profiler(
         uploads: [{ name: "view star sprites", count: 3, bytes: 96 }],
       }),
       timer: () => "quantized",
+      // The window's span, as the probe was asked it.
+      atmosphereReads: (startMs, endMs) => [
+        {
+          air: 1,
+          read: "thick",
+          thermal: false,
+          frames: endMs - startMs,
+          kernels: ["atmosphere sky view, thick"],
+        },
+      ],
       marchCensus: (signal) => {
         signals.push(signal);
         return census();
@@ -157,21 +167,35 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       gpuMs: [40],
       passes: [{ label: "atmosphere view", ms: [30], kernels: ["march"], workgroups: [9] }],
       memory: { uploaded: { count: 3, bytes: 96 } },
+      atmosphereReads: [{ air: 1, read: "thick", frames: 3_000 }],
       marchSamples: 36,
       position: "28.9 Mm 268° +49°",
     });
   });
 
-  it("counts the WebGPU calls of its draws alone, and none on a launch that does not count", async () => {
+  it("counts the WebGPU calls and attachments of its draws alone, and none on a launch that does not count", async () => {
     let nowMs = 0;
     const said: string[] = [];
+    const attachment = {
+      label: "bodies",
+      attachment: "depth",
+      view: { format: "depth32float", widthPx: 4, heightPx: 2, sampleCount: 1 },
+      loadOp: "clear",
+      storeOp: "store",
+      passes: 1,
+      bytesLoaded: 0,
+      bytesStored: 32,
+    } as const;
     const counter: InspectionProfileDeps["calls"] = {
       begin: () => {
         said.push("begin");
       },
       take: () => {
         said.push("take");
-        return [{ label: "bodies", call: "render pass.draw", count: nowMs, bytes: 0 }];
+        return {
+          calls: [{ label: "bodies", call: "render pass.draw", count: nowMs, bytes: 0 }],
+          attachments: [attachment],
+        };
       },
     };
     const counted = profiler(100, 6_000, counter);
@@ -179,13 +203,21 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       nowMs = 3;
       return PLATE();
     });
-    expect([said, counted.profile.windows[0]?.gpuCalls]).toEqual([
+    expect([
+      said,
+      counted.profile.windows[0]?.gpuCalls,
+      counted.profile.windows[0]?.gpuAttachments,
+    ]).toEqual([
       ["begin", "take"],
       [{ label: "bodies", call: "render pass.draw", count: 0, bytes: 0 }],
+      [attachment],
     ]);
     const uncounted = profiler(100);
     await uncounted.profile.measure("orbit", PLATE);
-    expect(uncounted.profile.windows[0]?.gpuCalls).toBeNull();
+    expect([
+      uncounted.profile.windows[0]?.gpuCalls,
+      uncounted.profile.windows[0]?.gpuAttachments,
+    ]).toEqual([null, null]);
   });
 
   it("counts React's commits over its draws alone, and none where React took no hook (lane perf-render-thread-2)", async () => {

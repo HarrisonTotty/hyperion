@@ -18,6 +18,8 @@
  */
 
 import type {
+  InspectionAtmosphereRead,
+  InspectionAtmosphereReadName,
   InspectionTimingMemory,
   InspectionTimingPass,
   ViewsCheckCanvas,
@@ -70,12 +72,60 @@ interface FrameEntry {
   readonly atMs: number;
   mainMs: number;
   readonly views: Map<string, FrameView>;
-  /** Its dispatches in their order: each one's pass label, kernel and workgroups (or `null`). */
+  /**
+   * Its dispatches in their order: each one's pass label, kernel and workgroups (or `null`), and the
+   * body with air it drew for, numbered from 1 by its tables (or `null`).
+   */
   readonly dispatches: Array<{
     readonly pass: string;
     readonly kernel: string;
     readonly workgroups: number | null;
+    readonly air: number | null;
   }>;
+}
+
+/** The per-frame kernels of a body's atmosphere (`hillaire.ts`), every read's forms named after them. */
+const AIR_KERNELS: ReadonlyArray<string> = [
+  "atmosphere sky view",
+  "atmosphere aerial perspective",
+  "atmosphere ray march",
+];
+
+/** The reads, each a later one the one a body's frame drew where its kernels hold several. */
+const READ_RANK: ReadonlyArray<InspectionAtmosphereReadName> = [
+  "thin",
+  "thick",
+  "deck",
+  "beneath a deck",
+];
+
+/**
+ * The read a per-frame atmosphere kernel draws by, from its name (`hillaire.ts`' forms: `, thick`,
+ * `, over a deck`, `beneath a deck`, `, thermal`), or `null` for a kernel of no read (the composite,
+ * the march's fill and limb lists, the tables').
+ *
+ * @remarks
+ * Over a deck the sky view and the aerial perspective are the thick read's, beside the deck's
+ * marches, so a body's frame is read as the latest of its kernels' reads ({@link READ_RANK}).
+ */
+export function atmosphereReadOf(
+  kernel: string,
+): { readonly read: InspectionAtmosphereReadName; readonly thermal: boolean } | null {
+  if (
+    !AIR_KERNELS.some((start) => kernel.startsWith(start)) ||
+    kernel.startsWith("atmosphere ray march's")
+  ) {
+    return null;
+  }
+  let read: InspectionAtmosphereReadName = "thin";
+  if (kernel.includes("beneath a deck")) {
+    read = "beneath a deck";
+  } else if (kernel.includes(", over a deck")) {
+    read = "deck";
+  } else if (kernel.includes(", thick")) {
+    read = "thick";
+  }
+  return { read, thermal: kernel.includes(", thermal") };
 }
 
 /** A view's scene target given a size: its scale against the view's canvas then. */
@@ -151,6 +201,9 @@ export class ViewsProbe implements EngineProbe {
   /** The timestamp of the animation frame whose callback is running, or `null` between them. */
   #frameMs: number | null = null;
   readonly #frames = new Map<number, FrameEntry>();
+  /** Each body's tables' number, from 1 in the order first dispatched against. */
+  readonly #airs = new WeakMap<object, number>();
+  #nextAir = 1;
   /**
    * The timestamps of the frames each view drew in, in order, for {@link ViewsProbe.drawTimes}
    * (lane perf-render-thread-ground): the frame profile asks for its draws four times a second, and
@@ -257,11 +310,90 @@ export class ViewsProbe implements EngineProbe {
     }
   }
 
-  dispatched(kernel: string, workgroups: number | null, pass: string | undefined): void {
+  dispatched(
+    kernel: string,
+    workgroups: number | null,
+    pass: string | undefined,
+    air: object | null,
+  ): void {
     const frameMs = this.#frameMs;
     if (frameMs !== null && pass !== undefined) {
-      this.#frameAt(frameMs).dispatches.push({ pass, kernel, workgroups });
+      this.#frameAt(frameMs).dispatches.push({ pass, kernel, workgroups, air: this.#airOf(air) });
     }
+  }
+
+  /** The number of the body whose tables are `air`, given at its first dispatch, or `null`. */
+  #airOf(air: object | null): number | null {
+    if (air === null) {
+      return null;
+    }
+    let number = this.#airs.get(air);
+    if (number === undefined) {
+      number = this.#nextAir;
+      this.#nextAir += 1;
+      this.#airs.set(air, number);
+    }
+    return number;
+  }
+
+  /**
+   * Each body's atmosphere read over the animation frames stamped from `startMs` up to `endMs`,
+   * from the kernels each frame dispatched against its tables ({@link atmosphereReadOf}): by body,
+   * then read in the order first drawn, with the frames that drew it so.
+   */
+  atmosphereReads(startMs: number, endMs: number): ReadonlyArray<InspectionAtmosphereRead> {
+    const frames = [...this.#frames.values()]
+      .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
+      .toSorted((a, b) => a.atMs - b.atMs);
+    const reads = new Map<
+      string,
+      {
+        air: number;
+        read: InspectionAtmosphereReadName;
+        thermal: boolean;
+        frames: number;
+        kernels: Set<string>;
+      }
+    >();
+    for (const frame of frames) {
+      const drawn = new Map<number, { rank: number; thermal: boolean; kernels: string[] }>();
+      for (const each of frame.dispatches) {
+        const read = each.air === null ? null : atmosphereReadOf(each.kernel);
+        if (each.air === null || read === null) {
+          continue;
+        }
+        const body = drawn.get(each.air) ?? { rank: 0, thermal: false, kernels: [] };
+        body.rank = Math.max(body.rank, READ_RANK.indexOf(read.read));
+        body.thermal ||= read.thermal;
+        body.kernels.push(each.kernel);
+        drawn.set(each.air, body);
+      }
+      for (const [air, body] of drawn) {
+        const read = READ_RANK[body.rank] ?? "thin";
+        const key = `${String(air)} ${read} ${String(body.thermal)}`;
+        const known = reads.get(key) ?? {
+          air,
+          read,
+          thermal: body.thermal,
+          frames: 0,
+          kernels: new Set(),
+        };
+        known.frames += 1;
+        for (const kernel of body.kernels) {
+          known.kernels.add(kernel);
+        }
+        reads.set(key, known);
+      }
+    }
+    return [...reads.values()]
+      .toSorted((a, b) => a.air - b.air)
+      .map((each) => ({
+        air: each.air,
+        read: each.read,
+        thermal: each.thermal,
+        frames: each.frames,
+        kernels: [...each.kernels],
+      }));
   }
 
   /**

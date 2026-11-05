@@ -2268,6 +2268,73 @@ export interface InspectionGpuCall {
   readonly bytes: number;
 }
 
+/** Where an attachment's texels come from as a render pass begins (`--count-gpu-calls`). */
+export type InspectionAttachmentLoad = "load" | "clear" | "read-only";
+
+/** What becomes of an attachment's texels as a render pass ends (`--count-gpu-calls`). */
+export type InspectionAttachmentStore = "store" | "discard" | "read-only" | "resolve";
+
+/** Which of a render pass's attachments: a colour target, its resolve target, or a depth aspect. */
+export type InspectionAttachmentSlot =
+  `colour ${number}` | `resolve ${number}` | "depth" | "stencil";
+
+/** An attachment's view: its format, its mip level's size, px, and its texture's samples. */
+export interface InspectionAttachmentView {
+  readonly format: string;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly sampleCount: number;
+}
+
+/**
+ * One kind of attachment a pass label's render passes took over a profiled window
+ * (`--count-gpu-calls`; plan R14, R14.T2.e, the owner's Mac): its aspect, view and operations, the
+ * passes that took it so, and the bytes they moved between memory and a tile-based GPU's tile
+ * memory where no tile is kept from one pass to the next.
+ */
+export interface InspectionGpuAttachment {
+  /** The pass's label, or its encoder's for an unlabelled pass. */
+  readonly label: string;
+  readonly attachment: InspectionAttachmentSlot;
+  /** Its view, or `null` for a view the counter did not see made. */
+  readonly view: InspectionAttachmentView | null;
+  /** Its operations, `null` where the pass gave none (a stencil aspect left alone). */
+  readonly loadOp: InspectionAttachmentLoad | null;
+  readonly storeOp: InspectionAttachmentStore | null;
+  /** The render passes that took it so. */
+  readonly passes: number;
+  /**
+   * The bytes those passes read into tiles (a load, or a read-only aspect) and wrote back (a store
+   * or a resolve), its texels' own size, a clear and a discard none; `null` where its format or
+   * size is not known.
+   */
+  readonly bytesLoaded: number | null;
+  readonly bytesStored: number | null;
+}
+
+/**
+ * The atmosphere's read a body drew (plan R08): the thin read, the thick table's (R08.T14.c,
+ * every world with air since its correction was routed), over a cloud deck (R08.T15.a.2), or
+ * beneath one (R08.T15.b.2).
+ */
+export type InspectionAtmosphereReadName = "thin" | "thick" | "deck" | "beneath a deck";
+
+/**
+ * One body's atmosphere as a profiled window drew it, from the kernels its frames dispatched: its
+ * read, whether by the kernels' thermal forms (a self-luminous body, R08.T18.b), and in how many
+ * of the window's frames.
+ */
+export interface InspectionAtmosphereRead {
+  /** The body with air, numbered from 1 in the order its tables were first dispatched against. */
+  readonly air: number;
+  readonly read: InspectionAtmosphereReadName;
+  readonly thermal: boolean;
+  /** The window's frames that drew it by this read. */
+  readonly frames: number;
+  /** The kernels its frames dispatched by it, each once, in the order first dispatched. */
+  readonly kernels: ReadonlyArray<string>;
+}
+
 /**
  * React's commits over a profiled window of the inspection run (lane perf-render-thread-2;
  * `reactCommits.ts`): how many, and each component's renders.
@@ -2327,6 +2394,16 @@ export interface InspectionTimingWindow {
    * or `null` on a launch that did not count them.
    */
   readonly gpuCalls: ReadonlyArray<InspectionGpuCall> | null;
+  /**
+   * Every render pass's attachments over the window, by pass label (`--count-gpu-calls`; plan R14,
+   * R14.T2.e), or `null` on a launch that did not count them.
+   */
+  readonly gpuAttachments: ReadonlyArray<InspectionGpuAttachment> | null;
+  /**
+   * Each body's atmosphere read over the window, from the kernels its frames dispatched, by body
+   * and read; none where no frame drew air.
+   */
+  readonly atmosphereReads: ReadonlyArray<InspectionAtmosphereRead>;
   /**
    * React's commits over the window (lane perf-render-thread-2), or `null` where React did not take
    * the profile's hook as it loaded.

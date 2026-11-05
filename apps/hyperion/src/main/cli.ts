@@ -99,7 +99,8 @@
  * every drawn surface dimmed by the channels' mean as the grey way back does (plan R08, R08.T9.c),
  * for an A/B of the composite's cost; it is refused without `--timing`. With `--count-gpu-calls`
  * too (plan R14, the owner's Mac) that profile counts every WebGPU call each window makes, by kind
- * and by pass, at a little of the main thread's time; it is refused without `--timing`.
+ * and by pass, and each render pass's attachments with the bytes their loads and stores move
+ * (R14.T2.e), at a little of the main thread's time; it is refused without `--timing`.
  * With `--march-probe centre` too (plan R08, R08.T8.d) that profile marches every texel's centre
  * ray alone, with no far-limb footprint, for an A/B of the footprint's node rays; with
  * `--march-probe depth-zero|one-source|no-lobes` (R08.T8.e's measurement) each step's sources lit
@@ -464,7 +465,7 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--count-gpu-calls",
-        "the frame profile's count of every WebGPU call, by kind and by pass (plan R14)",
+        "the frame profile's count of every WebGPU call, by kind and by pass, and of each render pass's attachments (plan R14)",
       ),
     )
     .addOption(

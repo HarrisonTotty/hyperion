@@ -19,12 +19,27 @@
  * window's end, under {@link AFTER_LAST_PASS}. A canvas's texture is the context's, not the
  * device's, so its view, one a view a frame, is not counted. The counter costs the main thread a
  * little, so a counted window's times are not a player's.
+ *
+ * Each render pass's attachments are counted too (R14.T2.e, the owner's Mac): by pass label, each
+ * attachment's aspect, view and operations, and the bytes a tile-based GPU moves between memory
+ * and its tiles where no tile is kept from one pass to the next ({@link attachmentBytes}). A view's
+ * format and size are read from the texture it was made of: the device's, and the canvases' as
+ * their contexts hand them out, without counting the call: from the first device wrapped, which is
+ * the engine's load and not a render, to {@link GpuCallCounter.release}.
  */
 
-import type { InspectionGpuCall } from "../../../../../preload/api";
+import type {
+  InspectionAttachmentLoad,
+  InspectionAttachmentSlot,
+  InspectionAttachmentStore,
+  InspectionGpuAttachment,
+  InspectionGpuCall,
+} from "../../../../../preload/api";
 import { loadRenderEngine } from "../../../view/engine/loadEngine";
+import { texelBytesOf } from "../../../view/engine/memory";
 import { requestAdapterOutcome } from "../../../view/engine/platform";
 import { navigatorGpu } from "../../../view/engine/status";
+import type { CanvasContexts } from "../../../view/spike/capture";
 import { wrapGpu } from "../../../view/spike/pipelineShim";
 import type { ViewEngineSource } from "../useViewEngine";
 
@@ -54,6 +69,121 @@ const MADE: Readonly<Record<string, string>> = {
 interface Tally {
   count: number;
   bytes: number;
+}
+
+/** What a counted window took: its calls, and its render passes' attachments. */
+export interface GpuCounts {
+  readonly calls: ReadonlyArray<InspectionGpuCall>;
+  readonly attachments: ReadonlyArray<InspectionGpuAttachment>;
+}
+
+/** A texture view as an attachment: its format, its mip level's size, px, and its samples. */
+export interface AttachedView {
+  readonly format: GPUTextureFormat;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly sampleCount: number;
+}
+
+/** A number read from `object`'s member `name`, or `fallback` where it is none. */
+function numberOf(object: unknown, name: string, fallback: number): number {
+  const value: unknown =
+    typeof object === "object" && object !== null ? Reflect.get(object, name) : undefined;
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * The view `descriptor` makes of `texture` as an attachment: the descriptor's format or the
+ * texture's, the base mip level's size and the texture's samples; `null` where the texture states
+ * no format.
+ */
+export function attachedView(texture: object, descriptor: unknown): AttachedView | null {
+  const asked: unknown =
+    typeof descriptor === "object" && descriptor !== null
+      ? Reflect.get(descriptor, "format")
+      : undefined;
+  const own: unknown = Reflect.get(texture, "format");
+  const format = typeof asked === "string" ? asked : own;
+  if (typeof format !== "string") {
+    return null;
+  }
+  const level = numberOf(descriptor, "baseMipLevel", 0);
+  return {
+    // The texture's own format or the one its view was asked in, both the browser's.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    format: format as GPUTextureFormat,
+    widthPx: Math.max(1, Math.floor(numberOf(texture, "width", 1) / 2 ** level)),
+    heightPx: Math.max(1, Math.floor(numberOf(texture, "height", 1) / 2 ** level)),
+    sampleCount: numberOf(texture, "sampleCount", 1),
+  };
+}
+
+/** Whether a format has a stencil aspect. */
+function hasStencil(format: GPUTextureFormat): boolean {
+  return format === "stencil8" || format.endsWith("-stencil8");
+}
+
+/** Whether a format has a depth aspect. */
+function hasDepth(format: GPUTextureFormat): boolean {
+  return format.startsWith("depth");
+}
+
+/**
+ * The bytes one aspect of `view` holds, its texels' own size (`engine/memory.ts`' table, from the
+ * WebGPU specification's §26.1): a stencil aspect 1 byte a texel and a depth aspect the rest of a
+ * depth-stencil format's; `null` for a format the table does not size (a compressed one, which no
+ * pass attaches).
+ */
+export function attachmentBytes(
+  view: AttachedView,
+  aspect: "colour" | "depth" | "stencil",
+): number | null {
+  let texel = texelBytesOf(view.format);
+  if (texel === null) {
+    return null;
+  }
+  if (aspect === "stencil") {
+    texel = 1;
+  } else if (aspect === "depth" && hasStencil(view.format)) {
+    texel -= 1;
+  }
+  return view.widthPx * view.heightPx * view.sampleCount * texel;
+}
+
+/** The sum of two byte counts, or `null` where either is not known. */
+function sumOrNull(a: number | null, b: number | null): number | null {
+  return a === null || b === null ? null : a + b;
+}
+
+/** One attachment as a render pass took it, before its passes are counted. */
+type AttachmentTake = Omit<InspectionGpuAttachment, "label" | "passes">;
+
+/**
+ * One attachment's take of `view` (`null`: not seen made) under `loadOp` and `storeOp`: its bytes
+ * loaded where it loads or is read-only, and stored where it stores or resolves.
+ */
+function takeOf(
+  attachment: InspectionAttachmentSlot,
+  view: AttachedView | null,
+  aspect: "colour" | "depth" | "stencil",
+  loadOp: InspectionAttachmentLoad | null,
+  storeOp: InspectionAttachmentStore | null,
+): AttachmentTake {
+  const bytes = view === null ? null : attachmentBytes(view, aspect);
+  const moved = (yes: boolean): number | null => (yes ? bytes : 0);
+  return {
+    attachment,
+    view,
+    loadOp,
+    storeOp,
+    bytesLoaded: moved(loadOp === "load" || loadOp === "read-only"),
+    bytesStored: moved(storeOp === "store" || storeOp === "resolve"),
+  };
+}
+
+/** The page's canvas contexts' prototype, or `null` where the page has none (a test's). */
+function pageCanvasContexts(): CanvasContexts | null {
+  return typeof GPUCanvasContext === "undefined" ? null : GPUCanvasContext.prototype;
 }
 
 /** The names of an object's methods, on its prototypes below `Object`'s and `EventTarget`'s. */
@@ -119,6 +249,15 @@ export class GpuCallCounter {
   readonly #instrumented = new WeakSet<object>();
   /** Set inside a counted call: a call the implementation makes through the instance is its own. */
   #inCall = false;
+  /** Each attachment kind's passes and bytes by its label and take, in the order first counted. */
+  #attachments = new Map<string, InspectionGpuAttachment>();
+  /** The views of the textures seen made, as attachments. */
+  readonly #views = new WeakMap<object, AttachedView>();
+  /** The canvases' textures whose views are read. */
+  readonly #canvasTextures = new WeakSet<object>();
+  readonly #contexts: CanvasContexts | null;
+  /** What puts the canvases' contexts back, once they are wrapped. */
+  #restoreCanvases: (() => void) | null = null;
 
   /**
    * Counts every call on `device` from now on, its queue's, its encoders' and their passes', and
@@ -126,23 +265,66 @@ export class GpuCallCounter {
    * wrapper.
    */
   readonly wrapDevice = (device: GPUDevice): GPUDevice => {
+    this.#restoreCanvases ??= this.#watchCanvases(this.#contexts);
     this.#instrument(device, "device", null);
     this.#instrument(device.queue, "queue", null);
     return device;
   };
 
+  /**
+   * @param contexts - Where the canvases' textures are handed out, `GPUCanvasContext.prototype`
+   *   unless given: wrapped as the first device is, so that a pass that draws into a canvas counts
+   *   its bytes; `null` reads no canvas.
+   */
+  constructor(contexts: CanvasContexts | null = pageCanvasContexts()) {
+    this.#contexts = contexts;
+  }
+
+  /** Puts the canvases' contexts back as they were, if the counter wrapped them. */
+  release(): void {
+    this.#restoreCanvases?.();
+    this.#restoreCanvases = null;
+  }
+
+  /**
+   * Reads the views of the canvases' textures from now on, as `contexts` hands the textures out;
+   * their views are not counted as calls.
+   *
+   * @returns What puts `contexts` back as it was.
+   */
+  #watchCanvases(contexts: CanvasContexts | null): () => void {
+    if (contexts === null) {
+      return () => undefined;
+    }
+    // Kept unbound on purpose: the wrapper calls it with each context as `this`.
+    // oxlint-disable-next-line typescript/unbound-method
+    const original = contexts.getCurrentTexture;
+    const seen = (texture: GPUTexture): void => {
+      this.#watchCanvasTexture(texture);
+    };
+    contexts.getCurrentTexture = function getCurrentTexture(this: object): GPUTexture {
+      const texture = original.call(this);
+      seen(texture);
+      return texture;
+    };
+    return () => {
+      contexts.getCurrentTexture = original;
+    };
+  }
+
   /** Starts a window: everything counted before is forgotten. */
   begin(): void {
     this.#tallies = new Map();
     this.#held = new Map();
+    this.#attachments = new Map();
   }
 
   /**
    * The calls since {@link GpuCallCounter.begin}, each pass label's by name, in the order first
-   * counted; those held for a pass not yet begun are under {@link AFTER_LAST_PASS}. Counting goes
-   * on from none.
+   * counted, those held for a pass not yet begun under {@link AFTER_LAST_PASS}; and the render
+   * passes' attachments, each label's kinds in the order first counted. Counting goes on from none.
    */
-  take(): ReadonlyArray<InspectionGpuCall> {
+  take(): GpuCounts {
     const calls: InspectionGpuCall[] = [];
     const add = (label: string, tallies: ReadonlyMap<string, Tally>): void => {
       for (const [call, { count, bytes }] of tallies) {
@@ -153,8 +335,120 @@ export class GpuCallCounter {
       add(label, tallies);
     }
     add(AFTER_LAST_PASS, this.#held);
+    const attachments = [...this.#attachments.values()];
     this.begin();
-    return calls;
+    return { calls, attachments };
+  }
+
+  /** Reads the views made of a canvas's texture as attachments, once a texture. */
+  #watchCanvasTexture(texture: object): void {
+    if (this.#canvasTextures.has(texture)) {
+      return;
+    }
+    this.#canvasTextures.add(texture);
+    const createView: unknown = Reflect.get(texture, "createView");
+    if (typeof createView !== "function") {
+      return;
+    }
+    Reflect.set(texture, "createView", (...args: unknown[]): unknown => {
+      const view: unknown = Reflect.apply(createView, texture, args);
+      this.#seeView(texture, args[0], view);
+      return view;
+    });
+  }
+
+  /** Keeps what `view`, made of `texture` by `descriptor`, is as an attachment. */
+  #seeView(texture: object, descriptor: unknown, view: unknown): void {
+    const attached = attachedView(texture, descriptor);
+    if (typeof view === "object" && view !== null && attached !== null) {
+      this.#views.set(view, attached);
+    }
+  }
+
+  /**
+   * An attachment's view as the counter saw it made, or, for a texture attached whole, the texture's
+   * own; `null` for a view not seen made.
+   */
+  #viewOf(view: GPUTexture | GPUTextureView): AttachedView | null {
+    return this.#views.get(view) ?? ("createView" in view ? attachedView(view, undefined) : null);
+  }
+
+  /** Counts the attachments of a render pass labelled `label`, begun with `descriptor`. */
+  #countAttachments(label: string, descriptor: GPURenderPassDescriptor): void {
+    const takes: AttachmentTake[] = [];
+    Array.from(descriptor.colorAttachments).forEach((colour, i) => {
+      if (colour === null) {
+        return;
+      }
+      takes.push(
+        takeOf(`colour ${i}`, this.#viewOf(colour.view), "colour", colour.loadOp, colour.storeOp),
+      );
+      if (colour.resolveTarget !== undefined) {
+        takes.push(
+          takeOf(`resolve ${i}`, this.#viewOf(colour.resolveTarget), "colour", null, "resolve"),
+        );
+      }
+    });
+    const depthStencil = descriptor.depthStencilAttachment;
+    if (depthStencil !== undefined) {
+      const view = this.#viewOf(depthStencil.view);
+      // A view not seen made is counted as a depth attachment, its bytes unknown.
+      if (view === null || hasDepth(view.format)) {
+        const readOnly = depthStencil.depthReadOnly === true;
+        takes.push(
+          takeOf(
+            "depth",
+            view,
+            "depth",
+            readOnly ? "read-only" : (depthStencil.depthLoadOp ?? null),
+            readOnly ? "read-only" : (depthStencil.depthStoreOp ?? null),
+          ),
+        );
+      }
+      if (view !== null && hasStencil(view.format)) {
+        const readOnly = depthStencil.stencilReadOnly === true;
+        takes.push(
+          takeOf(
+            "stencil",
+            view,
+            "stencil",
+            readOnly ? "read-only" : (depthStencil.stencilLoadOp ?? null),
+            readOnly ? "read-only" : (depthStencil.stencilStoreOp ?? null),
+          ),
+        );
+      }
+    }
+    for (const take of takes) {
+      this.#tallyAttachment(label, take);
+    }
+  }
+
+  /** Counts one pass's take of an attachment under `label`, beside the same takes before it. */
+  #tallyAttachment(label: string, take: AttachmentTake): void {
+    const key = [
+      label,
+      take.attachment,
+      take.view?.format,
+      take.view?.widthPx,
+      take.view?.heightPx,
+      take.view?.sampleCount,
+      take.loadOp,
+      take.storeOp,
+    ]
+      .map(String)
+      .join("\u0000");
+    const known = this.#attachments.get(key);
+    this.#attachments.set(
+      key,
+      known === undefined
+        ? { label, ...take, passes: 1 }
+        : {
+            ...known,
+            passes: known.passes + 1,
+            bytesLoaded: sumOrNull(known.bytesLoaded, take.bytesLoaded),
+            bytesStored: sumOrNull(known.bytesStored, take.bytesStored),
+          },
+    );
   }
 
   /** The tallies of `label`, made at its first call. */
@@ -217,7 +511,7 @@ export class GpuCallCounter {
         } finally {
           this.#inCall = false;
         }
-        this.#made(kind, method, args, result, label);
+        this.#made(object, kind, method, args, result, label);
         return result;
       });
     }
@@ -265,8 +559,12 @@ export class GpuCallCounter {
     this.#count(label, call, 1, bytes);
   }
 
-  /** Instruments what a call made: an encoder, a pass, a command buffer or a maker's object. */
+  /**
+   * Instruments what a call on `object` made: an encoder, a pass, a command buffer or a maker's
+   * object; and keeps a texture's view as an attachment.
+   */
   #made(
+    object: object,
     kind: string,
     method: string,
     args: ReadonlyArray<unknown>,
@@ -280,6 +578,12 @@ export class GpuCallCounter {
       this.#instrument(result, "encoder", labelOf(args[0]) ?? UNLABELLED);
       return;
     }
+    if (kind === "encoder" && method === "beginRenderPass") {
+      // The descriptor the browser took as the pass began, which it checked against its type.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      const descriptor = args[0] as GPURenderPassDescriptor;
+      this.#countAttachments(labelOf(descriptor) ?? label ?? UNLABELLED, descriptor);
+    }
     if (kind === "encoder" && (method === "beginRenderPass" || method === "beginComputePass")) {
       this.#instrument(
         result,
@@ -290,6 +594,10 @@ export class GpuCallCounter {
     }
     if (kind === "encoder" && method === "finish") {
       this.#buffers.set(result, label ?? UNLABELLED);
+      return;
+    }
+    if (kind === "texture" && method === "createView") {
+      this.#seeView(object, args[0], result);
       return;
     }
     const made = kind === "device" ? MADE[method] : undefined;

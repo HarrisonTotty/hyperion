@@ -2,9 +2,31 @@ import { describe, expect, it } from "vitest";
 
 import { GraphicsStatusStore, initialGraphicsStatus } from "../../../view/engine/status";
 import type { AllocationEvent } from "../../../view/engine/memory";
-import type { FrameSubmission, RenderEngine } from "../../../view/engine/types";
+import type {
+  ComputeBindings,
+  FrameSubmission,
+  RenderEngine,
+  TextureHandle,
+} from "../../../view/engine/types";
 import { timedEngineSource } from "../../../test/viewDisplayHarness";
-import { viewOf, ViewsProbe } from "./viewsProbe";
+import {
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
+  LIMB_RESOLVE_KERNEL,
+  RAY_MARCH_BELOW_DECK_KERNEL,
+  RAY_MARCH_DECK_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
+  RAY_MARCH_FILL_KERNEL,
+  RAY_MARCH_KERNEL,
+  RAY_MARCH_PACKED_KERNEL,
+  RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  SKY_VIEW_KERNEL,
+  SKY_VIEW_THERMAL_KERNEL,
+  SKY_VIEW_THICK_KERNEL,
+  THICK_LIMB_KERNELS,
+} from "../../../view/atmosphere/hillaire";
+import { atmosphereReadOf, viewOf, ViewsProbe } from "./viewsProbe";
 
 /** A frame with nothing in it, whose label names it. */
 function frame(label: string): FrameSubmission {
@@ -56,6 +78,22 @@ async function probed(): Promise<{
   );
   probe.installFrameClock(page);
   return { probe, page, engine, timed };
+}
+
+/** A dispatch's bindings, the body's tables' figure bound as an atmosphere's kernel binds it. */
+function airBindings(oblateBody: TextureHandle | null): ComputeBindings {
+  return {
+    buffers: {},
+    sampled: oblateBody === null ? {} : { oblateBody },
+    uniforms: {},
+    storage: {},
+  };
+}
+
+/** A kernel's read in words, `none` for a kernel of no read. */
+function readText(name: string): string {
+  const of = atmosphereReadOf(name);
+  return of === null ? "none" : `${of.read}${of.thermal ? ", thermal" : ""}`;
 }
 
 /** Draws `draw` from the page's next animation frame at `timeMs`, taking `costMs` of the clock. */
@@ -208,6 +246,43 @@ describe("the views probe", () => {
         workgroups: [100],
       },
       { label: "tonemap", ms: [1], kernels: [], workgroups: [] },
+    ]);
+  });
+
+  it("names each body's atmosphere read from the kernels its frames dispatched against its tables", async () => {
+    const { probe, page, engine } = await probed();
+    const near: TextureHandle = { kind: "texture", name: "near oblate body" };
+    const far: TextureHandle = { kind: "texture", name: "far oblate body" };
+    const dispatch = (name: string, air: TextureHandle | null): void => {
+      engine.dispatch(
+        { kind: "compute", name, path: "reference" },
+        airBindings(air),
+        [1, 1, 1],
+        "atmosphere view",
+      );
+    };
+    inFrame(page, 100, () => {
+      dispatch(SKY_VIEW_THICK_KERNEL.name, near);
+      dispatch(SKY_VIEW_KERNEL.name, far);
+      dispatch(RAY_MARCH_DECK_KERNEL.name, near);
+      dispatch(RAY_MARCH_FILL_KERNEL.name, null);
+    });
+    inFrame(page, 120, () => {
+      dispatch(SKY_VIEW_THICK_KERNEL.name, near);
+    });
+    inFrame(page, 300, () => {
+      dispatch(SKY_VIEW_KERNEL.name, near);
+    });
+    expect(probe.atmosphereReads(0, 200)).toEqual([
+      {
+        air: 1,
+        read: "deck",
+        thermal: false,
+        frames: 1,
+        kernels: [SKY_VIEW_THICK_KERNEL.name, RAY_MARCH_DECK_KERNEL.name],
+      },
+      { air: 1, read: "thick", thermal: false, frames: 1, kernels: [SKY_VIEW_THICK_KERNEL.name] },
+      { air: 2, read: "thin", thermal: false, frames: 1, kernels: [SKY_VIEW_KERNEL.name] },
     ]);
   });
 
@@ -516,5 +591,47 @@ describe("the views probe", () => {
     expect(page.requestAnimationFrame).not.toBe(own);
     restore();
     expect(page.requestAnimationFrame).toBe(own);
+  });
+});
+
+describe("atmosphereReadOf", () => {
+  it("reads each read's and each thermal form's kernels by their names, and no read of the rest", () => {
+    expect(
+      [
+        SKY_VIEW_KERNEL,
+        RAY_MARCH_KERNEL,
+        RAY_MARCH_PACKED_KERNEL,
+        AERIAL_PERSPECTIVE_THICK_KERNEL,
+        RAY_MARCH_THICK_TABLE_KERNEL,
+        RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+        RAY_MARCH_DECK_KERNEL,
+        RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+        RAY_MARCH_BELOW_DECK_KERNEL,
+        SKY_VIEW_THERMAL_KERNEL,
+        RAY_MARCH_DECK_THERMAL_KERNEL,
+        RAY_MARCH_FILL_KERNEL,
+        LIMB_RESOLVE_KERNEL,
+      ].map((kernel) => readText(kernel.name)),
+    ).toEqual([
+      "thin",
+      "thin",
+      "thin",
+      "thick",
+      "thick",
+      "thick",
+      "deck",
+      "deck",
+      "beneath a deck",
+      "thin, thermal",
+      "deck, thermal",
+      "none",
+      "none",
+    ]);
+  });
+
+  it("reads the thick read's packed limb as the thick read, where its kernel is of a read", () => {
+    expect(
+      new Set(THICK_LIMB_KERNELS.flatMap((kernel) => atmosphereReadOf(kernel.name)?.read ?? [])),
+    ).toEqual(new Set(["thick"]));
   });
 });

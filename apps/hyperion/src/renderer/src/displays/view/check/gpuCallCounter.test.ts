@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { FakeAdapter, FakeGpu, SWIFTSHADER_INFO } from "../../../test/fakeGpu";
+import type { InspectionAttachmentSlot, InspectionGpuAttachment } from "../../../../../preload/api";
+import { FakeAdapter, FakeGpu, FakeTexture, SWIFTSHADER_INFO } from "../../../test/fakeGpu";
+import type { CanvasContexts } from "../../../view/spike/capture";
 import { wrapGpu } from "../../../view/spike/pipelineShim";
 import { AFTER_LAST_PASS, bufferWriteBytes, GpuCallCounter } from "./gpuCallCounter";
 
-/** A counted device on a fake adapter, through the seam the views probe's engine source uses. */
-async function countedDevice(): Promise<{
+/**
+ * A counted device on a fake adapter, through the seam the views probe's engine source uses, its
+ * canvases' textures read from `contexts`.
+ */
+async function countedDevice(contexts: CanvasContexts | null = null): Promise<{
   readonly counter: GpuCallCounter;
   readonly device: GPUDevice;
 }> {
-  const counter = new GpuCallCounter();
+  const counter = new GpuCallCounter(contexts);
   const gpu = wrapGpu(
     new FakeGpu([new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] })]),
     counter.wrapDevice,
@@ -25,10 +30,31 @@ async function countedDevice(): Promise<{
 function lines(counter: GpuCallCounter): string[] {
   return counter
     .take()
-    .map(
+    .calls.map(
       ({ label, call, count, bytes }) =>
         `${label}: ${call} × ${String(count)}${bytes > 0 ? ` (${String(bytes)} B)` : ""}`,
     );
+}
+
+/** A kind of attachment two passes of `bodies` at 640 × 360 px took. */
+function bodiesTook(
+  attachment: InspectionAttachmentSlot,
+  format: GPUTextureFormat,
+  loadOp: InspectionGpuAttachment["loadOp"],
+  storeOp: InspectionGpuAttachment["storeOp"],
+  bytesLoaded: number,
+  bytesStored: number,
+): InspectionGpuAttachment {
+  return {
+    label: "bodies",
+    attachment,
+    view: { format, widthPx: 640, heightPx: 360, sampleCount: 1 },
+    loadOp,
+    storeOp,
+    passes: 2,
+    bytesLoaded,
+    bytesStored,
+  };
 }
 
 describe("the frame profile's count of WebGPU calls (plan R14)", () => {
@@ -86,10 +112,148 @@ describe("the frame profile's count of WebGPU calls (plan R14)", () => {
     const { counter, device } = await countedDevice();
     device.createCommandEncoder({ label: "before" });
     counter.begin();
-    expect(counter.take()).toEqual([]);
+    expect(counter.take()).toEqual({ calls: [], attachments: [] });
     device.createCommandEncoder({ label: "after" });
     expect(lines(counter)).toEqual(["after: device.createCommandEncoder × 1"]);
-    expect(counter.take()).toEqual([]);
+    expect(counter.take()).toEqual({ calls: [], attachments: [] });
+  });
+
+  it("counts a pass's attachments and the bytes each load and store moves, a clear and a discard none", async () => {
+    const { counter, device } = await countedDevice();
+    const texture = (label: string, format: GPUTextureFormat, size: [number, number]): GPUTexture =>
+      device.createTexture({ label, size, format, usage: 0 });
+    const hdr = texture("hdr", "rgba16float", [640, 360]).createView();
+    const ids = texture("ids", "r32uint", [640, 360]).createView();
+    // Its second mip, 640 × 360, through a view in its sRGB twin.
+    const half = texture("history", "rgba8unorm", [1280, 720]).createView({
+      baseMipLevel: 1,
+      mipLevelCount: 1,
+      format: "rgba8unorm-srgb",
+    });
+    const depth = texture("depth", "depth24plus-stencil8", [640, 360]).createView();
+    counter.begin();
+    const encoder = device.createCommandEncoder({ label: "frame" });
+    for (let i = 0; i < 2; i += 1) {
+      encoder
+        .beginRenderPass({
+          label: "bodies",
+          colorAttachments: [
+            { view: hdr, loadOp: "load", storeOp: "store" },
+            { view: ids, loadOp: "clear", storeOp: "store" },
+            null,
+            { view: half, loadOp: "load", storeOp: "discard" },
+          ],
+          depthStencilAttachment: {
+            view: depth,
+            depthLoadOp: "load",
+            depthStoreOp: "discard",
+            stencilLoadOp: "clear",
+            stencilStoreOp: "store",
+          },
+        })
+        .end();
+    }
+    // Two passes of 640 × 360 texels: 8 bytes a texel of rgba16float, 4 of r32uint, rgba8unorm and
+    // a depth24plus aspect, 1 of a stencil aspect.
+    expect(counter.take().attachments).toEqual([
+      bodiesTook("colour 0", "rgba16float", "load", "store", 2 * 1_843_200, 2 * 1_843_200),
+      bodiesTook("colour 1", "r32uint", "clear", "store", 0, 2 * 921_600),
+      bodiesTook("colour 3", "rgba8unorm-srgb", "load", "discard", 2 * 921_600, 0),
+      bodiesTook("depth", "depth24plus-stencil8", "load", "discard", 2 * 921_600, 0),
+      bodiesTook("stencil", "depth24plus-stencil8", "clear", "store", 0, 2 * 230_400),
+    ]);
+  });
+
+  it("reads a canvas's view as its context hands out the texture, without counting the call", async () => {
+    const canvas = new FakeTexture({ size: [800, 600], format: "bgra8unorm", usage: 0 });
+    const contexts: CanvasContexts = { getCurrentTexture: () => canvas };
+    const handOut: unknown = Reflect.get(contexts, "getCurrentTexture");
+    const { counter, device } = await countedDevice(contexts);
+    counter.begin();
+    const encoder = device.createCommandEncoder({ label: "frame" });
+    const view = contexts.getCurrentTexture().createView({ format: "bgra8unorm-srgb" });
+    encoder
+      .beginRenderPass({
+        label: "tonemap",
+        colorAttachments: [{ view, loadOp: "clear", storeOp: "store" }],
+      })
+      .end();
+    const { calls, attachments } = counter.take();
+    counter.release();
+    expect([
+      calls.map((each) => each.call),
+      attachments.map(({ view: seen, bytesLoaded, bytesStored }) => ({
+        seen,
+        bytesLoaded,
+        bytesStored,
+      })),
+      Reflect.get(contexts, "getCurrentTexture") === handOut,
+    ]).toEqual([
+      ["device.createCommandEncoder", "encoder.beginRenderPass", "render pass.end"],
+      [
+        {
+          seen: { format: "bgra8unorm-srgb", widthPx: 800, heightPx: 600, sampleCount: 1 },
+          bytesLoaded: 0,
+          bytesStored: 800 * 600 * 4,
+        },
+      ],
+      true,
+    ]);
+  });
+
+  it("counts a resolve, a texture attached whole, read-only aspects and a view it never saw made", async () => {
+    const { counter, device } = await countedDevice();
+    const make = (format: GPUTextureFormat, sampleCount = 1): GPUTexture =>
+      device.createTexture({ size: [64, 32], format, sampleCount, usage: 0 });
+    const many = make("rgba8unorm", 4).createView();
+    const resolved = make("rgba8unorm").createView();
+    const whole = make("rgba16float");
+    const depth = make("depth24plus-stencil8").createView();
+    const unseen = new FakeTexture({
+      size: [64, 32],
+      format: "depth32float",
+      usage: 0,
+    }).createView();
+    counter.begin();
+    const encoder = device.createCommandEncoder({ label: "frame" });
+    encoder
+      .beginRenderPass({
+        label: "lit",
+        colorAttachments: [
+          { view: many, resolveTarget: resolved, loadOp: "clear", storeOp: "discard" },
+          { view: whole, loadOp: "load", storeOp: "store" },
+        ],
+        depthStencilAttachment: { view: depth, depthReadOnly: true, stencilReadOnly: true },
+      })
+      .end();
+    encoder
+      .beginRenderPass({
+        label: "overlay",
+        colorAttachments: [],
+        depthStencilAttachment: { view: unseen, depthLoadOp: "clear", depthStoreOp: "store" },
+      })
+      .end();
+    // 64 × 32 texels: 4 samples of 4 bytes, 4 bytes, 8 bytes, a depth aspect's 4 and a stencil's 1.
+    expect(
+      counter
+        .take()
+        .attachments.map((each) => [
+          each.label,
+          each.attachment,
+          each.view?.sampleCount ?? null,
+          each.loadOp,
+          each.storeOp,
+          each.bytesLoaded,
+          each.bytesStored,
+        ]),
+    ).toEqual([
+      ["lit", "colour 0", 4, "clear", "discard", 0, 0],
+      ["lit", "resolve 0", 1, null, "resolve", 0, 8_192],
+      ["lit", "colour 1", 1, "load", "store", 16_384, 16_384],
+      ["lit", "depth", 1, "read-only", "read-only", 8_192, 0],
+      ["lit", "stencil", 1, "read-only", "read-only", 2_048, 0],
+      ["overlay", "depth", null, "clear", "store", 0, null],
+    ]);
   });
 
   it("reads a write's bytes from its elements, its offset and its size", () => {

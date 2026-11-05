@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { InspectionTimingMarchCensus, InspectionTimingRecord } from "../preload/api";
+import type {
+  InspectionGpuAttachment,
+  InspectionTimingMarchCensus,
+  InspectionTimingRecord,
+} from "../preload/api";
 import {
   buildInspectionTimingResults,
+  gpuAttachmentFigures,
   gpuCallKind,
   inspectionTimingMarkdown,
   inspectionTimingTraceConfig,
@@ -177,6 +182,28 @@ const CENSUS: InspectionTimingMarchCensus = {
   laneRays: 2_300,
 };
 
+/** A kind of attachment two passes of 100 × 50 px took, as the counter tallies it. */
+function attached(
+  label: string,
+  attachment: InspectionGpuAttachment["attachment"],
+  format: string,
+  loadOp: InspectionGpuAttachment["loadOp"],
+  storeOp: InspectionGpuAttachment["storeOp"],
+  bytesLoaded: number,
+  bytesStored: number,
+): InspectionGpuAttachment {
+  return {
+    label,
+    attachment,
+    view: { format, widthPx: 100, heightPx: 50, sampleCount: 1 },
+    loadOp,
+    storeOp,
+    passes: 2,
+    bytesLoaded,
+    bytesStored,
+  };
+}
+
 /** A record of one window: two frames, the atmosphere's view pass and the tone map. */
 const RECORD: InspectionTimingRecord = {
   timer: "quantized",
@@ -213,6 +240,29 @@ const RECORD: InspectionTimingRecord = {
         { label: "bodies", call: "render pass.setBindGroup", count: 12, bytes: 0 },
         { label: "bodies", call: "queue.writeBuffer", count: 2, bytes: 4_096 },
         { label: "atmosphere view", call: "device.createBindGroup", count: 4, bytes: 0 },
+      ],
+      // Two frames' passes at 100 × 50 px: 40,000 bytes an rgba16float target, 20,000 a 4-byte one.
+      gpuAttachments: [
+        attached("bodies", "colour 0", "rgba16float", "clear", "store", 0, 80_000),
+        attached("bodies", "depth", "depth32float", "clear", "store", 0, 40_000),
+        attached("terrain resolve", "colour 0", "rgba16float", "load", "store", 80_000, 80_000),
+        attached("tonemap", "colour 0", "bgra8unorm-srgb", "clear", "store", 0, 40_000),
+      ],
+      atmosphereReads: [
+        {
+          air: 1,
+          read: "deck",
+          thermal: false,
+          frames: 2,
+          kernels: ["atmosphere sky view, thick", "atmosphere ray march, thick, over a deck"],
+        },
+        {
+          air: 2,
+          read: "thin",
+          thermal: true,
+          frames: 1,
+          kernels: ["atmosphere sky view, thermal"],
+        },
       ],
       react: {
         commits: 4,
@@ -502,6 +552,90 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect(main?.reactMs).toEqual({ renderAndCommit: 0.5, passiveEffects: 0.1 });
   });
 
+  it("sums the counted attachments' bytes a draw by pass, the most first, where no tile is kept (R14.T2.e)", () => {
+    const figures = results().windows[0]?.attachments;
+    expect([figures?.bytesLoadedPerDraw, figures?.bytesStoredPerDraw]).toEqual([40_000, 120_000]);
+    expect(
+      figures?.passes.map((pass) => [
+        pass.label,
+        pass.passesPerDraw,
+        pass.bytesLoadedPerDraw,
+        pass.bytesStoredPerDraw,
+      ]),
+    ).toEqual([
+      ["terrain resolve", 1, 40_000, 40_000],
+      ["bodies", 1, 0, 60_000],
+      ["tonemap", 1, 0, 20_000],
+    ]);
+  });
+
+  it("leaves a pass's bytes unknown where one of its attachments' is", () => {
+    const unseen: InspectionGpuAttachment = {
+      ...attached("canvas", "colour 0", "bgra8unorm", "load", "store", 0, 0),
+      view: null,
+      bytesLoaded: null,
+      bytesStored: null,
+    };
+    const figures = gpuAttachmentFigures(
+      [unseen, attached("canvas", "depth", "depth32float", "clear", "store", 0, 40_000)],
+      2,
+    );
+    expect([figures.bytesLoadedPerDraw, figures.passes[0]?.bytesStoredPerDraw]).toEqual([
+      null,
+      null,
+    ]);
+  });
+
+  it("writes each window's atmosphere reads and attachments in its summary (R14.T2.e)", () => {
+    const markdown = inspectionTimingMarkdown(results());
+    expect(markdown).toContain(
+      "- **Atmosphere read** (each body with air, from the kernels its frames dispatched): air 1: deck, 2 frames; air 2: thin (thermal), 1 frame",
+    );
+    expect(markdown).toContain(
+      "| terrain resolve | 1.0 | 0.04 | 0.04 | colour 0 rgba16float 100 × 50 load/store |",
+    );
+  });
+
+  it("takes a window's attachments, or none, and its reads only named (R14.T2.e)", () => {
+    const [window] = RECORD.windows;
+    const read = (changes: object): unknown =>
+      readInspectionTimingRecord({
+        ...RECORD,
+        windows: window === undefined ? [] : [{ ...window, ...changes }],
+      })?.windows[0];
+    expect([
+      read({ gpuAttachments: null }) !== undefined,
+      read({
+        gpuAttachments: [
+          {
+            ...attached("bodies", "depth", "depth32float", "clear", "store", 0, 1),
+            loadOp: "keep",
+          },
+        ],
+      }),
+      read({
+        gpuAttachments: [
+          {
+            ...attached("bodies", "depth", "depth32float", "clear", "store", 0, 1),
+            view: { format: "depth32float", widthPx: 100 },
+          },
+        ],
+      }),
+      read({
+        gpuAttachments: [
+          {
+            ...attached("bodies", "depth", "depth32float", "clear", "store", 0, 1),
+            attachment: "colour",
+          },
+        ],
+      }),
+      read({
+        atmosphereReads: [{ air: 1, read: "dense", thermal: false, frames: 1, kernels: [] }],
+      }),
+      read({ atmosphereReads: undefined }),
+    ]).toEqual([true, undefined, undefined, undefined, undefined, undefined]);
+  });
+
   it("leaves the WebGPU calls out of a window that did not count them", () => {
     const [window] = RECORD.windows;
     const uncounted = window === undefined ? [] : [{ ...window, gpuCalls: null }];
@@ -631,7 +765,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 6,
+      version: 7,
       run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
     });
   });

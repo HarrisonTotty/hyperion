@@ -24,6 +24,13 @@ import type {
   HandoverSwitchName,
   HandoverResampleGaps,
   HandoverTexelRecord,
+  InspectionAtmosphereRead,
+  InspectionAtmosphereReadName,
+  InspectionAttachmentLoad,
+  InspectionAttachmentSlot,
+  InspectionAttachmentStore,
+  InspectionAttachmentView,
+  InspectionGpuAttachment,
   InspectionGpuCall,
   InspectionReactCommits,
   InspectionReactComponent,
@@ -1392,6 +1399,132 @@ function gpuCalls(value: unknown): ReadonlyArray<InspectionGpuCall> | null | und
     : undefined;
 }
 
+/** The load operations an attachment's record may name. */
+const ATTACHMENT_LOADS: ReadonlyArray<InspectionAttachmentLoad> = ["load", "clear", "read-only"];
+
+/** The store operations an attachment's record may name. */
+const ATTACHMENT_STORES: ReadonlyArray<InspectionAttachmentStore> = [
+  "store",
+  "discard",
+  "read-only",
+  "resolve",
+];
+
+/** Whether `value` is a count or `null`. */
+function isCountOrNull(value: unknown): value is number | null {
+  return value === null || isCount(value);
+}
+
+/** `value` as an attachment's slot (`colour 0`, `resolve 0`, `depth`, `stencil`), or `null`. */
+function attachmentSlot(value: unknown): InspectionAttachmentSlot | null {
+  if (value === "depth" || value === "stencil") {
+    return value;
+  }
+  if (typeof value !== "string" || !/^(?:colour|resolve) \d+$/u.test(value)) {
+    return null;
+  }
+  // A colour or resolve target's slot, its number checked just now: its template's own form.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return value as InspectionAttachmentSlot;
+}
+
+/**
+ * `value` as an attachment's view (a format, a size of a pixel or more, a sample or more), `null`
+ * for none seen made, or `undefined` where it is neither.
+ */
+function attachmentView(value: unknown): InspectionAttachmentView | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { format, widthPx, heightPx, sampleCount } = value;
+  return typeof format === "string" &&
+    format.length > 0 &&
+    isCount(widthPx) &&
+    widthPx > 0 &&
+    isCount(heightPx) &&
+    heightPx > 0 &&
+    isCount(sampleCount) &&
+    sampleCount > 0
+    ? { format, widthPx, heightPx, sampleCount }
+    : undefined;
+}
+
+/**
+ * One kind of a pass label's attachments (plan R14, R14.T2.e): a label and an attachment slot, its
+ * view or `null`, its operations as named or `null`, a pass or more, and its bytes.
+ */
+function gpuAttachment(value: unknown): InspectionGpuAttachment | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { label, passes, bytesLoaded, bytesStored } = value;
+  const attachment = attachmentSlot(value["attachment"]);
+  const seen = attachmentView(value["view"]);
+  const loadOp = ATTACHMENT_LOADS.find((each) => each === value["loadOp"]) ?? null;
+  const storeOp = ATTACHMENT_STORES.find((each) => each === value["storeOp"]) ?? null;
+  return typeof label === "string" &&
+    label.length > 0 &&
+    attachment !== null &&
+    seen !== undefined &&
+    (loadOp !== null || value["loadOp"] === null) &&
+    (storeOp !== null || value["storeOp"] === null) &&
+    isCount(passes) &&
+    passes > 0 &&
+    isCountOrNull(bytesLoaded) &&
+    isCountOrNull(bytesStored)
+    ? {
+        label,
+        attachment,
+        view: seen,
+        loadOp,
+        storeOp,
+        passes,
+        bytesLoaded,
+        bytesStored,
+      }
+    : null;
+}
+
+/**
+ * A window's render passes' attachments (plan R14, R14.T2.e), or `null` for a window that did not
+ * count them; `undefined` where the value is neither.
+ */
+function gpuAttachments(value: unknown): ReadonlyArray<InspectionGpuAttachment> | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  return listOf(value, gpuAttachment) ?? undefined;
+}
+
+/** The reads an atmosphere's record may name. */
+const ATMOSPHERE_READS: ReadonlyArray<InspectionAtmosphereReadName> = [
+  "thin",
+  "thick",
+  "deck",
+  "beneath a deck",
+];
+
+/** One body's atmosphere read over a window: a body from 1, a read named, its frames and kernels. */
+function atmosphereRead(value: unknown): InspectionAtmosphereRead | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { air, thermal, frames } = value;
+  const read = ATMOSPHERE_READS.find((each) => each === value["read"]);
+  const kernels = strings(value["kernels"]);
+  return isCount(air) &&
+    air > 0 &&
+    read !== undefined &&
+    typeof thermal === "boolean" &&
+    isCount(frames) &&
+    kernels !== null
+    ? { air, read, thermal, frames, kernels }
+    : null;
+}
+
 /** One prop's changed renders (lane perf-render-thread-2): a name and a count above 0. */
 function changedProp(value: unknown): InspectionReactComponent["propsChanged"][number] | null {
   if (!isRecord(value)) {
@@ -1497,8 +1630,9 @@ function timingClusters(value: unknown): InspectionTimingClusters | null | undef
 
 /**
  * One profiled window (the owner's report): its name, an end not before its start, and its times,
- * each pass's as many as the frames timed in full, each label once, its WebGPU calls or `null`, its
- * React commits or `null`, and its cluster counters or `null`.
+ * each pass's as many as the frames timed in full, each label once, its WebGPU calls and
+ * attachments or `null`, its atmosphere reads, its React commits or `null`, and its cluster
+ * counters or `null`.
  */
 function timingWindow(value: unknown): InspectionTimingWindow | null {
   if (!isRecord(value)) {
@@ -1515,6 +1649,8 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
   const statements = strings(value["statements"]);
   const memory = timingMemory(value["memory"]);
   const calls = gpuCalls(value["gpuCalls"]);
+  const attachments = gpuAttachments(value["gpuAttachments"]);
+  const atmosphereReads = listOf(value["atmosphereReads"], atmosphereRead);
   const react = reactCommits(value["react"]);
   const marchCensus = timingCensus(value["marchCensus"]);
   const clusters = timingClusters(value["clusters"]);
@@ -1536,6 +1672,8 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     !isCount(untimedFrames) ||
     memory === null ||
     calls === undefined ||
+    attachments === undefined ||
+    atmosphereReads === null ||
     react === undefined ||
     clusters === undefined ||
     !isCount(marchSamples) ||
@@ -1560,6 +1698,8 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     untimedFrames,
     memory,
     gpuCalls: calls,
+    gpuAttachments: attachments,
+    atmosphereReads,
     react,
     clusters,
     marchSamples,

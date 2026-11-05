@@ -10,15 +10,21 @@
  * setting as A B A B, so that a drift of the machine's heat or load falls on both sides alike; then
  * the sweep. It keeps each run's files as the run ends, so that a stopped batch resumes at its first
  * run not kept, and samples the 1-minute load, the server's CPU and macOS's thermal state before
- * and after each run ({@link MacProfileSample}). This module is the batch's arithmetic and its
- * summary ({@link macProfileSummaryLines}): each window's interval median and p95 and its GPU time
- * by pass, each lever's delta against its pair, and the load.
+ * and after each run ({@link MacProfileSample}). After the pairs come the counted runs
+ * (`--count-gpu-calls`; R14.T2.e), each setting's own way and each side of the pairs that split a
+ * pass (occlusion's and shading's, Design note 7) at DPR 1, apart from the timed pairs so that the
+ * count costs them nothing. This module is the batch's arithmetic and its summary
+ * ({@link macProfileSummaryLines}): each window's interval median and p95, its GPU time by pass and
+ * each body's atmosphere read, each lever's delta against its pair beside its sides' reads and, for
+ * a pair that splits a pass, its counted sides' attachments' bytes, and the load.
  */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  atmosphereReadsText,
+  attachmentText,
   INSPECTION_TIMING_SCHEMA,
   type InspectionTimingResults,
   type InspectionTimingWindowResults,
@@ -41,6 +47,11 @@ export interface MacProfileLever {
   readonly b: ReadonlyArray<string>;
   /** The ratios its pair runs at. */
   readonly ratios: ReadonlyArray<MacProfileRatio>;
+  /**
+   * Whether each side takes a counted run too (R14.T2.e): a lever that moves the passes'
+   * attachments, which a tile-based GPU pays for in memory traffic.
+   */
+  readonly countSides: boolean;
 }
 
 /**
@@ -55,6 +66,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     a: [],
     b: ["--limb-rays", "per-texel"],
     ratios: [1],
+    countSides: false,
   },
   {
     name: "march-sources",
@@ -62,6 +74,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     a: [],
     b: ["--march-sources", "per-step"],
     ratios: [1],
+    countSides: false,
   },
   {
     name: "lit-per-fragment",
@@ -69,6 +82,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     a: [],
     b: ["--lit-probe", "per-fragment"],
     ratios: [1],
+    countSides: false,
   },
   {
     name: "composite-per-pixel",
@@ -76,6 +90,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     a: [],
     b: ["--composite-probe", "per-pixel"],
     ratios: [1],
+    countSides: false,
   },
   {
     name: "occlusion",
@@ -83,6 +98,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     a: [],
     b: ["--geometry", "occlusion=hzb"],
     ratios: [1],
+    countSides: true,
   },
   {
     name: "strides",
@@ -90,6 +106,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     a: [],
     b: ["--geometry", "strides=off"],
     ratios: [1],
+    countSides: false,
   },
   {
     name: "far-cascades",
@@ -97,6 +114,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     a: [],
     b: ["--geometry", "farCascadeRate=1"],
     ratios: [1],
+    countSides: false,
   },
   {
     name: "shading",
@@ -105,6 +123,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     a: ["--geometry", "shading=forward"],
     b: ["--geometry", "shading=visibility"],
     ratios: [1, 2],
+    countSides: true,
   },
 ];
 
@@ -121,6 +140,28 @@ export interface MacProfilePairSide {
   readonly round: number;
 }
 
+/**
+ * A run's place in the matrix: a setting's own run, a side of a lever pair, or a counted run
+ * (`--count-gpu-calls`; R14.T2.e) of a setting's own way or of one side of a pair whose sides are
+ * counted.
+ */
+export type MacProfilePlace =
+  | { readonly kind: "own" }
+  | ({ readonly kind: "pair" } & MacProfilePairSide)
+  | { readonly kind: "counted" }
+  | { readonly kind: "counted side"; readonly lever: string; readonly side: "a" | "b" };
+
+/** Whether a run is a counted run, either kind. */
+export function isCounted(run: MacProfileRun): boolean {
+  return run.place.kind === "counted" || run.place.kind === "counted side";
+}
+
+/** The views check's switch a counted run adds: its WebGPU calls and attachments counted. */
+export const COUNT_GPU_CALLS = "--count-gpu-calls";
+
+/** The ratio the counted runs draw at: a screen-sized target's bytes scale with its pixels. */
+export const COUNTED_RATIO: MacProfileRatio = 1;
+
 /** One launch of the matrix. */
 export interface MacProfileRun {
   /** Its name, its directory's under the batch's `runs/`. */
@@ -129,8 +170,7 @@ export interface MacProfileRun {
   readonly ratio: MacProfileRatio;
   /** Its own arguments to the views check, after the batch's. */
   readonly args: ReadonlyArray<string>;
-  /** Its place in a lever pair, or `null` for a setting's own run. */
-  readonly pair: MacProfilePairSide | null;
+  readonly place: MacProfilePlace;
 }
 
 /** What the matrix is made of. */
@@ -144,6 +184,11 @@ export interface MacProfileMatrixOptions {
   readonly pairSetting: MacProfileSetting;
   /** Each pair's A B rounds: 2 is A B A B. */
   readonly rounds: number;
+  /**
+   * Whether the counted runs are made: each setting's own way, then each side of every pair of
+   * {@link levers} whose sides are counted, at the pair setting.
+   */
+  readonly counted: boolean;
 }
 
 /** The owner's batch: both settings at both ratios, every pair at high as A B A B. */
@@ -153,6 +198,7 @@ export const MAC_PROFILE_DEFAULTS: MacProfileMatrixOptions = {
   levers: MAC_PROFILE_LEVERS.map((lever) => lever.name),
   pairSetting: "high",
   rounds: 2,
+  counted: true,
 };
 
 /** The views check's argument for a ratio: none at 1, which is its default. */
@@ -162,7 +208,7 @@ function ratioArgs(ratio: MacProfileRatio): ReadonlyArray<string> {
 
 /**
  * The batch's runs, in the order they run: each setting's own runs, then each pair's, A and B by
- * turns, its ratios one after the other.
+ * turns, its ratios one after the other, then the counted runs at {@link COUNTED_RATIO}.
  *
  * @throws Error for a lever not in {@link MAC_PROFILE_LEVERS}, which the script refuses first.
  */
@@ -177,7 +223,7 @@ export function macProfileMatrix(options: MacProfileMatrixOptions): ReadonlyArra
       setting,
       ratio,
       args: ratioArgs(ratio),
-      pair: null,
+      place: { kind: "own" },
     })),
   );
   const setting = options.pairSetting;
@@ -190,12 +236,36 @@ export function macProfileMatrix(options: MacProfileMatrixOptions): ReadonlyArra
             setting,
             ratio,
             args: [...ratioArgs(ratio), ...(side === "a" ? lever.a : lever.b)],
-            pair: { lever: lever.name, side, round },
+            place: { kind: "pair", lever: lever.name, side, round },
           })),
         ),
       ),
   );
-  return [...own, ...pairs];
+  if (!options.counted) {
+    return [...own, ...pairs];
+  }
+  const ratio = String(COUNTED_RATIO);
+  const counted = [
+    ...options.settings.map((each): MacProfileRun => ({
+      id: `counted-${each}-dpr${ratio}`,
+      setting: each,
+      ratio: COUNTED_RATIO,
+      args: [...ratioArgs(COUNTED_RATIO), COUNT_GPU_CALLS],
+      place: { kind: "counted" },
+    })),
+    ...MAC_PROFILE_LEVERS.filter(
+      (lever) => lever.countSides && options.levers.includes(lever.name),
+    ).flatMap((lever) =>
+      (["a", "b"] as const).map((side): MacProfileRun => ({
+        id: `counted-${lever.name}-${setting}-dpr${ratio}-${side}`,
+        setting,
+        ratio: COUNTED_RATIO,
+        args: [...ratioArgs(COUNTED_RATIO), COUNT_GPU_CALLS, ...(side === "a" ? lever.a : lever.b)],
+        place: { kind: "counted side", lever: lever.name, side },
+      })),
+    ),
+  ];
+  return [...own, ...pairs, ...counted];
 }
 
 /** The machine as a run starts or ends. */
@@ -351,6 +421,32 @@ export interface ProfiledWindow {
   readonly name: InspectionTimingWindowResults["name"];
   readonly frame: Pick<InspectionTimingWindowResults["frame"], "intervalMs" | "gpuMs">;
   readonly passes: ReadonlyArray<Pick<PassFigures, "label" | "medianMs" | "shareOfGpu">>;
+  /** Its attachments counted, `null` uncounted; absent before the file's version 7, as none. */
+  readonly attachments?: InspectionTimingWindowResults["attachments"];
+  /** Each body's atmosphere read; absent before the file's version 7, as none known. */
+  readonly atmosphereReads?: InspectionTimingWindowResults["atmosphereReads"];
+}
+
+/**
+ * A window's atmosphere reads by body without their frames, so that runs of one side drawn alike
+ * read alike: `—` for none and `not recorded` before version 7.
+ */
+function readKindsText(window: ProfiledWindow): string {
+  if (window.atmosphereReads === undefined) {
+    return "not recorded";
+  }
+  return window.atmosphereReads.length === 0
+    ? "—"
+    : window.atmosphereReads
+        .map((each) => `air ${String(each.air)}: ${each.read}${each.thermal ? " (thermal)" : ""}`)
+        .join("; ");
+}
+
+/** A window's atmosphere reads in words, `—` for none and `not recorded` before version 7. */
+function readsText(window: ProfiledWindow): string {
+  return window.atmosphereReads === undefined
+    ? "not recorded"
+    : atmosphereReadsText(window.atmosphereReads);
 }
 
 /** What the summary reads of a timing file. */
@@ -369,6 +465,8 @@ export interface KeptRun {
 /** One side of a pair over a window: each figure the median of its runs' own. */
 export interface PairSideFigures {
   readonly runs: number;
+  /** Its runs' atmosphere reads by body, without their frames, each distinct one once. */
+  readonly reads: ReadonlyArray<string>;
   readonly intervalMedianMs: number | null;
   readonly intervalP95Ms: number | null;
   readonly gpuMedianMs: number | null;
@@ -418,6 +516,7 @@ function sideFigures(
   }
   return {
     runs: windows.length,
+    reads: [...new Set(windows.map(readKindsText))],
     intervalMedianMs: of((each) => each.frame.intervalMs.medianMs),
     intervalP95Ms: of((each) => each.frame.intervalMs.p95Ms),
     gpuMedianMs: of((each) => each.frame.gpuMs.medianMs),
@@ -442,7 +541,10 @@ export function pairFigures(
   const ofSide = (side: "a" | "b"): ReadonlyArray<KeptRun> =>
     kept.filter(
       (each) =>
-        each.run.pair?.lever === lever && each.run.pair.side === side && each.run.ratio === ratio,
+        each.run.place.kind === "pair" &&
+        each.run.place.lever === lever &&
+        each.run.place.side === side &&
+        each.run.ratio === ratio,
     );
   const aRuns = ofSide("a");
   const bRuns = ofSide("b");
@@ -517,11 +619,25 @@ const LISTED_PASSES = 6;
 /** The passes a pair's table lists of each window, the dearest of A and B together. */
 const PAIR_PASSES = 8;
 
-/** A run's lever, as the runs' table names it. */
+/** A run's lever, as the runs' table names it: a counted run's as counted. */
 function leverText(run: MacProfileRun): string {
-  return run.pair === null
-    ? "—"
-    : `${run.pair.lever} ${run.pair.side.toUpperCase()}${String(run.pair.round)}`;
+  const { place } = run;
+  let text: string;
+  switch (place.kind) {
+    case "own":
+      text = "—";
+      break;
+    case "pair":
+      text = `${place.lever} ${place.side.toUpperCase()}${String(place.round)}`;
+      break;
+    case "counted":
+      text = "counted";
+      break;
+    case "counted side":
+      text = `counted, ${place.lever} ${place.side.toUpperCase()}`;
+      break;
+  }
+  return text;
 }
 
 /** The runs' table: each run of the matrix, kept or not, with its load and the server's CPU. */
@@ -558,8 +674,8 @@ function windowsTable(
   kept: ReadonlyMap<string, KeptRun>,
 ): string[] {
   return [
-    "| Run | Window | Interval median | p95 | fps at the median | GPU median | Dearest passes, median ms (share of the GPU) |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
+    "| Run | Window | Interval median | p95 | fps at the median | GPU median | Dearest passes, median ms (share of the GPU) | Atmosphere read |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ...matrix.flatMap((run) =>
       (kept.get(run.id)?.timing.windows ?? []).map((window) => {
         const passes = window.passes
@@ -570,7 +686,8 @@ function windowsTable(
         return (
           `| ${run.id} | ${window.name} | ${msText(window.frame.intervalMs.medianMs)} | ` +
           `${msText(window.frame.intervalMs.p95Ms)} | ${fps(window.frame.intervalMs.medianMs)} | ` +
-          `${msText(window.frame.gpuMs.medianMs)} | ${cell(passes.length > 0 ? passes.join(", ") : "—")} |`
+          `${msText(window.frame.gpuMs.medianMs)} | ${cell(passes.length > 0 ? passes.join(", ") : "—")} | ` +
+          `${cell(readsText(window))} |`
         );
       }),
     ),
@@ -622,7 +739,132 @@ function pairSection(
     "| --- | --- | --- | --- | --- |",
     ...passRows,
     "",
+    "| Window | A's atmosphere read | B's |",
+    "| --- | --- | --- |",
+    ...figures.map(
+      (each) =>
+        `| ${each.window} | ${cell(each.a.reads.length === 0 ? "—" : each.a.reads.join(" / "))} | ${cell(each.b.reads.length === 0 ? "—" : each.b.reads.join(" / "))} |`,
+    ),
+    "",
   ];
+}
+
+/** The passes a counted run's window lists by their attachments' bytes, the most first. */
+const COUNTED_PASSES = 12;
+
+/** Bytes as MiB, to two decimals, or `—`. */
+function mibText(bytes: number | null | undefined): string {
+  return bytes === null || bytes === undefined ? "—" : (bytes / 1_048_576).toFixed(2);
+}
+
+/** A counted pass's bytes a draw, loaded and stored. */
+type CountedPass = NonNullable<ProfiledWindow["attachments"]>["passes"][number];
+
+/** A counted pass's bytes a draw, loaded and stored together, 0 for none. */
+function passBytes(pass: CountedPass | undefined): number {
+  return (pass?.bytesLoadedPerDraw ?? 0) + (pass?.bytesStoredPerDraw ?? 0);
+}
+
+/** A counted run's window's passes by label, or none for a window counted not or before 7. */
+function countedPasses(window: ProfiledWindow | undefined): ReadonlyMap<string, CountedPass> {
+  return new Map((window?.attachments?.passes ?? []).map((pass) => [pass.label, pass]));
+}
+
+/**
+ * A pair's counted sides' attachments by window and pass (R14.T2.e), beside its timed figures:
+ * each side's bytes loaded and stored a draw of the primary where no tile is kept.
+ */
+function countedPairSection(lever: MacProfileLever, kept: ReadonlyArray<KeptRun>): string[] {
+  const side = (which: "a" | "b"): KeptRun | undefined =>
+    kept.find(
+      (each) =>
+        each.run.place.kind === "counted side" &&
+        each.run.place.lever === lever.name &&
+        each.run.place.side === which,
+    );
+  const a = side("a");
+  const b = side("b");
+  const heading = `The counted sides' attachments (\`${COUNT_GPU_CALLS}\` at DPR ${String(COUNTED_RATIO)}, apart from the timed runs), MiB a draw of the primary where a tile-based GPU keeps no tile from one pass to the next:`;
+  if (a === undefined && b === undefined) {
+    return [heading, "", "No counted run of the pair is kept.", ""];
+  }
+  const rows = WINDOW_ORDER.flatMap((name) => {
+    const aPasses = countedPasses(a?.timing.windows.find((each) => each.name === name));
+    const bPasses = countedPasses(b?.timing.windows.find((each) => each.name === name));
+    return [...new Set([...aPasses.keys(), ...bPasses.keys()])]
+      .toSorted(
+        (x, y) =>
+          passBytes(aPasses.get(y)) +
+          passBytes(bPasses.get(y)) -
+          passBytes(aPasses.get(x)) -
+          passBytes(bPasses.get(x)),
+      )
+      .slice(0, PAIR_PASSES)
+      .map((label) => {
+        const ofA = aPasses.get(label);
+        const ofB = bPasses.get(label);
+        return `| ${name} | ${cell(label)} | ${mibText(ofA?.bytesLoadedPerDraw)} | ${mibText(ofA?.bytesStoredPerDraw)} | ${mibText(ofB?.bytesLoadedPerDraw)} | ${mibText(ofB?.bytesStoredPerDraw)} |`;
+      });
+  });
+  return [
+    heading,
+    "",
+    "| Window | Pass | A loaded | A stored | B loaded | B stored |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...(rows.length === 0 ? ["| — | no attachment counted | | | | |"] : rows),
+    "",
+  ];
+}
+
+/** A counted window's lines: its bytes a draw and its read, then its dearest passes' attachments. */
+function countedWindowLines(window: ProfiledWindow): string[] {
+  const figures = window.attachments;
+  if (figures === undefined || figures === null) {
+    return [`- **${window.name}:** no attachment counted.`];
+  }
+  const lines = [
+    `- **${window.name}:** ${mibText(figures.bytesLoadedPerDraw)} MiB loaded, ${mibText(figures.bytesStoredPerDraw)} MiB stored a draw; atmosphere read ${cell(readsText(window))}`,
+    "",
+    "| Pass | Passes a draw | Loaded | Stored | Attachments (load/store) |",
+    "| --- | --- | --- | --- | --- |",
+  ];
+  for (const pass of figures.passes.slice(0, COUNTED_PASSES)) {
+    lines.push(
+      `| ${cell(pass.label)} | ${pass.passesPerDraw.toFixed(1)} | ${mibText(pass.bytesLoadedPerDraw)} | ${mibText(pass.bytesStoredPerDraw)} | ${cell(pass.attachments.map(attachmentText).join("; "))} |`,
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
+/** The counted runs' section: each window's bytes a draw, then its dearest passes' attachments. */
+function countedSection(
+  matrix: ReadonlyArray<MacProfileRun>,
+  kept: ReadonlyMap<string, KeptRun>,
+): string[] {
+  const runs = matrix.filter(isCounted);
+  if (runs.length === 0) {
+    return [];
+  }
+  const lines = [
+    "## The counted runs",
+    "",
+    `Each counted run draws with \`${COUNT_GPU_CALLS}\` at DPR ${String(COUNTED_RATIO)}, apart from the timed pairs, so its times are not a player's. Its attachments' bytes are MiB a draw of the primary where a tile-based GPU keeps no tile from one pass to the next (a load reads an attachment into tiles, a store writes it back; a clear and a discard move none).`,
+    "",
+  ];
+  for (const run of runs) {
+    lines.push(`### ${run.id} (${leverText(run)})`, "");
+    const windows = kept.get(run.id)?.timing.windows;
+    if (windows === undefined) {
+      lines.push("Not kept.", "");
+      continue;
+    }
+    for (const window of windows) {
+      lines.push(...countedWindowLines(window));
+    }
+    lines.push("");
+  }
+  return lines;
 }
 
 /** One count of the height-worker sweep, as the batch sampled the machine around its descent. */
@@ -675,8 +917,10 @@ function sweepSection(sweep: MacProfileSummaryInput["sweep"]): string[] {
 
 /**
  * The batch's summary in Markdown: each run's load and the server's CPU, each kept run's windows
- * (interval median and p95, fps at the median, GPU median and the dearest passes), each lever pair's
- * sides and B less A by window and by pass, and the worker sweep's table.
+ * (interval median and p95, fps at the median, GPU median, the dearest passes and the atmosphere
+ * read), each lever pair's sides and B less A by window and by pass with each side's reads (and a
+ * counted pair's attachments' bytes by side), the counted runs' attachments, and the worker
+ * sweep's table.
  */
 export function macProfileSummaryLines(input: MacProfileSummaryInput): string[] {
   const matrix = macProfileMatrix(input.options);
@@ -706,15 +950,12 @@ export function macProfileSummaryLines(input: MacProfileSummaryInput): string[] 
     ...pairs.flatMap((lever) =>
       lever.ratios.flatMap((ratio) => [
         ...pairSection(lever, input.options.pairSetting, ratio, input.kept),
-        ...(lever.name === "shading"
-          ? [
-              "The attachments' loads and stores of each pass are not in the timing file (its schema " +
-                "has no such figure), so this table cannot give them.",
-              "",
-            ]
+        ...(lever.countSides && ratio === COUNTED_RATIO && input.options.counted
+          ? countedPairSection(lever, input.kept)
           : []),
       ]),
     ),
+    ...countedSection(matrix, byId),
     "## The height-worker sweep",
     "",
     ...sweepSection(input.sweep),

@@ -1390,7 +1390,8 @@ pass on the cluster path, then rasterised once into IDs and shaded once a pixel 
   - _Acceptance (pending: the owner's runs):_ the Mac's fps on high at 1920 × 1080 at least T2.a's,
     the RTX's p95 not above T2.a's on both settings, GPU per pass recorded.
   - _Pod half built_ (r14-t2-visibility-buffer): the order and its test; the switch waits on the
-    owner's runs. Records at the end of Risks.
+    owner's runs. The Mac run's attachment counts built (tool-mac-batch-passes). Records at the end
+    of Risks.
 
 ### R14.T3 Measured-error LOD and occlusion
 
@@ -2623,7 +2624,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     opaque draw, so its order is as before. Pending: the owner's Mac and RTX runs, one build each
     way, `just views-check --terrain --whole --hidden --setting high --hyperion-gpu-timing`
     with `--geometry shading=visibility` and with `--geometry shading=forward` (fps, p95 and GPU
-    per pass; on the Mac each split pass's attachment loads and stores), and the UHD 620's for low
+    per pass; each split pass's attachment loads and stores from the Mac batch's counted runs),
+    and the UHD 620's for low
     (`just views-check --terrain --hidden --setting low --geometry shading=visibility`); Windows
     NOT RUN.
   - The device check (part 15) composes the frame itself, the bodies pass's figures, the raster,
@@ -2681,11 +2683,11 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     `--geometry strides=measured,terrainBudget=triangles` and without) and RTX runs; Windows NOT RUN.
 - **The Mac batch** (lane tool-mac-profile, 2026-11-05): in `apps/hyperion`,
   `node --no-warnings scripts/macProfile.mjs --machine <text>` runs every pending Mac run (both
-  settings at DPR 1 and 2, each lever pair at high as A B A B, shading's at DPR 1 and 2, then the
-  worker sweep) into `target/mac-profile/`, its `summary.md` the pairs' deltas; the same command
-  resumes it. T2.e, T3.c, T3.d and T6.b read their pairs there. Pending: the owner's Mac run. The
-  timing file holds no attachment loads or stores, which T2.e's Mac run asks for. A served routed
-  body's thick-read pairs run as a batch of their own, with `--body <id>`, `--settings none`,
+  settings at DPR 1 and 2, each lever pair at high as A B A B, shading's at DPR 1 and 2, the
+  counted runs, then the worker sweep) into `target/mac-profile/`, its `summary.md` the pairs'
+  deltas; the same command resumes it. T2.e, T3.c, T3.d and T6.b read their pairs there. Pending:
+  the owner's Mac run. Its counted runs give the attachment loads and stores (below). A served
+  routed body's thick-read pairs run as a batch of their own, with `--body <id>`, `--settings none`,
   `--levers limb-rays,march-sources` and an `--out` of its own; TEST EARTH and TEST TITAN, being
   fixtures, are out of its reach.
 - (lean, 2026-11-05) The batch places the ship with the clock paused (`--rate 0`) and holds each
@@ -2710,3 +2712,20 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     what still draws at stride 1 on both: their masks need fins and heads cut to the set (T1.g's).
   - Pending: the owner's Mac (`views-check --terrain --hidden --setting low`, with and without
     `--geometry standInStrides=off`) and RTX runs; Windows NOT RUN.
+- **R14.T2.e, the Mac batch's passes** (`tool-mac-batch-passes`, 2026-11-05; built):
+  - `--count-gpu-calls` counts each render pass's attachments too (`GpuCallCounter.take()` gives
+    `{ calls, attachments }`): by pass label, slot, view (format, size, samples), load and store,
+    and the bytes a tiler moves with no tile kept (a load or read-only aspect in, a store or a
+    resolve out).
+  - A view is sized from its texture; a canvas's through `getCurrentTexture`, wrapped from the first
+    device (`release()` restores it), not counted as a call; a view not seen made has `null` bytes.
+  - Timing file version 7: each window's `attachments` (a draw of the primary, by pass label) and
+    `atmosphereReads`; a file before 7 reads as none counted, its reads "not recorded".
+  - Each body's read from its frames' kernels (`viewsProbe.ts`' `atmosphereReadOf`): thin, thick,
+    deck or beneath a deck, thermal a flag; bodies are numbered by their tables (`AIR_BINDING`).
+  - The batch's counted runs follow the pairs at DPR 1 (`--no-count` drops them): each setting's own
+    way, and both sides of the pairs that split a pass, occlusion's and shading's (`countSides`),
+    their bytes by pass in those pairs' DPR 1 sections. Pending: the owner's Mac batch.
+- (lean, 2026-11-05) Both sides of occlusion and shading are counted beyond the brief's one counted
+  run a setting, since every setting's own way is forward without the pyramid and splits no pass
+  (Design note 7); counted at DPR 1 only; a read-only aspect is loaded, not stored.

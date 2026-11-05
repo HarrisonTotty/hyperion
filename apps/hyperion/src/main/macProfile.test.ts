@@ -9,6 +9,7 @@ import {
   batchIn,
   cargoExecutable,
   cpuTimeSeconds,
+  isCounted,
   type KeptRun,
   keptRunsIn,
   MAC_PROFILE_DEFAULTS,
@@ -38,6 +39,7 @@ const DRY_RUN: MacProfileMatrixOptions = {
   levers: ["limb-rays"],
   pairSetting: "low",
   rounds: 1,
+  counted: false,
 };
 
 /** A sample at `at` (s past a minute) with the server's CPU time so far. */
@@ -120,8 +122,9 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, seven pairs at DPR 1 and the shading pair at 1 and 2, four runs each.
-    expect(matrix).toHaveLength(4 + 7 * 4 + 2 * 4);
+    // Four own runs, seven pairs at DPR 1 and the shading pair at 1 and 2, four runs each; then
+    // two counted settings and the occlusion and shading pairs' two counted sides each.
+    expect(matrix).toHaveLength(4 + 7 * 4 + 2 * 4 + 2 + 2 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -154,12 +157,58 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-low-dpr1-b1",
     ]);
     const both = macProfileMatrix({ ...DRY_RUN, levers: ["strides", "limb-rays"] });
-    expect(both.map((run) => run.pair?.lever)).toEqual([
+    expect(both.map((run) => (run.place.kind === "pair" ? run.place.lever : null))).toEqual([
       "limb-rays",
       "limb-rays",
       "strides",
       "strides",
     ]);
+  });
+
+  it("counts each setting's own way and each side of a pass-splitting pair last, at DPR 1, apart from the pairs (R14.T2.e)", () => {
+    const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
+    const counted = matrix.filter(isCounted);
+    expect(matrix.slice(-6)).toEqual(counted);
+    expect(counted.map((run) => [run.id, run.setting, run.ratio, run.args, run.place])).toEqual([
+      ["counted-high-dpr1", "high", 1, ["--count-gpu-calls"], { kind: "counted" }],
+      ["counted-low-dpr1", "low", 1, ["--count-gpu-calls"], { kind: "counted" }],
+      [
+        "counted-occlusion-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls"],
+        { kind: "counted side", lever: "occlusion", side: "a" },
+      ],
+      [
+        "counted-occlusion-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "occlusion=hzb"],
+        { kind: "counted side", lever: "occlusion", side: "b" },
+      ],
+      [
+        "counted-shading-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "shading=forward"],
+        { kind: "counted side", lever: "shading", side: "a" },
+      ],
+      [
+        "counted-shading-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "shading=visibility"],
+        { kind: "counted side", lever: "shading", side: "b" },
+      ],
+    ]);
+    expect(macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, counted: false }).some(isCounted)).toBe(
+      false,
+    );
+    expect(
+      macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, settings: [], levers: ["limb-rays"] }).filter(
+        isCounted,
+      ),
+    ).toEqual([]);
   });
 
   it("refuses a lever it does not know", () => {
@@ -302,7 +351,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 40 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 46 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(
@@ -318,8 +367,107 @@ describe("a lever's pair", () => {
     expect(text).toContain("| orbit | 2, 2 | 42.0 | 52.0 | +10.0 | +23.8% | 23.8 | 19.2 |");
     expect(text).toContain("| orbit | march | 13.0 | 21.0 | +8.0 |");
     expect(text).toContain("### shading, high at DPR 2: R14.T2.e");
-    expect(text).toContain("The attachments' loads and stores");
+    expect(text).toContain("No counted run of the pair is kept.");
+    // A timing file before version 7 holds no reads.
+    expect(text).toContain("| orbit | not recorded | not recorded |");
     expect(text).toContain("## The height-worker sweep\n\nNot written yet.");
+  });
+});
+
+describe("the counted runs (R14.T2.e)", () => {
+  const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
+  /** A window counted, its passes' bytes a draw, its air thick. */
+  const counted = (
+    name: ProfiledWindow["name"],
+    passes: ReadonlyArray<readonly [string, number, number]>,
+  ): ProfiledWindow => ({
+    ...windowOf(name, 400, 380, {}),
+    atmosphereReads: [
+      {
+        air: 1,
+        read: "thick",
+        thermal: false,
+        frames: 30,
+        kernels: ["atmosphere sky view, thick"],
+      },
+    ],
+    attachments: {
+      bytesLoadedPerDraw: passes.reduce((sum, [, loaded]) => sum + loaded, 0),
+      bytesStoredPerDraw: passes.reduce((sum, [, , stored]) => sum + stored, 0),
+      passes: passes.map(([label, bytesLoadedPerDraw, bytesStoredPerDraw]) => ({
+        label,
+        passesPerDraw: 1,
+        bytesLoadedPerDraw,
+        bytesStoredPerDraw,
+        attachments: [
+          {
+            label,
+            attachment: "colour 0",
+            view: { format: "rgba16float", widthPx: 1280, heightPx: 720, sampleCount: 1 },
+            loadOp: bytesLoadedPerDraw > 0 ? "load" : "clear",
+            storeOp: "store",
+            passes: 30,
+            bytesLoaded: 30 * bytesLoadedPerDraw,
+            bytesStored: 30 * bytesStoredPerDraw,
+          },
+        ],
+      })),
+    },
+  });
+  const MIB = 1_048_576;
+  const kept = [
+    keptAs(matrix, "counted-shading-high-dpr1-a", [counted("orbit", [["bodies", 0, 7 * MIB]])]),
+    keptAs(matrix, "counted-shading-high-dpr1-b", [
+      counted("orbit", [
+        ["terrain id raster", 0, 3.5 * MIB],
+        ["terrain resolve", 3.5 * MIB, 7 * MIB],
+      ]),
+    ]),
+    keptAs(matrix, "shading-high-dpr1-a1", [windowOf("orbit", 40, 38, { bodies: 10 })]),
+  ];
+  const text = macProfileSummaryLines({
+    machine: "Apple M5, 16 GiB",
+    tree: "e9966e0",
+    body: "41ffecb200000002.0400",
+    options: MAC_PROFILE_DEFAULTS,
+    kept,
+    sweep: { table: null, runs: [] },
+  }).join("\n");
+
+  it("reads a pair side's runs drawn alike as one read, whatever their frames", () => {
+    const thick = (frames: number): ProfiledWindow => ({
+      ...windowOf("orbit", 40, 38, {}),
+      atmosphereReads: [{ air: 1, read: "thick", thermal: false, frames, kernels: [] }],
+    });
+    const [orbit] = pairFigures(
+      [
+        keptAs(matrix, "shading-high-dpr1-a1", [thick(118)]),
+        keptAs(matrix, "shading-high-dpr1-a2", [thick(120)]),
+      ],
+      "shading",
+      1,
+    );
+    expect([orbit?.a.reads, orbit?.b.reads]).toEqual([["air 1: thick"], []]);
+  });
+
+  it("gives the shading pair's counted sides' bytes by pass beside its deltas", () => {
+    const pair = text.slice(text.indexOf("### shading, high at DPR 1"));
+    expect(pair).toContain("| orbit | terrain resolve | — | — | 3.50 | 7.00 |");
+    expect(pair).toContain("| orbit | bodies | 0.00 | 7.00 | — | — |");
+    expect(pair.indexOf("terrain resolve")).toBeLessThan(
+      pair.indexOf("### shading, high at DPR 2"),
+    );
+  });
+
+  it("lists each counted run's windows by their bytes and reads, and says which are not kept", () => {
+    expect(text).toContain("| counted-shading-high-dpr1-b | high | 1 | counted, shading B | 0 |");
+    expect(text).toContain(
+      "- **orbit:** 3.50 MiB loaded, 10.50 MiB stored a draw; atmosphere read air 1: thick, 30 frames",
+    );
+    expect(text).toContain(
+      "| terrain resolve | 1.0 | 3.50 | 7.00 | colour 0 rgba16float 1280 × 720 load/store |",
+    );
+    expect(text).toContain("### counted-low-dpr1 (counted)\n\nNot kept.");
   });
 });
 

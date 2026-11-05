@@ -3,12 +3,12 @@
 // server, places the ship at body 41ffecb200000002.0400 with the scene's clock paused, warms each
 // setting's sky, then runs `viewsCheck.sh --inspection --timing --hidden --hyperion-gpu-timing` over
 // the matrix (each setting at DPR 1 and 2; each lever pair at high as A B A B; the shading pair at
-// both ratios), then the height-worker sweep (`workerSweep.mjs`), and writes one summary. Run it by
-// hand on a quiet machine; not part of `ci`.
+// both ratios; then the counted runs), then the height-worker sweep (`workerSweep.mjs`), and writes
+// one summary. Run it by hand on a quiet machine; not part of `ci`.
 //
 //   node --no-warnings scripts/macProfile.mjs --machine <text> [--body <id>] [--out <dir>]
 //       [--load-bound <n>] [--settings high,low|none] [--dprs 1,2] [--levers <names>|all|none] [--pair-setting high]
-//       [--rounds 2] [--sweep-workers 3,4,6,8 | --no-sweep] [--port 7880] [--software] [--summary]
+//       [--rounds 2] [--no-count] [--sweep-workers 3,4,6,8 | --no-sweep] [--port 7880] [--software] [--summary]
 //
 // --machine names the machine in the summary and the sweep's table ("Apple M5, 16 GiB"). --body
 // names the served body every launch inspects, 41ffecb200000002.0400 by default; a batch of another
@@ -45,6 +45,15 @@
 // occlusion, strides, far-cascades, shading); --settings none and --levers none drop those runs.
 // --software (Linux only) runs every launch on SwiftShader, as a pod's dry run does; --port is the
 // batch's server's (7880 by default, apart from a developer's server and the descent spike's).
+//
+// The counted runs (R14.T2.e) come after the pairs, apart from them so that the count costs their
+// times nothing: each setting of --settings its own way, and each side of the pairs that split a
+// pass (occlusion and shading) at the pair setting where --levers holds them, all at DPR 1 with
+// `--count-gpu-calls`, which counts every render pass's attachments and the bytes a tile-based GPU
+// loads and stores for them. The summary gives their bytes by pass beside those pairs' deltas, and
+// every window's atmosphere read
+// (thin, thick, deck, beneath a deck, or a thermal form), from the kernels its frames dispatched.
+// --no-count drops the counted runs.
 import { spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
@@ -375,7 +384,14 @@ function optionsOf(args, profile) {
     machine,
     body,
     out: option(args, "out", join(repo, "target", "mac-profile")),
-    matrix: { settings, ratios, levers, pairSetting, rounds },
+    matrix: {
+      settings,
+      ratios,
+      levers,
+      pairSetting,
+      rounds,
+      counted: !args.includes("--no-count"),
+    },
     loadBound,
     port,
     sweepWorkers,

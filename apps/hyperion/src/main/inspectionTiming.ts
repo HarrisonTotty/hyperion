@@ -30,6 +30,8 @@ import type { TraceConfig } from "electron";
 import type {
   AtmosphereLeversOverride,
   CompositeProbeName,
+  InspectionAtmosphereRead,
+  InspectionGpuAttachment,
   InspectionGpuCall,
   InspectionReactCommits,
   InspectionTimingMarchCensus,
@@ -58,9 +60,10 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
  * census, the run's march probe and its levers over the setting's (plan R08, R08.T8.d), 3 since the
  * run's lit probe (R08.T9.b), 4 since each window's terrain cluster counters (plan R14, R14.T3.d), 5
  * since each window's React commits and each thread's React work (lane perf-render-thread-2), 6
- * since each thread's longest task (lane perf-render-thread-ground).
+ * since each thread's longest task (lane perf-render-thread-ground), 7 since each window's render
+ * passes' attachments and each body's atmosphere read (R14.T2.e; a file before it has neither).
  */
-export const INSPECTION_TIMING_VERSION = 6;
+export const INSPECTION_TIMING_VERSION = 7;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -747,6 +750,96 @@ export function gpuCallFigures(
   };
 }
 
+/** A pass label's attachments, each a draw of the primary (`--count-gpu-calls`; R14.T2.e). */
+export interface GpuAttachmentPassFigures {
+  readonly label: string;
+  /** Its render passes a draw: the most of any one of its attachments'. */
+  readonly passesPerDraw: number;
+  /**
+   * The bytes its attachments load into tiles and store from them a draw where no tile is kept, or
+   * `null` where one's format or size is not known.
+   */
+  readonly bytesLoadedPerDraw: number | null;
+  readonly bytesStoredPerDraw: number | null;
+  /** The counter's own kinds of the label's attachments, as the renderer gave them. */
+  readonly attachments: ReadonlyArray<InspectionGpuAttachment>;
+}
+
+/**
+ * A window's render passes' attachments (`--count-gpu-calls`; plan R14, R14.T2.e, the owner's
+ * Mac), each a draw of the primary: what a tile-based GPU moves between memory and its tiles where
+ * no tile is kept from one pass to the next, a clear and a discard moving none.
+ */
+export interface GpuAttachmentFigures {
+  readonly bytesLoadedPerDraw: number | null;
+  readonly bytesStoredPerDraw: number | null;
+  /** Each pass label's, the most bytes first. */
+  readonly passes: ReadonlyArray<GpuAttachmentPassFigures>;
+}
+
+/** The sum of `values`, or `null` where any is. */
+function sumOrNull(values: ReadonlyArray<number | null>): number | null {
+  return values.reduce<number | null>(
+    (sum, each) => (sum === null || each === null ? null : sum + each),
+    0,
+  );
+}
+
+/** A window's counted attachments a draw of the primary over `draws` draws, by pass label. */
+export function gpuAttachmentFigures(
+  attachments: ReadonlyArray<InspectionGpuAttachment>,
+  draws: number,
+): GpuAttachmentFigures {
+  const per = (value: number | null): number | null =>
+    value === null ? null : draws > 0 ? value / draws : 0;
+  const labels = [...new Set(attachments.map((each) => each.label))];
+  const passes = labels
+    .map((label): GpuAttachmentPassFigures => {
+      const ofLabel = attachments.filter((each) => each.label === label);
+      const slots = [...new Set(ofLabel.map((each) => each.attachment))];
+      const mostPasses = Math.max(
+        ...slots.map((slot) =>
+          ofLabel
+            .filter((each) => each.attachment === slot)
+            .reduce((sum, each) => sum + each.passes, 0),
+        ),
+      );
+      return {
+        label,
+        passesPerDraw: per(mostPasses) ?? 0,
+        bytesLoadedPerDraw: per(sumOrNull(ofLabel.map((each) => each.bytesLoaded))),
+        bytesStoredPerDraw: per(sumOrNull(ofLabel.map((each) => each.bytesStored))),
+        attachments: ofLabel,
+      };
+    })
+    .toSorted(
+      (a, b) =>
+        (b.bytesLoadedPerDraw ?? 0) +
+        (b.bytesStoredPerDraw ?? 0) -
+        ((a.bytesLoadedPerDraw ?? 0) + (a.bytesStoredPerDraw ?? 0)),
+    );
+  return {
+    bytesLoadedPerDraw: per(sumOrNull(attachments.map((each) => each.bytesLoaded))),
+    bytesStoredPerDraw: per(sumOrNull(attachments.map((each) => each.bytesStored))),
+    passes,
+  };
+}
+
+/**
+ * Each body's atmosphere read in words (`air 1: thick, 30 frames`), its thermal form named, or `—`
+ * where no frame drew air.
+ */
+export function atmosphereReadsText(reads: ReadonlyArray<InspectionAtmosphereRead>): string {
+  return reads.length === 0
+    ? "—"
+    : reads
+        .map(
+          (each) =>
+            `air ${String(each.air)}: ${each.read}${each.thermal ? " (thermal)" : ""}, ${String(each.frames)} frame${each.frames === 1 ? "" : "s"}`,
+        )
+        .join("; ");
+}
+
 /** One window's figures. */
 export interface InspectionTimingWindowResults {
   readonly name: InspectionTimingWindowName;
@@ -786,6 +879,13 @@ export interface InspectionTimingWindowResults {
   readonly memory: InspectionTimingMemory;
   /** Its WebGPU calls a draw (`--count-gpu-calls`; plan R14), or `null` where none were counted. */
   readonly gpuCalls: GpuCallFigures | null;
+  /**
+   * Its render passes' attachments a draw (`--count-gpu-calls`; R14.T2.e), or `null` where none
+   * were counted.
+   */
+  readonly attachments: GpuAttachmentFigures | null;
+  /** Each body's atmosphere read over it, from the kernels its frames dispatched. */
+  readonly atmosphereReads: ReadonlyArray<InspectionAtmosphereRead>;
   /** React's commits over it (lane perf-render-thread-2), or `null` where React took no hook. */
   readonly react: InspectionReactCommits | null;
   /** The far limb's census of the march the frame after the window dispatched, or `null`. */
@@ -932,6 +1032,9 @@ function windowResults(
     terrainShareOfGpu: gpu.meanMs === null || !(gpu.meanMs > 0) ? null : terrainMeanMs / gpu.meanMs,
     memory: window.memory,
     gpuCalls: window.gpuCalls === null ? null : gpuCallFigures(window.gpuCalls, draws),
+    attachments:
+      window.gpuAttachments === null ? null : gpuAttachmentFigures(window.gpuAttachments, draws),
+    atmosphereReads: window.atmosphereReads,
     react: window.react,
     marchCensus: window.marchCensus,
     clusters: window.clusters,
@@ -1084,6 +1187,51 @@ function gpuCallsMarkdown(calls: GpuCallFigures | null): string[] {
   ];
 }
 
+/** The pass labels the summary lists by their attachments' bytes; the JSON keeps every one. */
+const LISTED_ATTACHMENT_PASSES = 20;
+
+/** Bytes as MiB, to two decimals, or `—`. */
+function mibText(bytes: number | null): string {
+  return bytes === null ? "—" : (bytes / 1_048_576).toFixed(2);
+}
+
+/** An attachment as the summary names it: its slot, view and operations. */
+export function attachmentText(each: InspectionGpuAttachment): string {
+  const { view } = each;
+  const seen =
+    view === null
+      ? "? of a view not seen made"
+      : `${view.format} ${String(view.widthPx)} × ${String(view.heightPx)}${view.sampleCount > 1 ? ` × ${String(view.sampleCount)}` : ""}`;
+  return `${each.attachment} ${seen} ${each.loadOp ?? "—"}/${each.storeOp ?? "—"}`;
+}
+
+/** A window's counted attachments, by pass label, as the summary lists them. */
+function attachmentsMarkdown(figures: GpuAttachmentFigures | null): string[] {
+  if (figures === null) {
+    return [];
+  }
+  const listed = figures.passes.slice(0, LISTED_ATTACHMENT_PASSES);
+  return [
+    "### Attachments (counted)",
+    "",
+    `- **Every render pass:** ${mibText(figures.bytesLoadedPerDraw)} MiB loaded and ${mibText(figures.bytesStoredPerDraw)} MiB stored a draw of the primary, where a tile-based GPU keeps no tile from one pass to the next; a clear and a discard move none.`,
+    "",
+    "| Pass | Passes a draw | Loaded (MiB a draw) | Stored (MiB a draw) | Attachments (load/store) |",
+    "| --- | --- | --- | --- | --- |",
+    ...listed.map(
+      (pass) =>
+        `| ${cell(pass.label)} | ${perDrawText(pass.passesPerDraw)} | ${mibText(pass.bytesLoadedPerDraw)} | ${mibText(pass.bytesStoredPerDraw)} | ${cell(pass.attachments.map(attachmentText).join("; "))} |`,
+    ),
+    ...(figures.passes.length > listed.length
+      ? [
+          "",
+          `${String(figures.passes.length - listed.length)} more pass labels are listed in the JSON.`,
+        ]
+      : []),
+    "",
+  ];
+}
+
 /** The renderer's main thread's name in a trace, whose React work the summary states. */
 const RENDERER_MAIN_THREAD = "CrRendererMain";
 
@@ -1157,6 +1305,7 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
     `- **Primary:** ${String(window.canvas.widthPx)} × ${String(window.canvas.heightPx)} px; internal scale ${window.scales.length === 0 ? "—" : window.scales.map((scale) => scale.toFixed(3)).join(" → ")}; frames not timed in full ${String(window.untimedFrames)}`,
     `- **Position:** ${cell(window.position ?? "—")}`,
     `- **Statements:** ${cell(window.statements.length === 0 ? "—" : window.statements.join(" · "))}`,
+    `- **Atmosphere read** (each body with air, from the kernels its frames dispatched): ${cell(atmosphereReadsText(window.atmosphereReads))}`,
     "",
     "| Frame | Count | Median (ms) | p95 (ms) | Mean (ms) | Max (ms) |",
     "| --- | --- | --- | --- | --- | --- |",
@@ -1206,6 +1355,7 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
         ]),
     "",
     ...gpuCallsMarkdown(window.gpuCalls),
+    ...attachmentsMarkdown(window.attachments),
     ...reactMarkdown(window),
     "### Threads (trace)",
     "",

@@ -94,9 +94,23 @@ export interface EngineProbe {
    *
    * @param workgroups - Its workgroups, x × y × z, or `null` for an indirect dispatch, whose count
    *   the GPU holds.
+   * @param air - The tables of the body whose atmosphere it draws, by {@link AIR_BINDING}, or `null`
+   *   for a kernel that binds none.
    */
-  dispatched(kernel: string, workgroups: number | null, pass: string | undefined): void;
+  dispatched(
+    kernel: string,
+    workgroups: number | null,
+    pass: string | undefined,
+    air: object | null,
+  ): void;
 }
+
+/**
+ * The binding by which every per-frame kernel of a body's atmosphere takes its tables' figure of
+ * the body (`hillaire.ts`' `oblateBody`, one texture a body's tables), so that a dispatch's body is
+ * told apart from another's.
+ */
+export const AIR_BINDING = "oblateBody";
 
 /** A view that reports its renders and sizes. */
 class ProbedView implements RenderView {
@@ -534,6 +548,7 @@ export class ProbedEngine implements RenderEngine {
       kernel.name,
       Array.isArray(workgroups) ? workgroups[0] * workgroups[1] * workgroups[2] : null,
       pass,
+      bindings.sampled[AIR_BINDING] ?? null,
     );
     if (this.#censusesAsked.length > 0 && !("buffer" in workgroups)) {
       this.#takeCensus(kernel.name, bindings, workgroups);
