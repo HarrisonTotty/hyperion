@@ -898,3 +898,146 @@ fn a_merged_pair_s_own_zone_has_no_inner_limit() {
         assert_eq!(now.inner(), None, "{:?}", ctx.id());
     };
 }
+
+/// How a coalesced pair's product dies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProductDeath {
+    /// It is born a white dwarf, at the end of its giant branches.
+    WhiteDwarf,
+    /// It explodes, leaving a neutron star or a black hole.
+    Supernova,
+}
+
+/// The start of pair `timeline`'s first `Merged` segment after its first whose product is a
+/// white dwarf, a neutron star or a black hole, Julian years, with how it died there: its white
+/// dwarf's birth or its supernova, if its product has died so by the age it was run to.
+fn product_death(timeline: &crate::stellar::binary::BinaryTimeline) -> Option<(f64, ProductDeath)> {
+    let segments = timeline.segments();
+    let entry = segments
+        .iter()
+        .position(|s| s.kind() == SegmentKind::Merged)?;
+    segments[entry + 1..].iter().find_map(|segment| {
+        let death = match timeline.state_at(segment.start()).stars()[0].phase() {
+            Phase::HeliumWhiteDwarf
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf => ProductDeath::WhiteDwarf,
+            Phase::NeutronStar | Phase::BlackHole => ProductDeath::Supernova,
+            Phase::Protostar
+            | Phase::PreMainSequence
+            | Phase::MainSequence
+            | Phase::HertzsprungGap
+            | Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::HeliumMainSequence
+            | Phase::HeliumHertzsprungGap
+            | Phase::HeliumGiantBranch
+            | Phase::PostAgb
+            | Phase::NoRemnant
+            | Phase::Substellar => return None,
+        };
+        Some((segment.start().value(), death))
+    })
+}
+
+/// A coalesced pair's circumbinary host holds one event at the coalescence (its common envelope's,
+/// where one ends in it) and, from 30 ([`MERGED_STEPS_VERSION`]), none where its product's later
+/// segments start: its white dwarf's birth is adiabatic, as a single star's, Ψ ≪ 1 (Veras et al.
+/// 2011, eq. 15), so a M stays constant (eq. 18), and its supernova steps once, the supernova's
+/// own. Below 30 each such start is a further step, so `SystemId(0x42002cae00000001)`'s planet
+/// `0800` took its product's white dwarf's birth as a sudden loss. The pairs are the first of the
+/// sample with a zone about them whose product is born a white dwarf, and whose product explodes.
+#[test]
+fn a_merged_pair_s_host_steps_once_at_the_merger() {
+    let galaxy = galaxy();
+    let dies = |how: ProductDeath| {
+        let galaxy = &galaxy;
+        move |stars: &SystemStars, k: usize| {
+            product_death(stars.pairs()[k].timeline()).is_some_and(|(_, death)| death == how)
+                && has_pair_zone(galaxy, stars, k)
+        }
+    };
+    for (history, how) in [
+        (PairHistory::CommonEnvelopeMerger, ProductDeath::WhiteDwarf),
+        (PairHistory::Merger, ProductDeath::Supernova),
+    ] {
+        let (stars, k) = first_paired_system(&galaxy, SEARCH, history, dies(how))
+            .unwrap_or_else(|| panic!("a {history:?} pair among the sample's first systems"));
+        let ctx = SystemContext::from_stars(&galaxy, &stars);
+        let zone = zone_of(&ctx, &pair_stars(&ctx, k));
+        let timeline = ctx.pairs()[k].timeline();
+        let segments = timeline.segments();
+        let entry = segments
+            .iter()
+            .position(|s| s.kind() == SegmentKind::Merged)
+            .expect("a merged pair");
+        // A common envelope that ends in the coalescence is its one event.
+        let onset = match entry.checked_sub(1).map(|e| &segments[e]) {
+            Some(envelope) if envelope.kind() == SegmentKind::CommonEnvelope => envelope,
+            Some(_) | None => &segments[entry],
+        };
+        let merger = onset.start().value();
+        let later: Vec<f64> = segments[entry + 1..]
+            .iter()
+            .map(|segment| segment.start().value())
+            .collect();
+        let (death, _) = product_death(timeline).expect("found with one");
+        let ages = |rules| {
+            with_merged_steps(rules, || {
+                let host = FateHost::evolved(&ctx, &zone);
+                host.events
+                    .iter()
+                    .map(|event| event.age)
+                    .collect::<Vec<f64>>()
+            })
+        };
+        let count =
+            |ages: &[f64], age: f64| ages.iter().filter(|a| a.total_cmp(&age).is_eq()).count();
+        let entered = ages(MergedStepsRules::Entry);
+        let held = ages(MergedStepsRules::EverySegment);
+        let id = ctx.id();
+        assert!(death > merger, "{id:?}: the product dies at {death} yr");
+        assert_eq!(count(&entered, merger), 1, "{id:?}: {entered:?}");
+        assert_eq!(
+            count(&entered, death),
+            usize::from(how == ProductDeath::Supernova),
+            "{id:?}: the product's death at {death} yr, {entered:?}"
+        );
+        // Below 30 each later segment's start is one event more, the product's death among them.
+        let mut less = held.clone();
+        for age in &later {
+            let at = less
+                .iter()
+                .position(|a| a.total_cmp(age).is_eq())
+                .unwrap_or_else(|| panic!("{id:?}: no event at {age} yr below 30, {held:?}"));
+            less.remove(at);
+        }
+        assert_eq!(less, entered, "{id:?}");
+    }
+}
+
+/// The merged steps are held until the 29 → 30 bump: the rules in force are every segment's, and
+/// the tests' switch reaches 30's.
+#[test]
+fn the_merged_steps_are_held_only_until_the_30_bump() {
+    assert!(
+        GENERATOR_VERSION < MERGED_STEPS_VERSION,
+        "the 29 → 30 bump steps a coalesced pair's host only where the pair enters `Merged`: delete \
+         `MERGED_STEPS_VERSION`, `MergedStepsRules` with its `EverySegment` arm and its match in \
+         `pair_events`, the tests' `with_merged_steps`, its line in `HeldRules`, and this test; \
+         have `a_merged_pair_s_host_steps_once_at_the_merger` read the version's events alone; keep \
+         `no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample`'s walk of \
+         `whole_rest()` alone, at `SUDDEN_LOSS_INNER_MISSES`, and delete \
+         `HELD_MERGED_STEPS_INNER_MISSES`"
+    );
+    assert_eq!(MergedStepsRules::in_force(), MergedStepsRules::EverySegment);
+    assert_eq!(
+        with_merged_steps(MergedStepsRules::Entry, MergedStepsRules::in_force),
+        MergedStepsRules::Entry
+    );
+    assert_eq!(
+        with_merged_steps(MergedStepsRules::EverySegment, MergedStepsRules::in_force),
+        MergedStepsRules::EverySegment
+    );
+}

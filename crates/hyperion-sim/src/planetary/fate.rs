@@ -82,7 +82,11 @@
 //! - for a circumbinary planet the same events are a sudden loss of the pair's mass with no kick,
 //!   the supernova's step (lean, 2026-11-02: BSE ejects the envelope at once, and over about a year
 //!   a planet at 3–100 au is in Veras et al.'s non-adiabatic regime); a planet inside its reach of
-//!   the larger star before the envelope is engulfed by the search, as before any death;
+//!   the larger star before the envelope is engulfed by the search, as before any death; from
+//!   generator version 30 (`MERGED_STEPS_VERSION`) a coalesced pair's product is a single star
+//!   after it, not a further step at each of its segments: its white dwarf's birth is adiabatic,
+//!   Ψ ≪ 1 (Veras et al. 2011, eq. 15), so a M stays constant (eq. 18), and its supernova is the
+//!   one below;
 //! - a supernova of a star moves its own planets as a single star's does, with the remnant's natal
 //!   kick, and its companion's not at all; a circumbinary planet takes the pair's mass loss with
 //!   the pair's recoil (their eq. A14), and is `Unbound` where the explosion, or a white dwarf's
@@ -106,7 +110,6 @@ use std::error::Error;
 use std::f64::consts::TAU;
 use std::fmt;
 
-use crate::Seed;
 use crate::coords::SystemVelocity;
 use crate::id::BodyId;
 use crate::orbit::KeplerElements;
@@ -131,6 +134,7 @@ use crate::units::{
     EarthMasses, GravitationalParameter, KilogramsPerCubicMetre, Metres, SolarLuminosities,
     SolarMasses, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// A body's state at a time: a prefix of not yet formed → present → destroyed or unbound
 /// (P14.T28's test).
@@ -762,6 +766,71 @@ impl<'a> FateHost<'a> {
     }
 }
 
+/// The generator version from which a coalesced pair's later segments are no events of its host's
+/// (P14.T28.g's follow-up; the [module documentation](self)): 30, held with the 30 train.
+///
+/// The engine opens a new `Merged` segment at each change of its product's form, its white dwarf's
+/// birth and its supernova among them, and below 30 [`pair_events`] steps at each, so a
+/// circumbinary planet takes an adiabatic loss as a sudden one and a supernova twice. From 30 the
+/// `Merged` arm fires only where the pair enters `Merged`. Below it [`MergedStepsRules::in_force`]
+/// is [`MergedStepsRules::EverySegment`], and every event is as it was, bit for bit. 30's bump
+/// deletes this hold, [`MergedStepsRules`] with its `EverySegment` arm and its match in
+/// [`pair_events`], the tests' switch, its line in the tests' `HeldRules` and its tripwire
+/// (`the_merged_steps_are_held_only_until_the_30_bump`).
+pub(crate) const MERGED_STEPS_VERSION: GeneratorVersion = GeneratorVersion::new(30);
+
+/// Which of a coalesced pair's `Merged` segments are events of its host's (its hold,
+/// [`MERGED_STEPS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum MergedStepsRules {
+    /// Version 29's and before: the start of every one, its product's white dwarf's birth and its
+    /// supernova's segment among them.
+    EverySegment,
+    /// Version 30's: the first alone, where the pair enters `Merged`.
+    Entry,
+}
+
+impl MergedStepsRules {
+    /// The rules this generator version gives: the entry alone from [`MERGED_STEPS_VERSION`], every
+    /// segment below it; in the tests, the rules a test's switch sets on its thread
+    /// ([`with_merged_steps`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = MERGED_STEPS_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= MERGED_STEPS_VERSION {
+            Self::Entry
+        } else {
+            Self::EverySegment
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The merged steps' rules a test sets on its thread, `None` for the version's.
+    static MERGED_STEPS_RULES: core::cell::Cell<Option<MergedStepsRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the merged steps' rules `rules` on this thread, for the tests to reach 30's
+/// events ahead of the bump; the version's rules are set back after, a panic in `run` included.
+/// 30's bump deletes it with the hold.
+#[cfg(test)]
+pub(crate) fn with_merged_steps<R>(rules: MergedStepsRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<MergedStepsRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            MERGED_STEPS_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(MERGED_STEPS_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
 /// The events of `timeline`, the host's pair `pair`, that a host holding `share` of its stars
 /// feels (P14.T28.g; the [module documentation](self)), each at its clock time on `first`'s clock,
 /// in the timeline's order: its segments' events, then its supernovae. An event off the clock is
@@ -774,6 +843,10 @@ fn pair_events(
     share: PairShare,
 ) -> Vec<PairEvent> {
     let merged = timeline.merger_age().map(Years::value);
+    let later_segments_step = match MergedStepsRules::in_force() {
+        MergedStepsRules::EverySegment => true,
+        MergedStepsRules::Entry => false,
+    };
     let mut events = Vec::new();
     let mut push = |age: f64, effect: PairEffect| {
         if let Some(at) = clock_time(first, Years::new(age)) {
@@ -790,6 +863,13 @@ fn pair_events(
         let effect = match (segment.kind(), share) {
             // A common envelope that ends in a coalescence is one event, the envelope's.
             (SegmentKind::Merged, _) if before.kind() == SegmentKind::CommonEnvelope => None,
+            // From 30, a coalesced pair's product changes its form as a single star does: its
+            // white dwarf's birth is adiabatic, and its supernova steps below, once.
+            (SegmentKind::Merged, _)
+                if before.kind() == SegmentKind::Merged && !later_segments_step =>
+            {
+                None
+            }
             (SegmentKind::CommonEnvelope | SegmentKind::Merged, PairShare::Star(_)) => {
                 Some(PairEffect::Engulf)
             }

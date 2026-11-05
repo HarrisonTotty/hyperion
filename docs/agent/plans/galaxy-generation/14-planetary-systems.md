@@ -34414,3 +34414,16 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   margin moved both of the guard twin's new jumps at 27: 42002cb2000188e9.0a00 is a `Snowball` fixed
   point and 42002cb2000494de.0100 a converged `RunawayGreenhouse` at 580 K. No guard jump at 28 has
   a `MagmaOcean` end, so no `SOLIDUS_JUMP_VERSION` hold was built.
+- **P14.T28.g's merged steps (lane `fix-merged-pair-steps`, 2026-11-05).** Held at 30
+  (`fate::MERGED_STEPS_VERSION`; `MergedStepsRules::{EverySegment, Entry}`, the switch
+  `with_merged_steps`, a line in `HeldRules`). Nothing moves below 30.
+  - _Changed:_ `pair_events` steps at a `Merged` segment only where the pair enters `Merged`; its
+    product's white dwarf's birth is adiabatic and its supernova steps once.
+  - _Changed (tests):_ `no_overlapping_orbits_in` takes the chunk's `InnerMisses`, the exact count
+    of bodies at a time inside their zone's inner limit (10⁻¹² before) about a host that has lost
+    mass, and the share each may lie inside: none in the fast tier; in the slow tier 3 at 0.42
+    under the version's rules and, generated anew under the 30 arm, 3 at 3 × 10⁻³. A sudden loss
+    leaves a pericentre where it was while `zones_at` widens the limit by M₀ ÷ M (a finding).
+  - _Leans (2026-11-05):_ an S-type host, whose planets the merger engulfs, steps only at the entry
+    too; the residual is pinned, with neither `zones_at` nor the fate changed.
+  - _For 30's bump:_ delete what `the_merged_steps_are_held_only_until_the_30_bump` lists.

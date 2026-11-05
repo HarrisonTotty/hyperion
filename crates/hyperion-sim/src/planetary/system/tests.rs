@@ -1869,28 +1869,81 @@ fn a_companion_s_light_pushes_a_star_s_habitable_zone_out() {
 /// lose mass (ruling 33) while their planets' orbits widen; and from 27, for a zone a pair the
 /// engine ran bounds, intersected with Holman and Wiegert's on the pair's state then. A body
 /// beyond its zone at birth has outgrown it: 7 of this sample's 4,830 at the epoch, all about
-/// hosts that have lost mass.
+/// hosts that have lost mass. A body lies inside its zone's inner limit only about a host that has
+/// lost mass, and only those its walk names ([`InnerMisses`]).
 ///
 /// The fast tier walks [`whole_fast`]'s chunk of the sample, and
 /// [`no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample`] the rest
 /// (P14.T54.b.l's §C.7 split, sized on 24's times: 246 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn no_overlapping_orbits_in_generated_systems() {
-    no_overlapping_orbits_in(whole_fast());
+    no_overlapping_orbits_in(whole_fast(), NO_INNER_MISSES);
 }
 
-/// [`no_overlapping_orbits_in_generated_systems`] over the rest of the sample ([`whole_rest`]): the
-/// slow tier's chunk of P14.T54.b.l's §C.7 split.
+/// [`no_overlapping_orbits_in_generated_systems`] over the rest of the sample: the slow tier's chunk
+/// of P14.T54.b.l's §C.7 split, [`whole_rest`] under the version's rules, and until 30's bump the
+/// same chunk generated anew under 30's merged steps ([`MERGED_STEPS_VERSION`]). Below 30
+/// `SystemId(0x42002cae00000001)`'s circumbinary planet `0800` takes its merged pair's product's
+/// white dwarf's birth, 1.89 → 0.63 M☉, as a sudden loss, and ends at e = 0.76, 42% inside its
+/// zone ([`HELD_MERGED_STEPS_INNER_MISSES`]); from 30 it lies 0.258% inside
+/// ([`SUDDEN_LOSS_INNER_MISSES`]). 30's bump keeps the first pass alone, at the second's misses.
+///
+/// [`MERGED_STEPS_VERSION`]: crate::planetary::fate::MERGED_STEPS_VERSION
 #[test]
-#[ignore = "slow: the orbits of 200 whole systems at ±H, the fast tier's other chunk"]
+#[ignore = "slow: the orbits of 200 whole systems at ±H, twice, the fast tier's other chunk"]
 fn no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample() {
-    no_overlapping_orbits_in(whole_rest());
+    use crate::planetary::fate::{MergedStepsRules, with_merged_steps};
+    no_overlapping_orbits_in(whole_rest(), HELD_MERGED_STEPS_INNER_MISSES);
+    with_merged_steps(MergedStepsRules::Entry, || {
+        let systems: Vec<(SystemContext, PlanetarySystem)> = sample()[FAST_WHOLE..]
+            .iter()
+            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
+            .collect();
+        no_overlapping_orbits_in(&systems, SUDDEN_LOSS_INNER_MISSES);
+    });
 }
+
+/// The bodies a walk of [`no_overlapping_orbits_in`] finds inside their zone's inner limit, past
+/// rounding: how many at −H, the epoch and +H together, and the share of the limit each lies
+/// inside it by at most, about a host that has lost mass.
+#[derive(Debug, Clone, Copy)]
+struct InnerMisses {
+    count: u32,
+    share: f64,
+}
+
+/// None.
+const NO_INNER_MISSES: InnerMisses = InnerMisses {
+    count: 0,
+    share: 0.0,
+};
+
+/// The rest of the sample's under 30's merged steps, pinned as they stand (P14.T28.g's merged
+/// steps): `SystemId(0x42002cae00000001)`'s circumbinary planet `0800` 0.258% inside its zone's
+/// inner limit after its pair's common envelope, at each of the three times, the one such body of
+/// the sample's 400 systems. A sudden loss of a host's mass leaves a body's pericentre where it
+/// was, while the zone's limit, widened by the host's initial mass over its mass then, moves out by
+/// the mass before over the mass after, and about a zone no pair the engine ran bounds the fate
+/// unbinds no body for it.
+const SUDDEN_LOSS_INNER_MISSES: InnerMisses = InnerMisses {
+    count: 3,
+    share: 3e-3,
+};
+
+/// The rest of the sample's under the version's rules, below 30 ([`SUDDEN_LOSS_INNER_MISSES`]'s
+/// planet `0800`, 41.5% inside its zone's inner limit at each of the three times, since its host
+/// steps at its pair's product's white dwarf's birth): the merged steps' defect, held. 30's bump
+/// deletes it.
+const HELD_MERGED_STEPS_INNER_MISSES: InnerMisses = InnerMisses {
+    count: 3,
+    share: 0.42,
+};
 
 /// The body of [`no_overlapping_orbits_in_generated_systems`] and its slow twin, over the systems
-/// `systems`.
-fn no_overlapping_orbits_in(systems: &'static [(SystemContext, PlanetarySystem)]) {
+/// `systems`, which hold the bodies inside their zone's inner limit `misses`.
+fn no_overlapping_orbits_in(systems: &[(SystemContext, PlanetarySystem)], misses: InnerMisses) {
     let (mut pairs, mut bodies, mut outgrown, mut unstable) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let mut inside = 0_u32;
     // On whole systems (P14.T30.b): the planets about each host, the records whose parent is the
     // host; moons keep T22.b's rule about their planet, and a belt's members, listed under their
     // belt, keep T21.c's clearance of the chaotic zones instead.
@@ -1918,12 +1971,17 @@ fn no_overlapping_orbits_in(systems: &'static [(SystemContext, PlanetarySystem)]
                     .fold(SolarMasses::ZERO, |sum, m| sum + m);
                 let widening = zone.host_mass() / host;
                 for (_, orbit) in &orbits {
-                    if let Some(inner) = zone.inner() {
+                    if let Some(inner) = zone.inner()
+                        && orbit.periapsis() < inner * (1.0 - 1e-12)
+                    {
                         assert!(
-                            orbit.periapsis() >= inner * (1.0 - 1e-12),
-                            "{:?}",
-                            system.system()
+                            widening > 1.0 && orbit.periapsis() >= inner * (1.0 - misses.share),
+                            "{:?} at {t:?}: a pericentre {} of its zone's inner limit, about a \
+                             host widened by {widening}",
+                            system.system(),
+                            orbit.periapsis() / inner
                         );
+                        inside += 1;
                     }
                     if let Some(outer) = zone.outer() {
                         assert!(
@@ -1981,6 +2039,10 @@ fn no_overlapping_orbits_in(systems: &'static [(SystemContext, PlanetarySystem)]
     assert!(
         outgrown < bodies / 100 && unstable < pairs / 20,
         "{outgrown} of {bodies} bodies outgrew their zone, {unstable} of {pairs} pairs unsettled"
+    );
+    assert_eq!(
+        inside, misses.count,
+        "bodies at a time inside their zone's inner limit, of {bodies}"
     );
 }
 
