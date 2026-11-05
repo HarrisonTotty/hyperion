@@ -57,8 +57,9 @@ pub use track::{
 };
 pub(crate) use track::{
     CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, RadiusAtAge, Remains, Structure,
-    bare_core_light, giant_radius_exponent, lightest_helium_star, main_sequence_lifetime,
-    main_sequence_radius, main_sequence_structure, new_star_mass, pulsing_agb_helium_core,
+    bare_core_light, degenerate_giant_mass, giant_radius_exponent, lightest_helium_star,
+    main_sequence_lifetime, main_sequence_radius, main_sequence_structure, new_star_mass,
+    pulsing_agb_helium_core,
 };
 #[cfg(test)]
 pub(crate) use track::{early_agb_core_radius_bound, helium_zams_radius};

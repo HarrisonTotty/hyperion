@@ -30,14 +30,20 @@
 //! - [`kick_rank`](StellarRules::kick_rank), the ordinary kick's rank table. No version holds a
 //!   second table yet, so every version takes the committed one. The tests reach a test-only
 //!   second table through it, to show that every reader goes through the choke point.
+//! - [`swollen_dwarf`](StellarRules::swollen_dwarf), at [`SWOLLEN_DWARF_VERSION`] (plan 11,
+//!   P11.T4's fix): where a helium white dwarf fed hydrogen is placed as a giant, at the base of a
+//!   heavier star's giant branch below it, on a degenerate branch from it, read by `Engine::swell`
+//!   through the engine's input's rules. The fitted tables keep the version's rules until the bump
+//!   refits them (`stellar/rules/swollen_dwarf_hold.rs`).
 //!
-//! No stellar hold is held now: the 27 folds put P11's 27 holds on the record.
+//! The 27 folds put P11's 27 holds on the record; the holds above but `kick_rank` are at 29.
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
 
 use crate::GeneratorVersion;
+use crate::stellar::binary::swollen_dwarf::{SWOLLEN_DWARF_VERSION, SwollenDwarfRules};
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -48,17 +54,34 @@ pub(crate) struct StellarRules {
     ///
     /// [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
     pub(crate) kick_rank: KickRankRules,
+    /// Where a helium white dwarf fed hydrogen is placed as a giant, the hold of
+    /// [`SWOLLEN_DWARF_VERSION`].
+    pub(crate) swollen_dwarf: SwollenDwarfRules,
 }
 
 impl StellarRules {
-    /// Each field's arm at `_version`: the new arm from its `*_VERSION`, the held arm below it.
+    /// Each field's arm at `version`: the new arm from its `*_VERSION`, the held arm below it.
     ///
-    /// Every version takes the committed kick-rank table, and no field is held now (the 27 folds).
+    /// Every version takes the committed kick-rank table.
     #[must_use]
-    pub(crate) const fn of_version(_version: GeneratorVersion) -> Self {
+    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
         Self {
             kick_rank: KickRankRules::Committed,
+            swollen_dwarf: if version.get() >= SWOLLEN_DWARF_VERSION.get() {
+                SwollenDwarfRules::Degenerate
+            } else {
+                SwollenDwarfRules::AtBase
+            },
         }
+    }
+
+    /// Every stellar hold at 29 in force, for a test that asserts a 29 figure without a galaxy:
+    /// P11.T4's `swollen_dwarf`. The stellar part of `GalaxyRules::every_29_hold()`, so a later
+    /// hold at 29 joins both with nothing to edit; the 29 bump deletes it with it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn every_29_hold() -> Self {
+        Self::of_version(GeneratorVersion::new(29))
     }
 
     /// The test-only second table in place of the committed one
@@ -69,6 +92,7 @@ impl StellarRules {
     pub(crate) const fn probe() -> Self {
         Self {
             kick_rank: KickRankRules::Probe,
+            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 }
@@ -95,6 +119,8 @@ mod ns_accretion_hold;
 mod pinned_white_dwarfs_hold;
 #[cfg(test)]
 mod stripping_hold;
+#[cfg(test)]
+mod swollen_dwarf_hold;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

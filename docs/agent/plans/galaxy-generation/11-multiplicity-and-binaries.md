@@ -7638,3 +7638,13 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
 - **P11.T4's neutron-star accretion census re-pinned at 27** (lane `fix-p11-ns-accretion-census`,
   2026-11-05; test only; lean, 2026-11-05: a real effect). The census is 413 → 1,816: the `radx` fix
   above is +1,350 in landing order (its lane's 1,854 was lost). Causes: on `CENSUS_FIGURES`.
+- **P11.T4's swollen helium dwarf, held at 29** (lane `p11-wd-union`, first built at 27 by
+  `fix-swollen-he-wd-and-merger-dwarf` on 2026-11-02; rebased onto land/next on 2026-11-05 and held
+  at 29 as train 28 froze; nothing moves at 24–28). From `SWOLLEN_DWARF_VERSION` = 29
+  (`stellar/binary/swollen_dwarf.rs`, `StellarRules::swollen_dwarf`) a helium dwarf above
+  `Mc,BGB`(`M_HeF`) fed hydrogen swells onto the first giant branch of a 0.7 `M_HeF` star where its
+  core is the dwarf's (`Engine::degenerate_giant`, `sse::degenerate_giant_mass`; lean, 2026-11-02),
+  so a strip leaves a helium dwarf. It does not swell while its donor is held to
+  `heavy_donor::thermal_rate`, which stops once it is a giant, so it would be stripped back and
+  swell again to the segment cap (lean, 2026-11-02). The brief's gate refuses the fitted tables
+  under it.

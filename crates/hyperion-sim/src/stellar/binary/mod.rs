@@ -57,6 +57,7 @@ pub mod sampler;
 pub mod scan;
 mod star;
 mod supernova;
+pub(crate) mod swollen_dwarf;
 mod timeline;
 pub(crate) mod wind_accretion;
 pub(crate) mod xrb_class;

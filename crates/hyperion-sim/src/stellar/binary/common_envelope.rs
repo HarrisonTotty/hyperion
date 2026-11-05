@@ -188,6 +188,10 @@ const SWELL_BRACKET: f64 = 1.1;
 /// p11-c2-swell, §3.3 A4).
 const SWELL_BUILDS: u32 = 12;
 
+/// The most bisections of the branch's fraction [`Engine::degenerate_giant`] makes before it gives
+/// up: enough to narrow the fraction to the last bits of an f64.
+const DEGENERATE_GIANT_BISECTIONS: u32 = 64;
+
 /// Whether a merger may still pass through a common envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Envelope {
@@ -1407,6 +1411,51 @@ impl Engine {
             let slope = (miss - last.1) / (ask - last.0);
             next = (slope.is_finite() && slope.abs() > 0.0).then(|| ask - miss / slope);
             last = (ask, miss);
+        }
+        None
+    }
+
+    /// The giant a helium white dwarf of `core` M☉ fed hydrogen swells into with its core still
+    /// degenerate ([`Engine::swell`] under P11.T4's `swollen_dwarf` from version 29): a star of mass
+    /// `m` M☉ in member `i`'s slot on the track of [`sse::degenerate_giant_mass`], a star below
+    /// `M_HeF`, placed on its first giant branch where its core, read at `m`, is `core` to
+    /// [`SWELL_CORE_TOLERANCE`] of it; or `None` where no such track's branch holds the core.
+    ///
+    /// The branch's core grows with its fraction, so the fraction is found by bisection, in at most
+    /// [`DEGENERATE_GIANT_BISECTIONS`] reads of the one track.
+    #[must_use]
+    pub(super) fn degenerate_giant(&self, i: usize, m: f64, core: f64) -> Option<Member> {
+        let m0 = sse::degenerate_giant_mass(SolarMasses::new(core), self.ctx.coeffs())?;
+        let track = Arc::new(Track::full_with(
+            track_mass(m0),
+            self.ctx.composition(),
+            self.ctx.draws(i),
+            self.ctx.track_options(),
+        ));
+        // The giant at fraction `f` of the branch and its core's miss, or `None` off the branch.
+        let at = |f: f64| {
+            let age = track.age_in_phase(Phase::FirstGiantBranch, f)?;
+            let member = Member::Shaped {
+                track: Arc::clone(&track),
+                offset: super::evolve::offset_for(self.age, age),
+                mass: Path::starting(self.age, m),
+            };
+            let built = member.evaluate(&self.ctx, i, self.age, m, 0.0)?;
+            let miss = built.state.core_mass().value() - core;
+            (built.state.phase() == Phase::FirstGiantBranch).then_some((member, miss))
+        };
+        let tolerance = SWELL_CORE_TOLERANCE * core;
+        if at(0.0)?.1 > tolerance {
+            return None;
+        }
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..DEGENERATE_GIANT_BISECTIONS {
+            let mid = lo + 0.5 * (hi - lo);
+            match at(mid) {
+                Some((member, miss)) if miss.abs() <= tolerance => return Some(member),
+                Some((_, miss)) if miss < 0.0 => lo = mid,
+                Some(_) | None => hi = mid,
+            }
         }
         None
     }

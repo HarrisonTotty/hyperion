@@ -62,7 +62,9 @@
 //!   (`Engine::swelled_star`); its mass is the mass after the step, so its envelope is the step's
 //!   net gain. Otherwise the accretor keeps its type and the step's mass, burning the hydrogen to
 //!   helium as it lands or losing it to its wind, as BSE below its gate and COMPAS always do for a
-//!   helium star; a swell refused closes no segment.
+//!   helium star; a swell refused closes no segment. From generator version 29 a helium dwarf
+//!   above `Mc,BGB`(`M_HeF`) swells onto a degenerate branch instead
+//!   ([`swollen_dwarf`](super::swollen_dwarf), P11.T4's fix).
 //! - **White dwarfs fed** (section 2.6.6): a helium dwarf that reaches 0.7 M☉ on helium, a
 //!   carbon–oxygen dwarf that has taken 0.15 M☉ of helium, and a dwarf at the Chandrasekhar mass
 //!   are plan 11's pooled Type Ia candidates (`pooled_ia`); the engine continues as if they did
@@ -95,6 +97,7 @@ use super::star::{
     G, Kind, Member, MemberRadiusAt, Path, Surface, cooling_origin, moment_of_inertia,
     moment_of_inertia_within, positive,
 };
+use super::swollen_dwarf::SwollenDwarfRules;
 use super::timeline::{Component, IaPoolChannel, PooledIaEvent, SegmentKind};
 
 /// The critical mass ratio of a low-mass main-sequence donor (BSE section 2.6.4).
@@ -1380,10 +1383,19 @@ impl Engine {
         if !(fed.gained - SWELL_WIND_FACTOR * wind > 0.0 && m > core) {
             return false;
         }
+        // From 29 a helium dwarf's core stays degenerate where the held placement would put it on
+        // a heavier star's branch (`swollen_dwarf`, P11.T4's fix).
+        let degenerate = (kind == Kind::HeliumWhiteDwarf
+            && self.ctx.rules().swollen_dwarf == SwollenDwarfRules::Degenerate)
+            .then(|| self.degenerate_giant(i, m, core))
+            .flatten();
+        if degenerate.is_some() && !self.feeds_a_swollen_dwarf(i, m) {
+            return false;
+        }
         // Where no star of the kind has such a core, or no ask places one exactly, the accretor
         // keeps the mass as it is (ruling p11-c2-swell, item 7; BSE's gntage instead places a
         // giant of another type, `gntage.f` 34–49, 132–137 and 281–294).
-        let Some(member) = self.swelled_star(i, target, m, core) else {
+        let Some(member) = degenerate.or_else(|| self.swelled_star(i, target, m, core)) else {
             return false;
         };
         let core_at = |age: f64| {
@@ -1403,6 +1415,28 @@ impl Engine {
         self.close_segment();
         self.set_member(i, member);
         true
+    }
+
+    /// Whether member `i`, a helium white dwarf of `m` M☉ that would swell onto a degenerate branch
+    /// (P11.T4's `swollen_dwarf` from version 29), would go on being fed as that giant: its donor's
+    /// transfer is not the heavy donor's thermal rate, which holds onto a compact accretor alone
+    /// ([`heavy_donor::thermal_rate`]).
+    ///
+    /// Otherwise the swollen giant, fed at the donor's rate onto a giant, a nuclear one (about
+    /// 10⁻¹⁴ M☉ yr⁻¹ from a 0.9 M☉ donor onto a 0.38 M☉ dwarf at 100 d, Z = 0.004), burns its
+    /// envelope of one step into core in about 10⁴ years and is stripped back to the dwarf, which
+    /// swells again at the next step: a cycle to [`MAX_SEGMENTS`](super::MAX_SEGMENTS) (measured,
+    /// 2026-11-02). The dwarf goes on accreting as it is instead, as below the swell's other gates,
+    /// until its core passes the degenerate branch's flash (lean, 2026-11-02).
+    #[must_use]
+    fn feeds_a_swollen_dwarf(&self, i: usize, m: f64) -> bool {
+        let d = 1 - i;
+        let (md, td) = self.current(d);
+        let Some(sd) = self.structure(d, self.age, md, td) else {
+            return false;
+        };
+        let kd = Kind::of(sd.state.phase(), md);
+        !heavy_donor::thermal_rate(kd, Kind::HeliumWhiteDwarf, md, m)
     }
 
     /// Member `i`, a white dwarf a wind has fed to the Chandrasekhar mass in a detached phase,

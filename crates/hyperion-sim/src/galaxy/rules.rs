@@ -86,8 +86,9 @@ impl GalaxyRules {
     }
 
     /// Every galaxy and stellar hold at 29 in force, for a test that asserts a 29 figure: the
-    /// version's rules from 29: the alert walks' lists (P09.T36) and the superbubbles' merge
-    /// (P09.T5). The 29 bump deletes it with them.
+    /// version's rules from 29: the alert walks' lists (P09.T36), the superbubbles' merge (P09.T5)
+    /// and the stellar holds ([`StellarRules::every_29_hold`], P11.T4's). The 29 bump deletes it
+    /// with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_29_hold() -> Self {
@@ -204,6 +205,26 @@ mod tests {
         assert_eq!(
             GalaxyRules::of_version(crate::alerts::listed::LISTED_ALERTS_VERSION).listed_alerts,
             ListedAlertsRules::Lists
+        );
+    }
+
+    /// The galaxy's every 29 hold takes the stellar holds at 29, P11.T4's `swollen_dwarf` among
+    /// them, which the version's rules hold.
+    #[test]
+    fn every_29_hold_adds_the_stellar_holds_at_29() {
+        use crate::stellar::binary::swollen_dwarf::SwollenDwarfRules;
+
+        let every_29 = GalaxyRules::every_29_hold();
+        assert_eq!(every_29.stellar, StellarRules::every_29_hold());
+        assert_eq!(
+            every_29.stellar.swollen_dwarf,
+            SwollenDwarfRules::Degenerate
+        );
+        assert_eq!(
+            GalaxyRules::of_version(GENERATOR_VERSION)
+                .stellar
+                .swollen_dwarf,
+            SwollenDwarfRules::AtBase
         );
     }
 }

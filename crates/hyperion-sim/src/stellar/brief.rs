@@ -754,7 +754,9 @@ struct Gate {
 /// It is conservative, not exact: a refused system takes the paired route, which is right
 /// whatever its pairs did. The tests check that every certified primary is its own model at
 /// times across the window. The pair-light and reach tables the test reads are the version's
-/// tracks', so under another Humphreys–Davidson arm (P06.T42.b's hold) no pair is certified.
+/// tracks', so under another Humphreys–Davidson arm (P06.T42.b's hold) no pair is certified, nor
+/// under a stellar hold's arm other than the version's that the binary engine reads (P11.T4's
+/// `swollen_dwarf` at 29).
 ///
 /// `primary` says where the hierarchy reads the primary's stripped mark: the kick loop's kept
 /// attempt, for a record whose class constrains its kick (P08.T12.c).
@@ -784,13 +786,14 @@ fn gate(
     let ages = Years::new(age_at(age_at_epoch, ClockWindow::START))
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
     let stars = attempt.stars();
+    let tables_hold = galaxy.rules().stellar.swollen_dwarf.fitted_tables_hold();
     // A supernova that unbinds any pair changes what the system shows (P11.T10), so every pair is
     // checked, as for a system the grid redraws.
     let certified = attempt.pairs().iter().all(|pair| {
         let [a, b] = pair
             .stars()
             .map(|star| stars[usize::from(star.get())].initial_mass());
-        pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
+        tables_hold && pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
     });
     Gate {
         star_count: attempt.hierarchy().star_count(),

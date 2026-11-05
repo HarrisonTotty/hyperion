@@ -6741,3 +6741,228 @@ fn a_massive_gap_donor_s_spells_of_transfer_end_under_the_cap() {
         end[1]
     );
 }
+
+/// Whether timelines `a` and `b` hold the same segments, events and states at every segment's
+/// edge, bit for bit, whatever rules their tracks were built under (their `Debug` and so their
+/// [`digest`]s carry them).
+fn same_outcome(a: &BinaryTimeline, b: &BinaryTimeline) -> bool {
+    let edges = |t: &BinaryTimeline| -> Vec<(SegmentKind, f64, f64)> {
+        t.segments()
+            .iter()
+            .map(|s| (s.kind(), s.start().value(), s.end().value()))
+            .collect()
+    };
+    edges(a) == edges(b)
+        && a.supernovae() == b.supernovae()
+        && a.pooled_ia() == b.pooled_ia()
+        && edges(a).iter().all(|&(_, start, end)| {
+            [start, end.min(a.until().value())]
+                .iter()
+                .all(|&age| a.state_at(Years::new(age)) == b.state_at(Years::new(age)))
+        })
+}
+
+// --- P11.T4: the swollen helium dwarf (held at 29) ----------------------------------------------
+
+/// A helium white dwarf of `dwarf` M☉ fed by a 2.5 M☉ main-sequence donor at τ = 0.5 in
+/// transfer, at Z = 0.004 and 5 Gyr, under `rules` (`fed_engine`'s pair, under any rules).
+fn fed_dwarf_engine(
+    dwarf: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> super::evolve::Engine {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let age = 5.0e9;
+    let input = pair(2.0, 2.5, 1.0, 0.0, 0.004).with_rules(rules);
+    let k = input.orbit();
+    let accretor = Member::Remnant {
+        phase: Phase::HeliumWhiteDwarf,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    let donor = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(age, 2.5),
+        tau: Path::starting(age, 0.5),
+    };
+    let orbit = LiveOrbit::new(age, 10.0, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(
+        Arc::new(Context::of(&input)),
+        age,
+        1.0e10,
+        [accretor, donor],
+        orbit,
+        None,
+    );
+    engine.segment_start = age;
+    engine.kind = SegmentKind::StableTransfer {
+        donor: Component::Secondary,
+    };
+    engine
+}
+
+/// P11.T4's swollen dwarf: a 0.38 M☉ helium white dwarf, above `Mc,BGB`(`M_HeF`), fed hydrogen
+/// faster than its core grows by a 0.3 M☉ main-sequence donor, held to no thermal rate, swells
+/// under every 27 hold onto the base of the giant branch of a star heavier than `M_HeF`, whose
+/// strip leaves a helium main-sequence star; under every 29 hold onto the first giant branch of a
+/// 0.7 `M_HeF` star, its core the dwarf's to 10⁻⁹, whose strip leaves a helium white dwarf again.
+/// Fed by `fed_dwarf_engine`'s 2.5 M☉ donor, heavier than its dwarf and so held to its thermal rate,
+/// the swell is refused under every 29 hold: the giant would be fed at a nuclear rate and stripped
+/// back at once.
+#[test]
+fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
+    use super::rlof::Fed;
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::rules::StellarRules;
+
+    let (dwarf, dt, gained) = (0.38, 1.0e3, 1.0e-3);
+    let (every_27, every_29) = (
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+        StellarRules::every_29_hold(),
+    );
+    let m = dwarf + gained;
+    let fed = Fed {
+        kind: Kind::HeliumWhiteDwarf,
+        before: dwarf,
+        core_before: dwarf,
+        gained,
+        dt,
+    };
+    let swollen = |rules, donor: f64| {
+        let mut engine = fed_dwarf_engine(dwarf, rules);
+        let age = engine.age;
+        engine.members[1] = Member::MainSequence {
+            helium: false,
+            mass: Path::starting(age, donor),
+            tau: Path::starting(age, 0.5),
+        };
+        let s = engine.structure(0, age, m, 0.0).expect("a white dwarf");
+        let swells = engine.swell(0, Kind::HeliumWhiteDwarf, m, &s, fed);
+        (engine, swells)
+    };
+    let m_hef = {
+        let (engine, _) = swollen(every_27, 0.3);
+        engine.ctx.coeffs().m_hef().value()
+    };
+    for (rules, degenerate) in [(every_27, false), (every_29, true)] {
+        let (engine, swells) = swollen(rules, 0.3);
+        assert!(swells, "{:?}", rules.swollen_dwarf);
+        let Member::Shaped { track, .. } = &engine.members[0] else {
+            panic!(
+                "a swollen giant the binary carries: {:?}",
+                engine.members[0]
+            );
+        };
+        let m0 = track.initial_mass().value();
+        let giant = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        assert_eq!(giant.phase(), Phase::FirstGiantBranch);
+        let (stripped, _) = engine.stripped_member(0);
+        let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
+        println!(
+            "{:?}: M0 {m0} (M_HeF {m_hef}), core {:?}, stripped to {left:?}",
+            rules.swollen_dwarf,
+            giant.core_mass()
+        );
+        if degenerate {
+            assert!((m0 / m_hef - 0.7).abs() < 1e-12, "{m0} against {m_hef}");
+            let core = giant.core_mass().value();
+            assert!((core - dwarf).abs() <= 1e-9 * dwarf, "{core}");
+            assert_eq!(left, Phase::HeliumWhiteDwarf);
+        } else {
+            assert!(m0 > m_hef, "{m0} against {m_hef}");
+            assert_eq!(left, Phase::HeliumMainSequence);
+        }
+    }
+    let (engine, swells) = swollen(every_29, 2.5);
+    assert!(!swells);
+    assert!(engine.segments.is_empty(), "a refusal closes no segment");
+}
+
+/// P11.T4's swollen dwarf: two pairs whose primary leaves a helium white dwarf after a common
+/// envelope beside a lighter main-sequence companion that then overflows at its thermal rate
+/// (1.1 + 0.9 M☉ at 100 d and 1.4 + 0.9 M☉ at 200 d, Z = 0.004). As first built at 27 the dwarf
+/// swelled under the held arm and its giant was stripped at once to a helium main-sequence star of
+/// the dwarf's 0.377 and 0.437 M☉. Since version 27's heavy-donor wind such a dwarf blows the excess
+/// off and never swells (`Engine::optically_thick_wind`), so under every 27 hold and under every 29
+/// hold no helium main-sequence star appears and no timeline caps.
+#[test]
+fn a_heavy_donor_s_helium_dwarf_becomes_no_helium_star() {
+    use crate::stellar::rules::StellarRules;
+
+    let until = Years::new(1.2e10);
+    for (m1, m2, period) in [(1.1, 0.9, 100.0), (1.4, 0.9, 200.0)] {
+        let input = pair(m1, m2, period, 0.0, 0.004);
+        for rules in [
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+            StellarRules::every_29_hold(),
+        ] {
+            let timeline = evolve(&input.clone().with_rules(rules), until);
+            let helium_star = timeline.segments().iter().any(|s| {
+                [s.start(), s.end()].iter().any(|&age| {
+                    timeline.state_at(age).stars()[0].phase() == Phase::HeliumMainSequence
+                })
+            });
+            assert!(
+                !helium_star,
+                "{m1} + {m2}, {:?}: {}",
+                rules.swollen_dwarf,
+                describe(&timeline)
+            );
+            assert!(!timeline.hit_segment_cap(), "{m1} + {m2}");
+        }
+    }
+}
+
+/// P11.T4's swollen dwarf: over the pinned thousand the arm alone moves only pairs in which a
+/// helium white dwarf swells into a giant under the held arm, at a segment's edge or inside its
+/// transfer, which are listed (the arm's own cases are
+/// `a_swollen_helium_dwarf_keeps_its_degenerate_core`'s and
+/// `a_heavy_donor_s_helium_dwarf_becomes_no_helium_star`'s).
+#[test]
+fn the_swollen_dwarf_moves_only_pairs_whose_helium_dwarf_swells() {
+    use super::swollen_dwarf::SwollenDwarfRules;
+
+    let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let arm_rules = crate::stellar::rules::StellarRules {
+        swollen_dwarf: SwollenDwarfRules::Degenerate,
+        ..held_rules
+    };
+    let until = Years::new(1.2e10);
+    let mut mix = Mix(0x0b1e_0001);
+    let mut moved = Vec::new();
+    for i in 0..1000 {
+        let input = pinned_pair(&mut mix, i);
+        let held = evolve(&input.clone().with_rules(held_rules), until);
+        let arm = evolve(&input.with_rules(arm_rules), until);
+        if same_outcome(&held, &arm) {
+            continue;
+        }
+        moved.push(i);
+        let edges: Vec<Years> = held
+            .segments()
+            .iter()
+            .flat_map(|s| [s.start(), Years::new(s.end().value() * (1.0 - 1e-12))])
+            .collect();
+        let swells = edges.windows(2).any(|w| {
+            (0..2).any(|k| {
+                held.state_at(w[0]).stars()[k].phase() == Phase::HeliumWhiteDwarf
+                    && held.state_at(w[1]).stars()[k].phase() == Phase::FirstGiantBranch
+            })
+        });
+        assert!(
+            swells,
+            "pair {i:04} moves with no swollen dwarf: {}",
+            describe(&held)
+        );
+    }
+    assert_eq!(moved, SWOLLEN_DWARF_MOVERS);
+}
+
+/// The pinned pairs the swollen dwarf moves, as measured (2026-11-05, at generator version 27):
+/// each one's helium dwarf swells inside a spell of transfer from a gap or giant donor.
+const SWOLLEN_DWARF_MOVERS: [u32; 2] = [168, 762];

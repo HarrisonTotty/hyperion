@@ -5,8 +5,9 @@
 //! `stellar::binary::tests`' (P11.T4's dwarf limit there).
 //!
 //! - Slow: a census of 6 × 10⁴ pairs of layers C, D and E near the Sun, as the generator draws
-//!   them, run to 13.8 Gyr under every 27 hold: none shows a white dwarf above the Chandrasekhar
-//!   mass (under the held arm some did).
+//!   them, run to 13.8 Gyr under every 27 hold and under every 29 hold: none shows a white dwarf
+//!   above the Chandrasekhar mass (under the held arm some did). Every 29 hold adds P11.T4's
+//!   holds at 29.
 
 use crate::planetary::testing::in_shares;
 
@@ -86,23 +87,39 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
     figures
 }
 
-/// The census's figures under every 27 hold, as measured (2026-11-02, at generator version 25;
-/// under the held arm 94 of layer D's pairs and 157 of E's showed a dwarf above the limit).
-const CENSUS_FIGURES: Figures = Figures {
-    run: [5_983, 15_222, 18_105],
-    above: [0; 3],
-    massless: [149, 18, 2],
-};
+/// The census's figures under every 27 hold and under every 29 hold, as measured (2026-11-05, at
+/// generator version 27; the 27 pin before, run [5983, 15222, 18105] and massless [149, 18, 2],
+/// was stale at version 27's base; under the held arm of version 25, 94 of layer D's pairs and 157
+/// of E's showed a dwarf above the limit).
+const CENSUS_FIGURES: [Figures; 2] = [
+    Figures {
+        run: [8_519, 17_814, 19_213],
+        above: [0; 3],
+        massless: [148, 20, 6],
+    },
+    Figures {
+        run: [8_519, 17_814, 19_213],
+        above: [0; 3],
+        massless: [174, 20, 10],
+    },
+];
 
-/// A census of 6 × 10⁴ generated pairs ([`census`]) under every 27 hold: none shows a white dwarf
-/// above the Chandrasekhar mass.
+/// A census of 6 × 10⁴ generated pairs ([`census`]) under every 27 hold and under every 29 hold:
+/// none shows a white dwarf above the Chandrasekhar mass.
 #[test]
-#[ignore = "slow: 6 × 10⁴ generated pairs run through the binary engine to 13.8 Gyr"]
+#[ignore = "slow: 6 × 10⁴ generated pairs run through the binary engine to 13.8 Gyr, twice"]
 fn no_white_dwarf_passes_the_chandrasekhar_mass_under_every_27_hold() {
     let galaxy = Galaxy::from_params(Seed::new(CENSUS_SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture's gas is mostly neutral");
-    let figures = census(&galaxy, StellarRules::of_version(crate::GENERATOR_VERSION));
-    println!("every 27 hold: {figures:?}");
-    assert_eq!(figures.above, [0; 3], "{figures:?}");
+    let figures = [
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+        StellarRules::every_29_hold(),
+    ]
+    .map(|rules| {
+        let figures = census(&galaxy, rules);
+        println!("{rules:?}: {figures:?}");
+        assert_eq!(figures.above, [0; 3], "{figures:?}");
+        figures
+    });
     assert_eq!(figures, CENSUS_FIGURES);
 }

@@ -1085,6 +1085,35 @@ pub(crate) fn new_star_mass(
     }
 }
 
+/// The initial mass of the track a swollen helium white dwarf is placed on, in units of `M_HeF`
+/// ([`degenerate_giant_mass`]): 0.7, 1.40 M☉ at Z = 0.02 and 1.28 M☉ at Z = 0.0003, where the
+/// tracks' first giant branches reach their helium flash with their envelope and at its largest
+/// core. Measured on the built tracks (2026-11-02), the branch's last core is 0.41, 0.45, 0.46,
+/// 0.46 and 0.39 M☉ at Z = 0.02 for 0.7, 0.9, 1.2, 1.6 and 1.9 M☉ (`M_HeF` 2.00 M☉), and 0.49,
+/// 0.49, 0.49, 0.48 and 0.35 M☉ at Z = 0.0003 (`M_HeF` 1.83 M☉): lighter tracks lose their
+/// envelope to their wind first, and near `M_HeF` the flash comes early (HPT equation 49's
+/// e^(15 (M − `M_HeF`))).
+const DEGENERATE_GIANT_SHARE: f64 = 0.7;
+
+/// The initial mass, M☉, of the track a helium white dwarf of `mc` M☉ fed hydrogen swells onto with
+/// its core still degenerate (plan 11, P11.T4's fix, the stellar rules' `swollen_dwarf`):
+/// [`DEGENERATE_GIANT_SHARE`] of `M_HeF`, whose first giant branch has a degenerate core and reaches
+/// a low-mass giant's helium flash; or `None` where `mc` is at or below `Mc,BGB`(`M_HeF`), whose
+/// giant [`new_star_mass`] already places on a degenerate branch, or not below that track's flash
+/// (`Mc,HeI`, HPT section 5.3 and equation 49).
+///
+/// [`new_star_mass`] places a core above `Mc,BGB`(`M_HeF`) at the base of the giant branch of a
+/// heavier star, whose core is not degenerate (BSE's `gntage`, `mheif`), so that its strip leaves
+/// a helium-burning star. Not the swollen star's own mass, whose track's branch never holds the
+/// core, nor the heaviest mass below `M_HeF` whose branch holds it, whose flash would come at the
+/// dwarf's own core (lean, 2026-11-02).
+#[must_use]
+pub(crate) fn degenerate_giant_mass(mc: SolarMasses, c: &ZCoeffs) -> Option<SolarMasses> {
+    let m0 = SolarMasses::new(DEGENERATE_GIANT_SHARE * c.m_hef().value());
+    let above_base = mc.value() > gb::mc_bgb(c.m_hef(), c).value();
+    (above_base && mc.value() < gb::mc_hei(m0, c).value()).then_some(m0)
+}
+
 /// The core at the base of the AGB, M☉, of a thermally pulsing AGB star placed with the
 /// carbon–oxygen core `mc` M☉ (BSE section 2.7.4, `gntage.f`'s `mcx` for type 6, as BSE solves
 /// HPT's relations back): `Mc,BAGB` = (Mc + 0.35) ÷ 0.773 at or above `Mc,DU` of `Mc,BAGB` = 2.25
