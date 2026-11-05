@@ -3195,7 +3195,7 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
     ]);
   });
 
-  it("takes the setting's levers in every view: the march's resolution, the channels, the march's cover and limb rays, and the sources' table on both, the lit passes' and the march's (R08.T8.d, R08.T9.b, R08.T8.e)", () => {
+  it("takes the setting's levers in every view: the march's resolution, the channels and the surfaces' lobes, the march's cover and limb rays, and the sources' table on both, the lit passes' and the march's (R08.T8.d, R08.T9.b, R08.T8.e)", () => {
     expect([SETTINGS.high.atmosphereLevers, SETTINGS.low.atmosphereLevers]).toEqual([
       ATMOSPHERE_SETTINGS.high,
       ATMOSPHERE_SETTINGS.low,
@@ -3204,6 +3204,7 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
       high: {
         compositeTransmittance: "march",
         surfaceTransmittance: "channels",
+        surfaceLobes: "transmitted",
         marchCover: "area",
         limbRays: "packed",
         sourceTransmittance: "table",
@@ -3212,12 +3213,34 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
       low: {
         compositeTransmittance: "march",
         surfaceTransmittance: "channels",
+        surfaceLobes: "transmitted",
         marchCover: "area",
         limbRays: "packed",
         sourceTransmittance: "table",
         marchSourceTransmittance: "table",
       },
     });
+  });
+});
+
+describe("HillaireAtmosphere's surfaces keeping their forward lobes' light (fix-r08-decked-air-opacity)", () => {
+  it.each([
+    ["on both settings", ATMOSPHERE_SETTINGS.high, 1],
+    ["outside a view", PER_PIXEL_LEVERS, 1],
+    ["nowhere on the way back", { ...PER_PIXEL_LEVERS, surfaceLobes: "extinguished" }, 0],
+  ] as const)("keeps them %s, the march's forward.w", async (_, levers, lever) => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      R05_EARTH_REFERENCE,
+      TABLE_SIZES.high,
+      WGS84,
+      NO_ABSORBER_CURVES,
+      null,
+      levers,
+    );
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    expect(draw.uniforms["forward"]?.[3]).toBe(lever);
   });
 });
 

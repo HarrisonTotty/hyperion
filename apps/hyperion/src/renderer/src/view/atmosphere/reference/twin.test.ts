@@ -275,7 +275,7 @@ describe("the reference twin's reads", { timeout: TWIN_TIMEOUT_MS }, () => {
       throw new Error("the disc looks down at the ground");
     }
     const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), SPHERE, 1);
-    const [r, g, b, t] = rayMarchTargetTexelTwin(
+    const { light, transmittance } = rayMarchTargetTexelsTwin(
       twin.planet,
       view,
       TABLE_SIZES.high,
@@ -285,10 +285,14 @@ describe("the reference twin's reads", { timeout: TWIN_TIMEOUT_MS }, () => {
     );
     const lit = twin.litGroundRadiance({ x: RADIUS_M, y: 0, z: 0 }, sunOf(geometry));
     const drawn = twin.radianceAlong(geometry, direction);
-    for (const [c, march] of [r, g, b].entries()) {
-      expect(drawn.total[c]).toBeCloseTo(march + (lit[c] ?? Number.NaN) * t, 12);
-      expect(drawn.surface[c]).toBeCloseTo((lit[c] ?? Number.NaN) * t, 12);
+    for (const c of [0, 1, 2] as const) {
+      const t = transmittance[c];
+      expect(drawn.total[c]).toBeCloseTo(light[c] + lit[c] * t, 12);
+      expect(drawn.surface[c]).toBeCloseTo(lit[c] * t, 12);
     }
+    // The point's lobe (g 0.5) keeps its in-lobe light (fix-r08-decked-air-opacity): the second
+    // target stands above the throughput's mean, the first's alpha.
+    expect(transmittance[1]).toBeGreaterThan(light[3]);
   });
 
   it("reads aerial perspective at the target's distance where the ray clears the ground", () => {

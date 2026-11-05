@@ -39,6 +39,7 @@ export {
   type AtmosphereSettings,
   type CompositeTransmittance,
   PER_PIXEL_LEVERS,
+  type SurfaceLobes,
   type SurfaceTransmittance,
 } from "./hillaire";
 
@@ -170,6 +171,11 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * settings, its cost the second textures' memory (the volume's 262 KB on high, 131 KB on low, and
  * 8 bytes a march texel) and one more store a froxel and a march texel; `grey` is the way back.
  *
+ * `transmitted` (plan R08, fix-r08-decked-air-opacity) keeps a drawn surface's light scattered
+ * within the medium's forward lobes in the march's second target on both settings, its cost one sum
+ * over the medium's terms and one `exp` a march step where the medium has a drawn lobe, none
+ * elsewhere; `extinguished` is the way back.
+ *
  * `packed` (plan R08, R08.T8.d) takes the far limb's node rays one an invocation on both settings:
  * byte for byte the per-texel march on SwiftShader, and from orbit in the inspection profile (pod,
  * 16 vCPU, from 22 Mm and 28.9 Mm, each against the composite's time) 29% less of the march on high
@@ -211,6 +217,7 @@ export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSett
   high: {
     compositeTransmittance: "march",
     surfaceTransmittance: "channels",
+    surfaceLobes: "transmitted",
     marchCover: "area",
     limbRays: "packed",
     sourceTransmittance: "table",
@@ -219,6 +226,7 @@ export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSett
   low: {
     compositeTransmittance: "march",
     surfaceTransmittance: "channels",
+    surfaceLobes: "transmitted",
     marchCover: "area",
     limbRays: "packed",
     sourceTransmittance: "table",

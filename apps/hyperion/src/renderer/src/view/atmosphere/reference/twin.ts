@@ -28,7 +28,8 @@
  * `surfaceLightingTwin`), behind the march's transmittance (from orbit, the march ending on that
  * surface) or the volume's at the ground's distance (aerial perspective), per channel as the
  * composite takes it since R08.T9.c, or their mean, R05's grey, under
- * {@link TwinOptions.surfaceTransmittance}. The tracer traces
+ * {@link TwinOptions.surfaceTransmittance}, the march's with its forward lobes' light kept under
+ * {@link TwinOptions.surfaceLobes} (fix-r08-decked-air-opacity). The tracer traces
  * the same ray to the ground and reflects it there, so the comparison is of the whole pixel: the
  * ground's skylight and the ground–sky bounces Hillaire's one bounce leaves out are the analytic
  * path's errors, which τ* sees. {@link ReferenceTwin.groundConeShare} gives a geometry's share of
@@ -98,6 +99,7 @@ import {
   marchWeightOf,
   type SpheroidFigure,
   type SunState,
+  type SurfaceLobes,
   type SurfaceTransmittance,
   TABLE_SIZES,
   tableRadiusM,
@@ -133,6 +135,7 @@ import {
   oblateSkyViewReadTwin,
   oblateSkyViewTexelsTwin,
   type PlanetTwin,
+  type RayMarchSettings,
   rayMarchTargetTexelsTwin,
   skyViewReadTwin,
   skyViewTexelsTwin,
@@ -258,6 +261,12 @@ export interface TwinOptions {
    * the composite takes it on both settings, or `grey`, their mean, the way back.
    */
   readonly surfaceTransmittance: SurfaceTransmittance;
+  /**
+   * What a drawn surface keeps from orbit of its light scattered within the medium's forward lobes
+   * (`hillaire.ts`'s `SurfaceLobes`, fix-r08-decked-air-opacity): `transmitted` by default, as the
+   * frame takes it on both settings, or `extinguished`, the way back.
+   */
+  readonly surfaceLobes: SurfaceLobes;
 }
 
 /** A cloud deck a twin reads as its medium's ground ({@link TwinOptions.deck}; R08.T15.a.2). */
@@ -286,6 +295,7 @@ export const DEFAULT_TWIN_OPTIONS: TwinOptions = {
   deck: null,
   multiScatteringSize: MULTI_SCATTERING_SIZE,
   surfaceTransmittance: "channels",
+  surfaceLobes: "transmitted",
 };
 
 /**
@@ -318,6 +328,13 @@ const NEAR_M = 1;
 
 /** No light. */
 const DARK: Rgb = [0, 0, 0];
+
+/**
+ * How far a grey path's channels may stand from their mean, relative, and still read as grey
+ * (`surfaceThrough`): the mean of three equal doubles rounds within an ulp of them, 2⁻⁵² relative,
+ * and a path whose lobes' light its second target keeps stands off by its e^(x P) − 1.
+ */
+const GREY_MEAN_ULPS = 4 * Number.EPSILON;
 
 /** One slice at κ = 1 and one band at s = 1 ({@link TwinSlicing}'s `single`). */
 const ONE_SLICE_ONE_BAND: OblateSlicing = {
@@ -1000,12 +1017,16 @@ export function referenceTwin(
   // channel, or the mean beside it (its fourth), as the composite's `levers.y` takes them. A grey
   // path, its channels equal to the bit, takes the mean, an ulp from them, so that a grey medium's
   // records stand as they were: the sweep cases, whose traced outputs name each case by its SHA-256.
+  // A grey path whose lobes' light the second target keeps (fix-r08-decked-air-opacity) stands off
+  // the mean, the first target's, by far more, and takes its channels, as the composite does.
   const surfaceThrough = (t: readonly [number, number, number, number]): Rgb => {
-    const grey = t[0] === t[1] && t[1] === t[2];
+    const grey = t[0] === t[1] && t[1] === t[2] && Math.abs(t[0] - t[3]) <= GREY_MEAN_ULPS * t[3];
     return settings.surfaceTransmittance === "channels" && !grey
       ? [t[0], t[1], t[2]]
       : [t[3], t[3], t[3]];
   };
+
+  const marchSettings: RayMarchSettings = { ...sizes, surfaceLobes: settings.surfaceLobes };
 
   // The march's texel at the centre of a camera at `originM` along `direction`, over a surface
   // `surfaceM` on (`null` where nothing is drawn), lit ground where `lit` and else black, through
@@ -1022,8 +1043,8 @@ export function referenceTwin(
     const x = (TWIN_VIEWPORT.widthPx - 1) / 2;
     const y = (TWIN_VIEWPORT.heightPx - 1) / 2;
     const marchedTexel = sphere
-      ? rayMarchTargetTexelsTwin(planet, view, sizes, x, y, depth)
-      : oblateRayMarchTargetTexelsTwin(oblate, view, sizes, x, y, depth);
+      ? rayMarchTargetTexelsTwin(planet, view, marchSettings, x, y, depth)
+      : oblateRayMarchTargetTexelsTwin(oblate, view, marchSettings, x, y, depth);
     const [r, g, b] = marchedTexel.light;
     if (surfaceM === null || !lit) {
       return { total: [r, g, b], surface: DARK };

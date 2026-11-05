@@ -231,8 +231,11 @@ function computeTwinValues(specs: ReadonlyArray<SweepTwinSpec>): Map<string, num
       throw new Error(`no sweep file is named ${first?.file ?? "(none)"}`);
     }
     const medium = sweepMedium(sweepPointOf(file, first.column, walkSpot(first.candidate)));
+    // The way back's surfaces, as the sweep's own twin takes them (`atmosphereSweep.ts`'s
+    // sweepTwinRadiances; fix-r08-decked-air-opacity's lean).
     const twin = referenceTwin(medium, SWEEP_FIGURE, {
       multipleScattering: multipleScatteringOf(first.quantity),
+      surfaceLobes: "extinguished",
     });
     for (const spec of group) {
       const geometry = GEOMETRIES.get(spec.geometry);

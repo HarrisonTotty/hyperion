@@ -25186,3 +25186,19 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   `CHROMOPHORE_GATE_MISSES` and `CHROMOPHORE_GATE_EXCEPTIONS` are empty; `chromophoreGatePasses`
   passes over an image refused throughout, as `deckGatePasses` does; `COOL_GIANT_ROUTE_RANGE` ω̄ from
   0.96, ḡ to 0.772, τ ḡ to 7.55 and τ (1 − ω̄) to 0.491 (the hand Saturn's blue).
+- **A drawn surface's forward lobes kept** (fix-r08-decked-air-opacity, 2026-11-05; the owner's
+  "too opaque from space"). `AtmosphereSettings.surfaceLobes` (`hillaire.ts`'s `SurfaceLobes`):
+  `transmitted` on both settings and in `PER_PIXEL_LEVERS`, `extinguished` the way back; the view's
+  `forward.w` carries it to `rayMarch.wgsl`, whose second target is e^(−∫(σ_t − Σ P σ_s) ds).
+  - The twin: `RayMarchSettings.surfaceLobes`, `TwinOptions.surfaceLobes`, `TwinMarch.surface`.
+  - Off wherever a bake's table is read (`withThickRead` rewrites `surfaceLobes`; the twin's
+    `thick` kind): the bake's J re-emits the truncated lobe's diffuse field, the ground's light
+    among it. Kept beside the correction alone.
+  - Untouched (leans): the first target and its bare ground, the aerial-perspective volume, the
+    `grey` way back's mean, and the march beneath a deck (no lobe below a cloud's base).
+  - The sweep's twin and `sweepBoundary.ts`'s values keep `extinguished` (lean), so that
+    `THICK_MS_BOUNDARY` stands as R08.T13.c2 measured it; pending: the sweep walked again with the
+    lobes kept.
+  - `caseGate.json` re-blessed: `mars` 71 pass, 217 miss (was 75, 213); its disc-p0 reads +11%,
+    its veil's +35% now uncovered. `vectorGate.json` by hand: only `mars`'s analytic paths and
+    `titan-class`'s diagnostic move; every route, `titan-class`'s and the Venus decks', is unchanged.

@@ -293,7 +293,10 @@ export const TWIN_CHANNEL_SPREAD = 1e-12;
 
 /**
  * The twin's channel-1 radiance of a point at each of `geometries`, per unit of the sun's
- * irradiance.
+ * irradiance, its drawn surfaces dimmed by the march's throughput itself, the way back of
+ * `hillaire.ts`'s `SurfaceLobes` (fix-r08-decked-air-opacity; lean, 2026-11-05): the sweep's walk
+ * and `regime.ts`'s `THICK_MS_BOUNDARY` stand as R08.T13.c2 measured them until the sweep is walked
+ * again with the lobes' light kept.
  *
  * @throws Error where the twin's three channels differ beyond {@link TWIN_CHANNEL_SPREAD}, or a
  *   radiance is not finite and at least 0: a blocker of the ruling's 12.
@@ -302,7 +305,7 @@ export function sweepTwinRadiances(
   point: SweepPoint,
   geometries: ReadonlyArray<ReferenceGeometry>,
 ): number[] {
-  const twin = referenceTwin(sweepMedium(point), SWEEP_FIGURE);
+  const twin = referenceTwin(sweepMedium(point), SWEEP_FIGURE, { surfaceLobes: "extinguished" });
   return geometries.map((geometry) => {
     const rgb: Rgb = twin.radiance(geometry);
     const [r, g, b] = rgb;

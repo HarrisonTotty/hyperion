@@ -749,7 +749,7 @@
     "headlines": {
       "earth": ["miss", 186, 106, 68],
       "earth-ozone-slab": ["miss", 187, 105, 68],
-      "mars": ["miss", 75, 213, 96],
+      "mars": ["miss", 71, 217, 96],
       "saturn-oblate": ["miss", 197, 255, 22]
     },
     "marsOffSun": {

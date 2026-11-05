@@ -46,7 +46,9 @@ struct AtmosphereView {
   // the table's local azimuth is measured from it towards up x it.
   skyAxis : vec4f,
   // The camera's ray basis in the body-fixed frame: right x tan(fovX / 2), up x tan(fovY / 2),
-  // forward.
+  // forward. forward.w: 1 where a drawn surface keeps its light scattered within the medium's
+  // forward lobes, the ray march's second target's (`hillaire.ts`'s SurfaceLobes,
+  // fix-r08-decked-air-opacity), else 0.
   right : vec4f,
   upRay : vec4f,
   forward : vec4f,

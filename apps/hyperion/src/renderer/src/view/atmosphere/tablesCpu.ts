@@ -89,6 +89,7 @@ import {
   skyViewHeight,
   type SpheroidFigure,
   type SunState,
+  type SurfaceLobes,
   tableRadiusM,
   type TableSizes,
   type VolumeSize,
@@ -2283,6 +2284,13 @@ export type MarchGeometry =
 export interface TwinMarch {
   readonly luminance: Rgb;
   readonly transmittance: Rgb;
+  /**
+   * A drawn surface's transmittance at the march's end with its light scattered within the
+   * medium's forward lobes kept, as the ray march's second target takes it under `hillaire.ts`'s
+   * SurfaceLobes `transmitted` (fix-r08-decked-air-opacity): `transmittance` itself where no term
+   * has a drawn lobe or a bake's table is read.
+   */
+  readonly surface: Rgb;
 }
 
 /**
@@ -2696,6 +2704,18 @@ class Marcher {
   readonly #depth: TwinRgb = [0, 0, 0];
   /** Whether the march adds the forward lobes' higher orders: a tabulated term, and its depth read. */
   readonly #lobes: boolean;
+  /**
+   * Whether a drawn surface keeps its light scattered within the medium's forward lobes: a term with
+   * a drawn lobe, and no bake's table (`thick`), whose J re-emits the truncated lobe's diffuse field,
+   * the ground's light among it, into each direction (`thick/bake.ts`'s E, its first term), so that
+   * the lobes' light is the table's there; the correction alone beside Ψ_ms keeps it.
+   */
+  readonly #lobed: boolean;
+  /**
+   * A drawn surface's transmittance with its lobes' in-lobe scattering kept, slot 0's path less it
+   * (`rayMarch.wgsl`'s `surface`; fix-r08-decked-air-opacity), where {@link Marcher.#lobed}.
+   */
+  readonly #surface: TwinRgb = [1, 1, 1];
   /** The thick table's kind where the tables hold one, read with Ψ_ms (R08.T14.c, R08.T14.f). */
   readonly #thick: ThickTableKind | null;
   readonly #thickRead: TwinRgb = [0, 0, 0];
@@ -2736,11 +2756,11 @@ class Marcher {
         bodyFixed: reads.kind === "oblate" ? inBodyAxes(reads.frame, s, false) : s,
       };
     });
-    this.#lobes =
-      terms.some((term) => term.lobe !== null) &&
-      (reads.kind === "oblate" || reads.sources.sunOpticalDepth !== undefined);
+    const lobed = terms.some((term) => term.lobe !== null);
+    this.#lobes = lobed && (reads.kind === "oblate" || reads.sources.sunOpticalDepth !== undefined);
     this.#thick =
       reads.kind === "oblate" ? reads.reader.thickKind : (reads.sources.thick?.kind ?? null);
+    this.#lobed = lobed && this.#thick !== "thick";
     this.#thermal =
       reads.kind === "oblate" ? reads.reader.thermal : (reads.sources.thermal ?? null);
     // A path a light slot under an absorber, slot 0's always (the views' mean transmittance), and
@@ -2768,6 +2788,18 @@ class Marcher {
   /** The march's transmittance: light slot 0's throughput. */
   get throughput(): TwinRgb {
     return this.throughputOf(0);
+  }
+
+  /**
+   * A drawn surface's transmittance where it keeps its light scattered within the medium's forward
+   * lobes (`hillaire.ts`'s SurfaceLobes `transmitted`; `rayMarch.wgsl`): slot 0's path with each
+   * step's in-lobe scattering Σ P σ_s dropped from its depth, R08.T7's δ-M (Wiscombe 1977, J. Atmos.
+   * Sci. 34, 1408), carried from the first step, never as the throughput times e^(x P), so that a
+   * deep path keeps its own; the throughput itself, to the bit, where no term has a drawn lobe or a
+   * bake's table is read ({@link Marcher.#lobed}).
+   */
+  get surfaceThroughput(): TwinRgb {
+    return this.#lobed ? this.#surface : this.throughput;
   }
 
   /** A light slot's throughput, slot 0's for a slot with no path of its own. */
@@ -3010,6 +3042,10 @@ class Marcher {
           this.luminance[c] += throughput[c] * share[c] * dtM * exactStepFactor(stepDepth);
         }
         throughput[c] *= exp(-stepDepth);
+        if (slot === 0 && this.#lobed) {
+          const kept = (local[LOBE_AT + c] ?? Number.NaN) * dtM;
+          this.#surface[c] *= exp(-Math.max(stepDepth - kept, 0));
+        }
       }
     }
   }
@@ -3076,7 +3112,11 @@ export function marchTwin(
   for (const { tM, dtM } of steps) {
     marcher.step(tM, dtM);
   }
-  return { luminance: [...marcher.luminance], transmittance: [...marcher.throughput] };
+  return {
+    luminance: [...marcher.luminance],
+    transmittance: [...marcher.throughput],
+    surface: [...marcher.surfaceThroughput],
+  };
 }
 
 // --- The sky's irradiance (R08.T9.b) -------------------------------------------------------------
@@ -4160,12 +4200,18 @@ export function rayMarchRayAlongTwin(
  * near its rounding a piece's share may stand to be taken to the other side of it
  * (`marchSteps.ts`'s `MARCH_SHARE_ROUNDING_STEPS`), and `otherTurnWithin`, how near the turn a
  * piece's placement may stand to be taken to its other side (`MARCH_TURN_ROUNDING`), each 0 or
- * absent for the kernels' own.
+ * absent for the kernels' own; and `surfaceLobes`, what a drawn surface keeps of its light scattered
+ * within the medium's forward lobes (`hillaire.ts`'s {@link SurfaceLobes}), `transmitted`, the
+ * frame's default, where absent.
  */
 export type RayMarchSettings = Pick<
   TableSizes,
   "rayMarchScale" | "rayMarchSamples" | "aerialPerspectiveReachM" | "marchBand" | "marchDepthSteps"
-> & { readonly otherShareWithinSteps?: number; readonly otherTurnWithin?: number };
+> & {
+  readonly otherShareWithinSteps?: number;
+  readonly otherTurnWithin?: number;
+  readonly surfaceLobes?: SurfaceLobes;
+};
 
 /**
  * One ray-march texel's twin along a clipped ray (`rayMarchRayTwin`, `rayMarchRayAlongTwin`): its
@@ -4235,6 +4281,11 @@ interface RayMarchContext {
   readonly otherShareWithinSteps: number;
   /** The pieces' placements taken to the other side of the turn ({@link RayMarchSettings}). */
   readonly otherTurnWithin: number;
+  /**
+   * Whether a drawn surface keeps its light scattered within the medium's forward lobes
+   * ({@link RayMarchSettings}' `surfaceLobes`, `transmitted`).
+   */
+  readonly surfaceLobes: boolean;
 }
 
 /** A march's cloud deck at its ground (R08.T15.a.2; `thick/deckRead.ts`). */
@@ -4302,6 +4353,7 @@ function rayMarchContext(
     depthSteps: settings.marchDepthSteps,
     otherShareWithinSteps: settings.otherShareWithinSteps ?? 0,
     otherTurnWithin: settings.otherTurnWithin ?? 0,
+    surfaceLobes: (settings.surfaceLobes ?? "transmitted") === "transmitted",
     deck:
       planet.deck === undefined
         ? null
@@ -4373,7 +4425,10 @@ function rayMarchTexelInto(
   const luminance = marcher.luminance;
   const t = marcher.throughput;
   let meanTransmittance = (t[0] + t[1] + t[2]) / 3;
-  let transmittance: TwinRgb = [t[0], t[1], t[2]];
+  // The second target, a drawn surface's, with its lobes' light kept where the settings ask
+  // (fix-r08-decked-air-opacity); its mean stays the first's.
+  const surface = context.surfaceLobes ? marcher.surfaceThroughput : t;
+  let transmittance: TwinRgb = [surface[0], surface[1], surface[2]];
   // Over a deck the ground is read wherever the ray reaches the datum before a drawn surface, as
   // `hillaire.ts`'s deck forms read it (R08.T16.b.2); elsewhere only with nothing drawn.
   const readGroundM =
@@ -7341,6 +7396,7 @@ function oblateRayMarchContext(
     depthSteps: settings.marchDepthSteps,
     otherShareWithinSteps: settings.otherShareWithinSteps ?? 0,
     otherTurnWithin: settings.otherTurnWithin ?? 0,
+    surfaceLobes: (settings.surfaceLobes ?? "transmitted") === "transmitted",
     deck:
       planet.deck === undefined
         ? null

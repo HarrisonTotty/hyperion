@@ -146,6 +146,20 @@
 // (`rayMarchTransmittanceOut`, rgb, the mean in a; `storeMarched`), the footprint's mean taken over
 // it as over the first; the composite dims a drawn surface by it in place of the mean. The first
 // target is as before, to the bit.
+//
+// Changes (plan R08, fix-r08-decked-air-opacity; `hillaire.ts`'s SurfaceLobes): where the medium
+// has forward lobes, the view's `forward.w` is 1 and no bake's table is read (the thick read's
+// rewrite of `surfaceLobes`: its J already re-emits the truncated lobe's diffuse field, the
+// ground's light among it), the second target is a drawn surface's
+// transmittance with each drawn lobe's in-lobe scattering dropped from its extinction,
+// e^(-integral (sigma_t - sum P sigma_s) ds) per channel along slot 0's path, its absorbers' curves
+// included: R08.T7's delta-M (Wiscombe 1977, J. Atmos. Sci. 34, 1408), which the sun's beam and the
+// multiple-scattering table already take (`scattering.wgsl`'s lobeOrdersOf, `multiScattering.wgsl`).
+// A surface's light scattered within a lobe, 30 degrees, lands within its own pixel from orbit, as a
+// sky's does about the sun; dropped, a served water deck of tau 1.15 left the ground at 0.30-0.41 of
+// the tracer's (`hyperion-fit atmosphere-reference`). Its own path from the first step, never the
+// throughput times e^(x P), so that a deep path whose throughput f32 cannot hold keeps its own. The
+// first target, its mean and a medium with no lobe are as before, to the bit.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -247,16 +261,35 @@ struct MarchRay {
   lowestFromStar : f32,
 }
 
+// The scattering in a sample's drawn forward lobes, sum P sigma_s, m^-1, P each tabulated term's
+// forward share in its phase.xyz, 0 where its forward part is no lobe (R08.T7; `medium.wgsl`'s
+// mediumAtHeight forms the same for the multiple-scattering table).
+fn rayMarchLobeScatteringOf(local : SampleMedium) -> vec3f {
+  var lobe = vec3f(0.0);
+  let count = min(u32(medium.termCount), MAX_TERMS);
+  for (var i = 0u; i < count; i++) {
+    let term = terms[i];
+    if (term.phase.w > 2.5) {
+      lobe += term.phase.xyz * term.scattering.rgb * termDensity(local.densities, i);
+    }
+  }
+  return lobe;
+}
+
 // One step of the march, at its midpoint: its ground quadric, about t* beyond h0 = a / 2 and from
 // the camera within it, its datum point (its height and the datum's normal there) and s at its
 // latitude, then the medium at h* = s h, its sources through the sliced lookup and their
-// in-scattering (R08.T6.f).
+// in-scattering (R08.T6.f). Where `surfaceLobes`, a drawn surface's own transmittance `surface` one
+// step on: slot 0's step depth, as `viewMarchStep` forms it, less the step's in-lobe scattering
+// (fix-r08-decked-air-opacity).
 fn rayMarchStep(
   march : ptr<function, ViewMarch>,
+  surface : ptr<function, vec3f>,
   ray : MarchRay,
   body : OblateBody,
   stepAt : MarchStep,
   lobes : bool,
+  surfaceLobes : bool,
 ) {
   let p = ray.origin + stepAt.tM * ray.dir;
   let groundQ = ray.groundQ;
@@ -272,7 +305,13 @@ fn rayMarchStep(
   let local = sampleMediumAt(s * datum.heightM);
   let start = sampleStartOf(body, p, bigQ, datum.heightM, datum.normal, datum.normal, s, local);
   let shares = rayMarchSourcesAt(body, start, datum.normal, ray.dir, lobes, local);
+  let absorbedBefore = (*march).path0.depth;
   viewMarchStep(march, local, shares, stepAt.dtM);
+  if (surfaceLobes) {
+    let stepDepth = local.extinction * stepAt.dtM + ((*march).path0.depth - absorbedBefore);
+    let kept = rayMarchLobeScatteringOf(local) * stepAt.dtM;
+    *surface = *surface * exp(-max(stepDepth - kept, vec3f(0.0)));
+  }
 }
 
 // Step `i` of a split segment as the ray march steps it (R08.T8): a two-sided sky segment's under
@@ -870,12 +909,18 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
   );
   var march = viewMarchStart();
   let lobes = hasForwardLobes();
+  // A drawn surface's transmittance with its lobes' in-lobe scattering kept (forward.w, the view's
+  // SurfaceLobes; fix-r08-decked-air-opacity), the same for every pixel.
+  let surfaceLobes = lobes && view.forward.w > 0.5;
+  var surface = vec3f(1.0);
   // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk.
   // One loop a path, each step chosen in it (R08.T8), so that the step's work is compiled twice,
   // not once a placement and path.
   if (edgeCount == 0u) {
     for (var i = 0u; i < samples; i++) {
-      rayMarchStep(&march, ray, body, rayMarchStepOf(split, i, evenSky, warp), lobes);
+      rayMarchStep(
+        &march, &surface, ray, body, rayMarchStepOf(split, i, evenSky, warp), lobes, surfaceLobes
+      );
     }
   } else {
     var walk : MarchWalk;
@@ -892,7 +937,15 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
       rayMarchDepthShares(&walk, &placement, ray, body);
     }
     for (var i = 0u; i < samples; i++) {
-      rayMarchStep(&march, ray, body, rayMarchWalkStepOf(&walk, &placement, i, evenSky), lobes);
+      rayMarchStep(
+        &march,
+        &surface,
+        ray,
+        body,
+        rayMarchWalkStepOf(&walk, &placement, i, evenSky),
+        lobes,
+        surfaceLobes,
+      );
     }
   }
   var luminance = march.luminance;
@@ -918,6 +971,9 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
   // A sky pixel whose ray meets the ground sees nothing of space behind it: no sun's disc there.
   var meanTransmittance = viewMeanTransmittance(&march);
   var transmittanceRgb = march.throughput0;
+  if (surfaceLobes) {
+    transmittanceRgb = surface;
+  }
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     meanTransmittance = 0.0;
     transmittanceRgb = vec3f(0.0);

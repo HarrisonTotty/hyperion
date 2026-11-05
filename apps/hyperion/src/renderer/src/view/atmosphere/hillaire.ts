@@ -439,6 +439,23 @@ export type CompositeTransmittance = "march" | "per-pixel";
 export type SurfaceTransmittance = "channels" | "grey";
 
 /**
+ * What a drawn surface seen through the air keeps of its light scattered within the medium's
+ * forward lobes (plan R08, fix-r08-decked-air-opacity; R08.T7's lobes, `forwardLobe.ts`):
+ * `transmitted`, the ray march's second target with each drawn lobe's in-lobe scattering dropped
+ * from its extinction, e^(−∫(σ_t − Σ P σ_s) ds) per channel (`rayMarch.wgsl`), R08.T7's δ-M
+ * (Wiscombe 1977, J. Atmos. Sci. 34, 1408), as the sun's beam and Ψ_ms already take it; or
+ * `extinguished`, all of it as extinction, the way back. From orbit a surface's light scattered
+ * within a lobe (30°) lands within its own pixel, as the tracer counts it: on the served Earth-like
+ * `42002cae00000004.0300` (27), whose water deck the client draws uniform at τ(550) 1.15, the drawn
+ * ground stood at 0.30–0.41 of the tracer's independent-pixel truth (`hyperion-fit
+ * atmosphere-reference`, disc p0–p30 from 2,000 km). The march's first target, the
+ * aerial-perspective volume, the `grey` way back's mean and a medium with no drawn lobe are the same
+ * either way, to the bit. A march that reads a bake's table keeps none either way: the table's J
+ * holds that light ({@link withThickRead}).
+ */
+export type SurfaceLobes = "transmitted" | "extinguished";
+
+/**
  * How a view's ray march covers its target (plan R08, R08.T8.d; {@link MarchCover}): `area`, the
  * air's area by the footprint's entry point alone, the way back; or `tiles`, R08.T11.d's exact tile
  * cull over it, the centre ray's entry point marching the tiles no far-limb footprint can blend in
@@ -496,6 +513,8 @@ export interface AtmosphereSettings {
   readonly compositeTransmittance: CompositeTransmittance;
   /** {@link SurfaceTransmittance} (R08.T9.c): `channels` on both settings; `grey` is the way back. */
   readonly surfaceTransmittance: SurfaceTransmittance;
+  /** {@link SurfaceLobes}: `transmitted` on both settings; `extinguished` is the way back. */
+  readonly surfaceLobes: SurfaceLobes;
   /** {@link ViewMarchCover} (R08.T8.d): `area` on both settings, the way back; `tiles` the lever. */
   readonly marchCover: ViewMarchCover;
   /** {@link LimbRays} (R08.T8.d): `packed` on both settings; `per-texel` is the way back. */
@@ -514,14 +533,15 @@ export interface AtmosphereSettings {
 
 /**
  * The composite with its transmittance behind the sky per pixel, as before the cost levers, its
- * surfaces dimmed per channel (R08.T9.c), a view's march over the air's area per texel, each
- * source's transmittance to a lit point per fragment, and the march's sources per step: what an
- * atmosphere drawn outside a view takes (the smoke's checks, the descent spike), unless given its
- * view's.
+ * surfaces dimmed per channel (R08.T9.c) and keeping their forward lobes' light
+ * (fix-r08-decked-air-opacity), a view's march over the air's area per texel, each source's
+ * transmittance to a lit point per fragment, and the march's sources per step: what an atmosphere
+ * drawn outside a view takes (the smoke's checks, the descent spike), unless given its view's.
  */
 export const PER_PIXEL_LEVERS: AtmosphereSettings = {
   compositeTransmittance: "per-pixel",
   surfaceTransmittance: "channels",
+  surfaceLobes: "transmitted",
   marchCover: "area",
   limbRays: "per-texel",
   sourceTransmittance: "per-fragment",
@@ -1448,7 +1468,11 @@ export const MARCH_TABLE_ONLY_KERNELS: ReadonlyArray<KernelPair> = [
  * multiple scattering taken by `thickRead.wgsl`'s `thickSourceAt` in place of `source.wgsl`'s
  * `sourceAt`, and the forward lobes' higher orders at the analytic term's share. Each is one line;
  * the second stands once in every kernel (`source.wgsl`'s `sourceInScatteringAt`), the third only
- * in a march by slot (`rayMarchSlots.wgsl`), and the first in each of them.
+ * in a march by slot (`rayMarchSlots.wgsl`), and the first in each of them. The last, in a ray march
+ * alone (fix-r08-decked-air-opacity): a drawn surface keeps its forward lobes' light
+ * ({@link SurfaceLobes}) beside the correction alone, never on a bake's table, whose J re-emits the
+ * truncated lobe's diffuse field, the ground's light among it, into each direction (`thick/bake.ts`'s
+ * E, its first term), so that the lobes' light is the table's there.
  */
 const THICK_READ: ReadonlyArray<{
   readonly general: string;
@@ -1471,6 +1495,12 @@ const THICK_READ: ReadonlyArray<{
   {
     general: "let one = sourceAt(body, start, light, muSun, slot, local, phased);",
     thick: "let one = thickSourceAt(body, start, light, muSun, slot, local, phased, ray, dir, up);",
+    least: 0,
+    most: 1,
+  },
+  {
+    general: "let surfaceLobes = lobes && view.forward.w > 0.5;",
+    thick: "let surfaceLobes = lobes && view.forward.w > 0.5 && thickCorrectionOnly();",
     least: 0,
     most: 1,
   },
@@ -5083,7 +5113,14 @@ export class HillaireAtmosphere {
     }
     set("right", [right.x * tanX, right.y * tanX, right.z * tanX, 0]);
     set("upRay", [up.x * tanY, up.y * tanY, up.z * tanY, 0]);
-    set("forward", [forward.x, forward.y, forward.z, 0]);
+    // Its w, whether a drawn surface keeps its forward lobes' light ({@link SurfaceLobes}), the
+    // ray march's alone.
+    set("forward", [
+      forward.x,
+      forward.y,
+      forward.z,
+      this.#levers.surfaceLobes === "transmitted" ? 1 : 0,
+    ]);
     set("tables", [
       tableRadiusM(this.#figure),
       sizes.aerialPerspectiveReachM,
