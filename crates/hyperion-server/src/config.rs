@@ -27,6 +27,7 @@
 //! | `--surface-passes`       | `HYPERION_SURFACE_PASSES`          | the lesser of 4 and the workers less one, at least one |
 //! | `--serve-sky`            | `HYPERION_SERVE_SKY`               | on                                                     |
 //! | `--keep-skies`           | `HYPERION_KEEP_SKIES`              | on                                                     |
+//! | `--kept-skies-disk`      | `HYPERION_KEPT_SKIES_DISK_MB`      | 256 (MiB)                                              |
 //! | `--stop-on-stdin-close`  | `HYPERION_STOP_ON_STDIN_CLOSE`     | off                                                    |
 //!
 //! On Apple silicon `--num-workers` defaults to no more than its performance threads with a third
@@ -62,6 +63,11 @@
 //! not census cells, so it saves nothing for a sky asked from anywhere else, but a relaunched
 //! client's or a reopened view's repeated sky costs next to nothing. `--keep-skies=false` computes
 //! every sky afresh.
+//!
+//! `--kept-skies-disk` bounds the same final replies kept on disk, in `skies/` under the data
+//! directory, so that a sky asked again after a restart is answered from its file (rendering plan
+//! R06, R06.T11.n; the owner's priority, 2026-11-05). 0 keeps none there, and `--keep-skies=false`
+//! none anywhere.
 
 use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;
@@ -123,6 +129,8 @@ pub const ENV_SURFACE_PASSES: &str = "HYPERION_SURFACE_PASSES";
 pub const ENV_SERVE_SKY: &str = "HYPERION_SERVE_SKY";
 /// The variable that turns the kept skies off, or on, for `--keep-skies`.
 pub const ENV_KEEP_SKIES: &str = "HYPERION_KEEP_SKIES";
+/// The variable giving the kept skies' files' budget in MiB, for `--kept-skies-disk`.
+pub const ENV_KEPT_SKIES_DISK_MB: &str = "HYPERION_KEPT_SKIES_DISK_MB";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
 pub const ENV_STOP_ON_STDIN_CLOSE: &str = "HYPERION_STOP_ON_STDIN_CLOSE";
 
@@ -215,6 +223,11 @@ pub const DEFAULT_SKY_TABLES_MIB: usize = 160;
 /// (Ceres's), measured 2026-10-13 (R09.T17): the default keeps five Earths, or twenty bodies the
 /// size of Mars. An Earth's whole payload on the wire is 14.7 MB.
 pub const DEFAULT_SURFACE_CACHE_MIB: usize = 128;
+/// The kept skies' files' budget when `--kept-skies-disk` is not given, in MiB (rendering plan R06,
+/// R06.T11.n; lean, 2026-11-05): a sky at `N_max`'s 3 × 10⁵ stars is a file of some 7.6 MB, its
+/// 7.49 MB payload and its JSON, so this holds some 33 of them, and more of a camera's sky near the
+/// Sun, which lists some 7 × 10⁴ stars.
+pub const DEFAULT_KEPT_SKIES_DISK_MIB: usize = 256;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -257,6 +270,9 @@ const DEFAULT_SKY_CACHE: CacheBudget = CacheBudget {
 };
 const DEFAULT_SKY_TABLES: CacheBudget = CacheBudget {
     bytes: DEFAULT_SKY_TABLES_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_KEPT_SKIES_DISK: CacheBudget = CacheBudget {
+    bytes: DEFAULT_KEPT_SKIES_DISK_MIB * BYTES_PER_MIB,
 };
 const DEFAULT_SURFACE_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_SURFACE_CACHE_MIB * BYTES_PER_MIB,
@@ -377,6 +393,11 @@ pub struct ServerArgs {
         value_parser = BoolishValueParser::new().map(kept_skies),
     )]
     keep_skies: KeptSkies,
+
+    /// Budget of the kept skies' final replies on disk, under the data directory, in MiB; 0 keeps
+    /// none there
+    #[arg(long, value_name = "MIB", env = ENV_KEPT_SKIES_DISK_MB, default_value_t = DEFAULT_KEPT_SKIES_DISK)]
+    kept_skies_disk: CacheBudget,
 
     /// Stop gracefully when standard input closes, for a server run as another program's child
     #[arg(
@@ -558,6 +579,7 @@ impl From<ServerArgs> for ServerConfig {
             surface_passes,
             serve_sky,
             keep_skies,
+            kept_skies_disk,
             stop_on_stdin_close,
         } = args;
         let builder = Self::builder()
@@ -580,6 +602,7 @@ impl From<ServerArgs> for ServerConfig {
             .surface_cache_bytes(surface_cache.bytes)
             .sky_service(serve_sky)
             .kept_skies(keep_skies)
+            .kept_skies_disk_bytes(kept_skies_disk.bytes)
             .stdin_stop(stop_on_stdin_close);
         // Not given, the bound follows the workers (`ServerConfig::surface_passes`).
         match surface_passes {
@@ -661,6 +684,7 @@ pub struct ServerConfig {
     surface_passes: Option<NonZeroUsize>,
     sky_service: SkyService,
     kept_skies: KeptSkies,
+    kept_skies_disk_bytes: usize,
     global_list_warm_up: GlobalListWarmUp,
     feature_members: FeatureMembers,
     sky_feature_gas: SkyFeatureGas,
@@ -804,6 +828,16 @@ impl ServerConfig {
         self.kept_skies
     }
 
+    /// The kept skies' files' budget, bytes, under the data directory (rendering plan R06,
+    /// R06.T11.n): 0, keeping none there, where the kept skies are off.
+    #[must_use]
+    pub fn kept_skies_disk_bytes(&self) -> usize {
+        match self.kept_skies {
+            KeptSkies::Kept => self.kept_skies_disk_bytes,
+            KeptSkies::Off => 0,
+        }
+    }
+
     /// Whether an open starts its galaxy's global list and tube tables (plan 10, P10.T10.b).
     #[must_use]
     pub fn global_list_warm_up(&self) -> GlobalListWarmUp {
@@ -900,6 +934,7 @@ impl Default for ServerConfigBuilder {
                 surface_passes: None,
                 sky_service: SkyService::default(),
                 kept_skies: KeptSkies::default(),
+                kept_skies_disk_bytes: DEFAULT_KEPT_SKIES_DISK.bytes,
                 global_list_warm_up: GlobalListWarmUp::default(),
                 feature_members: FeatureMembers::default(),
                 sky_feature_gas: SkyFeatureGas::default(),
@@ -1073,6 +1108,14 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn kept_skies(mut self, kept: KeptSkies) -> Self {
         self.config.kept_skies = kept;
+        self
+    }
+
+    /// Budget of the kept skies' files under the data directory, bytes;
+    /// [`DEFAULT_KEPT_SKIES_DISK_MIB`] by default, and 0 keeps none there.
+    #[must_use]
+    pub fn kept_skies_disk_bytes(mut self, bytes: usize) -> Self {
+        self.config.kept_skies_disk_bytes = bytes;
         self
     }
 
@@ -1308,8 +1351,8 @@ mod tests {
 
     /// The address, the data directory, the workers, the surface passes run at once, the caches'
     /// budgets (cells, maps, systems, bodies, briefs, extinction maps, lines of sight, feature
-    /// cells, feature interiors, class cells, alert scans, the sky's cells, the sky tables and the
-    /// surface),
+    /// cells, feature interiors, class cells, alert scans, the sky's cells, the sky tables, the
+    /// surface and the kept skies' files),
     /// the sky's switch, the kept skies' switch, the feature members' gate and the stop on
     /// standard input.
     type Fields<'a> = (
@@ -1317,7 +1360,7 @@ mod tests {
         &'a Path,
         usize,
         usize,
-        [usize; 14],
+        [usize; 15],
         SkyService,
         KeptSkies,
         FeatureMembers,
@@ -1345,6 +1388,7 @@ mod tests {
                 config.sky_cache_bytes(),
                 config.sky_tables_bytes(),
                 config.surface_cache_bytes(),
+                config.kept_skies_disk_bytes(),
             ],
             config.sky_service(),
             config.kept_skies(),
@@ -1425,6 +1469,7 @@ mod tests {
                     0,
                     160 * 1024 * 1024,
                     128 * 1024 * 1024,
+                    256 * 1024 * 1024,
                 ],
                 SkyService::Served,
                 KeptSkies::Kept,
@@ -1476,7 +1521,9 @@ mod tests {
             "--surface-passes",
             "29",
             "--serve-sky=false",
-            "--keep-skies=no",
+            "--keep-skies",
+            "--kept-skies-disk",
+            "47",
             "--stop-on-stdin-close",
         ]);
         assert_eq!(
@@ -1500,10 +1547,11 @@ mod tests {
                     41 << 20,
                     17 << 20,
                     19 << 20,
-                    23 << 20
+                    23 << 20,
+                    47 << 20,
                 ],
                 SkyService::Unsupported,
-                KeptSkies::Off,
+                KeptSkies::Kept,
                 FeatureMembers::Served,
                 StdinStop::Watch,
             )
@@ -1555,9 +1603,18 @@ mod tests {
         );
     }
 
-    /// The kept skies' switch is on unless it is turned off, as the sky's own is (R06.T11.l).
+    /// The kept skies' switch is on unless it is turned off, as the sky's own is (R06.T11.l), and
+    /// off it keeps no file either, whatever their budget (R06.T11.n).
     #[test]
     fn the_skies_are_kept_unless_their_switch_is_off() {
+        assert_eq!(
+            config(&["--keep-skies=no", "--kept-skies-disk", "47"]).kept_skies_disk_bytes(),
+            0
+        );
+        assert_eq!(
+            config(&["--kept-skies-disk", "0"]).kept_skies(),
+            KeptSkies::Kept
+        );
         assert_eq!(config(&[]).kept_skies(), KeptSkies::Kept);
         assert_eq!(config(&["--keep-skies"]).kept_skies(), KeptSkies::Kept);
         assert_eq!(config(&["--keep-skies=on"]).kept_skies(), KeptSkies::Kept);
@@ -1620,6 +1677,7 @@ mod tests {
                 (Some("surface-passes"), Some("HYPERION_SURFACE_PASSES")),
                 (Some("serve-sky"), Some("HYPERION_SERVE_SKY")),
                 (Some("keep-skies"), Some("HYPERION_KEEP_SKIES")),
+                (Some("kept-skies-disk"), Some("HYPERION_KEPT_SKIES_DISK_MB")),
                 (
                     Some("stop-on-stdin-close"),
                     Some("HYPERION_STOP_ON_STDIN_CLOSE")
@@ -1895,6 +1953,7 @@ mod tests {
             .surface_passes(NonZeroUsize::new(3).unwrap())
             .sky_service(SkyService::Unsupported)
             .kept_skies(KeptSkies::Off)
+            .kept_skies_disk_bytes(150)
             .feature_members(FeatureMembers::Held)
             .stdin_stop(StdinStop::Watch)
             .build();
@@ -1905,7 +1964,10 @@ mod tests {
                 Path::new("/tmp/x"),
                 2,
                 3,
-                [10, 20, 30, 40, 50, 60, 70, 110, 120, 140, 130, 80, 90, 100],
+                // The kept skies' files' 150 bytes are none, the kept skies being off.
+                [
+                    10, 20, 30, 40, 50, 60, 70, 110, 120, 140, 130, 80, 90, 100, 0
+                ],
                 SkyService::Unsupported,
                 KeptSkies::Off,
                 FeatureMembers::Held,

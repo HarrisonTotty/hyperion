@@ -213,6 +213,12 @@ pub const SPRAY_FORCE_CACHE_BYTES: usize = 1 << 20;
 /// what its response's body holds, some 12 kB a layer of radii by ray.
 pub const SKY_REPLY_CACHE_BYTES: usize = 16 << 20;
 
+/// The kept skies' files' queue: the lookups and replies waiting for the store's thread
+/// (rendering plan R06, R06.T11.n). A sky's lookup waits for room; a reply that finds none is not
+/// written, which only costs its sky again after a restart. A reply is written in some 10 ms a MB,
+/// and skies end minutes apart, so four is room enough.
+pub const SKY_FILE_QUEUE: usize = 4;
+
 /// Most targets one `extinction` request may name (plan 07, P07.T10.c).
 ///
 /// A position target is some 130 bytes of JSON, so 64 of them, with the origin and the envelope,
@@ -270,6 +276,7 @@ mod tests {
             16 << 20,
             "16 MiB, two skies at N_max"
         );
+        assert_eq!(SKY_FILE_QUEUE, 4);
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);

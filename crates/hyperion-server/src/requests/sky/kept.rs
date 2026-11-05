@@ -11,6 +11,14 @@
 //!
 //! Only a final reply is kept, once made, so a sky asked again while the first is still under way
 //! computes its own. [`SKY_REPLY_CACHE_BYTES`] bounds what is kept: the last one or two skies.
+//!
+//! Each is also written to disk under the data directory ([`disk`], R06.T11.n), so that a sky asked
+//! again after a restart is answered from its file.
+
+mod disk;
+
+pub use disk::SkyFileCounters;
+pub(crate) use disk::{SKY_FILES_DIR, SkyReplyFiles, SkySettings};
 
 use std::mem::size_of;
 
@@ -85,6 +93,73 @@ impl SkyReplyKey {
             cone,
             exclude_system: exclude_system.clone(),
         }
+    }
+
+    /// Appends the key's bytes to `out`, every field in turn, little-endian, each optional one
+    /// after a byte saying whether it is there and each text after its length: what a kept sky's
+    /// file holds and is named by ([`disk`]).
+    pub(crate) fn write_bytes(&self, out: &mut Vec<u8>) {
+        let Self {
+            galaxy,
+            universe,
+            observer: (cell_ly, offset_m),
+            time: (seconds, nanos),
+            eye,
+            camera_limit_v,
+            n_max,
+            cone,
+            exclude_system,
+        } = self;
+        out.extend(galaxy.seed().to_le_bytes());
+        out.extend(galaxy.generator_version().get().to_le_bytes());
+        write_text(out, universe.as_str());
+        for cell in cell_ly {
+            out.extend(cell.to_le_bytes());
+        }
+        for bits in offset_m {
+            out.extend(bits.to_le_bytes());
+        }
+        out.extend(seconds.to_le_bytes());
+        out.extend(nanos.to_le_bytes());
+        write_option(out, eye.as_ref(), |out, eye| {
+            for bits in eye {
+                out.extend(bits.to_le_bytes());
+            }
+        });
+        write_option(out, camera_limit_v.as_ref(), |out, bits| {
+            out.extend(bits.to_le_bytes());
+        });
+        write_option(out, n_max.as_ref(), |out, n_max| {
+            out.extend(n_max.to_le_bytes());
+        });
+        write_option(out, cone.as_ref(), |out, (axis, half_angle)| {
+            for bits in axis {
+                out.extend(bits.to_le_bytes());
+            }
+            out.extend(half_angle.to_le_bytes());
+        });
+        write_option(out, exclude_system.as_ref(), |out, system| {
+            write_text(out, system.as_str());
+        });
+    }
+}
+
+/// Appends `text` after its length in bytes, a `u32`.
+fn write_text(out: &mut Vec<u8>, text: &str) {
+    let len =
+        u32::try_from(text.len()).expect("an ID's hex digits are far fewer than a u32 counts");
+    out.extend(len.to_le_bytes());
+    out.extend(text.as_bytes());
+}
+
+/// Appends 0 where `value` is `None`, and otherwise 1 and what `write` appends of it.
+fn write_option<T>(out: &mut Vec<u8>, value: Option<&T>, write: impl FnOnce(&mut Vec<u8>, &T)) {
+    match value {
+        Some(value) => {
+            out.push(1);
+            write(out, value);
+        }
+        None => out.push(0),
     }
 }
 
@@ -207,7 +282,7 @@ mod tests {
     use super::*;
 
     /// A sky near the Sun at the epoch to a camera's V 10, with an eye.
-    fn request() -> SkyRequest {
+    pub(super) fn request() -> SkyRequest {
         SkyRequest {
             universe: UniverseIdHex::from_u64(0x0123_4567_89ab_cdef),
             observer: GalacticPosition {
@@ -230,12 +305,12 @@ mod tests {
         }
     }
 
-    fn galaxy() -> GalaxyKey {
+    pub(super) fn galaxy() -> GalaxyKey {
         GalaxyKey::new(42, GeneratorVersion::new(24))
     }
 
     /// The request with one field changed, for each field and each part of one.
-    fn each_field_changed() -> Vec<(&'static str, GalaxyKey, SkyRequest)> {
+    pub(super) fn each_field_changed() -> Vec<(&'static str, GalaxyKey, SkyRequest)> {
         let base = request();
         let with = |what, change: fn(&mut SkyRequest)| {
             let mut changed = base.clone();
@@ -316,12 +391,39 @@ mod tests {
         assert_ne!(one, cone([1.0, 0.0, 0.0], 5.5), "the half-angle");
     }
 
+    /// The key's bytes, which a kept sky's file holds, differ wherever the keys do: for each
+    /// changed field, and for an option moved between two fields of one length.
+    #[test]
+    fn the_keys_bytes_differ_for_each_field() {
+        let bytes = |galaxy, request: &SkyRequest| {
+            let mut out = Vec::new();
+            SkyReplyKey::of(galaxy, request).write_bytes(&mut out);
+            out
+        };
+        let base = bytes(galaxy(), &request());
+        assert_eq!(bytes(galaxy(), &request()), base);
+        let mut seen = HashSet::from([base.clone()]);
+        for (what, galaxy, request) in &each_field_changed() {
+            assert!(seen.insert(bytes(*galaxy, request)), "{what}");
+        }
+        let moved = SkyRequest {
+            camera_limit_v: None,
+            n_max: None,
+            ..request()
+        };
+        let only_camera = SkyRequest {
+            n_max: None,
+            ..request()
+        };
+        assert_ne!(bytes(galaxy(), &moved), bytes(galaxy(), &only_camera));
+    }
+
     /// The rays each layer's radii are stated along, as the served caps' lattice has them.
     const RAYS: usize = 1_536;
 
     /// A final reply of `listed` stars and the full band: its payload of `listed` star records and
     /// six faces of 64² texels, and each layer's radii along every ray, at 17 digits.
-    fn answer(listed: u32) -> Answer {
+    pub(super) fn answer(listed: u32) -> Answer {
         let stars = usize::try_from(listed).unwrap() * SKY_STAR_BYTES;
         let band = 6 * 64 * 64 * SKY_TEXEL_BYTES;
         let payload = BulkPayload::new(Bytes::from(vec![7_u8; stars + band])).unwrap();

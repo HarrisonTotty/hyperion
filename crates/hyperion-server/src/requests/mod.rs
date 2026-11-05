@@ -30,7 +30,8 @@ mod system;
 mod universe;
 mod viewer;
 
-pub(crate) use sky::SkyReplyCache;
+pub use sky::SkyFileCounters;
+pub(crate) use sky::{SKY_FILES_DIR, SkyReplyCache, SkyReplyFiles, SkySettings};
 
 pub(crate) use self::system::bodies_of;
 pub(crate) use self::universe::openable_universe;

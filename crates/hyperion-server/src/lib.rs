@@ -54,7 +54,9 @@ use crate::limits::{
     GLOBAL_LIST_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY, SPRAY_FORCE_CACHE_BYTES,
     TUBE_TABLE_CACHE_BYTES,
 };
-use crate::requests::{Handler, Handlers, SkyReplyCache};
+use crate::requests::{
+    Handler, Handlers, SKY_FILES_DIR, SkyReplyCache, SkyReplyFiles, SkySettings,
+};
 use crate::scene::SceneService;
 use crate::stats::{OutboundStats, RequestStats};
 use crate::surface::SurfaceService;
@@ -65,6 +67,7 @@ pub use config::{
     FeatureMembers, GlobalListWarmUp, KeptSkies, ServerArgs, ServerConfig, ServerConfigBuilder,
     SkyFeatureGas, SkyService,
 };
+pub use requests::SkyFileCounters;
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
 
 /// Address the server listens on when neither `--address` and `--port` nor their variables are
@@ -184,6 +187,10 @@ pub(crate) struct AppState {
     /// The last skies' final replies, which a sky asked again exactly is answered with, unless the
     /// switch turns them off (rendering plan R06, R06.T11.l).
     pub(crate) sky_replies: SkyReplyCache,
+    /// The same final replies in files under the data directory, which a sky asked again after a
+    /// restart is answered with, unless their budget is 0 or the switch turns them off (rendering
+    /// plan R06, R06.T11.n).
+    pub(crate) sky_files: SkyReplyFiles,
     /// Each body's coarse surface field, computed once on the pool and kept in the configured byte
     /// budget (rendering plan R09, R09.T17; Design note 19).
     pub(crate) surface: SurfaceService,
@@ -304,6 +311,7 @@ impl Server {
                 sky_tables,
                 sky_cells,
                 sky_replies: SkyReplyCache::new(config.kept_skies()),
+                sky_files: sky_files(&config),
                 surface,
                 contacts: alerts::UniverseContacts::new(),
                 alert_scans: alerts::AlertScans::new(config.alert_cache_bytes()),
@@ -332,8 +340,9 @@ impl Server {
     /// so this does all three. A connection opened meanwhile is refused. Each connection has
     /// [`CLOSE_TIMEOUT`](limits::CLOSE_TIMEOUT) to finish closing, so a client that has stopped
     /// reading cannot hold this up. The sky tables' builds and the global lists' warm-ups that
-    /// opens started, and the coarse passes that prefetches started, are given up. Then the CPU
-    /// pool stops: queued jobs are dropped and the workers finish the jobs in hand.
+    /// opens started, and the coarse passes that prefetches started, are given up, and the kept
+    /// skies' files still queued are written. Then the CPU pool stops: queued jobs are dropped and
+    /// the workers finish the jobs in hand.
     ///
     /// # Errors
     ///
@@ -346,6 +355,8 @@ impl Server {
         self.state.surface.stop_prefetching();
         // Nor do the global lists' warm-ups started at opens.
         self.state.global_lists.stop_warming();
+        // The kept skies' files queued are written before the process can end.
+        self.state.sky_files.close().await;
         self.state
             .pool
             .shutdown()
@@ -495,6 +506,7 @@ fn log_start(config: &ServerConfig) {
         surface_passes = config.surface_passes().get(),
         sky_service = ?config.sky_service(),
         kept_skies = ?config.kept_skies(),
+        kept_skies_disk_mib = config.kept_skies_disk_bytes() / (1 << 20),
         extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
         sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
         alert_cache_mib = config.alert_cache_bytes() / (1 << 20),
@@ -504,6 +516,26 @@ fn log_start(config: &ServerConfig) {
         feature_members = ?config.feature_members(),
         "server started"
     );
+}
+
+/// The kept skies' files under `config`'s data directory, in its budget, keyed by its sky
+/// settings (rendering plan R06, R06.T11.n); none, and no thread for them, where the sky is not
+/// served.
+#[must_use]
+fn sky_files(config: &ServerConfig) -> SkyReplyFiles {
+    if config.sky_service() == SkyService::Unsupported {
+        return SkyReplyFiles::off();
+    }
+    let settings = SkySettings {
+        caps: config.sky_caps(),
+        members: config.feature_members(),
+        gas: config.sky_feature_gas(),
+    };
+    SkyReplyFiles::new(
+        config.data_dir().join(SKY_FILES_DIR),
+        u64::try_from(config.kept_skies_disk_bytes()).unwrap_or(u64::MAX),
+        &settings,
+    )
 }
 
 /// The caches of the systems' stars and of the range briefs' models, in the budgets `config`

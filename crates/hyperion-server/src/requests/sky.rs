@@ -34,9 +34,10 @@
 //! The server answers `sky` only behind its switch, `--serve-sky` (R06.T11.c), on by default since
 //! rendering plan R13's R13.T2; off (`--serve-sky=false`), the request never reaches this handler.
 //!
-//! The last skies' final replies are kept ([`kept`], R06.T11.l), and a sky asked again exactly as
-//! one of them is answered with its kept reply alone, with no sky job on the pool, unless the server
-//! is started with `--keep-skies=false`.
+//! The last skies' final replies are kept ([`kept`], R06.T11.l), in memory and in files under the
+//! data directory (R06.T11.n), and a sky asked again exactly as one of them, before or after a
+//! restart, is answered with its kept reply alone, with no sky job on the pool, unless the server
+//! is started with `--keep-skies=false` (or, for the files alone, `--kept-skies-disk 0`).
 //!
 //! Each sky logs at `info` that it started, its first reply and its final reply, or that it ended
 //! without one, with the request's wall time and the time its own jobs ran on the pool's workers,
@@ -45,7 +46,8 @@
 
 mod kept;
 
-pub(crate) use kept::SkyReplyCache;
+pub use kept::SkyFileCounters;
+pub(crate) use kept::{SKY_FILES_DIR, SkyReplyCache, SkyReplyFiles, SkySettings};
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -135,7 +137,8 @@ const AXIS_LENGTH_TOLERANCE: f64 = 1e-6;
 /// before it, and the census runs on meanwhile.
 ///
 /// A sky asked exactly as one whose final reply is kept is answered with that reply alone, once its
-/// request is checked, and runs no sky job (R06.T11.l); a final reply made here is kept.
+/// request is checked, and runs no sky job (R06.T11.l): from memory, or else from its file, kept
+/// before a restart (R06.T11.n). A final reply made here is kept in both.
 ///
 /// # Errors
 ///
@@ -165,6 +168,14 @@ pub(crate) async fn answer(
         );
         return Ok(answer);
     }
+    if let Some(answer) = state.sky_files.get(&kept).await {
+        tracing::info!(
+            wall_s = seconds(started),
+            "a sky is answered with its final reply kept on disk"
+        );
+        state.sky_replies.keep(kept, answer.clone());
+        return Ok(answer);
+    }
     let mut end = SkyEnd {
         token: &token,
         started,
@@ -174,6 +185,7 @@ pub(crate) async fn answer(
     match &answered {
         Ok(answer) => {
             end.ended = Ended::Replied;
+            state.sky_files.keep(&kept, answer);
             if state.sky_replies.is_kept() {
                 state.sky_replies.keep(kept, answer.clone());
             }

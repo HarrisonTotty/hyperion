@@ -37,7 +37,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use common::{BinaryHeader, Frame, TestClient, TestServer};
+use common::{BinaryHeader, Frame, RawFrame, TestClient, TestServer};
 use hyperion_protocol::{
     ConeDto, ErrorCode, EyeDto, GalacticPosition, HostDiscDto, MAX_SKY_STARS, MassLayer,
     OpenUniverseRequest, RequestBody, RequestError, RequestId, ResponseBody, SKY_STAR_BYTES,
@@ -1234,6 +1234,120 @@ async fn a_repeated_identical_sky_is_its_kept_reply_and_queues_no_census_job() {
     assert_eq!(computed.sky_replies().entries(), 2);
     client.close().await;
     server.stop().await;
+}
+
+/// A sky's final reply as the server sent it, raw: its body's JSON text, after the envelope's ID,
+/// and its payload, with how many replies came, the partial ones included.
+struct RawSky {
+    body: String,
+    payload: Vec<u8>,
+    replies: usize,
+}
+
+/// The answer to the sky `id`, which the client sent and must be served, as [`RawSky`].
+async fn raw_replies_to(client: &mut TestClient, id: RequestId) -> RawSky {
+    let (mut payload, mut replies) = (Vec::new(), 0);
+    loop {
+        match client.next_raw_frame().await {
+            RawFrame::Binary(header, bytes) => {
+                assert_eq!(header.request, id.0, "{header:?}");
+                payload.extend(bytes);
+            }
+            RawFrame::Text(text) => {
+                match serde_json::from_str(&text).expect("the server sends valid messages") {
+                    ServerMessage::PartialResponse { id: answered, .. } if answered == id => {
+                        replies += 1;
+                        payload.clear();
+                    }
+                    ServerMessage::Response { id: answered, .. } if answered == id => {
+                        let envelope = format!(r#"{{"type":"response","id":{},"body":"#, id.0);
+                        let body = text
+                            .strip_prefix(&envelope)
+                            .expect("the envelope's type and ID lead it")
+                            .to_owned();
+                        return RawSky {
+                            body,
+                            payload,
+                            replies: replies + 1,
+                        };
+                    }
+                    other => panic!("expected the sky's chunks and responses, got {other:?}"),
+                }
+            }
+        }
+    }
+}
+
+/// A client of `server` with the saved universe `universe` opened, and where the server serves the
+/// sky its galaxy's sky tables built, as [`opened`] leaves a created one.
+async fn reopened(server: &TestServer, universe: &UniverseIdHex) -> TestClient {
+    let mut client = server.connected().await;
+    let body = RequestBody::OpenUniverse(OpenUniverseRequest {
+        universe: universe.clone(),
+    });
+    match client.request(body).await {
+        Ok(ResponseBody::OpenUniverse(_)) => {}
+        other => panic!("expected the opened universe, got {other:?}"),
+    }
+    if server.stats().sky_tables().cache().misses() > 0 {
+        server
+            .stats_until("the open's sky tables are built", |stats| {
+                stats.sky_tables().builds() > 0
+            })
+            .await;
+    }
+    client
+}
+
+/// A sky asked again after a restart is answered from its file, kept under the data directory
+/// (R06.T11.n): its JSON and payload byte for byte the first's, with no sky job on the pool.
+#[tokio::test]
+async fn a_sky_asked_again_after_a_restart_is_answered_from_its_file_byte_for_byte() {
+    let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a small forced cap")
+        .with_band_spec(COARSE_BAND);
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let server = TestServer::start_with(sky_config(data_dir.path(), caps, 2).build()).await;
+    let (mut client, universe) = opened(&server).await;
+    let id = client.send_request(RequestBody::Sky(sky(&universe))).await;
+    let first = raw_replies_to(&mut client, id).await;
+    server
+        .stats_until("the sky's final reply is written", |stats| {
+            stats.sky_files().written() == 1
+        })
+        .await;
+    client.close().await;
+    server.stop().await;
+
+    let restarted = TestServer::start_with(sky_config(data_dir.path(), caps, 2).build()).await;
+    let mut client = reopened(&restarted, &universe).await;
+    let before = restarted.stats();
+    let id = client.send_request(RequestBody::Sky(sky(&universe))).await;
+    let again = raw_replies_to(&mut client, id).await;
+    let after = restarted.stats();
+    assert_eq!(again.replies, 1, "the kept final reply alone");
+    assert_eq!(again.body, first.body, "the JSON, byte for byte");
+    assert_eq!(again.payload, first.payload, "the payload, byte for byte");
+    assert!(
+        again.payload.len() > 1_000,
+        "the stars and the band: {}",
+        again.payload.len()
+    );
+    let (pool, files) = (after.pool(), after.sky_files());
+    assert_eq!(
+        (pool.completed(), pool.queued_bulk(), pool.running()),
+        (before.pool().completed() + 1, 0, 0),
+        "the reply's frame alone, serialised on the pool: {:?}, then {pool:?}",
+        before.pool()
+    );
+    assert_eq!(
+        (files.hits(), files.entries(), after.sky_replies().entries()),
+        (1, 1, 1),
+        "read from its file and kept in memory: {files:?}"
+    );
+
+    client.close().await;
+    restarted.stop().await;
 }
 
 /// Where the log test's subscriber writes: a buffer it shares.

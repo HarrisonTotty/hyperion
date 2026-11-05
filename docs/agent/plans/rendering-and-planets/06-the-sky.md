@@ -2842,6 +2842,18 @@ the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a 
     `tests/sky.rs`.
   - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
 
+- **R06.T11.n The kept skies on disk (new; the owner's priority, 2026-11-05; no output moves).** A
+  restart lost the kept skies, and near the Sun a camera's sky is some 2.5 × 10⁴ CPU-s. Each final
+  reply is also written under the data directory (`skies/`), keyed by `SkyReplyKey`, the build's
+  generator and protocol versions and the server's sky settings, in `--kept-skies-disk` (256 MiB),
+  its I/O on a thread of its own; a bad or mismatched file is a miss, never an error.
+  - **Tests:** a restart answered from its file with the same JSON and payload bytes; a miss for
+    each key field, version and setting; a bad file removed; the budget, least recently used first;
+    the switches.
+  - **Files:** `crates/hyperion-server/src/requests/sky{,/kept,/kept/disk}.rs`, `config.rs`,
+    `limits.rs`, `stats.rs`, `lib.rs`, `bulk.rs`, `tests/{sky,common/mod}.rs`, the root README.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -10047,3 +10059,13 @@ CensusCost)`.
   names the streams of `streams_seen_in` whose kept tube envelopes the sky's reach meets, or that
   keep none; the handler's `streams_by_step` takes the held list's models, so a sky builds no table
   whose kept envelope it misses. A cold galaxy's first sky still builds every table its shells meet.
+- **Deviations in T11.n, as built (2026-11-05).**
+  - `ServerConfigBuilder::kept_skies_disk_bytes`, `ServerConfig::kept_skies_disk_bytes()` (0 under
+    `KeptSkies::Off`), `ServerStats::sky_files() -> SkyFileCounters` (exported). A test that must
+    compute one sky twice across a restart sets `kept_skies_disk_bytes(0)`.
+  - `Server::shutdown` writes the files still queued; a reply that finds the queue
+    (`limits::SKY_FILE_QUEUE`, 4) full is not written. No file is synced; a torn one fails its
+    checksum and is removed.
+  - The key's settings are `SkyCaps`, `FeatureMembers` and `SkyFeatureGas` by their `Debug` form: a
+    setting that comes to change a final reply must join `SkySettings` (lean, 2026-11-05).
+  - `tests/common`: `RawFrame`, `TestClient::next_raw_frame`.

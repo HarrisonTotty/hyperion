@@ -12,6 +12,7 @@ use crate::cache::LruCounters;
 use crate::compute::{
     BodyCacheCounters, GalaxyCounters, PoolCounters, SkyCellCounters, SkyTablesCounters,
 };
+use crate::requests::SkyFileCounters;
 use crate::surface::SurfaceCounters;
 
 /// A snapshot of the server's activity.
@@ -30,6 +31,7 @@ pub struct ServerStats {
     sky_cells: SkyCellCounters,
     sky_tables: SkyTablesCounters,
     sky_replies: LruCounters,
+    sky_files: SkyFileCounters,
     surface: SurfaceCounters,
     extinction_maps: LruCounters,
     sightlines: LruCounters,
@@ -59,6 +61,7 @@ impl ServerStats {
             sky_cells: state.sky_cells.counters(),
             sky_tables: state.sky_tables.counters(),
             sky_replies: state.sky_replies.counters(),
+            sky_files: state.sky_files.counters(),
             surface: state.surface.counters(),
             extinction_maps: state.extinction_maps.counters(),
             sightlines: state.sightlines.counters(),
@@ -159,6 +162,14 @@ impl ServerStats {
     #[must_use]
     pub fn sky_replies(&self) -> LruCounters {
         self.sky_replies
+    }
+
+    /// The kept skies' files' contents and use, under the data directory: the same final replies,
+    /// which a sky asked again after a restart is answered with (rendering plan R06, R06.T11.n).
+    /// All zeros with `--keep-skies=false`, `--kept-skies-disk 0` or `--serve-sky=false`.
+    #[must_use]
+    pub fn sky_files(&self) -> SkyFileCounters {
+        self.sky_files
     }
 
     /// The surface service's cache's contents and use, including its byte budget, and the coarse

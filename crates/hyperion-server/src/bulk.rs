@@ -126,8 +126,8 @@ impl BulkPayload {
         self.bytes.len()
     }
 
-    /// The payload's bytes, whole, for a test to decode.
-    #[cfg(test)]
+    /// The payload's bytes, whole: what a kept sky's file holds (rendering plan R06, R06.T11.n),
+    /// and what a test decodes.
     #[must_use]
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes

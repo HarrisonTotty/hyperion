@@ -171,6 +171,7 @@ An option given on the command line wins over its variable.
 | `--surface-passes`      | `HYPERION_SURFACE_PASSES`      | the lesser of 4 and the workers less one, at least one | Coarse surface passes run at once            |
 | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                                     | Serve `sky` requests                         |
 | `--keep-skies`          | `HYPERION_KEEP_SKIES`          | on                                                     | Answer a sky asked again from memory         |
+| `--kept-skies-disk`     | `HYPERION_KEPT_SKIES_DISK_MB`  | `256`                                                  | The kept skies on disk, in MiB               |
 | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                                    | Stop gracefully when standard input closes   |
 
 On Apple silicon `--num-workers` defaults to no more than its performance threads with a third of
@@ -206,9 +207,16 @@ reopened view's sky costs next to nothing, while a sky asked from anywhere else 
 before (rendering plan R06, R06.T11.l). `--keep-skies=false` computes every sky afresh. It takes
 the same values as `--serve-sky`.
 
+`--kept-skies-disk` keeps the same final replies on disk too, up to 256 MiB, some 33 skies at the
+most stars a sky lists, in `skies/` under the data directory, so that a sky asked again after a
+restart is answered from its file (R06.T11.n). The least recently used go first. A file that is
+torn, or was written by another generator or protocol version or under other sky settings, is
+never read; `0` keeps none on disk, and `--keep-skies=false` none anywhere.
+
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;
-nothing generated is saved. To delete a universe, stop the server and remove its directory.
+nothing generated is saved but the kept skies, in `skies/`, which can be removed at any time. To
+delete a universe, stop the server and remove its directory.
 
 ### Client configuration
 

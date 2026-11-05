@@ -477,6 +477,16 @@ pub enum Frame {
     Binary(BinaryHeader, Vec<u8>),
 }
 
+/// A frame from the server, of either kind, as it arrived: for a test that pins an answer byte for
+/// byte rather than through a decoder.
+#[derive(Debug)]
+pub enum RawFrame {
+    /// A text frame's text.
+    Text(String),
+    /// A bulk frame: its header, read and checked, and its payload.
+    Binary(BinaryHeader, Vec<u8>),
+}
+
 /// A WebSocket client speaking `hyperion-protocol`.
 #[derive(Debug)]
 pub struct TestClient {
@@ -574,6 +584,26 @@ impl TestClient {
                 Message::Binary(bytes) => {
                     let (header, payload) = BinaryHeader::split(&bytes);
                     return Frame::Binary(header, payload);
+                }
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("unexpected frame {other:?}"),
+            }
+        }
+    }
+
+    /// The next frame from the server as it arrived, a text or a bulk frame, skipping WebSocket
+    /// pings and pongs.
+    pub async fn next_raw_frame(&mut self) -> RawFrame {
+        loop {
+            let frame = patiently("waiting for a frame", self.socket.next())
+                .await
+                .expect("the server closed the connection")
+                .expect("the connection is healthy");
+            match frame {
+                Message::Text(text) => return RawFrame::Text(text.to_string()),
+                Message::Binary(bytes) => {
+                    let (header, payload) = BinaryHeader::split(&bytes);
+                    return RawFrame::Binary(header, payload);
                 }
                 Message::Ping(_) | Message::Pong(_) => {}
                 other => panic!("unexpected frame {other:?}"),
