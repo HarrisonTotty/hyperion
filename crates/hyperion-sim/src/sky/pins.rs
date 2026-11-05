@@ -8,6 +8,10 @@
 //! natively and compared by `just test-wasm-fast` on wasm32-wasip1. It is the cross-target pin of
 //! the march, the eye's cut and the census, which no golden held on any target before it.
 //!
+//! A second golden pins the fixture's luminosity tables and its features' gas index whole, by the
+//! words a store keeps them in ([`tables_and_gas_index_words_golden`]), so that a value of either
+//! cannot move without failing it.
+//!
 //! The module is its own so that the ruling's filter of the sky's table modules
 //! (`sky::(band|limits|caps|dgl|luminosity|census::(cell|query))::`), whose tests `ci`'s wasip1 run
 //! is to leave to the daily slow pass once the filter lands, never reaches it.
@@ -18,8 +22,11 @@ use hyperion_testkit::float::bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::{GoldenWriter, f32_digest};
 
+use crate::galaxy::features::catalogue::NoFeatureCache;
 use crate::galaxy::features::centre::testing::milky_way_galaxy;
+use crate::galaxy::features::gas_overlay::FeatureGasIndex;
 use crate::units::{LightYears, Magnitudes};
+use crate::words::WordSink;
 
 use super::EyeObserver;
 use super::band::{BandSpec, BandTexel, CompleteTo, CubeFace, march_rows, sum_rows};
@@ -29,7 +36,85 @@ use super::census::{
     merge_shells,
 };
 use super::limits::{EyeCutSteps, PRE_PASS_SPEC, pre_pass_rows};
-use super::testing::{SUN_LY, milky_way_context, sun_illumination, sun_observer};
+use super::luminosity::LuminosityTables;
+use super::testing::{SUN_LY, milky_way_context, milky_way_tables, sun_illumination, sun_observer};
+
+/// The fixture's luminosity tables and its features' gas index, by their words
+/// ([`LuminosityTables::write_words`], [`FeatureGasIndex::write_words`]): each one's format, its
+/// count of words and their digest, pinned bit for bit for every target (perf-sky-tables-on-disk).
+///
+/// The server keeps a galaxy's tables and index on disk under a key of the generator version and
+/// these formats, with no build ID, so a value that moved without a version bump would stay in a
+/// warm data directory under the same key. Here every value and every list's length is pinned, so
+/// such a move fails this test, and its bless asks for the bump that renames the files. A list's
+/// capacity, which only charges a cache, is left out ([`WordDigest`]). The tables are the shared
+/// fixture's (`milky_way_tables`); the index is built here, some 7 s of a test build.
+#[test]
+fn tables_and_gas_index_words_golden() {
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    w.line(
+        "the fixture's luminosity tables and features' gas index by their words, each value's \
+         IEEE 754 bits, each list's length and no capacity: FNV-1a 64 over each word's eight \
+         little-endian bytes",
+    );
+    let mut tables = WordDigest::new();
+    milky_way_tables().write_words(&mut tables);
+    w.line(&format!("tables.format = {}", LuminosityTables::FORMAT));
+    w.line(&format!("tables.words = {}", tables.words));
+    w.u64_hex("tables.digest", tables.hash);
+    let mut index = WordDigest::new();
+    FeatureGasIndex::build(milky_way_galaxy(), &NoFeatureCache).write_words(&mut index);
+    w.line(&format!("index.format = {}", FeatureGasIndex::FORMAT));
+    w.line(&format!("index.words = {}", index.words));
+    w.u64_hex("index.digest", index.hash);
+    golden!("sky/tables_words", &w.finish());
+}
+
+/// A table's words digested as a store keeps them, but for the lists' capacities: FNV-1a 64 over
+/// each word's eight little-endian bytes, a float's its IEEE 754 bits, in order, and their count.
+#[derive(Debug)]
+struct WordDigest {
+    hash: u64,
+    words: u64,
+}
+
+impl WordDigest {
+    /// FNV-1a 64's offset basis.
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    /// FNV-1a 64's prime.
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    fn new() -> Self {
+        Self {
+            hash: Self::OFFSET,
+            words: 0,
+        }
+    }
+}
+
+impl WordSink for WordDigest {
+    fn word(&mut self, word: u64) {
+        self.hash = word.to_le_bytes().iter().fold(self.hash, |h, &b| {
+            (h ^ u64::from(b)).wrapping_mul(Self::PRIME)
+        });
+        self.words += 1;
+    }
+
+    /// `value`'s bits.
+    ///
+    /// # Panics
+    ///
+    /// If `value` is a NaN, whose bits are unspecified ([`bits`]).
+    fn float(&mut self, value: f64) {
+        self.word(bits(value));
+    }
+
+    /// The length alone: a list's capacity charges a cache, and pins no value.
+    fn lengths(&mut self, len: usize, _capacity: usize) {
+        self.count(len);
+    }
+}
 
 /// How far the pinned census looks, ly: every layer's cap is forced to it.
 ///
