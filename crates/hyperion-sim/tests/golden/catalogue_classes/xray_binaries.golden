@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 cell [-4, -4, -1] bound = 0x3e4ed4859a07c47a  # 1.4356413669823258e-8
 cell [-4, -4, -1] candidates 1 entries 1
 cell [-4, -4, -1] fc57c7c7f0000000 component 8 kind NeutronStarTransient donor attempt 0

@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 world earth_like
 body
 radius = 0x41584dae00000000  # 6371000.0

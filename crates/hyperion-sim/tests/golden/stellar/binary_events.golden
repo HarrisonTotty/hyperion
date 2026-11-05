@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 nova, from scan marks Nova subject Body(BodyId { system: SystemId(0xfc67c94800000000), body_index: 0 }) bin -15 number 0 onset -7880957571398 + 540395218 ns
 nova, from scan marks Nova peak at 86400 + 0 ns, duration 460800 + 0 ns
 nova, from scan marks Nova peak = 0x46a9ddd2f543606c  # 2.6231747618200485e32

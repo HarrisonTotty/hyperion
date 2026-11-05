@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 near the Sun (0, 26,000, 68) ly, cut V 7.95, 192 rays at 12 steps a decade
 V_P 4.5 A radius = 0x40282e65584fcf30  # 12.090616950743055
 V_P 4.5 A rule bound = 0x40d124d97e69a91a  # 17555.398340621126

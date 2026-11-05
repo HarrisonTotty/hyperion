@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 # galaxy mw, 0308d00000000000
 # sun.D: layer D cell (0, 406, 0), 64 ly
 sun.D.bound_per_ly3 = 0x3f10194405f0d724  # 6.141164475156592e-5

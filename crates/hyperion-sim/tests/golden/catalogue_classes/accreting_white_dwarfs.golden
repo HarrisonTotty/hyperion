@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 ACCRETING_WHITE_DWARF cell [-3, 50, 0] bound = 0x3e5071ae250ee41e  # 1.531472754491105e-8
 ACCRETING_WHITE_DWARF cell [-3, 50, 0] candidates 5 entries 5
 ACCRETING_WHITE_DWARF cell [-3, 50, 0] fc67db2800000000 component 3 donor MainSequence

@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 # The Milky Way fixture's centre motion (plan 09, P09.T28.b.a).
 influence_radius_ly = 0x401cbd9d1e8e680c  # 7.185169675294684
 r[0].ly = 0x3f1a36e2eb1c432d  # 0.0001

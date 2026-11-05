@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 red_giant 0x4200ecd200000003: OldThinDisc, 1 stars
 fe_h = 0x3fb0536aeeff0199  # 0.0637728532301537
 age_at_epoch_yr = 0x4200e53a3fea5d43  # 9070659581.295538
@@ -1040,7 +1040,7 @@ figure: NotApplicable
 photometry: NotApplicable
 envelope: NotApplicable
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), Present
-mass_mearth = 0x3f125dded5f478c7  # 7.006332952072806e-5
+mass_mearth = 0x3f125dd937f1f023  # 7.006300255513234e-5
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -1051,7 +1051,7 @@ main_inner_m = 0x4246f12ef3e195b3  # 197071333315.16953
 main_outer_m = 0x4252358c7b9651a6  # 312831241817.27576
 size_slope = 0x400696592bfe9d47  # 2.8234122693135393
 largest_diameter_m = 0x412219ca17381d04  # 593125.0453499858
-fractional_luminosity = 0x3e21b993c47c06cf  # 2.0634512188122323e-9
+fractional_luminosity = 0x3e21b98e58b8bf54  # 2.0634415892733337e-9
 members: [e101, e102]
 surface: NotApplicable
 hooks: NotApplicable
@@ -1060,7 +1060,7 @@ figure: NotApplicable
 photometry: NotApplicable
 envelope: NotApplicable
 body e101 BELT 1-1: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
-mass_mearth = 0x3f09e5794428d40c  # 4.93934280893297e-5
+mass_mearth = 0x3f09e56edd8bab4b  # 4.939312538517498e-5
 a_m = 0x4248d07a085cd523  # 213153747129.66513
 e = 0x3fc81b9fcb367af4  # 0.18834302351475396
 i_rad = 0x3ff268a1528cb358  # 1.1505444740862085
@@ -1077,9 +1077,9 @@ n_rate_rad_s2 = 0xbb38850658f5e443  # -2.0282160995626993e-23
 x_m = 0xc23d5755ae58d891  # -126019284568.84596
 y_m = 0x42469976b0f05d5e  # 194127946208.72943
 z_m = 0xc237e4c391aefc7c  # -102622269870.98627
-radius_rearth = 0x3fad3aa271c42ae5  # 0.05708797110317735
-density_kg_m3 = 0x4096deda18733ee5  # 1463.7129838950289
-gravity_m_s2 = 0x3fc30cfeff4e14a9  # 0.14883410898270213
+radius_rearth = 0x3fad3a9efd0b991c  # 0.057087868108100376
+density_kg_m3 = 0x4096ded905b79a40  # 1463.7119358718774
+gravity_m_s2 = 0x3fc30cfbd9d16ded  # 0.14883373389862645
 class: Rocky
 iron = 0x3faedf14a206dfe1  # 0.06029571988932481
 rock = 0x3fee120eb5df9202  # 0.9397042801106752
@@ -1091,7 +1091,7 @@ rings: NotModelled
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0x8a8b87a716a91fdd
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 7043849806068088832, nanos: 0 })
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 7043844557694563328, nanos: 0 })
 pole_x = 0x3febcc94d9ed1832  # 0.8687233215685011
 pole_y = 0x3fdd4dced01bfe56  # 0.4578740150754802
 pole_z = 0x3fc82cd4d8ea429c  # 0.18886814681583963
@@ -1105,19 +1105,19 @@ obliquity_rad = 0x3fd6ff7924347b58  # 0.3593428472103617
 initial_rate_rad_s = 0x3f1b5d3fc0ff4812  # 0.0001043863451280216
 locked_rate_rad_s = 0x3e885751be75859a  # 1.81355260790581e-7
 age_at_epoch_s = 0x438fc7aa1c6205bf  # 2.8624824680269206e17
-locking_age_s = 0x43d96e6f55ec894e  # 7.330098052870781e18
+locking_age_s = 0x43d96e6e246dad2b  # 7.330092804497255e18
 clock_period_s = 0x4198c7d291e55b83  # 103937188.4739819
 clock_mean_anomaly_at_epoch_rad = 0x3ff9e1771baf3c4f  # 1.6175452310015037
 sub_primary_angle_rad = 0x3fd82761f3ce7832  # 0.3774037247584402
 phase_at_epoch_rad = 0x40030d27960d38ef  # 2.3814231608185916
-capture_phase_rad = 0x4006777faab38fc8  # 2.8083489738510004
-w_start_rad = 0x3ffcedbeb5ad7aa0  # 1.808043203047113
+capture_phase_rad = 0xbfe1b66f17c941e0  # -0.5535197701047387
+w_start_rad = 0x3ffe665cd6cd7aa0  # 1.8999908819893463
 w_epoch_rad = 0x40030d27960d38ef  # 2.3814231608185916
-w_end_rad = 0x40078671356942b0  # 2.940645615839763
+w_end_rad = 0x4006ca22237942b0  # 2.8486979266529815
 figure: Rotational, SolidSurface
-equatorial_radius_m = 0x411661b499f5439f  # 366701.15034967096
-polar_radius_m = 0x4115d684d8667ee9  # 357793.21132849023
-flattening = 0x3f98e006ded283d4  # 0.024292094564433445
+equatorial_radius_m = 0x411661b1f699987e  # 366700.490820296
+polar_radius_m = 0x4115d6823f4b2a74  # 357792.5618101724
+flattening = 0x3f98e007f8675ba4  # 0.024292110954629145
 figure_pole_x = 0x3febcc94d9ed1832  # 0.8687233215685011
 figure_pole_y = 0x3fdd4dced01bfe56  # 0.4578740150754802
 figure_pole_z = 0x3fc82cd4d8ea429c  # 0.18886814681583963
@@ -1138,20 +1138,20 @@ bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x408f0962d42409a7  # 993.173256188912
 equator_pole_contrast_k = 0x406d43defb503958  # 234.12096944493055
-day_night_contrast_k = 0x408d6d6516221881  # 941.6743586219528
+day_night_contrast_k = 0x408d6d6516b40fe7  # 941.6743597094872
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x40bca19d4b66380c  # 7329.614431751903
+sigma_h_m = 0x40bca199f5d658e4  # 7329.601407429411
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3f45cebd0bcc4b30  # 0.0006655142857162396
+heat_flow_w_m2 = 0x3f45ceb971c0180c  # 0.000665512608521325
 surface_age_yr = 0x4200e53a3fea5d43  # 9070659581.295538
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 crust: lid Secondary; primary none, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Intermediate, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
-peak_central_temperature_k = 0x40bec0e7c018a11b  # 7872.905274905522
+peak_central_temperature_k = 0x40bec0e785fe4300  # 7872.904388324125
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
-mass_mearth = 0x3ef0504e85d8b009  # 1.5557954944053795e-5
+mass_mearth = 0x3ef0504e7eb6bbbf  # 1.5557954538610504e-5
 a_m = 0x424f2a776134a502  # 267712905833.28912
 e = 0x3fa4e9da3e8f8937  # 0.040846653115084335
 i_rad = 0x3fe3e04e182a5cdb  # 0.6211309883100528
@@ -1168,9 +1168,9 @@ n_rate_rad_s2 = 0xbb316b8851509d7b  # -1.4409526630518502e-23
 x_m = 0xc240d5ed1e4f181e  # -144617127070.18842
 y_m = 0x4248e7666c957c81  # 213922928938.9727
 z_m = 0xc2265fde23301124  # -48048837016.03348
-radius_rearth = 0x3fa3e0cb331522f3  # 0.03882441519323789
-density_kg_m3 = 0x4096e6fa8a6e4b4b  # 1465.744668696733
-gravity_m_s2 = 0x3fb9f2b50fd53963  # 0.10135966908021525
+radius_rearth = 0x3fa3e0cb3082a084  # 0.03882441489378244
+density_kg_m3 = 0x4096e6fa894ef933  # 1465.7446644153213
+gravity_m_s2 = 0x3fb9f2b50b3419ac  # 0.10135966800235136
 class: Rocky
 iron = 0x3fcc82aa5492fcc6  # 0.22273759011839028
 rock = 0x3fe8df556adb40ce  # 0.7772624098816097
@@ -1196,18 +1196,18 @@ obliquity_rad = 0x3fd3a7ed33cc531b  # 0.30712442453777705
 initial_rate_rad_s = 0x3f1c10b91ea3e249  # 0.00010706071740063898
 locked_rate_rad_s = 0x3e770ebf7932580f  # 8.589628768188721e-8
 age_at_epoch_s = 0x438fc7aa1c6205bf  # 2.8624824680269206e17
-locking_age_s = 0x43f9a167d347e320  # 2.9549943669447066e19
+locking_age_s = 0x43f9a167d20656e8  # 2.9549943583132254e19
 clock_period_s = 0x419170a170f48418  # 73148508.23878515
 clock_mean_anomaly_at_epoch_rad = 0x3ff0daa21c379dc1  # 1.0533772566067088
 sub_primary_angle_rad = 0x3ff01f3321d2887d  # 1.0076171227633772
 phase_at_epoch_rad = 0x3fe1f50b22608b94  # 0.5611625358036343
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x3fed9ea0422680c0  # 0.925613526535038
+w_start_rad = 0x3fed9f6894e680c0  # 0.9257090481005648
 w_epoch_rad = 0x3fe1f50b22608b94  # 0.5611625358036343
-w_end_rad = 0x3fc8b7b53165fd00  # 0.19310631668120237
+w_end_rad = 0x3fc8b493e665fd00  # 0.19301079511567565
 figure: Sphere, SolidSurface
-equatorial_radius_m = 0x410e31b2cb2755ab  # 247350.34919611862
-polar_radius_m = 0x410e31b2cb2755ab  # 247350.34919611862
+equatorial_radius_m = 0x410e31b2c73f14f7  # 247350.3472882879
+polar_radius_m = 0x410e31b2c73f14f7  # 247350.3472882879
 flattening = 0x0000000000000000  # 0.0
 figure_pole_x = 0x3fd6462a6d0aa0bc  # 0.34803257607064686
 figure_pole_y = 0x3fe6036e0f2109ba  # 0.6879186912049626
@@ -1229,17 +1229,17 @@ bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x408b914d40b7d07f  # 882.1627210960868
 equator_pole_contrast_k = 0x406d975e0ab6d060  # 236.73022971826413
-day_night_contrast_k = 0x4089a4298722f7eb  # 820.5202772838505
+day_night_contrast_k = 0x4089a42987231a5b  # 820.5202772848528
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x40b3a4354f2dbd02  # 5028.208239420552
+sigma_h_m = 0x40b3a4354cb7ea25  # 5028.208201880135
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3f395397dddc2058  # 0.0003864522712864241
+heat_flow_w_m2 = 0x3f395397d95763d2  # 0.0003864522671768708
 surface_age_yr = 0x4200e53a3fea5d43  # 9070659581.295538
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 crust: lid Secondary; primary none, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Intermediate, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
-peak_central_temperature_k = 0x40bf150005decc26  # 7957.0000895737085
+peak_central_temperature_k = 0x40bf150005c42594  # 7957.000087985205
 envelope: NotApplicable
 body e200 BELT 2: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3f43e52bb624ee94  # 0.0006071532664359718
@@ -2867,7 +2867,7 @@ figure: NotApplicable
 photometry: NotApplicable
 envelope: NotApplicable
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), Present
-mass_mearth = 0x3f125dded3855460  # 7.00633289672666e-5
+mass_mearth = 0x3f125dd9340d654f  # 7.006300167002498e-5
 orbit: NotApplicable
 position: none
 bulk: NotApplicable
@@ -2878,7 +2878,7 @@ main_inner_m = 0x4246f132eecdec12  # 197071855003.8443
 main_outer_m = 0x4252358fa44e9b52  # 312832069946.4269
 size_slope = 0x400696592bfe9d47  # 2.8234122693135393
 largest_diameter_m = 0x412219ca17381d04  # 593125.0453499858
-fractional_luminosity = 0x3e21b95a1e64e265  # 2.0633488139887267e-9
+fractional_luminosity = 0x3e21b954b14ae610  # 2.063339175160751e-9
 members: [e101, e102]
 surface: NotApplicable
 hooks: NotApplicable
@@ -2887,7 +2887,7 @@ figure: NotApplicable
 photometry: NotApplicable
 envelope: NotApplicable
 body e101 BELT 1-1: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
-mass_mearth = 0x3f09e5794428d40c  # 4.93934280893297e-5
+mass_mearth = 0x3f09e56edad868c9  # 4.939312507819396e-5
 a_m = 0x4248d07e55dcf9e7  # 213154311097.95236
 e = 0x3fc81b9fcb367af4  # 0.18834302351475396
 i_rad = 0x3ff268a1528cb358  # 1.1505444740862085
@@ -2904,9 +2904,9 @@ n_rate_rad_s2 = 0xbb3885c0d09c55eb  # -2.0284514544889856e-23
 x_m = 0xc24250dc5cc6fe5f  # -157332060557.98727
 y_m = 0x4231d7e89b167ae0  # 76636789526.47998
 z_m = 0x423e9a64476234c0  # 131439282018.20605
-radius_rearth = 0x3fad3aa271c42ae5  # 0.05708797110317735
-density_kg_m3 = 0x4096deda18733ee5  # 1463.7129838950289
-gravity_m_s2 = 0x3fc30cfeff4e14a9  # 0.14883410898270213
+radius_rearth = 0x3fad3a9efc25e8b4  # 0.05708786800364987
+density_kg_m3 = 0x4096ded9057046e7  # 1463.7119348090434
+gravity_m_s2 = 0x3fc30cfbd9004f98  # 0.14883373351824214
 class: Rocky
 iron = 0x3faedf14a206dfe1  # 0.06029571988932481
 rock = 0x3fee120eb5df9202  # 0.9397042801106752
@@ -2918,7 +2918,7 @@ rings: NotModelled
 population: NotApplicable
 surface: Ok
 hooks detail_seed = 0x8a8b87a716a91fdd
-rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 7043849806068088832, nanos: 0 })
+rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 7043844557694563328, nanos: 0 })
 pole_x = 0x3febcc94d9ed1832  # 0.8687233215685011
 pole_y = 0x3fdd4dced01bfe56  # 0.4578740150754802
 pole_z = 0x3fc82cd4d8ea429c  # 0.18886814681583963
@@ -2932,19 +2932,19 @@ obliquity_rad = 0x3fd6ff7924347b58  # 0.3593428472103617
 initial_rate_rad_s = 0x3f1b5d3fc0ff4812  # 0.0001043863451280216
 locked_rate_rad_s = 0x3e885751be75859a  # 1.81355260790581e-7
 age_at_epoch_s = 0x438fc7aa1c6205bf  # 2.8624824680269206e17
-locking_age_s = 0x43d96e6f55ec894e  # 7.330098052870781e18
+locking_age_s = 0x43d96e6e246dad2b  # 7.330092804497255e18
 clock_period_s = 0x4198c7d291e55b83  # 103937188.4739819
 clock_mean_anomaly_at_epoch_rad = 0x3ff9e1771baf3c4f  # 1.6175452310015037
 sub_primary_angle_rad = 0x3fd82761f3ce7832  # 0.3774037247584402
 phase_at_epoch_rad = 0x40030d27960d38ef  # 2.3814231608185916
-capture_phase_rad = 0x4006777faab38fc8  # 2.8083489738510004
-w_start_rad = 0x3ffcedbeb5ad7aa0  # 1.808043203047113
+capture_phase_rad = 0xbfe1b66f17c941e0  # -0.5535197701047387
+w_start_rad = 0x3ffe665cd6cd7aa0  # 1.8999908819893463
 w_epoch_rad = 0x40030d27960d38ef  # 2.3814231608185916
-w_end_rad = 0x40078671356942b0  # 2.940645615839763
+w_end_rad = 0x4006ca22237942b0  # 2.8486979266529815
 figure: Rotational, SolidSurface
-equatorial_radius_m = 0x411661b499edf256  # 366701.15032175684
-polar_radius_m = 0x4115d684d874c677  # 357793.21138296224
-flattening = 0x3f98e006dafe8bc2  # 0.024292094341614286
+equatorial_radius_m = 0x411661b1f5e2fdd7  # 366700.4901237166
+polar_radius_m = 0x4115d6823eacad8c  # 357792.561205589
+flattening = 0x3f98e007f4e2f21f  # 0.024292110749899117
 figure_pole_x = 0x3febcc94d9ed1832  # 0.8687233215685011
 figure_pole_y = 0x3fdd4dced01bfe56  # 0.4578740150754802
 figure_pole_z = 0x3fc82cd4d8ea429c  # 0.18886814681583963
@@ -2965,20 +2965,20 @@ bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x408f09920d563841  # 993.1963145004194
 equator_pole_contrast_k = 0x406d440b82783c08  # 234.12640498622227
-day_night_contrast_k = 0x408d6d97e91e4c61  # 941.6991751067218
+day_night_contrast_k = 0x408d6d97e9b04450  # 941.6991761942718
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x40bca19d4b66380c  # 7329.614431751903
+sigma_h_m = 0x40bca199f4f8bf61  # 7329.601394221042
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3f45cebce74570f7  # 0.0006655142192744369
+heat_flow_w_m2 = 0x3f45ceb94c49e2ab  # 0.000665512540378795
 surface_age_yr = 0x4200e53a5f2a5d43  # 9070660581.295538
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 crust: lid Secondary; primary none, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Intermediate, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
-peak_central_temperature_k = 0x40bec0ed5097483a  # 7872.927010970243
+peak_central_temperature_k = 0x40bec0ed166dd2aa  # 7872.926123489315
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
-mass_mearth = 0x3ef0504e85d8b009  # 1.5557954944053795e-5
+mass_mearth = 0x3ef0504e7eb49e19  # 1.55579545381407e-5
 a_m = 0x424f2a7cc8a5e15a  # 267713614155.76056
 e = 0x3fa4e9da3e8f8937  # 0.040846653115084335
 i_rad = 0x3fe3e04e182a5cdb  # 0.6211309883100528
@@ -2995,9 +2995,9 @@ n_rate_rad_s2 = 0xbb316c62824aaaa7  # -1.4412280592096787e-23
 x_m = 0x41d0df06bd2b4480  # 1132206836.676056
 y_m = 0xc24c6944712ea362  # -244050354781.27643
 z_m = 0x423ea05afb5f3340  # 131539336031.2002
-radius_rearth = 0x3fa3e0cb331522f3  # 0.03882441519323789
-density_kg_m3 = 0x4096e6fa8a6e4b4b  # 1465.744668696733
-gravity_m_s2 = 0x3fb9f2b50fd53963  # 0.10135966908021525
+radius_rearth = 0x3fa3e0cb3081dd2b  # 0.03882441489343543
+density_kg_m3 = 0x4096e6fa894ea401  # 1465.7446644103622
+gravity_m_s2 = 0x3fb9f2b50b32ba24  # 0.10135966800110247
 class: Rocky
 iron = 0x3fcc82aa5492fcc6  # 0.22273759011839028
 rock = 0x3fe8df556adb40ce  # 0.7772624098816097
@@ -3023,18 +3023,18 @@ obliquity_rad = 0x3fd3a7ed33cc531b  # 0.30712442453777705
 initial_rate_rad_s = 0x3f1c10b91ea3e249  # 0.00010706071740063898
 locked_rate_rad_s = 0x3e770ebf7932580f  # 8.589628768188721e-8
 age_at_epoch_s = 0x438fc7aa1c6205bf  # 2.8624824680269206e17
-locking_age_s = 0x43f9a167d347e320  # 2.9549943669447066e19
+locking_age_s = 0x43f9a167d20656e8  # 2.9549943583132254e19
 clock_period_s = 0x419170a170f48418  # 73148508.23878515
 clock_mean_anomaly_at_epoch_rad = 0x3ff0daa21c379dc1  # 1.0533772566067088
 sub_primary_angle_rad = 0x3ff01f3321d2887d  # 1.0076171227633772
 phase_at_epoch_rad = 0x3fe1f50b22608b94  # 0.5611625358036343
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x3fed9ea0422680c0  # 0.925613526535038
+w_start_rad = 0x3fed9f6894e680c0  # 0.9257090481005648
 w_epoch_rad = 0x3fe1f50b22608b94  # 0.5611625358036343
-w_end_rad = 0x3fc8b7b53165fd00  # 0.19310631668120237
+w_end_rad = 0x3fc8b493e665fd00  # 0.19301079511567565
 figure: Sphere, SolidSurface
-equatorial_radius_m = 0x410e31b2cb2755ab  # 247350.34919611862
-polar_radius_m = 0x410e31b2cb2755ab  # 247350.34919611862
+equatorial_radius_m = 0x410e31b2c73dec3d  # 247350.34728607713
+polar_radius_m = 0x410e31b2c73dec3d  # 247350.34728607713
 flattening = 0x0000000000000000  # 0.0
 figure_pole_x = 0x3fd6462a6d0aa0bc  # 0.34803257607064686
 figure_pole_y = 0x3fe6036e0f2109ba  # 0.6879186912049626
@@ -3056,17 +3056,17 @@ bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
 mean_surface_temperature_k = 0x408b91772ae5b472  # 882.1831872888272
 equator_pole_contrast_k = 0x406d978b08944688  # 236.73572186431943
-day_night_contrast_k = 0x4089a45661a379f6  # 820.5421784183116
+day_night_contrast_k = 0x4089a45661a39c68  # 820.542178419314
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x40b3a4354f2dbd02  # 5028.208239420552
+sigma_h_m = 0x40b3a4354cb72f4e  # 5028.208201836633
 continental_fraction = 0x0000000000000000  # 0.0
-heat_flow_w_m2 = 0x3f395397b3706147  # 0.0003864522327048547
+heat_flow_w_m2 = 0x3f395397aeea4db0  # 0.0003864522285905404
 surface_age_yr = 0x4200e53a5f2a5d43  # 9070660581.295538
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
 crust: lid Secondary; primary none, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Intermediate, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
-peak_central_temperature_k = 0x40bf1504f77c302a  # 7957.0194013230885
+peak_central_temperature_k = 0x40bf1504f76181ac  # 7957.019399732741
 envelope: NotApplicable
 body e200 BELT 2: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3f43e52bae52549b  # 0.0006071532522066327

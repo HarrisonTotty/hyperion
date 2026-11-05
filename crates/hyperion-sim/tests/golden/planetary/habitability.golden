@@ -1,4 +1,4 @@
-# generator_version = 27
+# generator_version = 28
 m_dwarf_resonant_chain 0x02002b2ca0000000:
 02002b2ca0000000.0100: Marginal [Snowball, TidallyLocked, ActiveHost]
 02002b2ca0000000.0100_added_limits = []
@@ -125,28 +125,18 @@ close_binary 0x42002cb200000009:
 42002cb200000009.0a01_added_limits = [DrySurface, MassOutsideTemperateRange, FrozenSurface]
 42002cb200000009.0b00: SubsurfaceOcean [OutsideOptimisticZone, OutsideConservativeZone, Snowball, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.0b00_added_limits = [MassOutsideTemperateRange]
-42002cb200000009.e101: Hostile [OutsideOptimisticZone, OutsideConservativeZone, BelowTriplePoint, TidallyLocked, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
-42002cb200000009.e101_added_limits = [MoltenSurface, DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e102: Hostile [OutsideOptimisticZone, OutsideConservativeZone, BelowTriplePoint, TidallyLocked, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
-42002cb200000009.e102_added_limits = [MoltenSurface, DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e103: Hostile [OutsideOptimisticZone, OutsideConservativeZone, BelowTriplePoint, TidallyLocked, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
-42002cb200000009.e103_added_limits = [MoltenSurface, DrySurface, MassOutsideTemperateRange]
+42002cb200000009.e101: NotApplicable
+42002cb200000009.e102: NotApplicable
+42002cb200000009.e103: NotApplicable
 42002cb200000009.e201: Hostile [OutsideOptimisticZone, OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, TidallyLocked, ActiveHost, ExtrapolatedZone]
 42002cb200000009.e201_added_limits = [DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e202: Hostile [OutsideOptimisticZone, OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, TidallyLocked, ActiveHost, ExtrapolatedZone]
-42002cb200000009.e202_added_limits = [DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e203: Hostile [OutsideOptimisticZone, OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, TidallyLocked, ActiveHost, ExtrapolatedZone]
-42002cb200000009.e203_added_limits = [DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e204: Hostile [OutsideOptimisticZone, OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, TidallyLocked, ActiveHost, ExtrapolatedZone]
-42002cb200000009.e204_added_limits = [DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e205: Hostile [OutsideOptimisticZone, OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, TidallyLocked, ActiveHost, ExtrapolatedZone]
-42002cb200000009.e205_added_limits = [DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e206: Hostile [OutsideOptimisticZone, OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, TidallyLocked, ActiveHost, ExtrapolatedZone]
-42002cb200000009.e206_added_limits = [DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e207: Hostile [OutsideOptimisticZone, OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, TidallyLocked, ActiveHost, ExtrapolatedZone]
-42002cb200000009.e207_added_limits = [DrySurface, MassOutsideTemperateRange]
-42002cb200000009.e208: Hostile [OutsideOptimisticZone, OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, TidallyLocked, ActiveHost, ExtrapolatedZone]
-42002cb200000009.e208_added_limits = [DrySurface, MassOutsideTemperateRange]
+42002cb200000009.e202: NotApplicable
+42002cb200000009.e203: NotApplicable
+42002cb200000009.e204: NotApplicable
+42002cb200000009.e205: NotApplicable
+42002cb200000009.e206: NotApplicable
+42002cb200000009.e207: NotApplicable
+42002cb200000009.e208: NotApplicable
 42002cb200000009.e301: Hostile [OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e301_added_limits = [DrySurface, MassOutsideTemperateRange]
 42002cb200000009.e302: Hostile [OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
@@ -154,7 +144,7 @@ close_binary 0x42002cb200000009:
 42002cb200000009.e303: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e303_added_limits = [DrySurface, MassOutsideTemperateRange]
 42002cb200000009.e304: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
-42002cb200000009.e304_added_limits = [MassOutsideTemperateRange]
+42002cb200000009.e304_added_limits = [MassOutsideTemperateRange, FrozenSurface]
 42002cb200000009.e305: Hostile [OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e305_added_limits = [DrySurface, MassOutsideTemperateRange]
 42002cb200000009.e306: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
@@ -162,20 +152,20 @@ close_binary 0x42002cb200000009:
 42002cb200000009.e307: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e307_added_limits = [DrySurface, MassOutsideTemperateRange]
 42002cb200000009.e308: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
-42002cb200000009.e308_added_limits = [MassOutsideTemperateRange]
-42002cb200000009.e401: Marginal [ActiveHost, LeavingMainSequence, ExtrapolatedZone]
-42002cb200000009.e401_added_limits = [DrySurface, MassOutsideTemperateRange, FrozenSurface]
-42002cb200000009.e402: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
-42002cb200000009.e402_added_limits = [MassOutsideTemperateRange, FrozenSurface]
+42002cb200000009.e308_added_limits = [MassOutsideTemperateRange, FrozenSurface]
+42002cb200000009.e401: Marginal [Snowball, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
+42002cb200000009.e401_added_limits = [MassOutsideTemperateRange]
+42002cb200000009.e402: Hostile [OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, HighEccentricity, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
+42002cb200000009.e402_added_limits = [DrySurface, MassOutsideTemperateRange, FrozenSurface]
 42002cb200000009.e403: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e403_added_limits = [DrySurface, MassOutsideTemperateRange, FrozenSurface]
 42002cb200000009.e404: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e404_added_limits = [DrySurface, MassOutsideTemperateRange, FrozenSurface]
 42002cb200000009.e405: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e405_added_limits = [MassOutsideTemperateRange, FrozenSurface]
-42002cb200000009.e406: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
+42002cb200000009.e406: Hostile [OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, HighEccentricity, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e406_added_limits = [DrySurface, MassOutsideTemperateRange, FrozenSurface]
-42002cb200000009.e407: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
+42002cb200000009.e407: Hostile [OutsideConservativeZone, NoAtmosphere, BelowTriplePoint, HighEccentricity, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e407_added_limits = [DrySurface, MassOutsideTemperateRange, FrozenSurface]
 42002cb200000009.e408: Hostile [NoAtmosphere, BelowTriplePoint, ActiveHost, LeavingMainSequence, ExtrapolatedZone]
 42002cb200000009.e408_added_limits = [DrySurface, MassOutsideTemperateRange, FrozenSurface]
