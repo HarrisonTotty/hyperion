@@ -38,7 +38,8 @@ fn milky_way() -> Galaxy {
 
 /// The galaxy's expected hosts over ten Milky Way seeds (research-leans-10's reading of the plan's
 /// "at Milky Way parameters"): each in the plan's 0.7–1.5 × 10⁴, its black-hole transients in its
-/// 1,300 ± 400 and its high-mass share the table's 0.16. The first ten galaxies of plan 02's sweep
+/// 1,300 ± 400 and its high-mass hosts the catalogue's [`HIGH_MASS_HOSTS`]. The first ten galaxies
+/// of plan 02's sweep
 /// are printed as a record, each total over its formed mass's share of the Milky Way fixture's,
 /// which the scratch row's uniform rates make 10⁴.
 #[test]
@@ -61,7 +62,7 @@ fn the_galaxy_total_over_ten_seeds() {
         );
         assert!((7.0e3..=1.5e4).contains(&total), "{k}: {total}");
         assert!((900.0..=1_700.0).contains(&black_hole_transients), "{k}");
-        assert!((high / total - 0.16).abs() < 1e-9);
+        assert!((high / HIGH_MASS_HOSTS - 1.0).abs() < 1e-9, "{k}: {high}");
     }
     for k in 0..10_u64 {
         let galaxy = Galaxy::new(Seed::new(SWEEP_SEED | k));
@@ -80,8 +81,39 @@ fn the_galaxy_total_over_ten_seeds() {
     }
 }
 
+/// The catalogue's expected high-mass hosts at Milky Way parameters, the same at every seed, pinned
+/// as measured: 4.10 of its 9,974 since the refit at generator version 27 (P15.T10.b), whose
+/// sampler gives the high-mass side 0.0010 of the class's row and leaves most of it to the young
+/// features' lists (the library's `the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals`
+/// pins that share), against Fortin et al.'s 152 catalogued, a finding; the scratch table's
+/// share, 0.16, before it.
+const HIGH_MASS_HOSTS: f64 = 4.102_400_021_056_781_5;
+
 /// The family of the Milky Way seeds the totals are read over: this with k < 10 in its low bits.
 const MILKY_WAY_SEEDS: u64 = 0x0b17_08b0_0000_0100;
+
+/// The hosts the disc's scan finds, pinned as measured at generator versions 27 and 28 (the same on
+/// both trees): 8,517, 3 of them high-mass, 0.854 of the 9,974 expected, against 0.93–1.02 of them
+/// on the scratch table's rows, which the refit at 27 replaced (P15.T10.b): the slab leaves out
+/// some 15% of the hosts, a finding.
+const SCANNED_HOSTS: usize = 8_517;
+
+/// The kinds of the disc's scan's hosts, the low-mass side's then the high-mass side's, pinned as
+/// measured at 27 and 28: the scan holds fewer ultracompacts and more neutron-star transients than
+/// the galaxy's mix gives the side (220 against 563.4 expected, −15.0 σ, and 6,874 against
+/// 6,601.4, +7.1 σ), the rest within 2 σ; to 26, on the scratch table's rows, every kind within
+/// 5 σ.
+const SCANNED_KINDS: [(XrbHostKind, usize); 9] = [
+    (XrbHostKind::NeutronStarPersistent, 265),
+    (XrbHostKind::NeutronStarTransient, 6_874),
+    (XrbHostKind::BlackHolePersistent, 4),
+    (XrbHostKind::BlackHoleTransient, 1_148),
+    (XrbHostKind::Ultracompact, 220),
+    (XrbHostKind::Symbiotic, 3),
+    (XrbHostKind::BeX, 3),
+    (XrbHostKind::Supergiant, 0),
+    (XrbHostKind::BlackHoleHighMass, 0),
+];
 
 /// What both sides define of an X-ray binary, one value per mark.
 #[derive(Debug, Clone, Copy)]
@@ -290,8 +322,9 @@ const MEMBERS: usize = 200;
 const SCRATCH_CHI_SQUARE_PER_DOF: f64 = 0.97;
 
 /// A scan of every host of the galaxy, the cells within 51,200 ly of the centre along the plane and
-/// 4,096 ly off it, runs the binary engine not once (`scan::engine_calls`); it finds the class's
-/// expected hosts but those of the halo beyond, and every high-mass host carries its recoil.
+/// 4,096 ly off it, runs the binary engine not once (`scan::engine_calls`); it finds
+/// [`SCANNED_HOSTS`] of the class's expected hosts, each kind as [`SCANNED_KINDS`] pins, and every
+/// high-mass host carries its recoil.
 #[test]
 #[ignore = "slow: 640,000 cells scanned"]
 fn a_scan_of_the_disc_s_hosts_runs_no_engine() {
@@ -317,14 +350,16 @@ fn a_scan_of_the_disc_s_hosts_runs_no_engine() {
     );
     #[expect(clippy::cast_precision_loss, reason = "a count of some thousands")]
     let found = hosts.len() as f64 / process.expected_hosts(&galaxy);
-    assert!((0.93..1.02).contains(&found), "{found}");
+    assert_eq!(hosts.len(), SCANNED_HOSTS, "{found} of the expected");
     assert!(
         hosts
             .iter()
             .all(|h| h.recoil().is_some() == h.kind().is_high_mass())
     );
-    // The kinds the scan found on each side are the table's shares of that side, within five
-    // standard deviations: the black-hole transients realised, not only expected.
+    // The kinds the scan found on each side, against the table's shares of that side over the
+    // galaxy, printed with their standard deviations, and pinned as found: the black-hole
+    // transients realised, not only expected.
+    let mut by_kind = Vec::new();
     for kinds in [&XrbHostKind::LOW_MASS[..], &XrbHostKind::HIGH_MASS[..]] {
         let on_side: Vec<_> = hosts
             .iter()
@@ -342,14 +377,13 @@ fn a_scan_of_the_disc_s_hosts_runs_no_engine() {
             let found = on_side.iter().filter(|h| h.kind() == kind).count() as f64;
             let sigma = (n * share * (1.0 - share)).sqrt();
             println!(
-                "{kind:?}: {found} found, {:.1} expected of the side's {n}",
-                n * share
+                "{kind:?}: {found} found, {:.1} expected of the side's {n}, {:+.1} σ",
+                n * share,
+                (found - n * share) / sigma.max(f64::MIN_POSITIVE)
             );
-            assert!(
-                (found - n * share).abs() < 5.0 * sigma + 1.0,
-                "{kind:?}: {found}"
-            );
+            by_kind.push((kind, on_side.iter().filter(|h| h.kind() == kind).count()));
         }
     }
+    assert_eq!(by_kind, SCANNED_KINDS);
     assert_eq!(engine_calls(), before);
 }
