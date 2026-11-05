@@ -211,7 +211,8 @@ export interface GeometrySettings {
    * `TERRAIN_TRIANGLE_BUDGET`, the stride-1 frame of its own patch budget at its held cache, so that
    * a larger cache selects more patches at no more lit triangles than that frame as selection
    * reckons them, each lit view held to it alone. Read where `litClusters` is on. `triangles` on
-   * low, where the strides are on, and `patches` on high, where they are off (a lean, 2026-11-05).
+   * both settings, where the strides are on (a lean, 2026-11-05); at the held cache it selects as
+   * `patches` bit for bit.
    * Whatever it says, where the strides are on but on low (which states it wherever it draws lit
    * terrain), `TERRAIN: DETAIL LIMITED` is raised too wherever the cull draws a stride past the
    * view's τ′ (`clusters/overCount.ts`; research-leans-42).
@@ -423,7 +424,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       strides: "measured",
       occlusion: "off",
       shading: "forward",
-      terrainBudget: "patches",
+      terrainBudget: "triangles",
     },
     decoration: true,
     scatterDensity: 1,

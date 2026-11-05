@@ -993,7 +993,7 @@ through `lit_place`.
     | `shading`         | `visibility` (after T2.e)                                                  | `forward` until the owner's UHD 620 run (lean, T2.e)                       | One shading a pixel where it pays                      |
     | `strides`         | `measured` (after T3.c)                                                    | `measured`                                                                 | Drawn error within τ′; stride 1 in the forced region   |
     | `occlusion`       | `hzb` (after T3.d)                                                         | `hzb` (after T3.d; the UHD 620's run may turn it off)                      | Exact                                                  |
-    | `terrainBudget`   | `patches` while `strides` is off (T3.e)                                    | `triangles` (T3.e)                                                         | Held stride-1 frame's triangles; ⌊slots ÷ 2⌋ patches   |
+    | `terrainBudget`   | `triangles` (T3.e)                                                         | `triangles` (T3.e)                                                         | Held stride-1 frame's triangles; ⌊slots ÷ 2⌋ patches   |
     | `pageBytes`       | 128 MiB                                                                    | 32 MiB                                                                     | Within the memory ceilings                             |
     | `meshTolerancePx` | camera 1, wireframe occluder half the stroke width (lean)                  | camera 2, the same occluder rule (lean)                                    | A mesh's DAG cut within τ; hidden-line removal holds   |
     | `farCascadeRate`  | 4 (lean, T6.b)                                                             | 4 (no cascades on low)                                                     | Far cascades' edges within a texel; 1 the way back     |
@@ -1507,7 +1507,7 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
     anywhere seen. With strides chosen on the GPU the CPU cannot know that, so the cull counts the
     clusters it draws over τ′ into a `bit-exact` reduction read each frame, which raises it (or the
     cull's twin decides it on the CPU).
-  - _Built_ (`r14-t3e-triangle-budget`; behind `terrainBudget`, `triangles` on low, on its lean;
+  - _Built_ (`r14-t3e-triangle-budget`; behind `terrainBudget`, `triangles` on both, on its lean;
     the draft and its counts in the lane's outbox): records at the end of Risks.
 
 ### R14.T4 The first non-terrain consumers
@@ -2631,8 +2631,11 @@ pages are assets and presentation; collision never reads them. No domain tag is 
 - **R14.T3.e** (`r14-t3e-triangle-budget`, lean 2026-11-05, with research-leans-42's review; the
   draft for the ruling, its counts, in the lane's outbox):
   - `GeometrySettings.terrainBudget` (`patches` | `triangles`; `--geometry terrainBudget=`; results
-    files without it read `patches`): `triangles` on low, `patches` on high while its strides are
-    off.
+    files without it read `patches`): `triangles` on both settings.
+  - High's default is `triangles` too (lean, 2026-11-05): its strides are on since the strides
+    lane, and at the held cache it selects as `patches` bit for bit.
+  - With its strides on, high also runs the count of strides past τ′ by default (low does not, R05
+    DN26).
   - The rule: `SelectionInput.triangleBudget` (`TriangleBudget`: `maxTriangles`, `bandFraction`,
     `tolerancesPx`, `strideErrorsM`) refuses a split as `maxPatches` does, the patches each reckoned
     a view by `patchLitTriangles` (`PATCH_LIT_TRIANGLES` 8,704 / 2,304 / 640 / 192) at the view's

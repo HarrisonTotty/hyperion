@@ -1931,6 +1931,8 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
   })();
 
   const STRIDED: GeometrySettings = { ...SETTINGS.high.geometry, strides: "measured" };
+  /** The strides under the patches' budget alone (R14.T3.e). */
+  const PATCHED: GeometrySettings = { ...STRIDED, terrainBudget: "patches" };
 
   /** A clustered pass whose bakes carry `errors`, streamed with `grounded`'s contacts. */
   async function measuredPass(
@@ -2220,6 +2222,8 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
 
     it("counts its strides past τ′ in the lit pass's cull wherever the strides are on, whatever the budget, at the view's τ′ over its px per radian, copying the counts back every frame, and nothing with the strides off (research-leans-42)", async () => {
       const made = await measuredPass();
+      made.pass.setGeometry(PATCHED);
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
       const counted = (): [boolean, boolean, number] => {
         const copies = overCopies(made);
         made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
@@ -2241,7 +2245,7 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
       made.pass.setGeometry(BUDGETED);
       made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
       const triangles = counted();
-      made.pass.setGeometry(SETTINGS.high.geometry);
+      made.pass.setGeometry({ ...SETTINGS.high.geometry, strides: "off" });
       made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
       made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
       expect([patches, triangles, [overWordOf(made), litToleranceOf(made)]]).toEqual([
@@ -2323,6 +2327,7 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
         rough.set([0, 2, 4, 8], 4 * c);
       }
       const made = await measuredPass(rough);
+      made.pass.setGeometry(PATCHED);
       // At lax tolerances, so that the selection's budget binds nowhere and states nothing.
       const at = (tauPx: number): TerrainPassView => ({ ...passView(PRIMARY, NEAR), tauPx });
       // The bands slew 2% a step: from the pass's 1 px to 16 px in some 140 steps.
@@ -2459,6 +2464,8 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
 
     it("selects as the patches' budget alone at the setting's held cache, one view's patches each within a whole grid", async () => {
       const made = await measuredPass();
+      made.pass.setGeometry(PATCHED);
+      made.pass.step({ views: [passView(PRIMARY, NEAR)], grounded: [] });
       const selection = (): [string[], boolean | undefined] => [
         [...(made.pass.lastStep?.selection.patches.keys() ?? [])],
         made.pass.lastStep?.selection.limited,
