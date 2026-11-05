@@ -89,6 +89,13 @@ function runProbe(testName, env, report, log, timeoutS) {
     child.stdout.on("data", (chunk) => chunks.push(chunk));
     child.stderr.on("data", (chunk) => chunks.push(chunk));
     const timer = setTimeout(() => child.kill("SIGTERM"), 1000 * timeoutS);
+    // A run that cannot start (no pnpm, or an environment past the system's limit) did not end.
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      running.delete(child);
+      writeFileSync(log, `${Buffer.concat(chunks).toString()}\n${String(error)}\n`);
+      done(2);
+    });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
       running.delete(child);

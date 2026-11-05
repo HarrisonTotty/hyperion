@@ -931,11 +931,17 @@ interface StrideMove {
   /** What changed of the block: its stride, its scale's bands, its edges' bands, its edges' holds. */
   readonly causes: ReadonlyArray<"stride" | "scale" | "edges" | "holds">;
   readonly strides: readonly [number, number];
-  /** The vertex's distance, m, its band towards its morph level's stride, m, and its morph's k. */
+  /**
+   * The vertex's distance, m, its band towards its morph level's stride, m (`null` past `f32`'s
+   * reach, an edge's +∞, which JSON cannot hold; `NO_STRIDE_BAND` for none), and its morph's k.
+   */
   readonly distanceM: number;
-  readonly bandM: readonly [number, number];
+  readonly bandM: readonly [number | null, number | null];
   readonly k: readonly [number, number];
-  /** The frame's τ′ (the selection's), and the τ′ the instance's stride scale was formed at, px. */
+  /**
+   * The frame's τ′ (the selection's), and the τ′ the instance's stride scale was formed at, px, 0
+   * for no scale.
+   */
   readonly tauPx: number;
   readonly scaleTauPx: readonly [number, number];
   /** The instance's quadrant words (its holds) and shares words (their onsets' fades). */
@@ -978,6 +984,11 @@ function errorBitsOf(
     bits[at + 2] ?? 0x7c00,
     bits[at + 3] ?? 0x7c00,
   ];
+}
+
+/** `value`, or `null` where it is not finite, which JSON cannot hold. */
+function finiteOrNull(value: number): number | null {
+  return Number.isFinite(value) ? value : null;
 }
 
 /** A stride's lit-mesh template's triangles a block (`clusters/templates.ts`): 128 ÷ s². */
@@ -1192,7 +1203,8 @@ class StrideFrames {
         };
       const nowFactor = factorBy(inst);
       const thenFactor = factorBy(was);
-      const scaleTauPx = (scale: StrideScale): number => pxPerRad / scale.perErrorM;
+      const scaleTauPx = (scale: StrideScale): number =>
+        scale.perErrorM > 0 ? pxPerRad / scale.perErrorM : 0;
       for (let block = 0; block < 64; block += 1) {
         const sNow = strides[block] ?? 1;
         const sThen = was.strides[block] ?? 1;
@@ -1288,7 +1300,7 @@ class StrideFrames {
                 ],
                 strides: [sThen, sNow],
                 distanceM: norm(rel),
-                bandM: [bandOf(was), bandOf(inst)],
+                bandM: [finiteOrNull(bandOf(was)), finiteOrNull(bandOf(inst))],
                 k:
                   level >= 3
                     ? [0, 0]
@@ -2804,6 +2816,15 @@ function isPair(value: unknown): value is readonly [number, number] {
   );
 }
 
+/** Whether `value` is a pair of finite numbers or `null`s. */
+function isBandPair(value: unknown): value is readonly [number | null, number | null] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((v: unknown) => v === null || (typeof v === "number" && Number.isFinite(v)))
+  );
+}
+
 const STRIDE_MOVE_CAUSES = ["stride", "scale", "edges", "holds"] as const;
 
 /** Whether `value` is a {@link StrideMove} as JSON holds it. */
@@ -2821,8 +2842,7 @@ function isStrideMove(value: unknown): value is StrideMove {
     ["strides", "k", "scaleTauPx", "quadrantWords", "holdFadesWords"].every((key) =>
       isPair(Reflect.get(value, key)),
     ) &&
-    // A band of none is the largest float, which JSON holds as a number too.
-    isPair(Reflect.get(value, "bandM"))
+    isBandPair(Reflect.get(value, "bandM"))
   );
 }
 
@@ -3001,7 +3021,15 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
       const after = stridesOf(
         await play({ ...span, strides: { fromFrame: split, toFrame: null } }),
       );
-      const merged = mergeStrideSummaries([after, before]);
+      // Through JSON and its check, as the segments' files carry them.
+      const carried = [after, before].map((part): StrideSummary => {
+        const read: unknown = JSON.parse(JSON.stringify(part));
+        if (!isStrideSummary(read)) {
+          throw new Error("a segment's figures do not read back from JSON");
+        }
+        return read;
+      });
+      const merged = mergeStrideSummaries(carried);
       Object.assign(task.meta, { seamless: { split, whole, before, after } });
       expect([moved.length > 1, before.framesMeasured > 0, after.framesMeasured > 0]).toEqual([
         true,
