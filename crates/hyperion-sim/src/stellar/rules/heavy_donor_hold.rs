@@ -359,13 +359,17 @@ fn figures(census: &Census) -> CvFigures {
     }
 }
 
-/// The census's figures under every 27 hold, as measured (2026-11-04, at generator version 26,
-/// with the heavy donors' white dwarfs' wind).
+/// The census's figures under every 27 hold, as measured (2026-11-05, at generator version 27).
+/// At 26 (2026-11-04, with the heavy donors' white dwarfs' wind) it found 5,708 members, 4,557
+/// variables and 2,758 below the gap. P15.T10.b's refits of the fitted binary rows at 27, whose
+/// carved shares the field's thinning reads, each take one below-gap variable out of the census's
+/// records (`binary_awd`'s on 7cf1f39e's engine and the binary classes' on 27's); the engine's
+/// segment cap of 256 and the floored step's stop at the pin move none.
 const CENSUS_FIGURES: CvFigures = CvFigures {
-    members: 5_708,
-    variables: 4_557,
+    members: 5_706,
+    variables: 4_555,
     heavy: 152,
-    below_gap: 2_758,
+    below_gap: 2_756,
     above_six_hours: 625,
 };
 
