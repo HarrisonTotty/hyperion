@@ -6,8 +6,9 @@
  * the scalar radiance, every refusal pinned in `refusals.json` as R08's record lists it
  * (`decision-r08-t12b-scope.md`, rulings 6, 8 and 9). The Venus-class and Titan-class cases'
  * sanity ranges, pinned in `sanityRanges.json`. And the readers and the beam quadrature
- * themselves, on small inputs. R08.T16.a.2's `jupiter-envelope` (`test/jupiterEnvelopeCase.ts`) is
- * among them, its disc and limb alone.
+ * themselves, on small inputs. R08.T16.a.2's `jupiter-envelope` and `saturn-envelope`
+ * (`test/jupiterEnvelopeCase.ts`, `test/saturnEnvelopeCase.ts`) are among them, their disc and limb
+ * alone.
  *
  * @remarks
  * `refusals.json` and `sanityRanges.json` are rewritten with the references, by
@@ -26,6 +27,7 @@ import {
 } from "../../../test/atmosphereCases";
 import { expectCommittedTable } from "../../../test/bless";
 import { JUPITER_ENVELOPE_CASE, jupiterEnvelopeCase } from "../../../test/jupiterEnvelopeCase";
+import { SATURN_ENVELOPE_CASE, saturnEnvelopeCase } from "../../../test/saturnEnvelopeCase";
 import {
   aggregateRefusal,
   beamDepthAgrees,
@@ -42,6 +44,7 @@ import earthOzoneSlabHighLimbReference from "./earth-ozone-slab-high-limb.refere
 import giantDeckReference from "./giant-deck.reference.json" with { type: "json" };
 import jupiterEnvelopeReference from "./jupiter-envelope.reference.json" with { type: "json" };
 import marsReference from "./mars.reference.json" with { type: "json" };
+import saturnEnvelopeReference from "./saturn-envelope.reference.json" with { type: "json" };
 import saturnOblateReference from "./saturn-oblate.reference.json" with { type: "json" };
 import titanClassReference from "./titan-class.reference.json" with { type: "json" };
 import venus58barReference from "./venus-58bar.reference.json" with { type: "json" };
@@ -75,6 +78,7 @@ const REFERENCES: Readonly<Record<string, ReferenceFile>> = {
   "titan-class": titanClassReference,
   "giant-deck": giantDeckReference,
   [JUPITER_ENVELOPE_CASE]: jupiterEnvelopeReference,
+  [SATURN_ENVELOPE_CASE]: saturnEnvelopeReference,
 };
 
 /** Each case's own counts. */
@@ -124,7 +128,12 @@ const CHEAP: ReadonlyMap<string, ReferenceCase> = new Map(
 );
 
 /** Every case with a committed reference, the thick ones by name until first asked. */
-const NAMES: ReadonlyArray<string> = [...CHEAP.keys(), ...THICK_CASE_NAMES, JUPITER_ENVELOPE_CASE];
+const NAMES: ReadonlyArray<string> = [
+  ...CHEAP.keys(),
+  ...THICK_CASE_NAMES,
+  JUPITER_ENVELOPE_CASE,
+  SATURN_ENVELOPE_CASE,
+];
 
 /** A case by name: a thick one's Mie runs once, when a test first asks. */
 function caseNamed(name: string): ReferenceCase {
@@ -134,6 +143,9 @@ function caseNamed(name: string): ReferenceCase {
   }
   if (name === JUPITER_ENVELOPE_CASE) {
     return jupiterEnvelopeCase().referenceCase;
+  }
+  if (name === SATURN_ENVELOPE_CASE) {
+    return saturnEnvelopeCase().referenceCase;
   }
   const thick = thickReferenceCases();
   const found = THICK_CASE_NAMES.find((n) => n === name);
