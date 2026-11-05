@@ -251,15 +251,18 @@ struct Budget {
 }
 
 /// The globular tubes inside [`INSIDE_LY`] by their sprays against the share's term, galaxy by
-/// galaxy over the sweep, as measured (2026-10-31, x86-64: 0.6775–1.2673, mean 0.9622), with a
-/// little room.
-const GLOBULAR_BAND: [f64; 2] = [0.65, 1.30];
+/// galaxy over the sweep, as measured (2026-11-05, x86-64, at generator version 27: 0.7056–1.3221,
+/// mean 0.9610), with a little room. At 24 (2026-10-31) it was 0.6775–1.2673, mean 0.9622, in
+/// 0.65–1.30. P15.T11.b's fitted streams per globular, a 27 fold, move it alone. On the tree
+/// before the folds, 26's rules with that hold's 27 arm give 27's figures. They take sweep galaxy
+/// 56 from 1.172 of the term to 1.322: its orphans' sprayed mass grows 54%, the term 37%.
+const GLOBULAR_BAND: [f64; 2] = [0.68, 1.35];
 
 /// The dwarfs inside [`INSIDE_LY`] by their sprays, their cores whole, against the share's dwarf
 /// part, galaxy by galaxy over the sweep's galaxies with any, as measured (2026-10-31, x86-64:
-/// 0.1811–1.6321, median 1.0000, 25 of 64 within 5%), with a little room: a finding, since the
-/// share's period estimate puts a young tube's mass where its orbit spends its time, not where a
-/// few wraps have put its tracers.
+/// 0.1811–1.6321, median 1.0000, 25 of 64 within 5%; at 27, 0.1801–1.6570, median 1.0025, 26 of
+/// 64), with a little room: a finding, since the share's period estimate puts a young tube's mass
+/// where its orbit spends its time, not where a few wraps have put its tracers.
 const DWARF_BAND: [f64; 2] = [0.15, 1.70];
 
 /// Tracers an arm for a globular tube's share inside [`INSIDE_LY`] in the budget sweep: enough for
@@ -308,9 +311,10 @@ fn budget_of(n: u64) -> Budget {
 /// 65,000 ly by their sprays and their cores whole, against the share's dwarf part, which the plan
 /// holds to 5% and most galaxies miss; (ii) the
 /// globular tubes inside 65,000 ly by their sprays within 5% of the share's globular term in the
-/// mean (from generator version 26 within 6%: the mean is 0.949, a finding pinned as it stands),
-/// and each galaxy within the band measured again here by the sprays, [`GLOBULAR_BAND`] (by
-/// their orbits' periods it was 0.71–1.33); (iii) the share applied never below its globular term.
+/// mean (from generator version 26 within 6%: the mean was 0.949, 0.961 at 27, a finding pinned
+/// as it stands), and each galaxy within the band measured again here by the sprays,
+/// [`GLOBULAR_BAND`] (by their orbits' periods it was 0.71–1.33); (iii) the share applied never
+/// below its globular term.
 /// The dwarfs miss in most galaxies, a finding pinned as measured ([`DWARF_BAND`]).
 #[test]
 #[ignore = "slow: builds 64 galaxies' kinematic tables and sprays every stream of each"]
