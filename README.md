@@ -231,8 +231,10 @@ Elsewhere either value leaves the pool's bulk work at its lowered priority, nice
 
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;
-nothing generated is saved but the kept skies, in `skies/`, which can be removed at any time. To
-delete a universe, stop the server and remove its directory.
+nothing generated is saved but the kept skies, in `skies/`, and the streams' tube envelopes, in
+`envelopes/` (at most 16 MiB, so that a relaunched server's first range query builds only the tube
+tables it reaches), either of which can be removed at any time. To delete a universe, stop the
+server and remove its directory.
 
 ### Client configuration
 

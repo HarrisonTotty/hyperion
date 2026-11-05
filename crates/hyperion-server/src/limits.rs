@@ -227,6 +227,13 @@ pub const SKY_REPLY_CACHE_BYTES: usize = 16 << 20;
 /// and skies end minutes apart, so four is room enough.
 pub const SKY_FILE_QUEUE: usize = 4;
 
+/// The streams' envelopes waiting to be written to disk, and the lookups waiting to read them
+/// (plan 10, P10.T10.b; perf-range-envelopes-on-disk). A table's envelope is queued as the table is
+/// kept, some 1.6 kB written in well under a millisecond, and a warm-up keeps a few tables a second,
+/// so 64 is room enough; an envelope that finds none is not written, which only costs its table
+/// after a restart. A list's lookup waits for room.
+pub const ENVELOPE_FILE_QUEUE: usize = 64;
+
 /// Most targets one `extinction` request may name (plan 07, P07.T10.c).
 ///
 /// A position target is some 130 bytes of JSON, so 64 of them, with the origin and the envelope,
@@ -285,6 +292,7 @@ mod tests {
             "16 MiB, two skies at N_max"
         );
         assert_eq!(SKY_FILE_QUEUE, 4);
+        assert_eq!(ENVELOPE_FILE_QUEUE, 64);
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);

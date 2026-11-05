@@ -2450,3 +2450,28 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     orbit nor tubes reduced from a quarter of the spray's releases bound a tube's tips, whose knots
     rest on a few lone tracers (the lane's outbox has the figures). A cold query still builds every
     table whose shell it meets: 121 for the Sun-like 50 ly query, which needs 10.
+- **P10.T10.b, the envelopes on disk (lane `perf-range-envelopes-on-disk`, 2026-11-05, at 28; no
+  output moved).**
+  - _Sim._ `TubeEnvelope::{BOXES, FORMAT, boxes_ly, from_parts}` and `tube::RestoreEnvelopeError`;
+    `GlobalListModels::keep_stored_envelope`. Raise `TubeEnvelope::FORMAT` whenever what the boxes
+    hold changes; a fast test pins a synthetic tube's envelope.
+  - _Server._ `compute::EnvelopeFiles` (`envelopes/` under the data directory, one 1,586-byte file a
+    stream, keyed by the protocol and build versions, the `GalaxyKey`, the stream and the format;
+    a missing, bad or other-keyed file is a miss), held by `TubeTableCache::with_envelope_files`.
+    `TubeTableCache::insert` writes each table's envelope (and panics on a key of another stream);
+    `Lists::get` keeps the stored ones (`stored_envelopes`) with a list's models as it builds it, so
+    the sky and the range query both read them. `ServerStats::envelope_files`; `cache::fnv1a`, moved
+    from the sky's `disk.rs`; `limits::ENVELOPE_FILE_QUEUE` (64).
+  - _Stored generated data (main's brief, 2026-11-05)._ Kept as the kept skies are (R06.T11.n), a
+    cache the server may remove at any time and rebuilds on a miss, against the brainstorm's
+    "generated data is never stored".
+  - _Budget (lean, 2026-11-05)._ 16 MiB (`DEFAULT_KEPT_ENVELOPES_DISK_MIB`),
+    `ServerConfigBuilder::kept_envelopes_disk_bytes` (0 off); no command-line option.
+  - _Tests._ Server: `compute::envelope_files::tests`, `compute::global_list::tests::a_list_built_after_a_restart_keeps_the_envelopes_its_tables_had`,
+    `--test systems_in_range a_relaunched_server_reads_its_envelopes_and_answers_a_cold_query_as_before`
+    and its ignored measurement `cold_queries_before_and_after_a_relaunch`. Sim:
+    `tube::tests::an_envelope_rebuilt_from_its_parts_is_the_table_s_own_bit_for_bit`,
+    `source::tests::a_stored_envelope_replaces_none_and_one_past_the_list_is_passed_by`; the slow
+    `a_drawn_galaxy_s_census_is_the_old_path_s_bit_for_bit` keeps every envelope from its parts.
+  - _Left._ A galaxy's first launch still builds every table whose shell its first query meets (121
+    at 50 ly); an open's warm-up still builds every table after a relaunch, to fill the cache.

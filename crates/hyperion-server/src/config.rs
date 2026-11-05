@@ -244,6 +244,11 @@ pub const DEFAULT_SURFACE_CACHE_MIB: usize = 128;
 /// 7.49 MB payload and its JSON, so this holds some 33 of them, and more of a camera's sky near the
 /// Sun, which lists some 7 × 10⁴ stars.
 pub const DEFAULT_KEPT_SKIES_DISK_MIB: usize = 256;
+/// The streams' envelopes' files' budget, in MiB (plan 10, P10.T10.b; perf-range-envelopes-on-disk,
+/// lean, 2026-11-05): an envelope's file is 1,586 bytes, so this holds some 10,000, the envelopes of
+/// 32 galaxies of the server tests' 321 streams, or of 7 of the largest galaxies' 1,500. No option
+/// or variable sets it; [`ServerConfigBuilder::kept_envelopes_disk_bytes`] does.
+pub const DEFAULT_KEPT_ENVELOPES_DISK_MIB: usize = 16;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -786,6 +791,7 @@ pub struct ServerConfig {
     held_skies: HeldSkies,
     sky_qos: SkyQos,
     global_list_warm_up: GlobalListWarmUp,
+    kept_envelopes_disk_bytes: usize,
     feature_members: FeatureMembers,
     sky_feature_gas: SkyFeatureGas,
     stdin_stop: StdinStop,
@@ -960,6 +966,13 @@ impl ServerConfig {
         self.global_list_warm_up
     }
 
+    /// The streams' envelopes' files' budget, bytes, under the data directory (plan 10,
+    /// P10.T10.b; perf-range-envelopes-on-disk): 0 keeps none there.
+    #[must_use]
+    pub fn kept_envelopes_disk_bytes(&self) -> usize {
+        self.kept_envelopes_disk_bytes
+    }
+
     /// Whether the server serves plan 09's feature members (P09.T40.a).
     #[must_use]
     pub fn feature_members(&self) -> FeatureMembers {
@@ -1054,6 +1067,7 @@ impl Default for ServerConfigBuilder {
                 held_skies: HeldSkies::default(),
                 sky_qos: SkyQos::default(),
                 global_list_warm_up: GlobalListWarmUp::default(),
+                kept_envelopes_disk_bytes: DEFAULT_KEPT_ENVELOPES_DISK_MIB * BYTES_PER_MIB,
                 feature_members: FeatureMembers::default(),
                 sky_feature_gas: SkyFeatureGas::default(),
                 stdin_stop: StdinStop::default(),
@@ -1256,6 +1270,14 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn global_list_warm_up(mut self, warm_up: GlobalListWarmUp) -> Self {
         self.config.global_list_warm_up = warm_up;
+        self
+    }
+
+    /// Budget of the streams' envelopes' files under the data directory, bytes;
+    /// [`DEFAULT_KEPT_ENVELOPES_DISK_MIB`] by default, and 0 keeps none there.
+    #[must_use]
+    pub fn kept_envelopes_disk_bytes(mut self, bytes: usize) -> Self {
+        self.config.kept_envelopes_disk_bytes = bytes;
         self
     }
 

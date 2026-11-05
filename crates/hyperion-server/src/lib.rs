@@ -42,11 +42,12 @@ use std::{fmt, io};
 use axum::{Router, routing::get};
 
 use crate::compute::{
-    BulkGate, CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, GalaxyFeaturesService,
-    GlobalListService, SharedBodyCache, SharedBriefCache, SharedCellCache, SharedCentreOrbitCache,
-    SharedClassCellCache, SharedClusterModelCache, SharedFeatureCellCache, SharedSightlineCache,
-    SharedSkyCellCache, SharedSprayForces, SharedSystemCache, ShutDownPoolError, SkyCaps,
-    SkyTablesService, StartPoolError, TubeTableCache,
+    BulkGate, CpuPool, DensityMapService, ENVELOPE_FILES_DIR, EnvelopeFiles, ExtinctionMapService,
+    GalaxyCache, GalaxyFeaturesService, GlobalListService, SharedBodyCache, SharedBriefCache,
+    SharedCellCache, SharedCentreOrbitCache, SharedClassCellCache, SharedClusterModelCache,
+    SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSprayForces,
+    SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
+    TubeTableCache,
 };
 use crate::connections::Connections;
 use crate::limits::{
@@ -264,7 +265,10 @@ impl Server {
         );
         let sightlines = SharedSightlineCache::new(config.sightline_cache_bytes());
         let cells = Arc::new(SharedCellCache::new(config.cell_cache_bytes()));
-        let tube_tables = Arc::new(TubeTableCache::new(TUBE_TABLE_CACHE_BYTES));
+        let tube_tables = Arc::new(TubeTableCache::with_envelope_files(
+            TUBE_TABLE_CACHE_BYTES,
+            envelope_files(&config),
+        ));
         let (feature_cells, cluster_models, class_cells, map_lists, global_lists) = feature_caches(
             &config,
             Arc::clone(&pool),
@@ -366,8 +370,10 @@ impl Server {
         self.state.surface.stop_prefetching();
         // Nor do the global lists' warm-ups started at opens.
         self.state.global_lists.stop_warming();
-        // The kept skies' files queued are written before the process can end.
+        // The kept skies' files queued are written before the process can end, and the streams'
+        // envelopes'.
         self.state.sky_files.close().await;
+        self.state.tube_tables.close_envelope_files().await;
         self.state
             .pool
             .shutdown()
@@ -518,6 +524,7 @@ fn log_start(config: &ServerConfig) {
         sky_service = ?config.sky_service(),
         kept_skies = ?config.kept_skies(),
         kept_skies_disk_mib = config.kept_skies_disk_bytes() / (1 << 20),
+        kept_envelopes_disk_mib = config.kept_envelopes_disk_bytes() / (1 << 20),
         held_skies = ?config.held_skies(),
         sky_qos = ?config.sky_qos(),
         extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
@@ -548,6 +555,16 @@ fn sky_files(config: &ServerConfig) -> SkyReplyFiles {
         config.data_dir().join(SKY_FILES_DIR),
         u64::try_from(config.kept_skies_disk_bytes()).unwrap_or(u64::MAX),
         &settings,
+    )
+}
+
+/// The streams' envelopes' files under `config`'s data directory, in its budget (plan 10,
+/// P10.T10.b; perf-range-envelopes-on-disk).
+#[must_use]
+fn envelope_files(config: &ServerConfig) -> EnvelopeFiles {
+    EnvelopeFiles::new(
+        config.data_dir().join(ENVELOPE_FILES_DIR),
+        u64::try_from(config.kept_envelopes_disk_bytes()).unwrap_or(u64::MAX),
     )
 }
 

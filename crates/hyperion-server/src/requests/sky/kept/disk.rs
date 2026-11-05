@@ -47,6 +47,7 @@ use hyperion_sim::coords::GalacticPosition as SimPosition;
 
 use super::{HeldSky, SkyArrival, SkyHold, SkyReplyKey};
 use crate::bulk::{Answer, BulkPayload};
+use crate::cache::fnv1a;
 use crate::compute::SkyCaps;
 use crate::config::{FeatureMembers, SkyFeatureGas};
 use crate::limits::SKY_FILE_QUEUE;
@@ -62,12 +63,6 @@ const EXTENSION: &str = "sky";
 
 /// The extension of a file being written, removed if found at start.
 const TEMP_EXTENSION: &str = "tmp";
-
-/// FNV-1a's 64-bit offset basis and prime (Fowler, Noll and Vo; IETF draft-eastlake-fnv-21, §2.1
-/// and §6.1.2), for the files' names and checksums: no cryptographic strength is needed, since a
-/// name that collides is caught by the key the file holds.
-const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 /// What a sky's final reply depends on besides its request and its galaxy: the server's sky
 /// settings, fixed for its life but not across restarts.
@@ -896,14 +891,6 @@ fn take_bytes(file: &Bytes, at: usize, end: usize) -> Option<Bytes> {
     Some(file.slice(start..stop))
 }
 
-/// FNV-1a's 64-bit hash of `bytes`.
-#[must_use]
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(FNV_OFFSET_BASIS, |hash, &byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -1238,14 +1225,6 @@ mod tests {
         let file = encode(b"k", &answer(10)).unwrap();
         assert_eq!(decode(file.clone(), b"k"), Ok(answer(10)));
         assert_eq!(decode(file, b"j"), Err(Unread::OtherKey));
-    }
-
-    /// FNV-1a's published 64-bit test vectors (draft-eastlake-fnv-21, §8 and its test code).
-    #[test]
-    fn fnv1a_is_the_published_one() {
-        assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
-        assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
-        assert_eq!(fnv1a(b"foobar"), 0x8594_4171_f739_67e8);
     }
 
     /// A file of the arrival that holds for a sky asked later, or from a little way off, answers

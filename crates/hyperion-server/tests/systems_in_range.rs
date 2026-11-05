@@ -19,8 +19,8 @@ use hyperion_protocol::{
     RequestError, ResponseBody, ServerMessage, StellarBriefDto, SystemRecord, SystemsInRange,
     SystemsInRangeRequest, UniverseIdHex, UniverseInfo, UniverseTime,
 };
-use hyperion_server::FeatureMembers;
 use hyperion_server::limits::MAX_QUERY_CELLS;
+use hyperion_server::{FeatureMembers, ServerStats};
 use hyperion_sim::coords::LyCell;
 use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
 use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
@@ -1469,4 +1469,144 @@ async fn an_answer_with_briefs_is_the_golden_response(server: &TestServer) {
     }
     golden!("systems_in_range_briefs", &golden.finish());
     client.close().await;
+}
+
+/// A relaunched server answers a range query cold as the first server did, byte for byte, having
+/// read back the envelopes the first one wrote under the data directory as it built each table,
+/// its shutdown waiting for those still queued: it builds only the tables of the streams whose
+/// envelopes the sphere may touch, fewer than the first built, and asked again, warm, it builds
+/// none and answers the same (perf-range-envelopes-on-disk).
+#[tokio::test]
+async fn a_relaunched_server_reads_its_envelopes_and_answers_a_cold_query_as_before() {
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let query = Query::sunlike();
+    let server = TestServer::start_with(TestServer::config(data_dir.path()).build()).await;
+    let mut client = server.connected().await;
+    let universe = client
+        .create_universe("Kepler Reach: relaunched", SEED)
+        .await;
+    let first = ask(&mut client, &universe.id, &query).await.unwrap();
+    let built = server.stats().tube_tables().entries();
+    let written = u64::try_from(built).unwrap();
+    client.close().await;
+    server.stop().await;
+
+    let relaunched = TestServer::start_with(TestServer::config(data_dir.path()).build()).await;
+    let mut client = relaunched.connected().await;
+    let cold = ask(&mut client, &universe.id, &query).await.unwrap();
+    assert_eq!(
+        serde_json::to_string(&cold).unwrap(),
+        serde_json::to_string(&first).unwrap(),
+        "the relaunched cold answer, byte for byte"
+    );
+    let stats = relaunched.stats();
+    let (tables, files) = (stats.tube_tables(), stats.envelope_files());
+    assert_eq!(files.hits(), written, "every envelope read back: {files:?}");
+    // The pair moves with the list's streams, which a generator version may move: 10 is the slow
+    // census test's count of the tables the Sun-like 50 ly sphere reads.
+    assert_eq!(
+        (built, tables.entries()),
+        (121, 10),
+        "the tables the first and the relaunched cold query built"
+    );
+    assert_eq!(files.written(), 0, "none written again: {files:?}");
+
+    let warm = ask(&mut client, &universe.id, &query).await.unwrap();
+    assert_eq!(
+        serde_json::to_string(&warm).unwrap(),
+        serde_json::to_string(&first).unwrap(),
+        "the warm answer, byte for byte"
+    );
+    let again = relaunched.stats().tube_tables();
+    assert_eq!(
+        (again.entries(), again.evictions()),
+        (tables.entries(), 0),
+        "no table built warm"
+    );
+    client.close().await;
+    relaunched.stop().await;
+}
+
+/// The cold range queries of perf-range-envelopes-on-disk's table, in a server of eight workers:
+/// at the Sun-like point, of 50 ly, 500 ly and 5,000 ly, each first on a fresh data directory, then
+/// after a relaunch over it, and then warm, with the tables each built and the envelopes read back.
+/// Each launch first asks the galaxy's global list, which builds the galaxy and the list and reads
+/// the envelopes, so that the query's time is its tables' and its own. Its figures depend on the
+/// machine and the build, so it asserts only that the answers agree.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "measurement, run by hand: cargo test --release -p hyperion-server --test \
+            systems_in_range cold_queries_before_and_after_a_relaunch -- --ignored --nocapture"]
+async fn cold_queries_before_and_after_a_relaunch() {
+    let workers = std::num::NonZeroUsize::new(8).expect("eight");
+    eprintln!(
+        "| Radius | Launch | Galaxy and list (s) | Query (s) | Tables built | Envelopes read |"
+    );
+    eprintln!("| --- | --- | --- | --- | --- | --- |");
+    for radius_ly in [50.0, 500.0, 5_000.0] {
+        let data_dir = tempfile::tempdir().expect("a temporary directory");
+        let config = || TestServer::config(data_dir.path()).workers(workers).build();
+        let query = Query {
+            radius_ly,
+            ..Query::sunlike()
+        };
+        let server = TestServer::start_with(config()).await;
+        let mut client = server.connected().await;
+        let universe = client.create_universe("Kepler Reach: measured", SEED).await;
+        let row = |launch: &str, (list, wall): (f64, f64), stats: &ServerStats| {
+            eprintln!(
+                "| {radius_ly} ly | {launch} | {list:.2} | {wall:.2} | {} | {} |",
+                stats.tube_tables().entries(),
+                stats.envelope_files().hits()
+            );
+        };
+        let list = listed(&mut client, &universe.id).await;
+        let (first, wall) = timed(&mut client, &universe.id, &query).await;
+        row("first", (list, wall.as_secs_f64()), &server.stats());
+        client.close().await;
+        server.stop().await;
+
+        let relaunched = TestServer::start_with(config()).await;
+        let mut client = relaunched.connected().await;
+        let list = listed(&mut client, &universe.id).await;
+        let (cold, wall) = timed(&mut client, &universe.id, &query).await;
+        row(
+            "relaunched, cold",
+            (list, wall.as_secs_f64()),
+            &relaunched.stats(),
+        );
+        let (warm, wall) = timed(&mut client, &universe.id, &query).await;
+        row(
+            "relaunched, warm",
+            (0.0, wall.as_secs_f64()),
+            &relaunched.stats(),
+        );
+        assert_eq!(cold, first, "{radius_ly} ly");
+        assert_eq!(warm, first, "{radius_ly} ly");
+        client.close().await;
+        relaunched.stop().await;
+    }
+}
+
+/// Asks `query` of `universe` and returns the answer's JSON and the time it took.
+async fn timed(
+    client: &mut TestClient,
+    universe: &UniverseIdHex,
+    query: &Query,
+) -> (String, std::time::Duration) {
+    let started = std::time::Instant::now();
+    let answer = ask(client, universe, query).await.unwrap();
+    (serde_json::to_string(&answer).unwrap(), started.elapsed())
+}
+
+/// Asks `universe`'s global list, which builds its galaxy and the list, and returns the seconds it
+/// took.
+async fn listed(client: &mut TestClient, universe: &UniverseIdHex) -> f64 {
+    let started = std::time::Instant::now();
+    let body = RequestBody::GlobalFeatures(hyperion_protocol::GlobalFeaturesRequest {
+        universe: universe.clone(),
+    });
+    match client.request(body).await {
+        Ok(ResponseBody::GlobalFeatures(_)) => started.elapsed().as_secs_f64(),
+        other => panic!("expected the global list, got {other:?}"),
+    }
 }

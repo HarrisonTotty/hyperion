@@ -5,7 +5,10 @@
 //! a [`SharedByteLru`] over `(GalaxyKey, StreamNumber)`, so that two saves of one seed share their
 //! tables and nothing built under one generator version is lent for another (plan 04, design
 //! note 23). A table is a pure function of its galaxy and its stream, so eviction never changes an
-//! answer: a table evicted is built again, to the same bits.
+//! answer: a table evicted is built again, to the same bits. Each table kept has its envelope
+//! written to disk ([`EnvelopeFiles`]), and a galaxy's list built again after a restart reads them
+//! back ([`TubeTableCache::stored_envelopes`]), so that its first query builds only the tables it
+//! may touch (perf-range-envelopes-on-disk).
 //!
 //! [`ListedTubes`] is one galaxy's view of the cache with its global list: the sim's
 //! [`TubeLookup`], which [`resolve_with`](hyperion_sim::galaxy::placement::resolve_with) and the
@@ -20,12 +23,12 @@ use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::global_list::{
-    GlobalList, GlobalListModels, StreamNumber, TubeLookup, TubeTable,
+    GlobalList, GlobalListModels, StreamNumber, TubeEnvelope, TubeLookup, TubeTable,
 };
 use hyperion_sim::galaxy::placement::{ResolveSystemError, SystemRecord, resolve, resolve_with};
 use hyperion_sim::id::SystemId;
 
-use super::{GalaxyKey, HeldGlobalList};
+use super::{EnvelopeFileCounters, EnvelopeFiles, GalaxyKey, HeldGlobalList};
 use crate::cache::{HeapBytes, Insertion, LruCounters, SharedByteLru};
 
 /// What names a tube table in the cache: its galaxy, and its stream.
@@ -38,20 +41,30 @@ impl HeapBytes for TubeTable {
     }
 }
 
-/// The tube tables of every galaxy the server holds, in one byte budget.
+/// The tube tables of every galaxy the server holds, in one byte budget, and their envelopes on
+/// disk.
 #[derive(Debug)]
 pub struct TubeTableCache {
     tables: SharedByteLru<TubeKey, TubeTable>,
+    envelopes: EnvelopeFiles,
 }
 
 impl TubeTableCache {
-    /// An empty cache that holds at most `budget_bytes` of charged tables.
+    /// An empty cache that holds at most `budget_bytes` of charged tables, and keeps no envelope on
+    /// disk.
     ///
     /// A budget of zero keeps none: each table is built, read and dropped.
     #[must_use]
     pub fn new(budget_bytes: usize) -> Self {
+        Self::with_envelope_files(budget_bytes, EnvelopeFiles::off())
+    }
+
+    /// [`new`](Self::new), with each table's envelope kept in `envelopes` as the table is kept.
+    #[must_use]
+    pub(crate) fn with_envelope_files(budget_bytes: usize, envelopes: EnvelopeFiles) -> Self {
         Self {
             tables: SharedByteLru::new(budget_bytes),
+            envelopes,
         }
     }
 
@@ -69,8 +82,38 @@ impl TubeTableCache {
 
     /// Keeps `table` under `key`, evicting the least recently used tables to make room; a table
     /// larger than the whole budget is not kept.
+    ///
+    /// Its envelope is written to disk either way, unless a file holds it already, off the
+    /// caller's thread, which it never blocks.
+    ///
+    /// # Panics
+    ///
+    /// If `key` names another stream than `table`'s, whose envelope would be stored as another's.
     pub fn insert(&self, key: TubeKey, table: Arc<TubeTable>) -> Insertion<TubeTable> {
+        assert_eq!(
+            key.1,
+            table.stream(),
+            "a table is kept under its own stream"
+        );
+        self.envelopes.keep(key.0, &table);
         self.tables.insert(key, table)
+    }
+
+    /// The envelopes written to disk of `streams`, streams of the galaxy `key` names, by this
+    /// server or one before it on the same data directory: those a good file holds, in the order
+    /// asked, each its stream's table's own. What a galaxy's list keeps with its models when it is
+    /// built ([`GlobalListModels::keep_stored_envelope`]).
+    pub(crate) async fn stored_envelopes(
+        &self,
+        key: GalaxyKey,
+        streams: impl IntoIterator<Item = StreamNumber>,
+    ) -> Vec<(StreamNumber, TubeEnvelope)> {
+        self.envelopes.get(key, streams).await
+    }
+
+    /// Writes the envelopes still queued and stops writing any, for the server's shutdown.
+    pub(crate) async fn close_envelope_files(&self) {
+        self.envelopes.close().await;
     }
 
     /// The tables held, the bytes they are charged, and the hits, misses, evictions and refusals
@@ -78,6 +121,12 @@ impl TubeTableCache {
     #[must_use]
     pub fn counters(&self) -> LruCounters {
         self.tables.counters()
+    }
+
+    /// The envelopes' files' size and use.
+    #[must_use]
+    pub fn envelope_file_counters(&self) -> EnvelopeFileCounters {
+        self.envelopes.counters()
     }
 }
 

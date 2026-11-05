@@ -45,7 +45,10 @@
 //! bulk priority, or for the first `stream_track` that asks, at interactive priority, or inside
 //! the job that resolves one of its members ([`ListedTubes`]). A list and a table are pure
 //! functions of their galaxy, so eviction never changes an answer, and neither does the order in
-//! which the warm-up's tables, several in flight at once, finish and are kept.
+//! which the warm-up's tables, several in flight at once, finish and are kept. Each table's
+//! envelope is written to disk as it is kept, and a list built again, after its eviction or a
+//! restart, keeps the envelopes found there with its models ([`TubeTableCache::stored_envelopes`],
+//! perf-range-envelopes-on-disk), so that its queries build only the tables they may touch.
 //!
 //! [`served_range_query`]: super::served_range_query
 //! [`DebrisPlan::orphan`]: hyperion_sim::galaxy::global_list::DebrisPlan::orphan
@@ -880,11 +883,12 @@ impl Lists {
         if let Some(list) = self.held.get(&key) {
             return Ok(list);
         }
-        let (pool, galaxies, forces, held) = (
+        let (pool, galaxies, forces, held, tubes) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.galaxies),
             Arc::clone(&self.forces),
             Arc::clone(&self.held),
+            Arc::clone(&self.tubes),
         );
         self.flights
             .run(key, move || async move {
@@ -914,7 +918,20 @@ impl Lists {
                     })
                     .await?
                 };
-                let list = Arc::new(reply(modelled).await?);
+                let list = reply(modelled).await?;
+                // The envelopes of the tables built before, by this server or one before it, so
+                // that a query whose sphere misses a stream's tube need not build its table first
+                // (perf-range-envelopes-on-disk).
+                let streams = list
+                    .list()
+                    .debris()
+                    .streams()
+                    .iter()
+                    .map(StreamSpec::number);
+                for (number, envelope) in tubes.stored_envelopes(key, streams).await {
+                    list.models().keep_stored_envelope(number, envelope);
+                }
+                let list = Arc::new(list);
                 // A list larger than the whole budget is handed back and not stored.
                 drop(held.insert(key, Arc::clone(&list)));
                 Ok(list)
@@ -1093,7 +1110,7 @@ mod tests {
         GlobalMemberRecord, StreamBandShares, resolve_stream_member, stream_cell_members,
     };
     use hyperion_sim::galaxy::global_list::tube::KNOTS_PER_ARM;
-    use hyperion_sim::galaxy::global_list::{GlobalListSource, TubeLookup};
+    use hyperion_sim::galaxy::global_list::{GlobalListSource, TubeEnvelope, TubeLookup};
     use hyperion_sim::galaxy::imf::MassBand;
     use hyperion_sim::galaxy::placement::{
         NoCache, ResolveSystemError, SystemOrigin, SystemRecord,
@@ -1102,7 +1119,7 @@ mod tests {
     use hyperion_sim::units::LightYears;
 
     use super::*;
-    use crate::compute::SharedSystemCache;
+    use crate::compute::{ENVELOPE_FILES_DIR, EnvelopeFiles, SharedSystemCache};
     use crate::convert::origins::SEED;
     use crate::limits::TUBE_TABLE_CACHE_BYTES;
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -1466,6 +1483,61 @@ mod tests {
             .expect("the warm-up's jobs run");
         assert_eq!((again.built(), again.held()), (0, 2));
         assert_eq!(service.tube_counters().evictions(), 0);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// perf-range-envelopes-on-disk: each table the service keeps has its envelope written under
+    /// the data directory, and a service started again over it, as a restarted server's, keeps
+    /// them with its list's models when it builds the list, before any table: each the table's
+    /// own, bit for bit, and none of a stream whose table was not built.
+    #[tokio::test]
+    async fn a_list_built_after_a_restart_keeps_the_envelopes_its_tables_had() {
+        let dir = tempfile::TempDir::new().expect("a temporary directory");
+        let cache_over = |dir: &tempfile::TempDir| {
+            let files = EnvelopeFiles::new(dir.path().join(ENVELOPE_FILES_DIR), 1 << 20);
+            Arc::new(TubeTableCache::with_envelope_files(
+                TUBE_TABLE_CACHE_BYTES,
+                files,
+            ))
+        };
+        let cache = cache_over(&dir);
+        let (service, pool) = service_on(4, &cache);
+        let (galaxy, list) = listed(&service).await;
+        let streams = list.list().debris().streams();
+        let specs: Vec<&StreamSpec> = streams[..2].iter().collect();
+        within(service.tubes((&galaxy, key()), &specs, Priority::Bulk))
+            .await
+            .expect("the tables build");
+        let own: Vec<TubeEnvelope> = specs
+            .iter()
+            .map(|spec| TubeEnvelope::of(&cache.get(&(key(), spec.number())).expect("kept")))
+            .collect();
+        within(cache.close_envelope_files()).await;
+        assert_eq!(cache.envelope_file_counters().written(), 2);
+        pool.shutdown().await.unwrap();
+
+        let restarted = cache_over(&dir);
+        let (service, pool) = service_on(4, &restarted);
+        let (_, relisted) = listed(&service).await;
+        for (spec, own) in specs.iter().zip(&own) {
+            let kept = relisted
+                .models()
+                .envelope(spec.number())
+                .expect("read back");
+            assert_eq!(kept, own, "stream {}", spec.number().get());
+            // A float's debug form spells it exactly, as `bits` spells a table.
+            assert_eq!(format!("{kept:?}"), format!("{own:?}"), "bit for bit");
+        }
+        assert!(
+            streams[2..]
+                .iter()
+                .all(|spec| relisted.models().envelope(spec.number()).is_none())
+        );
+        assert_eq!(restarted.counters().entries(), 0, "no table built");
+        let read = restarted.envelope_file_counters();
+        let others = u64::try_from(streams.len() - 2).expect("a count");
+        assert_eq!((read.hits(), read.misses()), (2, others), "{read:?}");
+        within(restarted.close_envelope_files()).await;
         pool.shutdown().await.unwrap();
     }
 

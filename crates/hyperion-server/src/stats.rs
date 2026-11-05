@@ -10,7 +10,8 @@ use tokio::sync::watch;
 use crate::AppState;
 use crate::cache::LruCounters;
 use crate::compute::{
-    BodyCacheCounters, GalaxyCounters, PoolCounters, SkyCellCounters, SkyTablesCounters,
+    BodyCacheCounters, EnvelopeFileCounters, GalaxyCounters, PoolCounters, SkyCellCounters,
+    SkyTablesCounters,
 };
 use crate::requests::SkyFileCounters;
 use crate::surface::SurfaceCounters;
@@ -41,6 +42,7 @@ pub struct ServerStats {
     galaxy_features: LruCounters,
     global_lists: LruCounters,
     tube_tables: LruCounters,
+    envelope_files: EnvelopeFileCounters,
 }
 
 impl ServerStats {
@@ -71,6 +73,7 @@ impl ServerStats {
             galaxy_features: state.galaxy_features.counters(),
             global_lists: state.global_lists.counters(),
             tube_tables: state.global_lists.tube_counters(),
+            envelope_files: state.tube_tables.envelope_file_counters(),
         }
     }
 
@@ -235,6 +238,14 @@ impl ServerStats {
     #[must_use]
     pub fn tube_tables(&self) -> LruCounters {
         self.tube_tables
+    }
+
+    /// The streams' envelopes' files' size and use, under the data directory: each table's
+    /// envelope written as it is kept, and read back when its galaxy's list is built again
+    /// (perf-range-envelopes-on-disk).
+    #[must_use]
+    pub fn envelope_files(&self) -> EnvelopeFileCounters {
+        self.envelope_files
     }
 }
 

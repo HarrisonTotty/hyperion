@@ -33,6 +33,7 @@ mod cells;
 mod centre_orbits;
 mod class_cells;
 mod density_map;
+mod envelope_files;
 mod error;
 mod extinction_map;
 mod features;
@@ -62,6 +63,8 @@ pub use density_map::{
     ParseCodeDepthError, ParseMapResolutionError, PerLy2, QuantisedMap, RawDensityMap, RawMap,
     quantise_map, quantise_map_with_floor,
 };
+pub use envelope_files::EnvelopeFileCounters;
+pub(crate) use envelope_files::{ENVELOPE_FILES_DIR, EnvelopeFiles};
 pub use error::ComputeError;
 pub use extinction_map::{
     EXTINCTION_FLOOR_LOG10_MAG, ExtinctionMapKey, ExtinctionMapService, Mag, RawExtinctionMap,
