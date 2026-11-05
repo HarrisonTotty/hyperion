@@ -263,6 +263,60 @@ pub(crate) fn dwarfs_above_the_limit(
     above
 }
 
+/// The kinds of the carbon–oxygen and oxygen–neon dwarfs that `timeline`'s members become giants
+/// from and come back to, in order, each as (before, after, merged) (P11.T4's swollen dwarf): a
+/// member that is such a dwarf in one segment, a giant the binary carries in a later one, and such
+/// a dwarf again in the next after that; merged where the other member is gone in a segment
+/// between, so that the giant is a merger product placed on a track of its own rather than the
+/// swollen dwarf's. Read from the segments' members, since a swollen giant can live for no time
+/// between a swell and a common envelope that strips it.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn swollen_dwarf_kinds(
+    timeline: &crate::stellar::binary::BinaryTimeline,
+) -> Vec<(crate::stellar::Phase, crate::stellar::Phase, bool)> {
+    use crate::stellar::Phase;
+    use crate::stellar::binary::star::Member;
+
+    let mut found = Vec::new();
+    for k in 0..2 {
+        // The last dwarf the member was, whether it has been a carried giant since, and whether
+        // the other member has been gone since.
+        let mut dwarf: Option<(Phase, bool, bool)> = None;
+        for segment in timeline.segments() {
+            let merged = segment.members()[1 - k].is_gone();
+            dwarf = match (&segment.members()[k], dwarf) {
+                (
+                    Member::Remnant {
+                        phase: phase @ (Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf),
+                        ..
+                    },
+                    before,
+                ) => {
+                    if let Some((before, true, was_merged)) = before {
+                        found.push((before, *phase, was_merged));
+                    }
+                    Some((*phase, false, false))
+                }
+                (Member::Shaped { .. }, Some((before, _, was_merged))) => {
+                    Some((before, true, was_merged || merged))
+                }
+                (Member::Shaped { .. }, None)
+                | (
+                    Member::Track { .. }
+                    | Member::MainSequence { .. }
+                    | Member::Cooling { .. }
+                    | Member::Frozen { .. }
+                    | Member::Remnant { .. }
+                    | Member::Gone,
+                    _,
+                ) => None,
+            };
+        }
+    }
+    found
+}
+
 /// Whether `input`'s primary dies when plan 06 says, its death pinned (design note 16).
 #[cfg(test)]
 #[must_use]

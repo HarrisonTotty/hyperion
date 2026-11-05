@@ -46,6 +46,7 @@ use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Megayears, Metres, Radians, SolarMasses, Years};
 
 use super::detached::TestedOrbit;
+use super::dwarf_limit::CoreSource;
 use super::star::{Member, Path, positive, zams_spin};
 use super::timeline::{
     BinaryInput, BinaryTimeline, Context, FixedOrbit, OrbitPath, PooledIaEvent, Segment,
@@ -865,6 +866,13 @@ pub(super) struct Engine {
     /// Whether a common envelope is being resolved: a merger it leads to never starts another
     /// (the guard against the recursion of a held bare core, ruling 129.4c).
     pub(super) in_common_envelope: bool,
+    /// The white dwarf each member's core is, where the member is the giant a carbon–oxygen or
+    /// oxygen–neon dwarf swelled into (from version 29, P11.T4's swollen dwarf): its strip, its
+    /// own death and a merger product no star holds take that kind ([`CoreSource`]). Any other
+    /// member's is [`CoreSource::Other`], and [`Engine::set_member`] resets it: the callers that
+    /// keep the giant (a merger it survives as itself, a strip to a bare core that dies at once)
+    /// set it again.
+    pub(super) swollen_cores: [CoreSource; 2],
     /// The main-sequence lifetimes read last ([`Engine::main_sequence_lifetime`]).
     lifetimes: Lifetimes,
     /// The members' structures evaluated last ([`Engine::structure`]).
@@ -1138,6 +1146,7 @@ impl Engine {
             in_common_envelope: false,
             lifetimes: Lifetimes::default(),
             structures: KeptStructures::default(),
+            swollen_cores: [CoreSource::Other; 2],
         };
         for i in 0..2 {
             let (mass, tau) = engine.current(i);
@@ -1308,9 +1317,11 @@ impl Engine {
     }
 
     /// Replaces the members from now, the current segment having been closed: a change of form
-    /// inside a phase.
+    /// inside a phase. The new member is no swollen dwarf's giant ([`Engine::swollen_cores`])
+    /// unless the caller says so.
     pub(super) fn set_member(&mut self, i: usize, member: Member) {
         self.members[i] = member;
+        self.swollen_cores[i] = CoreSource::Other;
     }
 
     /// The kind a pair without Roche-lobe overflow is in: detached while bound, disrupted once

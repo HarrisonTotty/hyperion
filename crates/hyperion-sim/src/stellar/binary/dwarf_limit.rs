@@ -183,10 +183,15 @@ pub(crate) fn unplaced_counts() -> [usize; 6] {
     UNPLACED.with(core::cell::Cell::get)
 }
 
-/// What a merger's product's core was ([`DwarfLimitRules::unplaced`]): an oxygen–neon white dwarf,
-/// whose product's dwarf is oxygen–neon whatever its mass, or anything else.
+/// What a merger's product's core was ([`DwarfLimitRules::unplaced`]): a carbon–oxygen or
+/// oxygen–neon white dwarf, whose product's dwarf is of its kind whatever its mass, since gaining
+/// and losing a hydrogen envelope does not change a core's composition, or anything else. The
+/// engine keeps it too for the giant each dwarf swells into, whose every exit takes it
+/// (`Engine::swollen_cores`; P11.T4's swollen dwarf from `SWOLLEN_DWARF_VERSION`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CoreSource {
+    /// A carbon–oxygen white dwarf.
+    CarbonOxygenDwarf,
     /// An oxygen–neon white dwarf.
     OxygenNeonDwarf,
     /// Any other star's core.
@@ -197,10 +202,63 @@ impl CoreSource {
     /// The source of a product whose core is a star of `kind`.
     #[must_use]
     pub(super) fn of(kind: Kind) -> Self {
-        if kind == Kind::OxygenNeonWhiteDwarf {
-            Self::OxygenNeonDwarf
-        } else {
-            Self::Other
+        match kind {
+            Kind::CarbonOxygenWhiteDwarf => Self::CarbonOxygenDwarf,
+            Kind::OxygenNeonWhiteDwarf => Self::OxygenNeonDwarf,
+            Kind::LowMassMainSequence
+            | Kind::MainSequence
+            | Kind::HertzsprungGap
+            | Kind::GiantBranch
+            | Kind::CoreHeliumBurning
+            | Kind::EarlyAgb
+            | Kind::PulsingAgb
+            | Kind::HeliumMainSequence
+            | Kind::HeliumGap
+            | Kind::HeliumGiant
+            | Kind::HeliumWhiteDwarf
+            | Kind::NeutronStar
+            | Kind::BlackHole
+            | Kind::Massless => Self::Other,
+        }
+    }
+
+    /// The phase of the dwarf the core is, if it is one's.
+    #[must_use]
+    pub(super) const fn dwarf(self) -> Option<Phase> {
+        match self {
+            Self::CarbonOxygenDwarf => Some(Phase::CarbonOxygenWhiteDwarf),
+            Self::OxygenNeonDwarf => Some(Phase::OxygenNeonWhiteDwarf),
+            Self::Other => None,
+        }
+    }
+
+    /// The phase of the white dwarf a core of this source leaves where a track types it `phase`:
+    /// the source's dwarf's kind in place of a carbon–oxygen or oxygen–neon one, and `phase`
+    /// otherwise.
+    #[must_use]
+    pub(super) fn dwarf_phase(self, phase: Phase) -> Phase {
+        let Some(kind) = self.dwarf() else {
+            return phase;
+        };
+        match phase {
+            Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => kind,
+            Phase::Protostar
+            | Phase::PreMainSequence
+            | Phase::MainSequence
+            | Phase::HertzsprungGap
+            | Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::HeliumMainSequence
+            | Phase::HeliumHertzsprungGap
+            | Phase::HeliumGiantBranch
+            | Phase::PostAgb
+            | Phase::HeliumWhiteDwarf
+            | Phase::NeutronStar
+            | Phase::BlackHole
+            | Phase::NoRemnant
+            | Phase::Substellar => phase,
         }
     }
 }
@@ -217,7 +275,6 @@ impl DwarfLimitRules {
         source: CoreSource,
     ) -> Unplaced {
         let mass = SolarMasses::new(core.value().max(1e-3).min(m.value()));
-        let oxygen_neon_source = source == CoreSource::OxygenNeonDwarf;
         match self {
             Self::Whole
                 if kind == Kind::PulsingAgb
@@ -230,8 +287,8 @@ impl DwarfLimitRules {
                 }
             }
             Self::Held if carbon_oxygen_core(kind) => {
-                let oxygen_neon =
-                    oxygen_neon_source || sse::pulsing_agb_helium_core(core) >= OXYGEN_NEON_MC_BAGB;
+                let oxygen_neon = source == CoreSource::OxygenNeonDwarf
+                    || sse::pulsing_agb_helium_core(core) >= OXYGEN_NEON_MC_BAGB;
                 Unplaced::WhiteDwarf {
                     phase: if oxygen_neon {
                         Phase::OxygenNeonWhiteDwarf
@@ -242,20 +299,20 @@ impl DwarfLimitRules {
                 }
             }
             Self::Whole if carbon_oxygen_core(kind) => {
-                let oxygen_neon = oxygen_neon_source
-                    || if kind == Kind::PulsingAgb {
-                        sse::pulsing_agb_helium_core(core) >= OXYGEN_NEON_MC_BAGB
-                    } else {
-                        // HPT section 6.1: a helium star's mass takes `Mc,BAGB`'s place, and the
-                        // product's mass stands for the helium star's.
-                        m >= OXYGEN_NEON_MC_BAGB
-                    };
+                let oxygen_neon = if kind == Kind::PulsingAgb {
+                    sse::pulsing_agb_helium_core(core) >= OXYGEN_NEON_MC_BAGB
+                } else {
+                    // HPT section 6.1: a helium star's mass takes `Mc,BAGB`'s place, and the
+                    // product's mass stands for the helium star's.
+                    m >= OXYGEN_NEON_MC_BAGB
+                };
+                let phase = if oxygen_neon {
+                    Phase::OxygenNeonWhiteDwarf
+                } else {
+                    Phase::CarbonOxygenWhiteDwarf
+                };
                 Unplaced::WhiteDwarf {
-                    phase: if oxygen_neon {
-                        Phase::OxygenNeonWhiteDwarf
-                    } else {
-                        Phase::CarbonOxygenWhiteDwarf
-                    },
+                    phase: source.dwarf_phase(phase),
                     mass,
                 }
             }

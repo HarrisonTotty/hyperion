@@ -245,7 +245,7 @@ impl Engine {
             self.structure(d, self.age, md, td),
             self.structure(o, self.age, mo, to),
         ) else {
-            self.coalesce(None);
+            self.coalesce(d, None);
             return;
         };
         let a_i = self.orbit.as_ref().map_or(0.0, |orbit| orbit.a);
@@ -262,7 +262,7 @@ impl Engine {
         }
         match envelope_outcome(s1, s2, binding, a_i, &params) {
             EnvelopeOutcome::Survives { a_f } => self.survive_envelope(d, &s2, a_f),
-            EnvelopeOutcome::Coalesces(remains) => self.coalesce(Some(remains)),
+            EnvelopeOutcome::Coalesces(remains) => self.coalesce(d, Some(remains)),
         }
     }
 
@@ -273,12 +273,12 @@ impl Engine {
         let o = 1 - d;
         self.stripped[d] = true;
         let (donor, donor_collapses) = self.stripped_member(d);
-        self.set_member(d, donor);
+        self.set_stripped(d, donor, donor_collapses);
         let mut other_collapses = false;
         if s2.kind.is_giant_like() {
             self.stripped[o] = true;
             let (other, collapses) = self.stripped_member(o);
-            self.set_member(o, other);
+            self.set_stripped(o, other, collapses);
             other_collapses = collapses;
         }
         let age = self.age;
@@ -381,12 +381,16 @@ impl Engine {
                 mass,
                 last_luminosity,
                 ..
-            } => Member::Remnant {
-                phase,
-                birth: age,
-                origin: cooling_origin(&self.ctx, phase, mass.value(), Some(last_luminosity)),
-                mass: Path::starting(age, mass.value()),
-            },
+            } => {
+                // A swollen dwarf's giant leaves the dwarf's kind (`swollen_dwarf`, P11.T4's fix).
+                let phase = self.swollen_cores[i].dwarf_phase(phase);
+                Member::Remnant {
+                    phase,
+                    birth: age,
+                    origin: cooling_origin(&self.ctx, phase, mass.value(), Some(last_luminosity)),
+                    mass: Path::starting(age, mass.value()),
+                }
+            }
         };
         Some((member, false))
     }
@@ -397,10 +401,20 @@ impl Engine {
         self.close_segment();
         self.stripped[i] = true;
         let (member, collapses) = self.stripped_member(i);
-        self.set_member(i, member);
+        self.set_stripped(i, member, collapses);
         self.kind = self.quiet_kind();
         if collapses {
             self.die(i);
+        }
+    }
+
+    /// Sets member `i` to what its strip leaves, `member`: a bare core that dies at once
+    /// (`collapses`) keeps a swollen dwarf's kind for its death ([`Engine::swollen_cores`]).
+    fn set_stripped(&mut self, i: usize, member: Member, collapses: bool) {
+        let source = self.swollen_cores[i];
+        self.set_member(i, member);
+        if collapses {
+            self.swollen_cores[i] = source;
         }
     }
 
@@ -418,22 +432,35 @@ impl Engine {
         self.spins[i] = (moment_of_inertia(&s) * omega).max(1e-10);
     }
 
-    /// The pair coalesces, with what a common envelope left, `remains`, if there was one (BSE
-    /// sections 2.7.1–2.7.4), or in a collision without one.
-    fn coalesce(&mut self, remains: Option<CommonEnvelopeRemains>) {
+    /// The pair coalesces, with what a common envelope around member `d` left, `remains`, if there
+    /// was one (BSE sections 2.7.1–2.7.4), or in a collision without one.
+    fn coalesce(&mut self, d: usize, remains: Option<CommonEnvelopeRemains>) {
         let Some(remains) = remains else {
             self.mix();
             return;
         };
-        let product = self.product_member(coalesced_product(&remains, self.ctx.giant_exponent()));
+        let product = coalesced_product(&remains, self.ctx.giant_exponent());
+        let product = self.product_member(product, self.merged_core_source(d));
         self.finish_merger(product);
+    }
+
+    /// The dwarf the core of a common envelope's merger product came from, whose core is both
+    /// members' cores: a swollen dwarf's giant's ([`Engine::swollen_cores`]), member `first`'s
+    /// before the other's (lean, 2026-11-03), or [`CoreSource::Other`].
+    #[must_use]
+    fn merged_core_source(&self, first: usize) -> CoreSource {
+        [first, 1 - first]
+            .into_iter()
+            .map(|i| self.swollen_cores[i])
+            .find(|&source| source != CoreSource::Other)
+            .unwrap_or(CoreSource::Other)
     }
 
     /// What a coalescence in a common envelope leaves, from what [`coalesced_product`] gives:
     /// nothing, a compact star, or a star of its kind, mass and core, placed by
-    /// [`Engine::new_star`] at the engine's age.
+    /// [`Engine::new_star_around`] at the engine's age, its core from `source`.
     #[must_use]
-    pub(super) fn product_member(&self, product: CoalescedProduct) -> Product {
+    pub(super) fn product_member(&self, product: CoalescedProduct, source: CoreSource) -> Product {
         match product {
             CoalescedProduct::Nothing => Member::Gone.into(),
             CoalescedProduct::Compact { kind, mass } => self.compact(kind, mass).into(),
@@ -443,7 +470,7 @@ impl Engine {
                 core,
                 burnt,
                 fraction,
-            } => self.new_star(kind, mass, core, burnt, fraction),
+            } => self.new_star_around(kind, mass, core, burnt, fraction, source),
         }
     }
 }
@@ -627,18 +654,17 @@ impl Engine {
             self.structure(1, self.age, m1, t1),
         );
         let (Some(a), Some(b)) = (s0, s1) else {
-            // One of them is already gone: the other stays as it is.
-            let survivor = if self.members[0].is_gone() {
-                self.members[1].clone()
-            } else {
-                self.members[0].clone()
-            };
-            self.finish_merger(survivor.into());
+            // One of them is already gone: the other stays as it is, a swollen dwarf's giant with
+            // its dwarf's kind.
+            let k = usize::from(self.members[0].is_gone());
+            let survivor = self.members[k].clone();
+            self.finish_merger_keeping(survivor.into(), self.swollen_cores[k]);
             return;
         };
         let (k0, k1) = (Kind::of(a.state.phase(), m0), Kind::of(b.state.phase(), m1));
         // Body 1 of BSE's `mix` is the more evolved.
-        let (hi, lo, s_hi, s_lo) = if k0.number() >= k1.number() {
+        let first = usize::from(k0.number() < k1.number());
+        let (hi, lo, s_hi, s_lo) = if first == 0 {
             (k0, k1, &a, &b)
         } else {
             (k1, k0, &b, &a)
@@ -740,21 +766,28 @@ impl Engine {
                     return;
                 }
                 let kind = collision_product(hi, lo);
-                self.new_star(
+                self.new_star_around(
                     kind,
                     total,
                     s_hi.state.core_mass().value(),
                     s_hi.burnt,
                     s_hi.state.phase_fraction(),
+                    self.swollen_cores[first],
                 )
             }
         };
         self.finish_merger(product);
     }
 
-    /// Records the merger as [`Engine::finish_merger`] does, for a product built by the caller.
-    pub(super) fn finish_merger_with(&mut self, product: Product) {
-        self.finish_merger(product);
+    /// Records the merger as [`Engine::finish_merger_keeping`] does, for a product built by the
+    /// caller.
+    pub(super) fn finish_merger_with(&mut self, product: Product, source: CoreSource) {
+        self.finish_merger_keeping(product, source);
+    }
+
+    /// [`Engine::finish_merger_keeping`] for a product that is no swollen dwarf's giant.
+    fn finish_merger(&mut self, product: Product) {
+        self.finish_merger_keeping(product, CoreSource::Other);
     }
 
     /// Records the merger: `product` in the primary's place, nothing in the secondary's, no orbit.
@@ -765,8 +798,9 @@ impl Engine {
     /// collapse (P11.T4's fix, `dwarf_limit::collapses`); from 29 a pinned primary's product is
     /// left to its pin ([`Engine::pin_pending`], P11.T4's `dwarf_limit`), and an unplaced product's
     /// iron core ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]),
-    /// pooling no candidate.
-    fn finish_merger(&mut self, product: Product) {
+    /// pooling no candidate. From 29 a swollen dwarf's giant that merges as itself keeps its
+    /// dwarf's kind, `source` ([`Engine::swollen_cores`], P11.T4's `swollen_dwarf`).
+    fn finish_merger_keeping(&mut self, product: Product, source: CoreSource) {
         let (product, iron_core) = match product {
             Product::Member(member) => (member, None),
             Product::IronCore { co_core, mass } => (Member::Gone, Some((co_core, mass))),
@@ -789,6 +823,7 @@ impl Engine {
         let masses = dwarf.map(|_| [0, 1].map(|i| SolarMasses::new(self.current(i).0)));
         self.close_segment();
         self.set_member(0, product);
+        self.swollen_cores[0] = source;
         self.set_member(1, Member::Gone);
         self.orbit = None;
         self.kind = SegmentKind::Merged;

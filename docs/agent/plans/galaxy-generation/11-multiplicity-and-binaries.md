@@ -7660,3 +7660,8 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     plan 06's iron-core fate (`sse::iron_core_fate`, `Engine::iron_core_collapse`) with the
     ordinary kick and no Ia; the held arm's ONe AIC stays. Merger callers pass
     `common_envelope::Product`. The census counts the unplaced products by kind.
+  - From fix-p11-swollen-dwarf-kind (under `SWOLLEN_DWARF_VERSION` 29): a CO or ONe dwarf's swell
+    records its kind (`Engine::swollen_cores`, `CoreSource::CarbonOxygenDwarf` added), and every
+    exit of the giant takes it: its strip, a merger it survives as itself, an unplaced product made
+    from it, and its own death (`SwollenDeath`). Pinned pair 0080's ONe dwarf no longer strips back
+    to CO.

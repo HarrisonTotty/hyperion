@@ -54,10 +54,10 @@ use std::sync::Arc;
 use crate::coords::{SystemVector, SystemVelocity};
 use crate::orbit::{Eccentricity, KeplerElements, Orbit, elements_from_state};
 use crate::stellar::Phase;
-use crate::stellar::remnant::collapse::RemnantDraws;
+use crate::stellar::remnant::collapse::{RemnantDraws, electron_capture_remnant};
 use crate::stellar::remnant::{
-    CollapseChannel, CompactRemnant, KickDraws, KickLaw, NatalKick, ProgenitorAtDeath, RemnantKind,
-    StandardKickLaw, Stripping, SupernovaType,
+    CollapseChannel, CompactRemnant, DeathKind, KickDraws, KickLaw, NatalKick, ProgenitorAtDeath,
+    RemnantKind, StandardKickLaw, Stripping, SupernovaType,
 };
 use crate::stellar::sse;
 use crate::time::{Span, UniverseTime};
@@ -66,7 +66,8 @@ use crate::units::{GravitationalParameter, Megayears, Radians, SolarMasses, Year
 
 use super::detached::last_living;
 use super::evolve::{Engine, LiveOrbit, OwnMainSequenceEnd, Pin, PreTest, clock_resolution_years};
-use super::star::{Member, Path, positive};
+use super::star::{Member, Path, cooling_origin, positive};
+use super::swollen_dwarf::SwollenDeath;
 use super::timeline::{
     BinaryInput, BinaryTimeline, Component, Context, FixedOrbit, MAX_REPORTED_ECCENTRICITY,
     OrbitPath, Segment, SegmentKind, SupernovaRecord,
@@ -119,13 +120,37 @@ impl Engine {
         } else {
             super::evolve::offset_for(self.age, death.age().value())
         };
-        self.set_member(
-            i,
-            Member::Track {
+        // A swollen dwarf's giant dies as the dwarf's core would (`swollen_dwarf`, P11.T4's fix).
+        let phase = track
+            .remnant_clock()
+            .map_or(Phase::NoRemnant, |(phase, ..)| phase);
+        let member = match SwollenDeath::of(self.swollen_cores[i], death.kind(), phase) {
+            SwollenDeath::Own => Member::Track {
                 track: std::sync::Arc::clone(&track),
                 offset,
             },
-        );
+            SwollenDeath::WhiteDwarf(phase) => {
+                let mass = remnant.mass().value();
+                let last = track.state_at(Years::new(last_living(death.age().value())));
+                Member::Remnant {
+                    phase,
+                    birth: self.age,
+                    origin: cooling_origin(&self.ctx, phase, mass, Some(last.luminosity())),
+                    mass: Path::starting(self.age, mass),
+                }
+            }
+            SwollenDeath::ElectronCapture => {
+                self.electron_capture_collapse(i, &death, before);
+                return;
+            }
+            SwollenDeath::Disruption => {
+                self.set_member(i, Member::Gone);
+                let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);
+                self.explode(i, before, nothing, None);
+                return;
+            }
+        };
+        self.set_member(i, member);
         if !death.kind().is_sudden() {
             // A white dwarf born as the envelope goes: continuous, and whatever envelope a companion
             // left on the star goes with it, without a kick.
@@ -158,6 +183,43 @@ impl Engine {
             && self.pin.is_some_and(|p| {
                 p.death.age().value() >= self.age - clock_resolution_years(self.age)
             })
+    }
+
+    /// Member `i`, a swollen oxygen–neon dwarf's giant of `before` M☉, collapses now by electron
+    /// capture where its own track's `death` would not.
+    ///
+    /// The core collapses inside its hydrogen envelope, an electron-capture supernova (Nomoto
+    /// 1984, ApJ 277, 791; HPT section 6, the engine's [`DeathKind::ElectronCapture`]), into Mandel
+    /// and Müller's 1.26 M☉ neutron star ([`electron_capture_remnant`]) with the low-mode kick of
+    /// electron capture and no Type Ia candidate (P11.T4's swollen dwarf from version 29,
+    /// [`SwollenDeath::ElectronCapture`]). The progenitor's core is the track's at its death and
+    /// its envelope the rest of `before`.
+    fn electron_capture_collapse(
+        &mut self,
+        i: usize,
+        death: &crate::stellar::remnant::Death,
+        before: f64,
+    ) {
+        let core = SolarMasses::new(death.progenitor().co_core_mass().value().min(before));
+        let envelope = SolarMasses::new((before - core.value()).max(0.0));
+        let progenitor = ProgenitorAtDeath::new(core, core, envelope, Stripping::None);
+        let death = crate::stellar::remnant::Death::new(
+            Years::new(self.age),
+            DeathKind::ElectronCapture,
+            progenitor,
+        );
+        let remnant = electron_capture_remnant();
+        let kick = self.companion_kick(i, &death, &remnant);
+        self.set_member(
+            i,
+            Member::Remnant {
+                phase: Phase::NeutronStar,
+                birth: self.age,
+                origin: Megayears::ZERO,
+                mass: Path::starting(self.age, remnant.mass().value()),
+            },
+        );
+        self.explode(i, before, remnant, kick);
     }
 
     /// Holds the pinned primary, whose own track `track` (at `offset`) dies now, at its last

@@ -1,5 +1,6 @@
-//! The hold on the giant a helium white dwarf fed hydrogen swells into (plan 11, P11.T4's fix, at
-//! [`SWOLLEN_DWARF_VERSION`]).
+//! The hold on the giant a white dwarf fed hydrogen swells into (plan 11, P11.T4's fixes, at
+//! [`SWOLLEN_DWARF_VERSION`]): a helium dwarf's core stays degenerate, and a carbon–oxygen or
+//! oxygen–neon dwarf's giant keeps the dwarf's kind.
 //!
 //! As built, `Engine::swell` places the giant as BSE's `gntage` does (`sse::new_star_mass`): a core
 //! above `Mc,BGB`(`M_HeF`) at the base of the giant branch of a star heavier than `M_HeF`, whose core
@@ -17,33 +18,53 @@
 //! or below `Mc,BGB`(`M_HeF`), which the held placement already puts on a degenerate branch, or not
 //! below that track's flash keeps the held placement. Such a dwarf does not swell while its donor
 //! is held to the heavy donor's thermal rate (`Engine::feeds_a_swollen_dwarf`, lean, 2026-11-02).
+//!
+//! As built too, a carbon–oxygen or oxygen–neon dwarf swells onto a thermally pulsing AGB track
+//! placed by its core alone (`Engine::swelled_star`), whose own core at the base of the AGB
+//! (`sse::pulsing_agb_helium_core`) types what its strip and its death leave (HPT section 6), so
+//! that a dwarf can come back the other kind: pinned pair 0080's oxygen–neon dwarf of 1.070 M☉
+//! comes back carbon–oxygen, as does 1 of the dwarf-limit census's swollen dwarfs of layer D the
+//! other way (2026-11-03). Gaining and losing a hydrogen envelope does not change a core's
+//! composition, so from 29 the swell records the dwarf's kind for its member
+//! (`Engine::swollen_cores`, fix-p11-swollen-dwarf-kind), and every exit of the giant takes it:
+//! its strip leaves a dwarf of that kind, a merger product no star holds made from it is one
+//! (`dwarf_limit::CoreSource`), and its own track's death ends as the dwarf's core would
+//! ([`SwollenDeath`]). A merger product placed on a track of its own is that track's, as before.
 
 use crate::GeneratorVersion;
+use crate::stellar::Phase;
+use crate::stellar::remnant::DeathKind;
 use crate::stellar::rules::StellarRules;
 
+use super::dwarf_limit::CoreSource;
+
 /// The generator version whose stellar rules swell a helium white dwarf fed hydrogen into a giant
-/// whose core stays degenerate (P11.T4's fix): `Engine::swell` takes
-/// [`SwollenDwarfRules::Degenerate`].
+/// whose core stays degenerate, and keep a carbon–oxygen or oxygen–neon dwarf's kind for its giant
+/// (P11.T4's fixes): `Engine::swell`'s two reads take [`SwollenDwarfRules::Degenerate`].
 ///
 /// Below it every pair takes the held arm, [`SwollenDwarfRules::AtBase`], the code of version 27
 /// verbatim, so every generated value keeps its bits; the tests reach the new arm through
 /// `StellarRules::every_29_hold()`. The bump to 29 deletes the hold, not the rule: this module with
-/// [`SwollenDwarfRules`], the stellar rules' `swollen_dwarf` field, the swell's read of it, the
-/// brief's read of [`SwollenDwarfRules::fitted_tables_hold`], and the tripwire
+/// [`SwollenDwarfRules`] (but [`SwollenDeath`], which moves to the engine), the stellar rules'
+/// `swollen_dwarf` field, the swell's two reads of it, the brief's read of
+/// [`SwollenDwarfRules::fitted_tables_hold`], and the tripwire
 /// (`the_swollen_dwarf_is_held_only_until_the_29_bump`). It keeps `Engine::degenerate_giant`,
-/// `sse::degenerate_giant_mass` and `Engine::feeds_a_swollen_dwarf` applied always, and refits the
+/// `sse::degenerate_giant_mass`, `Engine::feeds_a_swollen_dwarf`, the record of the dwarf's kind
+/// at every swell (`Engine::swollen_cores`) and [`SwollenDeath`] applied always, and refits the
 /// pair-light and reach tables, which the engine's runs fit.
 pub(crate) const SWOLLEN_DWARF_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
-/// Where a helium white dwarf fed hydrogen is placed as a giant (the stellar rules'
-/// `swollen_dwarf` field, the hold of [`SWOLLEN_DWARF_VERSION`]).
+/// Where a helium white dwarf fed hydrogen is placed as a giant, and whether a carbon–oxygen or
+/// oxygen–neon dwarf's giant keeps the dwarf's kind (the stellar rules' `swollen_dwarf` field, the
+/// hold of [`SWOLLEN_DWARF_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum SwollenDwarfRules {
     /// Version 29's and before: BSE's placement, a core above `Mc,BGB`(`M_HeF`) at the base of a
-    /// heavier star's giant branch.
+    /// heavier star's giant branch; a carbon–oxygen or oxygen–neon dwarf's giant ends as its
+    /// track's kind.
     AtBase,
     /// Version 29's: on the first giant branch of a star below `M_HeF`, where its core is the
-    /// dwarf's.
+    /// dwarf's; a carbon–oxygen or oxygen–neon dwarf's giant keeps the dwarf's kind.
     Degenerate,
 }
 
@@ -55,5 +76,58 @@ impl SwollenDwarfRules {
     #[must_use]
     pub(crate) fn fitted_tables_hold(self) -> bool {
         self == StellarRules::of_version(crate::GENERATOR_VERSION).swollen_dwarf
+    }
+}
+
+/// How the giant a dwarf swelled into ends where its own track dies: as the dwarf's core would.
+///
+/// From version 29 (`Engine::die`): the swell places the giant on a track by its core alone, and
+/// the track types its death by its own core at the base of the AGB (HPT section 6), which need not
+/// be the dwarf's kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SwollenDeath {
+    /// The track's own death, which the dwarf's kind agrees with, or no dwarf's.
+    Own,
+    /// The white dwarf of `phase`, the dwarf's kind, where the track leaves the other kind.
+    WhiteDwarf(Phase),
+    /// An oxygen–neon core that dies with its envelope on where the track's would not collapse by
+    /// electron capture: it does, an electron-capture supernova (Nomoto 1984, ApJ 277, 791) with
+    /// no Type Ia candidate (`Engine::electron_capture_collapse`; lean, 2026-11-03, where the
+    /// ruling has the accretion-induced collapse of a bare dwarf, whose remnant and kick are the
+    /// same).
+    ElectronCapture,
+    /// A carbon–oxygen core that dies with its envelope on where the track's would not ignite
+    /// carbon: carbon ignites in the degenerate core at `Mc,SN` and nothing is left (HPT section 6,
+    /// [`DeathKind::ThermonuclearDisruption`]).
+    Disruption,
+}
+
+impl SwollenDeath {
+    /// How a giant whose core came from `source` ends where its own track's death is `death`,
+    /// leaving a remnant of `phase`.
+    #[must_use]
+    pub(super) fn of(source: CoreSource, death: DeathKind, phase: Phase) -> Self {
+        let Some(kind) = source.dwarf() else {
+            return Self::Own;
+        };
+        match death {
+            DeathKind::EnvelopeLoss if source.dwarf_phase(phase) == phase => Self::Own,
+            DeathKind::EnvelopeLoss => Self::WhiteDwarf(kind),
+            DeathKind::ElectronCapture if kind == Phase::OxygenNeonWhiteDwarf => Self::Own,
+            DeathKind::ThermonuclearDisruption if kind == Phase::CarbonOxygenWhiteDwarf => {
+                Self::Own
+            }
+            DeathKind::ElectronCapture
+            | DeathKind::ThermonuclearDisruption
+            | DeathKind::CoreCollapse { .. }
+            | DeathKind::DirectCollapse
+            | DeathKind::PairInstability => {
+                if kind == Phase::OxygenNeonWhiteDwarf {
+                    Self::ElectronCapture
+                } else {
+                    Self::Disruption
+                }
+            }
+        }
     }
 }

@@ -6712,27 +6712,29 @@ fn dwarf_limit_rules() -> crate::stellar::rules::StellarRules {
 }
 
 /// What a merger's product of `kind`, `m` M☉ and core `core` M☉ with `burnt` of its helium burnt
-/// leaves in an engine of metallicity `z` with no pin, under `rules`, once the merger is recorded:
-/// the engine and its primary's state then.
+/// leaves in an engine of metallicity `z` with no pin, under `rules`, once the merger is recorded,
+/// its core from `source`: the engine and its primary's state then.
 fn unplaced_product(
     kind: super::star::Kind,
-    m: f64,
-    core: f64,
-    burnt: f64,
+    (m, core, burnt): (f64, f64, f64),
     z: f64,
     rules: crate::stellar::rules::StellarRules,
+    source: super::dwarf_limit::CoreSource,
 ) -> (super::evolve::Engine, crate::stellar::StarState) {
     use super::common_envelope::CoalescedProduct;
 
     let mut engine = fed_dwarf_engine(0.6, z, rules);
-    let product = engine.product_member(CoalescedProduct::Star {
-        kind,
-        mass: m,
-        core,
-        burnt,
-        fraction: 0.0,
-    });
-    engine.finish_merger_with(product);
+    let product = engine.product_member(
+        CoalescedProduct::Star {
+            kind,
+            mass: m,
+            core,
+            burnt,
+            fraction: 0.0,
+        },
+        source,
+    );
+    engine.finish_merger_with(product, super::dwarf_limit::CoreSource::Other);
     let state = engine.members[0].state_at(&engine.ctx, 0, engine.age);
     (engine, state)
 }
@@ -6789,7 +6791,8 @@ fn an_unplaced_merger_product_takes_the_engine_s_own_remnant() {
         let case = format!("{kind:?} of {m} M☉ around {core} M☉");
         for (rules, phase) in [(held, held_phase), (dwarf_limit_rules(), arm_phase)] {
             let case = format!("{case}, {:?}", rules.dwarf_limit);
-            let (engine, state) = unplaced_product(kind, m, core, burnt, z, rules);
+            let other = super::dwarf_limit::CoreSource::Other;
+            let (engine, state) = unplaced_product(kind, (m, core, burnt), z, rules, other);
             assert_eq!(state.phase(), phase, "{case}");
             if phase == Phase::NeutronStar && rules.dwarf_limit == DwarfLimitRules::Whole {
                 assert_an_iron_core_collapse(&case, &engine, state, m, core);
@@ -6874,7 +6877,8 @@ const IRON_CORE_NEUTRON_STAR_MSUN: f64 = 1.200_005_831_146_352_6;
 /// 1.6 M☉ or more, where a helium giant's mass is (HPT section 6.1), or where it merged from an
 /// oxygen–neon dwarf, an iron core where that core at the base of the AGB is 2.25 M☉ or more (a
 /// carbon–oxygen core of 1.438 M☉ or more, HPT section 6) and it merged from no dwarf, and the
-/// naked helium star of a helium core of 0.5 M☉ or more; under the held
+/// naked helium star of a helium core of 0.5 M☉ or more, and the kind of the dwarf it merged from,
+/// if it did (a core's composition does not change with its hydrogen envelope); under the held
 /// arm a helium giant is typed by its core as a thermally pulsing star is, and a helium core is its
 /// helium star only from the Chandrasekhar mass.
 ///
@@ -6901,7 +6905,11 @@ fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
         Phase::HeliumWhiteDwarf,
     );
     let (agb, giant, cheb) = (Kind::PulsingAgb, Kind::HeliumGiant, Kind::CoreHeliumBurning);
-    let (other, ne) = (CoreSource::Other, CoreSource::OxygenNeonDwarf);
+    let (other, ne, cod) = (
+        CoreSource::Other,
+        CoreSource::OxygenNeonDwarf,
+        CoreSource::CarbonOxygenDwarf,
+    );
     // (Mc − 0.448) ÷ 0.44 = 1.6 at Mc = 1.152, and 2.25 at 1.438.
     for (kind, m, core, source, whole, held) in [
         (agb, 5.0, 1.0, other, w(co, 1.0), w(co, 1.0)),
@@ -6909,6 +6917,9 @@ fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
         (agb, 5.0, 1.43, other, w(one, 1.43), w(one, 1.43)),
         (agb, 5.0, 1.5, other, fe(1.5, 5.0), w(one, 1.5)),
         (agb, 5.0, 1.5, ne, w(one, 1.5), w(one, 1.5)),
+        (agb, 5.0, 1.2, cod, w(co, 1.2), w(one, 1.2)),
+        (agb, 5.0, 1.5, cod, w(co, 1.5), w(one, 1.5)),
+        (giant, 1.7, 1.0, cod, w(co, 1.0), w(co, 1.0)),
         (giant, 1.4, 1.2, other, w(co, 1.2), w(one, 1.2)),
         (giant, 1.7, 1.0, other, w(one, 1.0), w(co, 1.0)),
         (giant, 1.4, 1.0, ne, w(one, 1.0), w(one, 1.0)),
@@ -7068,11 +7079,10 @@ fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
     let iron_core = || {
         let (engine, _) = unplaced_product(
             Kind::PulsingAgb,
-            4.331_5,
-            1.764_8,
-            1.0,
+            (4.331_5, 1.764_8, 1.0),
             0.02,
             dwarf_limit_rules(),
+            super::dwarf_limit::CoreSource::Other,
         );
         (engine.members, engine.supernovae, engine.pooled)
     };
@@ -7349,14 +7359,16 @@ fn a_heavy_donor_s_helium_dwarf_becomes_no_helium_star() {
     }
 }
 
-/// P11.T4's swollen dwarf: over the pinned thousand the arm alone moves only pairs in which a
-/// helium white dwarf swells into a giant under the held arm, at a segment's edge or inside its
-/// transfer, which are listed (the arm's own cases are
-/// `a_swollen_helium_dwarf_keeps_its_degenerate_core`'s and
-/// `a_heavy_donor_s_helium_dwarf_becomes_no_helium_star`'s).
+/// P11.T4's swollen dwarf: over the pinned thousand the arm alone moves only pairs in which, under
+/// the held arm, a helium white dwarf swells into a giant, at a segment's edge or inside its
+/// transfer, or a carbon–oxygen or oxygen–neon one's giant comes back the other kind, which are
+/// listed (the arm's own cases are `a_swollen_helium_dwarf_keeps_its_degenerate_core`'s,
+/// `a_heavy_donor_s_helium_dwarf_becomes_no_helium_star`'s and
+/// `a_swollen_oxygen_neon_dwarf_strips_back_to_its_kind`'s).
 #[test]
-fn the_swollen_dwarf_moves_only_pairs_whose_helium_dwarf_swells() {
+fn the_swollen_dwarf_moves_only_pairs_whose_dwarf_swells() {
     use super::swollen_dwarf::SwollenDwarfRules;
+    use super::testing::swollen_dwarf_kinds;
 
     let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
     let arm_rules = crate::stellar::rules::StellarRules {
@@ -7385,8 +7397,11 @@ fn the_swollen_dwarf_moves_only_pairs_whose_helium_dwarf_swells() {
                     && held.state_at(w[1]).stars()[k].phase() == Phase::FirstGiantBranch
             })
         });
+        let changes_kind = swollen_dwarf_kinds(&held)
+            .iter()
+            .any(|(before, after, merged)| before != after && !merged);
         assert!(
-            swells,
+            swells || changes_kind,
             "pair {i:04} moves with no swollen dwarf: {}",
             describe(&held)
         );
@@ -7395,5 +7410,292 @@ fn the_swollen_dwarf_moves_only_pairs_whose_helium_dwarf_swells() {
 }
 
 /// The pinned pairs the swollen dwarf moves, as measured (2026-11-05, at generator version 27):
-/// each one's helium dwarf swells inside a spell of transfer from a gap or giant donor.
-const SWOLLEN_DWARF_MOVERS: [u32; 2] = [168, 762];
+/// 0080's oxygen–neon dwarf comes back of its kind, and 0168's and 0762's helium dwarfs swell inside
+/// a spell of transfer from a gap or giant donor.
+const SWOLLEN_DWARF_MOVERS: [u32; 3] = [80, 168, 762];
+
+// --- P11.T4: the swollen dwarf's kind (held at 29) ---------------------------------------------
+
+/// P11.T4's swollen dwarf: pinned pair 0080's primary leaves an oxygen–neon white dwarf of
+/// 1.070 M☉ (a helium giant of 1.669 M☉ stripped by a common envelope, HPT section 6.1), which its
+/// Hertzsprung-gap companion's transfer swells at 220 Myr into a giant on a thermally pulsing AGB
+/// track whose core at the base of the AGB is below 1.6 M☉, and a common envelope strips back.
+/// Under the version's rules the dwarf comes back carbon–oxygen, the track's kind; under every 29
+/// hold oxygen–neon, the kind it swelled from, since gaining and losing a hydrogen envelope
+/// changes no core's composition.
+#[test]
+fn a_swollen_oxygen_neon_dwarf_strips_back_to_its_kind() {
+    use super::swollen_dwarf::SwollenDwarfRules;
+    use super::testing::swollen_dwarf_kinds;
+    use crate::stellar::rules::StellarRules;
+
+    let input = pinned_pair_number(80);
+    let version = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let arm = StellarRules {
+        swollen_dwarf: SwollenDwarfRules::Degenerate,
+        ..version
+    };
+    let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
+    for (rules, kinds) in [
+        (version, [(one, co, false)]),
+        (arm, [(one, one, false)]),
+        (StellarRules::every_29_hold(), [(one, one, false)]),
+    ] {
+        let timeline = evolve(&input.clone().with_rules(rules), Years::new(1.2e10));
+        assert_eq!(
+            swollen_dwarf_kinds(&timeline),
+            kinds,
+            "{:?}: {}",
+            rules.swollen_dwarf,
+            describe(&timeline)
+        );
+    }
+}
+
+/// Pinned pair `n` of the pinned thousand (`pinned_pair`'s).
+fn pinned_pair_number(n: u32) -> BinaryInput {
+    let mut mix = Mix(0x0b1e_0001);
+    (0..=n)
+        .map(|i| pinned_pair(&mut mix, i))
+        .last()
+        .expect("a pair")
+}
+
+/// A white dwarf of `phase` and `dwarf` M☉ in `fed_dwarf_engine`'s place, at metallicity `z`,
+/// swollen by 0.01 M☉ of hydrogen over a century into the giant around its core, under `rules`.
+fn swollen_dwarf_engine(
+    phase: Phase,
+    dwarf: f64,
+    z: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> super::evolve::Engine {
+    use super::rlof::Fed;
+    use super::star::{Kind, Member, Path};
+
+    let mut engine = fed_dwarf_engine(dwarf, z, rules);
+    let age = engine.age;
+    engine.members[0] = Member::Remnant {
+        phase,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    let (gained, dt) = (1.0e-2, 1.0e2);
+    let m = dwarf + gained;
+    let kind = Kind::of(phase, dwarf);
+    let s = engine.structure(0, age, m, 0.0).expect("a white dwarf");
+    let fed = Fed {
+        kind,
+        before: dwarf,
+        core_before: dwarf,
+        gained,
+        dt,
+    };
+    assert!(engine.swell(0, kind, m, &s, fed), "{phase:?} of {dwarf} M☉");
+    engine
+}
+
+/// P11.T4's swollen dwarf: an oxygen–neon dwarf of 1.07 M☉ and a carbon–oxygen one of 1.25 M☉
+/// swell into giants on thermally pulsing AGB tracks whose cores at the base of the AGB, solved
+/// back from the dwarfs' (`sse::pulsing_agb_helium_core`: 1.41 and 1.82 M☉), are of the other kind
+/// (HPT section 6). Under the arm the giant's strip, its strip after a merger it survives as
+/// itself and its own track's death leave the dwarf's kind; under the held arm the track's.
+#[test]
+fn a_swollen_dwarf_s_giant_leaves_the_dwarf_s_kind() {
+    use super::star::Member;
+    use super::swollen_dwarf::SwollenDwarfRules;
+    use crate::stellar::rules::StellarRules;
+
+    let version = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let arm = StellarRules {
+        swollen_dwarf: SwollenDwarfRules::Degenerate,
+        ..version
+    };
+    let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
+    for (phase, dwarf, other) in [(one, 1.07, co), (co, 1.25, one)] {
+        for (rules, kind) in [(version, other), (arm, phase)] {
+            let case = format!("{phase:?} of {dwarf} M☉ under {:?}", rules.swollen_dwarf);
+            let mut engine = swollen_dwarf_engine(phase, dwarf, 0.02, rules);
+            let (stripped, _) = engine.stripped_member(0);
+            let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
+            assert_eq!(left, kind, "{case}: stripped");
+            let mut merged = swollen_dwarf_engine(phase, dwarf, 0.02, rules);
+            merged.members[1] = Member::Gone;
+            merged.mix();
+            let (stripped, _) = merged.stripped_member(0);
+            let left = stripped.state_at(&merged.ctx, 0, merged.age).phase();
+            assert_eq!(left, kind, "{case}: merged as itself, then stripped");
+            let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+                panic!("{case}: a giant the binary carries");
+            };
+            let death = track.death().expect("a track built in full");
+            let at = offset + death.age().value();
+            println!("{case}: the track dies by {:?} at {at} yr", death.kind());
+            engine.age = at;
+            engine.die(0);
+            let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+            assert_eq!(dead.phase(), kind, "{case}: dead, {dead:?}");
+        }
+    }
+}
+
+/// P11.T4's swollen dwarf: a carbon–oxygen dwarf of 1.43 M☉ at Z = 0.004 swells onto the thermally
+/// pulsing AGB track of a 7.41 M☉ star, whose oxygen–neon core collapses by electron capture at
+/// its death. Under the held arm the giant does, to the 1.26 M☉ neutron star; under the arm its
+/// carbon–oxygen core ignites carbon there and nothing is left (HPT section 6). Neither pools a
+/// Type Ia candidate.
+#[test]
+fn a_swollen_carbon_oxygen_dwarf_s_giant_disrupts_where_its_track_captures_electrons() {
+    use super::star::Member;
+    use super::swollen_dwarf::SwollenDwarfRules;
+    use crate::stellar::remnant::{DeathKind, RemnantKind};
+    use crate::stellar::rules::StellarRules;
+
+    let version = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let arm = StellarRules {
+        swollen_dwarf: SwollenDwarfRules::Degenerate,
+        ..version
+    };
+    for (rules, phase, remnant) in [
+        (version, Phase::NeutronStar, RemnantKind::NeutronStar),
+        (arm, Phase::NoRemnant, RemnantKind::None),
+    ] {
+        let case = format!("{:?}", rules.swollen_dwarf);
+        let mut engine = swollen_dwarf_engine(Phase::CarbonOxygenWhiteDwarf, 1.43, 0.004, rules);
+        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+            panic!("{case}: a giant the binary carries");
+        };
+        let death = track.death().expect("a track built in full");
+        assert_eq!(death.kind(), DeathKind::ElectronCapture, "{case}");
+        engine.age = offset + death.age().value();
+        engine.die(0);
+        let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        assert_eq!(dead.phase(), phase, "{case}: {dead:?}");
+        let [collapse] = engine.supernovae.as_slice() else {
+            panic!("{case}: one death, not {:?}", engine.supernovae);
+        };
+        assert_eq!(collapse.remnant().kind(), remnant, "{case}");
+        assert!(engine.pooled.is_none(), "{case}");
+    }
+}
+
+/// P11.T4's swollen dwarf under every 29 hold: a thermally pulsing AGB product of 4.33 M☉ around a
+/// 1.76 M☉ core that no star can hold, made from the giant an oxygen–neon or carbon–oxygen dwarf
+/// swelled into, is a dwarf of that kind, not an iron core (the product of no dwarf's, as
+/// `an_unplaced_merger_product_takes_the_engine_s_own_remnant` has it): above the Chandrasekhar mass
+/// it collapses at once to the 1.26 M☉ neutron star of an accretion-induced collapse, a Type Ia
+/// candidate pooled for the carbon–oxygen one only.
+#[test]
+fn an_unplaced_product_of_a_swollen_dwarf_keeps_its_kind() {
+    use super::common_envelope::CoalescedProduct;
+    use super::dwarf_limit::CoreSource;
+    use super::star::Kind;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::rules::StellarRules;
+
+    for (phase, dwarf, pooled) in [
+        (Phase::OxygenNeonWhiteDwarf, 1.07, false),
+        (Phase::CarbonOxygenWhiteDwarf, 1.25, true),
+    ] {
+        let case = format!("{phase:?} of {dwarf} M☉");
+        let mut engine = swollen_dwarf_engine(phase, dwarf, 0.02, StellarRules::every_29_hold());
+        let source = engine.swollen_cores[0];
+        assert_eq!(source.dwarf(), Some(phase), "{case}");
+        let product = engine.product_member(
+            CoalescedProduct::Star {
+                kind: Kind::PulsingAgb,
+                mass: 4.331_5,
+                core: 1.764_8,
+                burnt: 1.0,
+                fraction: 0.0,
+            },
+            source,
+        );
+        engine.finish_merger_with(product, CoreSource::Other);
+        let [collapse] = engine.supernovae.as_slice() else {
+            panic!("{case}: one collapse, not {:?}", engine.supernovae);
+        };
+        assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
+        assert_eq!(engine.pooled.is_some(), pooled, "{case}");
+    }
+}
+
+/// P11.T4's swollen dwarf: how a swollen dwarf's giant ends where its own track dies
+/// ([`SwollenDeath::of`]), by the dwarf it came from, the track's death and the remnant's phase.
+///
+/// [`SwollenDeath::of`]: super::swollen_dwarf::SwollenDeath::of
+#[test]
+fn a_swollen_dwarf_s_giant_dies_as_its_dwarf_would() {
+    use super::dwarf_limit::CoreSource;
+    use super::swollen_dwarf::SwollenDeath;
+    use crate::stellar::remnant::{DeathKind, SupernovaType};
+
+    let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
+    let (ecsn, ia) = (
+        DeathKind::ElectronCapture,
+        DeathKind::ThermonuclearDisruption,
+    );
+    let (ns, none) = (Phase::NeutronStar, Phase::NoRemnant);
+    let core_collapse = DeathKind::CoreCollapse {
+        supernova: SupernovaType::IIP,
+    };
+    for (source, death, phase, outcome) in [
+        (
+            CoreSource::Other,
+            DeathKind::EnvelopeLoss,
+            co,
+            SwollenDeath::Own,
+        ),
+        (CoreSource::Other, ia, none, SwollenDeath::Own),
+        (
+            CoreSource::OxygenNeonDwarf,
+            DeathKind::EnvelopeLoss,
+            one,
+            SwollenDeath::Own,
+        ),
+        (
+            CoreSource::OxygenNeonDwarf,
+            DeathKind::EnvelopeLoss,
+            co,
+            SwollenDeath::WhiteDwarf(one),
+        ),
+        (
+            CoreSource::CarbonOxygenDwarf,
+            DeathKind::EnvelopeLoss,
+            one,
+            SwollenDeath::WhiteDwarf(co),
+        ),
+        (CoreSource::OxygenNeonDwarf, ecsn, ns, SwollenDeath::Own),
+        (
+            CoreSource::OxygenNeonDwarf,
+            ia,
+            none,
+            SwollenDeath::ElectronCapture,
+        ),
+        (CoreSource::CarbonOxygenDwarf, ia, none, SwollenDeath::Own),
+        (
+            CoreSource::CarbonOxygenDwarf,
+            ecsn,
+            ns,
+            SwollenDeath::Disruption,
+        ),
+        (
+            CoreSource::OxygenNeonDwarf,
+            core_collapse,
+            ns,
+            SwollenDeath::ElectronCapture,
+        ),
+        (
+            CoreSource::CarbonOxygenDwarf,
+            core_collapse,
+            ns,
+            SwollenDeath::Disruption,
+        ),
+    ] {
+        assert_eq!(
+            SwollenDeath::of(source, death, phase),
+            outcome,
+            "{source:?}, {death:?}, {phase:?}"
+        );
+    }
+}
