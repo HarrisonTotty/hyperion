@@ -71,14 +71,13 @@ use futures_util::stream::FuturesUnordered;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
-use hyperion_sim::galaxy::features::catalogue::{FeatureCellCache, FeatureCellContents};
-use hyperion_sim::galaxy::features::gas_overlay::FeatureGas;
+use hyperion_sim::galaxy::features::gas_overlay::{FeatureGas, FeatureGasIndex};
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
 use hyperion_sim::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::global_list::GlobalListSource;
 use hyperion_sim::galaxy::placement::CellKey;
-use hyperion_sim::id::{FeatureCell, Layer};
+use hyperion_sim::id::Layer;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::band::{
@@ -410,8 +409,8 @@ impl fmt::Display for ForceSkyCapsError {
 impl Error for ForceSkyCapsError {}
 
 /// What a sky's jobs read beside the galaxy: its luminosity tables, the brightness envelope and its
-/// cells' offset bounds (Design notes 7, 8 and 10), and, once plan 09's feature members are served,
-/// the feature cells its jobs' gas looks features up in (P09.T40.a).
+/// cells' offset bounds (Design notes 7, 8 and 10), and, where the sky marches plan 09's features'
+/// gas, the galaxy's nurseries and clouds that its jobs' gas looks features up in (P09.T40.a).
 ///
 /// Built once per galaxy and kept by the [`SkyTablesService`](super::SkyTablesService).
 #[derive(Debug)]
@@ -419,7 +418,7 @@ pub(crate) struct SkyTables {
     tables: LuminosityTables,
     envelope: BrightnessEnvelope,
     offsets: CellOffsets,
-    features: Option<SkyFeatureCells>,
+    features: Option<FeatureGasIndex>,
 }
 
 impl SkyTables {
@@ -435,34 +434,44 @@ impl SkyTables {
         }
     }
 
-    /// These tables, whose jobs take plan 09's features' gas from the feature cells `cells` holds
-    /// of the galaxy `key` names (P09.T40.a): what the [`SkyTablesService`](super::SkyTablesService)
-    /// builds when the feature members are served.
+    /// These tables, whose jobs take plan 09's features' gas from `index`, their galaxy's
+    /// (P09.T40.a): what the [`SkyTablesService`](super::SkyTablesService) builds where the sky
+    /// marches the features' gas.
     #[must_use]
-    pub(crate) fn with_features(self, cells: Arc<SharedFeatureCellCache>, key: GalaxyKey) -> Self {
+    pub(crate) fn with_features(self, index: FeatureGasIndex) -> Self {
         Self {
-            features: Some(SkyFeatureCells { cells, key }),
+            features: Some(index),
             ..self
         }
     }
 
-    /// The bytes the tables, the envelope and the offset bounds own on the heap. The feature cells
-    /// are the server's shared cache's, charged there.
+    /// The bytes the tables, the envelope, the offset bounds and the features' gas index own on
+    /// the heap.
     #[must_use]
     pub(crate) fn heap_bytes(&self) -> usize {
-        self.tables.heap_bytes() + self.envelope.heap_bytes() + self.offsets.heap_bytes()
+        self.tables.heap_bytes()
+            + self.envelope.heap_bytes()
+            + self.offsets.heap_bytes()
+            + self
+                .features
+                .as_ref()
+                .map_or(0, FeatureGasIndex::heap_bytes)
     }
 
     /// The gas a job at `t` marches through beside `galaxy`'s smooth field: plan 09's features' at
-    /// `t` ([`FeatureGas`]) if these tables have the feature cells, and nothing otherwise, the sky's
-    /// gas until the feature members are served (P09.T40.a).
+    /// `t` ([`FeatureGas`]), looked up in the tables' index, if they have one, and nothing
+    /// otherwise, the sky's gas below its version (P09.T40.a).
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy` is not the galaxy whose index the tables hold.
     #[must_use]
     pub(crate) fn gas<'a>(&'a self, galaxy: &'a Galaxy, t: UniverseTime) -> SkyGas<'a> {
         match &self.features {
             None => SkyGas::Smooth,
-            Some(cells) => SkyGas::Features(FeatureGas::new(
+            Some(index) => SkyGas::Features(FeatureGas::indexed(
                 galaxy,
-                cells,
+                index,
                 Years::new(t.since_epoch().as_julian_years_f64()),
             )),
         }
@@ -501,20 +510,6 @@ impl SkyTables {
         modifiers: &'a dyn GasModifierSource,
     ) -> SkyContext<'a> {
         self.context(MARCH_NOISE_SLOTS, &NoSkyCellCache, &[], modifiers)
-    }
-}
-
-/// The feature cells a galaxy's sky tables lend their jobs' gas: the server's shared cache, for the
-/// galaxy `key` names (P09.T40.a).
-#[derive(Debug)]
-struct SkyFeatureCells {
-    cells: Arc<SharedFeatureCellCache>,
-    key: GalaxyKey,
-}
-
-impl FeatureCellCache for SkyFeatureCells {
-    fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
-        self.cells.handle(self.key).contents(galaxy, cell)
     }
 }
 
@@ -3922,19 +3917,22 @@ pub(crate) mod tests {
     }
 
     /// A sky's job marches through plan 09's features' gas at its own time once its tables carry
-    /// the feature cells, the gas [`FeatureGas`] gives through the sim's own lookup, and through
+    /// the galaxy's index, the gas [`FeatureGas`] gives through the sim's own lookup, and through
     /// none otherwise (P09.T40.a). The tables are one galaxy's, shared by every request, so a
     /// nursery that ages between two jobs' times shows that each takes its own.
     #[test]
-    fn a_job_s_gas_is_the_features_at_its_own_time_once_the_tables_carry_their_cells() {
+    fn a_job_s_gas_is_the_features_at_its_own_time_once_the_tables_carry_their_index() {
         let galaxy = Galaxy::new(Seed::new(0x4d2));
-        let key = GalaxyKey::new(0x4d2, GENERATOR_VERSION);
         let from = *sun().position();
         let to = an_ageing_nursery(&galaxy, &from);
         let smooth = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
-        let cells = Arc::new(SharedFeatureCellCache::new(64 << 20));
-        let featured = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy)
-            .with_features(Arc::clone(&cells), key);
+        let index = FeatureGasIndex::build(
+            &galaxy,
+            &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
+        );
+        let featured =
+            SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy).with_features(index);
+        assert!(featured.heap_bytes() > smooth.heap_bytes() + (40 << 20));
         let mut found = Vec::new();
         for years in [0_i32, 1_000] {
             let t = UniverseTime::from_julian_years(i64::from(years)).unwrap();
@@ -3958,9 +3956,5 @@ pub(crate) mod tests {
             found.push(at);
         }
         assert_ne!(found[0], found[1], "each job's own time");
-        assert!(
-            cells.counters().entries() > 0,
-            "looked up through the shared cells"
-        );
     }
 }

@@ -29,6 +29,13 @@
 //! machine, is a per-galaxy cost under its own 30 CPU-s budget, not a sky's, and a sky asked
 //! meanwhile joins it. The open answers without waiting for it.
 //!
+//! Where the sky marches plan 09's features' gas (P09.T40.a), a galaxy's tables are built with its
+//! [`FeatureGasIndex`]: its nurseries and clouds, made one slab of feature cells to a bulk job,
+//! [`FeatureGasIndex::SLABS`]' 32, queued ahead of the tables' own jobs, and assembled in one more.
+//! Each slab makes its cells afresh, not through the server's feature cell cache, whose budget a
+//! galaxy's 32,768 cells would sweep. The index is a pure function of the galaxy, so where its
+//! jobs run changes no bit of it.
+//!
 //! A server whose sky's caps are forced for a test ([`SkyCaps::forced`](super::SkyCaps::forced))
 //! is given tables that hold no star, built in one job at once, unless its caps ask for the
 //! galaxy's own ([`SkyCaps::with_galaxy_tables`](super::SkyCaps::with_galaxy_tables)). The service
@@ -41,6 +48,8 @@ use std::time::Instant;
 
 use hyperion_protocol::SeedHex;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+use hyperion_sim::galaxy::features::gas_overlay::{FeatureGasIndex, FeatureGasSlab};
 use hyperion_sim::sky::luminosity::{
     BinSums, LuminosityTables, SampleChunk, Stage, TablesPlan, TrackSamples,
 };
@@ -48,10 +57,7 @@ use hyperion_sim::sky::luminosity::{
 use tokio::task::JoinSet;
 
 use super::sky::{BulkJobs, SkyTables, SkyTablesSource, bulk};
-use super::{
-    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SharedFeatureCellCache,
-    SingleFlight,
-};
+use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SingleFlight};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
 impl HeapBytes for SkyTables {
@@ -101,9 +107,18 @@ pub(crate) struct SkyTablesService {
     /// flight lives with no sky waiting ([`prefetch`](Self::prefetch)); aborted at shutdown or when
     /// the service is dropped.
     prefetching: Mutex<JoinSet<()>>,
-    /// The feature cells every table this service builds lends its jobs' gas, once plan 09's
-    /// feature members are served (P09.T40.a); `None`, the smooth field alone, until then.
-    features: Option<Arc<SharedFeatureCellCache>>,
+    /// Whether every table this service builds carries its galaxy's features' gas index, which
+    /// its jobs march (P09.T40.a): the smooth field alone until then.
+    features: TablesGas,
+}
+
+/// The gas a service's tables lend their jobs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TablesGas {
+    /// The smooth field alone.
+    Smooth,
+    /// Plan 09's features' too, from the galaxy's [`FeatureGasIndex`].
+    Indexed,
 }
 
 impl SkyTablesService {
@@ -121,17 +136,17 @@ impl SkyTablesService {
             flights: SingleFlight::new(),
             builds: Arc::new(AtomicU64::new(0)),
             prefetching: Mutex::new(JoinSet::new()),
-            features: None,
+            features: TablesGas::Smooth,
         }
     }
 
-    /// This service, whose tables lend their jobs plan 09's features' gas from `cells`
-    /// ([`SkyTables::with_features`]): the server's, once the feature members are served
-    /// (P09.T40.a).
+    /// This service, whose tables are built with their galaxy's features' gas index, which their
+    /// jobs march ([`SkyTables::with_features`]): the server's, where the sky marches the features'
+    /// gas (P09.T40.a).
     #[must_use]
-    pub(crate) fn with_features(self, cells: Arc<SharedFeatureCellCache>) -> Self {
+    pub(crate) fn with_features(self) -> Self {
         Self {
-            features: Some(cells),
+            features: TablesGas::Indexed,
             ..self
         }
     }
@@ -235,7 +250,7 @@ impl SkyTablesService {
             Arc::clone(&self.held),
             Arc::clone(&self.builds),
             Arc::clone(galaxy),
-            self.features.clone(),
+            self.features,
         );
         self.flights.run(key, move || async move {
             // As in `GalaxyCache::get`: a caller can arrive just after another flight has
@@ -249,6 +264,12 @@ impl SkyTablesService {
             // Cancels the build's queued jobs once every waiter on this flight has gone.
             let _cancel_on_drop = CancelOnDrop::new(token.clone());
             let started = Instant::now();
+            // The index's slabs are queued first, so that the tables' stages find the workers
+            // they leave.
+            let slabs = match features {
+                TablesGas::Smooth => None,
+                TablesGas::Indexed => Some(gas_slabs(&pool, &galaxy, &token).await?),
+            };
             let tables = match source {
                 SkyTablesSource::Galaxy => build_on_pool(&pool, &galaxy, &token).await?,
                 SkyTablesSource::Dark => {
@@ -259,8 +280,16 @@ impl SkyTablesService {
                     .await?
                 }
             };
-            let tables = Arc::new(match features {
-                Some(cells) => tables.with_features(cells, key),
+            let tables = Arc::new(match slabs {
+                Some(slabs) => {
+                    let slabs = slabs.results().await?;
+                    let galaxy = Arc::clone(&galaxy);
+                    let index = bulk(&pool, &token, move |_: &CancelToken| {
+                        FeatureGasIndex::assemble(&galaxy, slabs)
+                    })
+                    .await?;
+                    tables.with_features(index)
+                }
                 None => tables,
             });
             builds.fetch_add(1, Ordering::Relaxed);
@@ -358,6 +387,24 @@ pub(crate) async fn build_on_pool(
         SkyTables::new(plan.assemble(sums), &galaxy)
     })
     .await
+}
+
+/// Queues the jobs of `galaxy`'s features' gas index, one slab of feature cells each, in
+/// [`FeatureGasIndex::SLABS`]' order, each making its cells afresh.
+///
+/// # Errors
+///
+/// [`ComputeError::Submit`] if the pool is shutting down or faulted.
+async fn gas_slabs(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    token: &CancelToken,
+) -> Result<BulkJobs<FeatureGasSlab>, ComputeError> {
+    let jobs = FeatureGasIndex::SLABS.map(|x| {
+        let galaxy = Arc::clone(galaxy);
+        move || FeatureGasIndex::slab(&galaxy, &NoFeatureCache, x)
+    });
+    BulkJobs::submit(pool, token, jobs).await
 }
 
 /// Queues `stage`'s sample jobs, in their order.
@@ -689,19 +736,20 @@ mod tests {
         drop(service.get(other, &galaxy).await);
     }
 
-    /// A service given the feature cells builds tables that lend them to their jobs' gas, and one
-    /// without builds tables whose jobs march the smooth field alone (P09.T40.a).
+    /// A service with the features' gas builds tables with their galaxy's index on the pool, whose
+    /// jobs' gas is the sim's own lookup's, and one without builds tables whose jobs march the
+    /// smooth field alone (P09.T40.a).
     #[tokio::test]
-    async fn a_service_with_the_feature_cells_lends_them_to_its_tables() {
+    async fn a_service_with_the_features_gas_builds_its_tables_index() {
         use super::super::sky::tests::{an_ageing_nursery, feature_gas_at};
         use hyperion_sim::time::UniverseTime;
 
         let pool = one_worker();
         let (key, galaxy) = galaxy();
-        let cells = Arc::new(SharedFeatureCellCache::new(64 << 20));
-        let smooth = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, 64 << 20);
-        let featured = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, 64 << 20)
-            .with_features(Arc::clone(&cells));
+        let budget = 128 << 20;
+        let smooth = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, budget);
+        let featured =
+            SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, budget).with_features();
         let from = hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 68.0])
             .unwrap();
         let to = an_ageing_nursery(&galaxy, &from);
@@ -725,7 +773,14 @@ mod tests {
             };
             assert_eq!(found, expected, "featured: {featured}");
         }
-        assert!(cells.counters().entries() > 0);
+        // The index is charged to the tables: some 52 MB.
+        let charged = |service: &SkyTablesService| service.counters().cache().bytes();
+        assert!(
+            charged(&featured) > charged(&smooth) + (40 << 20),
+            "{} against {} bytes",
+            charged(&featured),
+            charged(&smooth)
+        );
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 }

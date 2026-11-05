@@ -467,6 +467,43 @@ impl Default for FeatureMembers {
     }
 }
 
+/// Whether the sky's sightlines march plan 09's features' gas beside the smooth field
+/// (P09.T40.a), where the feature members are served: from
+/// [`SKY_FEATURE_GAS_FROM`](crate::SKY_FEATURE_GAS_FROM).
+///
+/// Marched, a galaxy's sky tables are built with its nurseries and clouds in a `FeatureGasIndex`
+/// (some 52 MB for the Milky Way-like galaxy, and some 7 CPU-s on the pool), and every ray and star
+/// sightline of its skies takes the holes and clouds `FeatureGas` gives it, looked up in that
+/// index. Held, the default below that version, the sky marches the smooth field alone. Tests open
+/// it under its hold; no option or variable sets it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SkyFeatureGas {
+    /// The smooth field alone.
+    Held,
+    /// The features' gas beside it, where the feature members are served.
+    Marched,
+}
+
+impl SkyFeatureGas {
+    /// The sky's features' gas at generator version `version`: marched from
+    /// [`SKY_FEATURE_GAS_FROM`](crate::SKY_FEATURE_GAS_FROM), held below it.
+    #[must_use]
+    pub fn of_version(version: hyperion_sim::GeneratorVersion) -> Self {
+        if version >= crate::SKY_FEATURE_GAS_FROM {
+            Self::Marched
+        } else {
+            Self::Held
+        }
+    }
+}
+
+impl Default for SkyFeatureGas {
+    /// [`SkyFeatureGas::of_version`] of the build's generator version.
+    fn default() -> Self {
+        Self::of_version(hyperion_sim::GENERATOR_VERSION)
+    }
+}
+
 /// The sky's service that a switch asks for.
 #[must_use]
 fn sky_service(serve: bool) -> SkyService {
@@ -626,6 +663,7 @@ pub struct ServerConfig {
     kept_skies: KeptSkies,
     global_list_warm_up: GlobalListWarmUp,
     feature_members: FeatureMembers,
+    sky_feature_gas: SkyFeatureGas,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
     scene_knowledge: Arc<dyn SceneKnowledge>,
@@ -778,6 +816,13 @@ impl ServerConfig {
         self.feature_members
     }
 
+    /// Whether the sky's sightlines march plan 09's features' gas, where the feature members are
+    /// served (P09.T40.a).
+    #[must_use]
+    pub fn sky_feature_gas(&self) -> SkyFeatureGas {
+        self.sky_feature_gas
+    }
+
     /// Whether the end of standard input stops the server.
     ///
     /// The binary's `main` reads this, for [`StopRequests::listen`](crate::stop::StopRequests::listen);
@@ -857,6 +902,7 @@ impl Default for ServerConfigBuilder {
                 kept_skies: KeptSkies::default(),
                 global_list_warm_up: GlobalListWarmUp::default(),
                 feature_members: FeatureMembers::default(),
+                sky_feature_gas: SkyFeatureGas::default(),
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
                 scene_knowledge: Arc::new(GrantAsked),
@@ -1045,6 +1091,16 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn feature_members(mut self, members: FeatureMembers) -> Self {
         self.config.feature_members = members;
+        self
+    }
+
+    /// Whether the sky's sightlines march plan 09's features' gas, where the feature members are
+    /// served; [`SkyFeatureGas::of_version`] of the build's version by default.
+    ///
+    /// Tests open it under its hold; no option or variable sets it (P09.T40.a).
+    #[must_use]
+    pub fn sky_feature_gas(mut self, gas: SkyFeatureGas) -> Self {
+        self.config.sky_feature_gas = gas;
         self
     }
 

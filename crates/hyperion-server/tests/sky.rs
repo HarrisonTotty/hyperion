@@ -46,13 +46,14 @@ use hyperion_protocol::{
 };
 use hyperion_server::compute::{BulkGate, SkyCaps, SkyCellCounters};
 use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
-use hyperion_server::{KeptSkies, ServerConfigBuilder, ServerStats, SkyService};
+use hyperion_server::{KeptSkies, ServerConfigBuilder, ServerStats, SkyFeatureGas, SkyService};
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition as SimPosition, UnitVector};
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::catalogue_classes::{CatalogueClassSource, NoClassCellCache};
 use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
 use hyperion_sim::galaxy::features::centre::NoCentreOrbitCache;
+use hyperion_sim::galaxy::features::gas_overlay::{FeatureGas, FeatureGasIndex};
 use hyperion_sim::galaxy::features::members::KeepInteriors;
 use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
 use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
@@ -81,7 +82,7 @@ use hyperion_sim::sky::limits::{Glare, eye_cut, eye_offsets, limit_map};
 use hyperion_sim::sky::luminosity::LuminosityTables;
 use hyperion_sim::stellar::system::SystemStars;
 use hyperion_sim::tables::star_colour::LUMINANCE_RGB;
-use hyperion_sim::units::{CandelasPerSquareMetre, LightYears, Magnitudes};
+use hyperion_sim::units::{CandelasPerSquareMetre, LightYears, Magnitudes, Years};
 use tempfile::TempDir;
 
 /// The seed of every universe these tests create.
@@ -709,6 +710,240 @@ async fn a_shallow_sky_within_the_limit_is_served_as_r06s() {
 fn sim_census_one_shot(cells: &mut CellParts<'_>, plan: &CensusPlan) -> SkyCensus {
     assert_eq!(cells.query.synthetic_ceiling(), None);
     merge_census(cells.fold(plan.cells()), cells.query.n_max())
+}
+
+/// The galaxy's features' gas index, as a sky's tables hold it where the sky marches the features'
+/// gas (P09.T40.a), built once for the binary.
+fn gas_index() -> &'static FeatureGasIndex {
+    static INDEX: OnceLock<FeatureGasIndex> = OnceLock::new();
+    INDEX.get_or_init(|| FeatureGasIndex::build(galaxy(), &NoFeatureCache))
+}
+
+/// The sim's census of `query` over `tables`, cell by cell as [`sim_census_one_shot`] folds it, and
+/// its band at `spec` complete to its caps, both through the features' gas at the epoch over
+/// [`gas_index`]: the faces' rays marched on threads of their own, each with its own gas source.
+fn sim_with_the_features_gas(
+    tables: &Tables,
+    query: &SkyQuery,
+    spec: BandSpec,
+) -> (SkyCensus, Vec<BandTexel>) {
+    let plan = plan_over(tables, query);
+    let gas = FeatureGas::indexed(galaxy(), gas_index(), Years::ZERO);
+    let mut cells = CellParts::over(tables, query);
+    cells.ctx.modifiers = &gas;
+    let census = sim_census_one_shot(&mut cells, &plan);
+    let marches: Vec<BandMarch> = std::thread::scope(|scope| {
+        let marching: Vec<_> = CubeFace::ALL
+            .chunks(2)
+            .map(|faces| {
+                let plan = &plan;
+                scope.spawn(move || {
+                    let gas = FeatureGas::indexed(galaxy(), gas_index(), Years::ZERO);
+                    let mut ctx = context_over(tables);
+                    ctx.modifiers = &gas;
+                    faces
+                        .iter()
+                        .map(|&face| {
+                            march_rows(
+                                galaxy(),
+                                &mut ctx,
+                                query,
+                                plan.replies(),
+                                &spec,
+                                face,
+                                0..spec.face_texels(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        marching
+            .into_iter()
+            .flat_map(|faces| faces.join().expect("a face's march"))
+            .collect()
+    });
+    let mut band = Vec::new();
+    for march in &marches {
+        sum_rows(march, &census, &CompleteTo::of_caps(plan.caps()), &mut band);
+    }
+    (census, band)
+}
+
+/// Under its hold (P09.T40.a), a shallow sky marches plan 09's features' gas: with
+/// [`SkyFeatureGas::Marched`], the server's tables are built with the galaxy's index on the pool,
+/// and each shallow sky of [`a_shallow_sky_within_the_limit_is_served_as_r06s`] lists the sim's
+/// census and sends the sim's band, texel for texel, both marched through `FeatureGas` over the
+/// galaxy's index, which the sim's own tests hold to the cells' lookup. The gas moves the band:
+/// its texels are not the smooth field's. The sim's references are made on threads while the
+/// server serves, so that the test's time is the server's: the sky's cost with the gas on, which
+/// the hold's bump reads (twice the held sky's at most, the lane's brief).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn under_its_hold_a_shallow_sky_marches_the_features_gas_as_the_sim_does() {
+    let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a small forced cap")
+        .with_band_spec(COARSE_BAND);
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = sky_config(data_dir.path(), caps, 2)
+        .sky_feature_gas(SkyFeatureGas::Marched)
+        .build();
+    let server = TestServer::start_with(config).await;
+    let shallows = [4.6, SYNTHETIC_CEILING_V];
+    let queries = shallows.map(|shallow| {
+        SkyQuery::builder(observer(), Magnitudes::new(shallow))
+            .band_spec(COARSE_BAND)
+            .build()
+            .expect("a query")
+            .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+            .expect("a forced cap")
+    });
+    let references = {
+        let queries = queries.clone();
+        std::thread::spawn(move || {
+            queries.map(|query| sim_with_the_features_gas(dark_tables(), &query, COARSE_BAND))
+        })
+    };
+    let (mut client, universe) = opened(&server).await;
+    let mut sent = Vec::new();
+    for shallow in shallows {
+        let reply = served(
+            &mut client,
+            SkyRequest {
+                camera_limit_v: Some(shallow),
+                ..sky(&universe)
+            },
+        )
+        .await;
+        assert_eq!(reply.response.cut_v.to_bits(), shallow.to_bits());
+        assert!(reply.response.is_final, "at {shallow}");
+        sent.push(reply);
+    }
+    let references = references.join().expect("the sim's references");
+    for ((shallow, (query, (census, band))), reply) in shallows
+        .iter()
+        .zip(queries.iter().zip(&references))
+        .zip(&sent)
+    {
+        let what = format!("a shallow sky at {shallow} through the features' gas");
+        assert_stars_are_the_sims(reply, census, &what);
+        let payload = reply.payload();
+        let stars_bytes = usize::try_from(reply.response.stars_bytes).unwrap();
+        let (texels, rest) = payload[stars_bytes..].as_chunks::<SKY_TEXEL_BYTES>();
+        assert_eq!(rest, [] as [u8; 0]);
+        assert_eq!(texels.len(), band.len(), "{what}");
+        for (index, (texel, bytes)) in band.iter().zip(texels).enumerate() {
+            assert_eq!(
+                bytes.as_slice(),
+                texel_wire(texel).as_slice(),
+                "{what}, texel {index}"
+            );
+        }
+        // The smooth field's census differs: the gas moved the stars' extinction.
+        let plan = plan_over(dark_tables(), query);
+        let smooth = sim_census_one_shot(&mut CellParts::new(query), &plan);
+        assert_ne!(
+            listed_on_the_wire(census),
+            listed_on_the_wire(&smooth),
+            "{what}: the features' gas moves the stars"
+        );
+    }
+    client.close().await;
+    server.stop().await;
+}
+
+/// Under its hold (P09.T40.a), the band of the galaxy's own light marches the features' gas: over
+/// the galaxy's tables, which forced caps otherwise leave dark, a shallow sky's coarse band is the
+/// sim's march through `FeatureGas` over the galaxy's index, texel for texel, its illumination
+/// marched through the gas too, and not the smooth field's. The census overflows nothing, so the
+/// band takes no star of it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn under_its_hold_the_band_of_the_galaxys_light_marches_the_features_gas() {
+    // The sim's tables and index, built serially while the server builds its own on the pool.
+    let building = std::thread::spawn(|| {
+        let tables = tables_of(LuminosityTables::build(galaxy()));
+        gas_index();
+        tables
+    });
+    let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
+        .expect("a small forced cap")
+        .with_galaxy_tables()
+        .with_band_spec(COARSE_BAND);
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = sky_config(data_dir.path(), caps, 3)
+        .sky_feature_gas(SkyFeatureGas::Marched)
+        .build();
+    let server = TestServer::start_with(config).await;
+    let (mut client, universe) = opened(&server).await;
+    let shallow = 4.6;
+    let sent = served(
+        &mut client,
+        SkyRequest {
+            camera_limit_v: Some(shallow),
+            ..sky(&universe)
+        },
+    )
+    .await;
+    assert!(sent.response.is_final);
+    let tables = building.join().expect("the sim's tables");
+    // The request's illumination, as the server states it on every sky's query (R06.T9.g),
+    // marched through the features' gas as its jobs march it, or through the smooth field.
+    let query_lit_by = |light: Illumination| {
+        SkyQuery::builder(observer(), Magnitudes::new(shallow))
+            .band_spec(COARSE_BAND)
+            .illumination(Arc::new(light))
+            .build()
+            .expect("a query")
+            .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+            .expect("a forced cap")
+    };
+    let gas = FeatureGas::indexed(galaxy(), gas_index(), Years::ZERO);
+    let mut ctx = context_over(&tables);
+    ctx.modifiers = &gas;
+    let query = query_lit_by(Illumination::march(galaxy(), &mut ctx, &observer()));
+    let (census, band) = sim_with_the_features_gas(&tables, &query, COARSE_BAND);
+    assert_eq!(census.overflow().len(), 0);
+    assert!(
+        band.iter().all(|texel| texel.luminance().value() > 0.0),
+        "the galaxy's light beyond the caps fills every texel"
+    );
+    let payload = sent.payload();
+    let stars_bytes = usize::try_from(sent.response.stars_bytes).unwrap();
+    let (texels, rest) = payload[stars_bytes..].as_chunks::<SKY_TEXEL_BYTES>();
+    assert_eq!(rest, [] as [u8; 0]);
+    assert_eq!(texels.len(), band.len());
+    for (index, (texel, bytes)) in band.iter().zip(texels).enumerate() {
+        assert_eq!(
+            bytes.as_slice(),
+            texel_wire(texel).as_slice(),
+            "texel {index}"
+        );
+    }
+    let smooth_query = query_lit_by(Illumination::march(
+        galaxy(),
+        &mut context_over(&tables),
+        &observer(),
+    ));
+    let plan = plan_over(&tables, &smooth_query);
+    let mut smooth = Vec::new();
+    for march in &sim_marches_at(&tables, &smooth_query, &plan, COARSE_BAND) {
+        sum_rows(
+            march,
+            &census,
+            &CompleteTo::of_caps(plan.caps()),
+            &mut smooth,
+        );
+    }
+    let moved = band
+        .iter()
+        .zip(&smooth)
+        .filter(|(gas, field)| texel_wire(gas) != texel_wire(field))
+        .count();
+    assert!(
+        moved > band.len() / 2,
+        "the features' gas moves {moved} texels"
+    );
+    client.close().await;
+    server.stop().await;
 }
 
 /// The request's cut is the deeper of the eye's and the camera's: under a shallower camera, the
@@ -1442,7 +1677,16 @@ fn texel_wire(texel: &BandTexel) -> Vec<u8> {
 /// every reply `plan`'s shells can state, as the server marches it once a request (R06.T9.f's
 /// record asks this comparison to march the server's replies).
 fn sim_marches(tables: &Tables, query: &SkyQuery, plan: &CensusPlan) -> Vec<BandMarch> {
-    let spec = BandSpec::STANDARD;
+    sim_marches_at(tables, query, plan, BandSpec::STANDARD)
+}
+
+/// [`sim_marches`] of the band at `spec`.
+fn sim_marches_at(
+    tables: &Tables,
+    query: &SkyQuery,
+    plan: &CensusPlan,
+    spec: BandSpec,
+) -> Vec<BandMarch> {
     std::thread::scope(|scope| {
         let marching: Vec<_> = CubeFace::ALL
             .chunks(2)

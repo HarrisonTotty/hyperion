@@ -1626,6 +1626,9 @@ _The catalogue classes' cell cache and the source's read-first levers built (lan
 `p09-t40-class-cells`, 2026-11-01, at `GENERATOR_VERSION` 24, no output moved): see Risks,
 "P09.T40, the classes' cost"._
 
+_The sky's features' gas index built (lane `p09-t40a-sky-feature-gas`, 2026-11-05, at 27, held
+until `SKY_FEATURE_GAS_FROM`, no output moved): see Risks, "P09.T40.a, the sky's features' gas"._
+
 #### P09.T41 Client: feature marks and shells
 
 - **P09.T41.a The guide and the marks.** `docs/frontend/ux-guidelines.md` gains a fixed symbol per
@@ -4786,7 +4789,8 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     take none: `render_extinction_rows` integrates the smooth field. The caps' rays read no
     modifiers (before this task too), so served, the census's sightlines see the features' gas and
     the caps' do not: R06.T16.a's to reconcile. Each served segment looks its feature cells up
-    through the shared cache's one lock from every worker; unmeasured.
+    through the shared cache's one lock from every worker; unmeasured. _(The sky's gas: superseded
+    by "P09.T40.a, the sky's features' gas".)_
   - _Catalogue classes._ `convert::features::catalogue_class(ClassId) -> Option<CatalogueClassWire>`
     matches the registry's constants and is `None` past plan 09's nine, since `ClassId` is a struct;
     `every_registered_class_has_a_distinct_wire_string` walks `ALL_CLASSES` in value order. Its
@@ -6060,3 +6064,22 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     the fast suite moves (checked by blessing with the 25 holds forced on and testing with the arc
     on). It deletes the tripwire `the_kepler_arc_is_held_only_until_the_27_bump`, the `Series` arm
     and the plan's test's 25 figures.
+- **P09.T40.a, the sky's features' gas (lane `p09-t40a-sky-feature-gas`, 2026-11-05, at 27 and 3;
+  held until `SKY_FEATURE_GAS_FROM`, no output moved).**
+  - _Sim._ `gas_overlay::{FeatureGasIndex, FeatureGasSlab}` (`build`, `slab`, `assemble`, `SLABS`)
+    and `FeatureGas::indexed`: `FeatureGas::new`'s modifiers in its order for every segment
+    (`gas_index_finds_what_the_cells_find`). `FeatureRecord::touches_sphere` is `near`'s test.
+  - _Server._ `SkyFeatureGas::{Held, Marched}` (`of_version`; `ServerConfigBuilder::sky_feature_gas`
+    only). `SkyTables::with_features(FeatureGasIndex)`; the service queues its 32 slab jobs ahead of
+    the tables'. The sky's gas reads no `SharedFeatureCellCache`; its census's members still do.
+  - _Exact._ `extinction::pieces` tests each piece only against the holes whose bounds hold its
+    middle (`Line::inside_bounds`), bit for bit
+    (`the_sweep_labels_each_piece_as_testing_every_hole_does`).
+  - _Lean: the constant (2026-11-05)._ `SKY_FEATURE_GAS_FROM` stays 28: train 28 retargets it to 29.
+  - _Lean: the time (2026-11-05)._ "Twice the 26 s" is read as twice the held shallow sky on the
+    same machine: on the pod 68.7 s held, 69.4 s marched (the lane's outbox).
+  - _For the bump that opens it._ Delete `SKY_FEATURE_GAS_FROM`, `SkyFeatureGas` and the tripwire,
+    and give every sky test's sim reference the gas as `tests/sky.rs`' `under_its_hold_*` do.
+  - _Then, too._ Refresh the constant's cost sentence and re-bless the sky's goldens. The index's
+    52 MB leave the 160 MiB tables budget one galaxy, and its 7 CPU-s join the tables' 31 (budget
+    30).
