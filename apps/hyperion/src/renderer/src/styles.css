@@ -4239,19 +4239,23 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 
 /*
  * The PLANET VIEWER (plan R15): its INPUTS panel in a column of its own on the left, its volatile
- * ranks folded as it opens so that it stands whole at 1280 x 720, and its bar above VIEW's display,
- * which fills the rest.
+ * ranks folded as it opens, one of its parts open at a time where the column is too short for all
+ * of them (`inputsLayout.ts`), so that it stands whole at 1280 x 720, and its bar above VIEW's
+ * display, which fills the rest. The work area and the column are held to the window, never to
+ * what they hold, so that the column's height, which decides its layout, does not follow it.
  */
 .console__work--planet {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   align-content: stretch;
+  min-height: 0;
   overflow: clip;
 }
 
 .planet-viewer {
   display: grid;
   grid-template-columns: 26rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 1rem;
   min-height: 0;
 }
@@ -4335,9 +4339,27 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   color: var(--text-muted);
 }
 
-/* What the folded volatile ranks' disclosure says of them, beside it. */
+/* What a folded part's disclosure says of it, beside it: its rows' values, or the planet shown. */
 .planet-inputs__summary {
   margin-left: 0.5rem;
+}
+
+/* A folded group's summary, read as its rows are: its values in the text's colour, untracked. */
+.planet-inputs__legend > .planet-inputs__summary {
+  color: var(--text);
+  letter-spacing: 0;
+}
+
+/* One row's part of a folded group's summary, which breaks only between rows. */
+.planet-inputs__summary-input {
+  white-space: nowrap;
+}
+
+/* A value in a folded group's summary, set as its field sets it. */
+.planet-inputs__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 
 /* SUN's legend holds its two settings beside its name. */
@@ -4370,7 +4392,7 @@ select.form-field__input:not([aria-disabled="true"]):hover {
  * GENERATE keeps its key and name on one line, the seed's field beside it giving way; OPEN BODY may
  * wrap, so that its field holds a body's whole ID.
  */
-.planet-inputs > .planet-inputs__generate > .command {
+.planet-inputs__parts > .planet-inputs__generate > .command {
   flex: none;
   white-space: nowrap;
 }

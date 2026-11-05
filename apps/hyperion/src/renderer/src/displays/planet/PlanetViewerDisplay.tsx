@@ -3,12 +3,14 @@ import { memo, useCallback, useEffect, useId, useMemo } from "react";
 import { StatusText } from "../../components/StatusText";
 import { useServerLink } from "../../lib/serverLink";
 import { isTextEntry } from "../../lib/textEntry";
+import { useElementSize } from "../../lib/useElementSize";
 import { useUniverse } from "../../lib/universe";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import type { AtmosphereLeversOverride, GeometryOverride } from "../../../../preload/api";
 import { ViewDisplay } from "../view/ViewDisplay";
 import type { ViewEngineSource } from "../view/useViewEngine";
 import { ViewSceneProvider } from "../view/ViewSceneProvider";
+import { inputsLayout } from "./inputsLayout";
 import { GENERATE_KEY, PlanetInputsPanel } from "./PlanetInputsPanel";
 import { PlanetViewerBar, RANDOMIZE_KEY } from "./PlanetViewerBar";
 import { SunControl } from "./SunControl";
@@ -36,7 +38,9 @@ export interface PlanetViewerDisplayProps {
  * drawn from the galaxy, drawn by `VIEW` itself from orbit down to its terrain.
  *
  * @remarks
- * - Its `INPUTS` panel stands on the left ({@link PlanetInputsPanel}), and on the right its bar of
+ * - Its `INPUTS` panel stands on the left ({@link PlanetInputsPanel}), laid out by its column's
+ *   height ({@link inputsLayout}: compact where the column is too short for every part open), and on the
+ *   right its bar of
  *   `RANDOMIZE` and `SHARE` ({@link PlanetViewerBar}) above `VIEW`'s whole display: its engine,
  *   terrain session, atmosphere cache, exposure, styles and instrument views, held by a
  *   `ViewSceneProvider` of its own whose one scene is the planet's body inspection,
@@ -61,6 +65,7 @@ function PlanetViewerPanels({
   opening,
 }: PlanetViewerDisplayProps) {
   const heldBackId = useId();
+  const { ref: inputsRef, size: inputsSize } = useElementSize();
   const link = useServerLink();
   const universe = useUniverse().open?.id ?? null;
   const viewer = usePlanetViewer(link.requests, universe, opening);
@@ -125,12 +130,13 @@ function PlanetViewerPanels({
   const { shown } = viewer;
   return (
     <div className="planet-viewer">
-      <div className="planet-viewer__inputs">
+      <div className="planet-viewer__inputs" ref={inputsRef}>
         <PlanetInputsPanel
           viewer={viewer}
           heldBack={heldBack}
           heldBackId={heldBackId}
           sun={<SunControl sun={viewer.sun} onSun={viewer.setSun} />}
+          layout={inputsLayout(inputsSize)}
         />
       </div>
       <div className="planet-viewer__view">

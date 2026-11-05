@@ -18,6 +18,7 @@ import { requestAdapterOutcome } from "../../view/engine/platform";
 import { UniversePanel } from "../galaxy/UniversePanel";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
 import { FakeGpu } from "../../test/fakeGpu";
+import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
@@ -47,10 +48,37 @@ async function noAdapterStore(): Promise<GraphicsStatusStore> {
 }
 
 /**
- * Renders the display in its providers, a universe's panel beside it to open one, and a way to hand
- * it a planet over, as `App` does.
+ * The `INPUTS` column's height, CSS px, as the client lays it out at 100% (measured hidden, R15.T6):
+ * 959 in a 1920 × 1080 window, the full layout's, and 599 in a 1280 × 720 one, the floor's.
  */
-async function renderViewer(): Promise<{
+const COLUMN_HEIGHT_PX = { window1920x1080: 959, window1280x720: 599 } as const;
+
+/**
+ * Lays the `INPUTS` column out `heightPx()` tall, as `heightPx` gives it at each measure, over
+ * {@link stubViewLayout}'s stubs of every other element.
+ */
+function stubInputsColumn(heightPx: () => number): void {
+  const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+  const laidOut = spy.getMockImplementation();
+  spy.mockImplementation(function column(this: HTMLElement) {
+    if (this.classList.contains("planet-viewer__inputs")) {
+      return DOMRect.fromRect({ x: 0, y: 0, width: 416, height: heightPx() });
+    }
+    if (laidOut === undefined) {
+      throw new Error("stubInputsColumn runs after stubViewLayout, whose stubs it wraps");
+    }
+    return laidOut.call(this);
+  });
+}
+
+/**
+ * Renders the display in its providers, a universe's panel beside it to open one, and a way to hand
+ * it a planet over, as `App` does, its `INPUTS` column `columnHeightPx()` tall, 1920 × 1080's by
+ * default.
+ */
+async function renderViewer(
+  columnHeightPx: () => number = () => COLUMN_HEIGHT_PX.window1920x1080,
+): Promise<{
   readonly socket: FakeWebSocket;
   readonly user: ReturnType<typeof userEvent.setup>;
   readonly handOver: (opening: PlanetViewerOpening) => void;
@@ -59,6 +87,7 @@ async function renderViewer(): Promise<{
 }> {
   const advanceTimers = fakeFramesAndTimeouts();
   stubViewLayout({ widthPx: 1280, heightPx: 720 }, () => ({ widthPx: 900, heightPx: 600 }));
+  stubInputsColumn(columnHeightPx);
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const user = userEvent.setup({ advanceTimers });
   const store = await noAdapterStore();
@@ -683,5 +712,288 @@ describe("nextDrawSeed", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(screen.getByRole("textbox", { name: "H2O" })).toHaveAttribute("aria-invalid", "true");
+  });
+});
+
+/** Generates the panel's inputs and has the server refuse them, naming SMA. */
+async function rejectSma(
+  socket: FakeWebSocket,
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+  const [asked] = socket.requestsOfKind("viewer_planet");
+  await act(async () => {
+    if (asked !== undefined) {
+      socket.serverRejects(asked.id, {
+        code: "bad_request",
+        message: "the orbit's periapsis lies inside its star",
+        field: "inputs.semi_major_axis_au",
+      });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+/** The column of a 1280 × 720 window, the floor's. */
+function atFloor(): number {
+  return COLUMN_HEIGHT_PX.window1280x720;
+}
+
+/** Whether the `INPUTS` part `name`'s disclosure says it is open. */
+function expanded(name: string): string | null {
+  return screen.getByRole("button", { name }).getAttribute("aria-expanded");
+}
+
+/** The `INPUTS` parts that fold, in the panel's order. */
+const PARTS = ["SHOWN", "STAR", "ORBIT", "PLANET", "VOLATILES · RANK"];
+
+describe("the INPUTS column's fold (plan R15, T6)", () => {
+  it("opens STAR alone at 1280 × 720 as the display mounts, every other part folded", async () => {
+    await renderViewer(atFloor);
+    expect(PARTS.map(expanded)).toEqual(["false", "true", "false", "false", "false"]);
+    expect([
+      screen.queryByRole("textbox", { name: "INIT MASS" }) === null,
+      screen.queryByRole("textbox", { name: "SMA" }) === null,
+    ]).toEqual([false, true]);
+  });
+
+  it("says, folded at 1280 × 720, what a group's rows show, a drawn input's dash marked DRAWN", async () => {
+    await renderViewer(atFloor);
+    expect(wholeText("1 AU · ECC 0.0167 · FORMED AT — AU DRAWN")).toHaveLength(1);
+  });
+
+  it("says, folded, the value drawn for the planet on show", async () => {
+    const { socket, user } = await renderViewer(atFloor);
+    await openUniverse(socket, user);
+    await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+    await showPlanet(socket, toInputsDto(DEFAULT_INPUTS));
+    expect(wholeText("1 AU · ECC 0.0167 · FORMED AT 1 AU DRAWN")).toHaveLength(1);
+  });
+
+  it("folds the part open as another opens at 1280 × 720, and opens STAR again as that folds", async () => {
+    const { user } = await renderViewer(atFloor);
+    await user.click(screen.getByRole("button", { name: "ORBIT" }));
+    const opened = PARTS.map(expanded);
+    await user.click(screen.getByRole("button", { name: "ORBIT" }));
+    expect([opened, PARTS.map(expanded)]).toEqual([
+      ["false", "false", "true", "false", "false"],
+      ["false", "true", "false", "false", "false"],
+    ]);
+  });
+
+  it("counts SHOWN among the parts of which one is open at 1280 × 720", async () => {
+    const { user } = await renderViewer(atFloor);
+    await user.click(screen.getByRole("button", { name: "SHOWN" }));
+    expect(PARTS.map(expanded)).toEqual(["true", "false", "false", "false", "false"]);
+    expect(screen.getByRole("textbox", { name: "BODY" })).toBeInTheDocument();
+  });
+
+  it("opens SHOWN at 1280 × 720 as a planet is handed over, so that OPEN BODY's PENDING stands", async () => {
+    const { handOver } = await renderViewer(atFloor);
+    handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+    await settle();
+    expect([expanded("SHOWN"), expanded("STAR"), wholeText("OPEN BODY PENDING").length]).toEqual([
+      "true",
+      "false",
+      1,
+    ]);
+  });
+
+  it("opens a folded group at 1280 × 720 once the server refuses one of its inputs", async () => {
+    const { socket, user } = await renderViewer(atFloor);
+    await openUniverse(socket, user);
+    await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+    const [asked] = socket.requestsOfKind("viewer_planet");
+    await act(async () => {
+      if (asked !== undefined) {
+        socket.serverRejects(asked.id, {
+          code: "bad_request",
+          message: "the orbit's periapsis lies inside its star",
+          field: "inputs.semi_major_axis_au",
+        });
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect([
+      expanded("ORBIT"),
+      screen.getByRole("textbox", { name: "SMA" }).getAttribute("aria-invalid"),
+    ]).toEqual(["true", "true"]);
+  });
+
+  it("names the refused input in GENERATE's outcome, its reason standing under its field alone", async () => {
+    const { socket, user } = await renderViewer();
+    await openUniverse(socket, user);
+    await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+    const [asked] = socket.requestsOfKind("viewer_planet");
+    await act(async () => {
+      if (asked !== undefined) {
+        socket.serverRejects(asked.id, {
+          code: "bad_request",
+          message: "the orbit's periapsis lies inside its star",
+          field: "inputs.semi_major_axis_au",
+        });
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect([
+      wholeText("GENERATE REJECTED: see SMA").length,
+      screen.getAllByText(/the orbit's periapsis lies inside its star/u).length,
+    ]).toEqual([1, 1]);
+  });
+
+  it("heads the server's reason under its field with the input's REJECTED", async () => {
+    const { socket, user } = await renderViewer();
+    await openUniverse(socket, user);
+    await rejectSma(socket, user);
+    expect(wholeText("SMA REJECTED: the orbit's periapsis lies inside its star")).toHaveLength(1);
+  });
+
+  it("states the reason in GENERATE's outcome once the refused input's group is folded", async () => {
+    const { socket, user } = await renderViewer(atFloor);
+    await openUniverse(socket, user);
+    await rejectSma(socket, user);
+    await user.click(screen.getByRole("button", { name: "ORBIT" }));
+    expect(wholeText("GENERATE REJECTED: the orbit's periapsis lies inside its star")).toHaveLength(
+      1,
+    );
+  });
+
+  it("sets a folded group's missing value as the Missing dash", async () => {
+    await renderViewer(atFloor);
+    const summary = wholeText("1 AU · ECC 0.0167 · FORMED AT — AU DRAWN")[0];
+    expect(summary === undefined ? null : within(summary).getByText("—")).toHaveClass(
+      "readout__missing",
+    );
+  });
+
+  it("gives the focus in a group that folds to that group's disclosure", async () => {
+    const { user, handOver } = await renderViewer(atFloor);
+    await user.click(screen.getByRole("textbox", { name: "AGE" }));
+    handOver({ inspection: sliceEarthInspection(), sequence: 1 });
+    await settle();
+    expect(screen.getByRole("button", { name: "STAR" })).toHaveFocus();
+  });
+
+  it("opens the part that holds the focus as the column becomes too short for every part", async () => {
+    let heightPx: number = COLUMN_HEIGHT_PX.window1920x1080;
+    const { user } = await renderViewer(() => heightPx);
+    await user.click(screen.getByRole("textbox", { name: "SMA" }));
+    heightPx = COLUMN_HEIGHT_PX.window1280x720;
+    act(() => {
+      FakeResizeObserver.resizeAll();
+    });
+    expect([expanded("STAR"), expanded("ORBIT")]).toEqual(["false", "true"]);
+  });
+
+  it("keeps the focus in its field as the column becomes too short for every part", async () => {
+    let heightPx: number = COLUMN_HEIGHT_PX.window1920x1080;
+    const { user } = await renderViewer(() => heightPx);
+    await user.click(screen.getByRole("textbox", { name: "SMA" }));
+    heightPx = COLUMN_HEIGHT_PX.window1280x720;
+    act(() => {
+      FakeResizeObserver.resizeAll();
+    });
+    expect(screen.getByRole("textbox", { name: "SMA" })).toHaveFocus();
+  });
+
+  it("keeps the part open in the compact layout open as the column grows to the full one", async () => {
+    let heightPx: number = COLUMN_HEIGHT_PX.window1280x720;
+    const { user } = await renderViewer(() => heightPx);
+    await user.click(screen.getByRole("button", { name: "VOLATILES · RANK" }));
+    heightPx = COLUMN_HEIGHT_PX.window1920x1080;
+    act(() => {
+      FakeResizeObserver.resizeAll();
+    });
+    expect(expanded("VOLATILES · RANK")).toBe("true");
+  });
+
+  it("gives the focus on a disclosure the full layout does without to its group's first field", async () => {
+    let heightPx: number = COLUMN_HEIGHT_PX.window1280x720;
+    const { user } = await renderViewer(() => heightPx);
+    await user.click(screen.getByRole("button", { name: "ORBIT" }));
+    heightPx = COLUMN_HEIGHT_PX.window1920x1080;
+    act(() => {
+      FakeResizeObserver.resizeAll();
+    });
+    expect(screen.getByRole("textbox", { name: "SMA" })).toHaveFocus();
+  });
+
+  it("stands STAR, ORBIT and PLANET open at 1920 × 1080, VOLATILES and SHOWN folding on their own", async () => {
+    const { user } = await renderViewer();
+    await user.click(screen.getByRole("button", { name: "VOLATILES · RANK" }));
+    await user.click(screen.getByRole("button", { name: "SHOWN" }));
+    expect([
+      ["STAR", "ORBIT", "PLANET"].map((name) => screen.queryByRole("button", { name })),
+      ["SHOWN", "VOLATILES · RANK"].map(expanded),
+      ["INIT MASS", "SMA", "MASS", "H2O", "BODY"].map(
+        (name) => screen.queryByRole("textbox", { name }) !== null,
+      ),
+    ]).toEqual([
+      [null, null, null],
+      ["true", "true"],
+      [true, true, true, true, true],
+    ]);
+  });
+
+  it("keeps one entry refusal on the panel, a newer one dropping the older and what was typed", async () => {
+    const { user } = await renderViewer();
+    const mass = screen.getByRole("textbox", { name: "INIT MASS" });
+    await user.clear(mass);
+    await user.type(mass, "200{Enter}");
+    const age = screen.getByRole("textbox", { name: "AGE" });
+    await user.clear(age);
+    await user.type(age, "99{Enter}");
+    expect([
+      wholeText("INIT MASS INVALID: enter 0.08 to 150").length,
+      wholeText("AGE INVALID: enter 0.001 to 13.787").length,
+    ]).toEqual([0, 1]);
+    expect(mass).toHaveProperty("value", "1");
+  });
+
+  it("drops a refusal under SUN's field once an input's entry is refused", async () => {
+    const { user } = await renderViewer();
+    await user.click(screen.getByRole("button", { name: "HELD" }));
+    const latitude = screen.getByRole("textbox", { name: "LATITUDE" });
+    await user.clear(latitude);
+    await user.type(latitude, "95{Enter}");
+    const mass = screen.getByRole("textbox", { name: "INIT MASS" });
+    await user.clear(mass);
+    await user.type(mass, "200{Enter}");
+    expect([
+      wholeText("LATITUDE INVALID: enter -90.0 to 90.0").length,
+      wholeText("INIT MASS INVALID: enter 0.08 to 150").length,
+    ]).toEqual([0, 1]);
+  });
+
+  it("drops what was typed in BODY, and its refusal, as SHOWN folds", async () => {
+    const { socket, user } = await renderViewer();
+    await openUniverse(socket, user);
+    const shownButton = screen.getByRole("button", { name: "SHOWN" });
+    await user.click(shownButton);
+    await user.type(screen.getByRole("textbox", { name: "BODY" }), "xyz{Enter}");
+    const refused = wholeText(
+      "BODY INVALID: enter 16 hexadecimal digits, a full stop and 4 more (0-9, A-F)",
+    ).length;
+    await user.click(shownButton);
+    await user.click(shownButton);
+    expect([
+      refused,
+      wholeText("BODY INVALID: enter 16 hexadecimal digits, a full stop and 4 more (0-9, A-F)")
+        .length,
+    ]).toEqual([1, 0]);
+    expect(screen.getByRole("textbox", { name: "BODY" })).toHaveProperty("value", "");
+  });
+
+  it("drops what was typed in a group, and its refusal, as the group folds", async () => {
+    const { user } = await renderViewer();
+    const volatiles = screen.getByRole("button", { name: "VOLATILES · RANK" });
+    await user.click(volatiles);
+    const water = screen.getByRole("textbox", { name: "H2O" });
+    await user.type(water, "5{Enter}");
+    const refused = wholeText("H2O INVALID: enter 0.001 to 0.999").length;
+    await user.click(volatiles);
+    await user.click(volatiles);
+    expect([refused, wholeText("H2O INVALID: enter 0.001 to 0.999").length]).toEqual([1, 0]);
+    expect(water).toHaveProperty("value", "—");
   });
 });

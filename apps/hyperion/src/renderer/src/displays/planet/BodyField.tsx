@@ -1,10 +1,11 @@
 import { type BodyIdHex, isBodyId } from "@hyperion/protocol";
-import { useId, useState } from "react";
+import { useId } from "react";
 
 import { RequestStatus } from "../../components/RequestStatus";
 import { StatusText } from "../../components/StatusText";
 import { isEmptyEntry, showSelected } from "../../lib/textEntry";
 import { describedBy } from "./describedBy";
+import { useEntryDraft } from "./useEntryDraft";
 import type { CommandState } from "./usePlanetViewer";
 
 /** Props of {@link BodyField}. */
@@ -16,6 +17,8 @@ export interface BodyFieldProps {
   /** Why the commands are held back, or `null`, and the ID of the words that say so. */
   readonly heldBack: string | null;
   readonly heldBackId: string;
+  /** Whether `SHOWN` is folded, which drops what was typed and its refusal. */
+  readonly folded: boolean;
   readonly onOpen: (body: BodyIdHex) => void;
 }
 
@@ -24,6 +27,9 @@ function typedBodyId(text: string): BodyIdHex | null {
   const id = text.trim().toLowerCase();
   return isBodyId(id) ? id : null;
 }
+
+/** The refusal of a typed ID of another form, with what is valid. */
+const BODY_INVALID = "BODY INVALID: enter 16 hexadecimal digits, a full stop and 4 more (0-9, A-F)";
 
 /** The form a body's ID is entered in, which the field states while it is empty. */
 const BODY_FORMAT = "a body's ID: 16 hexadecimal digits, a full stop and 4 more";
@@ -37,22 +43,29 @@ const BODY_FORMAT = "a body's ID: 16 hexadecimal digits, a full stop and 4 more"
  * that form while it is empty, and shows the galaxy's planet on show, in upper case as `SEED` shows
  * its seed. `OPEN BODY`, or `Enter` in the field, opens what was typed, refusing an ID of another
  * form with what is valid; `Escape`, `Enter` in the emptied field, or leaving it emptied, drops
- * what was typed. `OPEN BODY`'s `PENDING`, then its outcome, stands under the row. It is held back,
- * as `GENERATE` is, with the reason while no universe is open or the link is down.
+ * what was typed, as folding `SHOWN` does. Its refusal is the panel's one ({@link useEntryDraft}).
+ * `OPEN BODY`'s `PENDING`, then its outcome, stands under the row. It is held back, as `GENERATE`
+ * is, with the reason while no universe is open or the link is down.
  */
-export function BodyField({ shownBody, status, heldBack, heldBackId, onOpen }: BodyFieldProps) {
+export function BodyField({
+  shownBody,
+  status,
+  heldBack,
+  heldBackId,
+  folded,
+  onOpen,
+}: BodyFieldProps) {
   const fieldId = useId();
   const errorId = useId();
   const statusId = useId();
   const formatId = useId();
-  const [draft, setDraft] = useState<string | null>(null);
-  const [refused, setRefused] = useState(false);
+  const entry = useEntryDraft(folded);
+  const { draft, refusal } = entry;
   const shownText = shownBody?.toUpperCase() ?? "";
   const text = draft ?? shownText;
   /** Drops what was typed, the field showing its value again, selected for typing to replace. */
   const drop = (input: HTMLInputElement | null): void => {
-    setDraft(null);
-    setRefused(false);
+    entry.drop();
     if (input !== null) {
       showSelected(input, shownText);
     }
@@ -67,11 +80,10 @@ export function BodyField({ shownBody, status, heldBack, heldBackId, onOpen }: B
     }
     const id = typedBodyId(text);
     if (id === null) {
-      setRefused(true);
+      entry.refuse(BODY_INVALID);
       return;
     }
-    setDraft(null);
-    setRefused(false);
+    entry.drop();
     onOpen(id);
   };
   return (
@@ -88,14 +100,13 @@ export function BodyField({ shownBody, status, heldBack, heldBackId, onOpen }: B
             autoComplete="off"
             spellCheck={false}
             value={text}
-            aria-invalid={refused ? "true" : undefined}
+            aria-invalid={refusal === null ? undefined : "true"}
             aria-describedby={describedBy([
-              refused ? errorId : null,
+              refusal === null ? null : errorId,
               text.length === 0 ? formatId : null,
             ])}
             onChange={(event) => {
-              setDraft(event.target.value);
-              setRefused(false);
+              entry.type(event.target.value);
             }}
             onFocus={(event) => {
               event.currentTarget.select();
@@ -136,11 +147,11 @@ export function BodyField({ shownBody, status, heldBack, heldBackId, onOpen }: B
           {BODY_FORMAT}
         </p>
       ) : null}
-      {refused ? (
+      {refusal === null ? null : (
         <p className="form-field__error planet-inputs__error" id={errorId}>
-          <StatusText text="BODY INVALID: enter 16 hexadecimal digits, a full stop and 4 more (0-9, A-F)" />
+          <StatusText text={refusal} />
         </p>
-      ) : null}
+      )}
       {status === null ? null : <RequestStatus state={status} id={statusId} subject="OPEN BODY" />}
     </>
   );

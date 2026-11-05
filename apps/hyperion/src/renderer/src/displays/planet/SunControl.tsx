@@ -1,7 +1,8 @@
-import { type KeyboardEvent, useId, useState } from "react";
+import { type KeyboardEvent, useId } from "react";
 
 import { StatusText } from "../../components/StatusText";
 import { isEmptyEntry, showSelected } from "../../lib/textEntry";
+import { useEntryDraft } from "./useEntryDraft";
 import { formatSunDegrees, type SunSetting } from "./viewerScene";
 
 /** Props of {@link SunControl}. */
@@ -22,8 +23,9 @@ const FIRST_HELD: SunSetting = { kind: "held", latitudeDeg: 0, longitudeDeg: 0 }
  * planet turns under it; `HELD` holds it over the subsolar point at `LATITUDE` and `LONGITUDE` on the
  * planet's ground (`viewerScene.ts`), so that its day side holds still, first over the prime
  * meridian on the equator. Each field enters its value with `Enter` or when it is left, refusing
- * one out of range with what is valid; `Escape`, or `Enter` in the emptied field, drops what was
- * typed. A change moves the light at the view's next frame.
+ * one out of range with what is valid, as the panel's one refusal ({@link useEntryDraft}); `Escape`, or
+ * `Enter` in the emptied field, drops what was typed. A change moves the light at the view's next
+ * frame.
  */
 export function SunControl({ sun, onSun }: SunControlProps) {
   return (
@@ -97,26 +99,23 @@ const TYPED_DEGREES = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/u;
 function DegreesRow({ label, valueDeg, minDeg, maxDeg, onEnter }: DegreesRowProps) {
   const fieldId = useId();
   const errorId = useId();
-  const [draft, setDraft] = useState<string | null>(null);
-  const [refused, setRefused] = useState(false);
+  const { draft, refusal, type, drop, refuse } = useEntryDraft(false);
   const text = formatSunDegrees(valueDeg);
   const enter = (input: HTMLInputElement): void => {
     if (draft === null) {
       return;
     }
     if (isEmptyEntry(draft)) {
-      setDraft(null);
-      setRefused(false);
+      drop();
       showSelected(input, text);
       return;
     }
     const value = TYPED_DEGREES.test(draft.trim()) ? Number(draft.trim()) : Number.NaN;
     if (value >= minDeg && value <= maxDeg) {
-      setDraft(null);
-      setRefused(false);
+      drop();
       onEnter(value);
     } else {
-      setRefused(true);
+      refuse(`${label} INVALID: enter ${formatSunDegrees(minDeg)} to ${formatSunDegrees(maxDeg)}`);
     }
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
@@ -125,8 +124,7 @@ function DegreesRow({ label, valueDeg, minDeg, maxDeg, onEnter }: DegreesRowProp
       enter(event.currentTarget);
     } else if (event.key === "Escape") {
       event.preventDefault();
-      setDraft(null);
-      setRefused(false);
+      drop();
       showSelected(event.currentTarget, text);
     }
   };
@@ -143,11 +141,10 @@ function DegreesRow({ label, valueDeg, minDeg, maxDeg, onEnter }: DegreesRowProp
         autoComplete="off"
         spellCheck={false}
         value={draft ?? text}
-        aria-invalid={refused ? "true" : undefined}
-        aria-describedby={refused ? errorId : undefined}
+        aria-invalid={refusal === null ? undefined : "true"}
+        aria-describedby={refusal === null ? undefined : errorId}
         onChange={(event) => {
-          setDraft(event.target.value);
-          setRefused(false);
+          type(event.target.value);
         }}
         onFocus={(event) => {
           event.currentTarget.select();
@@ -159,13 +156,11 @@ function DegreesRow({ label, valueDeg, minDeg, maxDeg, onEnter }: DegreesRowProp
       />
       <span className="planet-inputs__unit">°</span>
       <span className="planet-inputs__provenance" />
-      {refused ? (
+      {refusal === null ? null : (
         <p className="form-field__error planet-inputs__error" id={errorId}>
-          <StatusText
-            text={`${label} INVALID: enter ${formatSunDegrees(minDeg)} to ${formatSunDegrees(maxDeg)}`}
-          />
+          <StatusText text={refusal} />
         </p>
-      ) : null}
+      )}
     </div>
   );
 }
