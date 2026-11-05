@@ -305,8 +305,6 @@ export interface OccluderMesh {
 export interface StarSprite {
   /** The star's system. */
   readonly id: string;
-  /** Its direction from the camera, unit, `f32`. */
-  readonly directionF32: Float32Array;
   /** Where it falls, px from the view's top left, with its sub-pixel part. */
   readonly xPx: number;
   /** Where it falls, px from the top. */
@@ -1284,7 +1282,6 @@ function starSprites(
     const [r, g, b] = star.illuminanceRgbLx;
     sprites.push({
       id: star.id,
-      directionF32: narrow(direction),
       xPx: p.xPx,
       yPx: p.yPx,
       exposedRgb: exposedLight(star.illuminanceRgbLx, exposure, solidAngleOf(direction)),

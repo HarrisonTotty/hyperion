@@ -569,6 +569,24 @@ describe("buildWireframeDrawList", () => {
     });
   });
 
+  it("makes each sky sprite of its place and light alone, no direction a frame for it (lane perf-render-thread-2)", () => {
+    const skyStars = [
+      {
+        id: "7",
+        direction: normalise(vec3(0.01, 0.02, -1)),
+        illuminanceRgbLx: [1e-6, 2e-6, 3e-6] as const,
+      },
+    ];
+    const [sprite] = build({ skyStars }).sprites;
+    expect(sprite === undefined ? [] : Object.keys(sprite)).toEqual([
+      "id",
+      "xPx",
+      "yPx",
+      "exposedRgb",
+      "illuminanceLx",
+    ]);
+  });
+
   it("draws the flight path marker for the own ship's velocity", () => {
     expect(build().lines.some((line) => line.id.startsWith("mark:flight_path"))).toBe(true);
   });

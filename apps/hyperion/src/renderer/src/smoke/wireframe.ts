@@ -1400,7 +1400,6 @@ async function checkStarSprite(
 ): Promise<void> {
   const sprite: StarSprite = {
     id: "star",
-    directionF32: new Float32Array([0, 0, -1]),
     xPx: SPRITE.xPx,
     yPx: SPRITE.yPx,
     exposedRgb: SPRITE.exposedRgb,

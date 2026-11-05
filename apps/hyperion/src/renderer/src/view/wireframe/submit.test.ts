@@ -314,7 +314,6 @@ describe("packWireframe", () => {
     sprites: [
       {
         id: "star",
-        directionF32: new Float32Array([0, 0, -1]),
         xPx: 960.25,
         yPx: 540.75,
         exposedRgb: [1, 2, 3],
@@ -630,7 +629,6 @@ describe("WireframeRenderer", () => {
       sprites: [
         {
           id: "star",
-          directionF32: new Float32Array([0, 0, -1]),
           xPx: 960,
           yPx: 540,
           exposedRgb: [1, 1, 1],
@@ -1079,7 +1077,6 @@ describe("WireframeRenderer over the bodies' terrain (R10.T11)", () => {
     sprites: [
       {
         id: "star",
-        directionF32: new Float32Array([0, 0, -1]),
         xPx: 960,
         yPx: 540,
         exposedRgb: [1, 1, 1],
