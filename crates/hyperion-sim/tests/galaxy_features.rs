@@ -7,7 +7,6 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::ages::SubDisc;
 use hyperion_sim::galaxy::features::FeatureProcess;
@@ -24,7 +23,7 @@ use hyperion_sim::galaxy::features::kinds::open_cluster::{
 };
 use hyperion_sim::galaxy::features::shares::phi_young;
 use hyperion_sim::galaxy::gas::SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY;
-use hyperion_sim::galaxy::gas::extinction::{NoiseMode, Quality, sightline};
+use hyperion_sim::galaxy::gas::extinction::{NoiseMode, Quality, SIGHTLINE_QUALITY, sightline};
 use hyperion_sim::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
 use hyperion_sim::galaxy::params::GalaxyParams;
@@ -36,7 +35,10 @@ use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::{Composition, lifetime};
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{LightYears, SolarMasses, Years};
+use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::golden;
+use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
 use hyperion_testkit::order::assert_order_independent;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
@@ -465,7 +467,7 @@ fn a_point_in_a_bubble_reads_its_interior() {
                 interior,
             } => (centre.distance_to(&inside).value() / METRES_PER_LIGHT_YEAR < radius.value())
                 .then_some(interior.value()),
-            GasModifier::Cloud { .. } => None,
+            GasModifier::Cloud { .. } | GasModifier::Wall { .. } => None,
         })
         .fold(f64::INFINITY, f64::min);
     assert!(
@@ -639,6 +641,106 @@ fn gas_index_finds_what_the_cells_find() {
         indexed.modifiers_near_segment(a, b, &mut out);
         out
     });
+}
+
+/// The features' gas about the Sun-like point, bit for bit, before the superbubbles' merge (P09.T5,
+/// the D1 pre-pin of its hold at 29): the bubbles of the nurseries in the Sun's cell, and the
+/// modifiers and the served lines' extinction over a kiloparsec of the plane in four directions,
+/// at the epoch and a million years on. The hold leaves it as it is.
+#[test]
+fn feature_gas_about_the_sun_is_pinned() {
+    golden!(
+        "galaxy/features/gas",
+        &feature_gas_about_the_sun(&milky_way())
+    );
+}
+
+/// The golden text of the features' gas about the Sun-like point in `galaxy`.
+fn feature_gas_about_the_sun(galaxy: &Galaxy) -> String {
+    let cells = KeepCells::default();
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let cell = FeatureCell::new([0, 6, 0]).unwrap();
+    let nurseries = cells.contents(galaxy, cell);
+    let mut written = 0;
+    for feature in nurseries.features() {
+        let FeatureMarks::Nursery(marks) = feature.marks() else {
+            continue;
+        };
+        for (when, t) in [("epoch", 0.0), ("myr", 1e6)] {
+            let age = Years::new(marks.age_at_epoch().value() + t);
+            let label = format!("bubble.{}.{when}", feature.id().index());
+            let gas = galaxy.gas();
+            match Superbubble::of(
+                marks,
+                age,
+                gas.mean_density(feature.position()),
+                gas.params().neutral_height(),
+                galaxy.feature_shares().supernova_clock(),
+            ) {
+                Some(bubble) => {
+                    w.f64(&format!("{label}.radius"), bubble.radius().value());
+                    w.f64(
+                        &format!("{label}.interior"),
+                        bubble.interior_density().value(),
+                    );
+                }
+                None => w.line(&format!("{label} = none")),
+            }
+        }
+        written += 1;
+        if written == 24 {
+            break;
+        }
+    }
+    let sun = [0.0, 26_000.0, 68.0];
+    let start = GalacticPosition::from_light_years(sun).unwrap();
+    let mut noise = NoiseCache::with_capacity(4_096);
+    for (when, t) in [("epoch", 0.0), ("myr", 1e6)] {
+        let source = FeatureGas::new(galaxy, &cells, Years::new(t));
+        for (name, d) in [
+            ("px", [1.0, 0.0]),
+            ("mx", [-1.0, 0.0]),
+            ("py", [0.0, 1.0]),
+            ("my", [0.0, -1.0]),
+        ] {
+            let end = GalacticPosition::from_light_years([
+                sun[0] + 3_261.56 * d[0],
+                sun[1] + 3_261.56 * d[1],
+                sun[2],
+            ])
+            .unwrap();
+            let mut mods = Vec::new();
+            source.modifiers_near_segment(&start, &end, &mut mods);
+            let count = |kind: fn(&GasModifier) -> bool| mods.iter().filter(|m| kind(m)).count();
+            let label = format!("line.{when}.{name}");
+            w.line(&format!(
+                "{label}.modifiers = {} holes, {} clouds, {} walls",
+                count(|m| matches!(m, GasModifier::Hole { .. })),
+                count(|m| matches!(m, GasModifier::Cloud { .. })),
+                count(|m| matches!(m, GasModifier::Wall { .. })),
+            ));
+            let line = sightline(
+                galaxy.gas(),
+                &start,
+                &end,
+                NoiseMode::Realised,
+                SIGHTLINE_QUALITY,
+                &mods,
+                &mut noise,
+            );
+            w.f64(&format!("{label}.a_v"), line.a_v().value());
+            w.f64(
+                &format!("{label}.hydrogen_column"),
+                line.hydrogen_column().value(),
+            );
+            w.f64(
+                &format!("{label}.neutral_column"),
+                line.neutral_hydrogen_column().value(),
+            );
+        }
+    }
+    w.as_str().to_owned()
 }
 
 // --- P09.T3.b: the index's headroom ---

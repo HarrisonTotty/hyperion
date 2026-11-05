@@ -1723,7 +1723,8 @@ fn a_sightline_does_not_depend_on_the_order_of_its_clouds() {
 
 /// P07.T8's integral, bit for bit: eight lines through the fixture's gas — in the plane, to the
 /// centre, out of the disc, through a hole and a cloud — in both modes, at full quality and at 64
-/// steps, and the visual and K horizons from the Sun. P07.T12's `sightlines.golden` is its own.
+/// steps, and the visual and K horizons from the Sun; then two through a hole lined by a wall (plan
+/// 09, P09.T5), across it and ending in its wall. P07.T12's `sightlines.golden` is its own.
 #[test]
 fn gas_extinction_is_pinned() {
     let fields = milky_way_fields();
@@ -1797,5 +1798,48 @@ fn gas_extinction_is_pinned() {
             w.f64(&format!("horizon.{}.{mode:?}", band.name()), reach.value());
         }
     }
+    write_walled_lines(&mut w, &gas, hole, &mut cache);
     golden!("gas/extinction", w.as_str());
+}
+
+/// `gas_extinction_is_pinned`'s two lines through `hole` lined by a wall (plan 09, P09.T5), across
+/// it and ending in its wall, in both modes and at both qualities.
+fn write_walled_lines(
+    w: &mut GoldenWriter,
+    gas: &GasField,
+    hole: GasModifier,
+    cache: &mut NoiseCache,
+) {
+    let sixty_four = Quality::Budget(NonZeroU32::new(64).expect("sixty-four"));
+    let bubble = [
+        hole,
+        GasModifier::Wall {
+            centre: at([0.0, 26_000.0, 50.0]),
+            inner: LightYears::new(180.0),
+            outer: LightYears::new(200.0),
+            density: HydrogenPerCm3::new(2.7),
+            dust_per_hydrogen: 0.95,
+        },
+    ];
+    for (i, (a, b)) in [
+        ([-1_500.0, 26_030.0, 0.0], [1_500.0, 26_030.0, 0.0]),
+        ([-1_500.0, 26_000.0, 50.0], [190.0, 26_000.0, 50.0]),
+    ]
+    .iter()
+    .enumerate()
+    {
+        for (mode_name, mode) in [("mean", NoiseMode::Mean), ("realised", NoiseMode::Realised)] {
+            for (quality_name, quality) in [("full", Quality::Full), ("budget64", sixty_four)] {
+                let line = sightline(gas, &at(*a), &at(*b), mode, quality, &bubble, cache);
+                let label = |name: &str| format!("walled{i}.{mode_name}.{quality_name}.{name}");
+                w.f64(&label("a_v"), line.a_v().value());
+                w.f64(&label("hydrogen_column"), line.hydrogen_column().value());
+                w.f64(
+                    &label("neutral_column"),
+                    line.neutral_hydrogen_column().value(),
+                );
+                w.line(&format!("{} = {}", label("steps"), line.steps()));
+            }
+        }
+    }
 }
