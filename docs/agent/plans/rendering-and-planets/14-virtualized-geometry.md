@@ -2682,7 +2682,10 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   settings at DPR 1 and 2, each lever pair at high as A B A B, shading's at DPR 1 and 2, then the
   worker sweep) into `target/mac-profile/`, its `summary.md` the pairs' deltas; the same command
   resumes it. T2.e, T3.c, T3.d and T6.b read their pairs there. Pending: the owner's Mac run. The
-  timing file holds no attachment loads or stores, which T2.e's Mac run asks for.
+  timing file holds no attachment loads or stores, which T2.e's Mac run asks for. A served routed
+  body's thick-read pairs run as a batch of their own, with `--body <id>`, `--settings none`,
+  `--levers limb-rays,march-sources` and an `--out` of its own; TEST EARTH and TEST TITAN, being
+  fixtures, are out of its reach.
 - (lean, 2026-11-05) The batch places the ship with the clock paused (`--rate 0`) and holds each
   setting's warm-up connection open (`src/main/holdingRelay.ts`) until its sky's final reply, so
   that each measured launch's sky is the server's kept reply and the server is quiet beside it.

@@ -6,11 +6,14 @@
 // both ratios), then the height-worker sweep (`workerSweep.mjs`), and writes one summary. Run it by
 // hand on a quiet machine; not part of `ci`.
 //
-//   node --no-warnings scripts/macProfile.mjs --machine <text> [--out <dir>] [--load-bound <n>]
-//       [--settings high,low|none] [--dprs 1,2] [--levers <names>|all|none] [--pair-setting high]
+//   node --no-warnings scripts/macProfile.mjs --machine <text> [--body <id>] [--out <dir>]
+//       [--load-bound <n>] [--settings high,low|none] [--dprs 1,2] [--levers <names>|all|none] [--pair-setting high]
 //       [--rounds 2] [--sweep-workers 3,4,6,8 | --no-sweep] [--port 7880] [--software] [--summary]
 //
-// --machine names the machine in the summary and the sweep's table ("Apple M5, 16 GiB"). --out
+// --machine names the machine in the summary and the sweep's table ("Apple M5, 16 GiB"). --body
+// names the served body every launch inspects, 41ffecb200000002.0400 by default; a batch of another
+// body, such as a routed one's (a medium within the thick or the haze route's range) for the thick
+// read's limb-rays and march-sources pairs, takes an --out of its own. --out
 // (default target/mac-profile/) holds the batch: each kept run under runs/<id>/ (its timing file and
 // summary, its captures, the views check's output and run.json, its samples), a run that wrote no
 // timing file under failed/, the warm-ups under warm-up/, the server's log and data, the sweep under
@@ -69,8 +72,8 @@ const repo = join(app, "..", "..");
 /** The address of the batch's server, and of its relay. */
 const LOCAL = "127.0.0.1";
 
-/** The body every launch inspects: Dev Fixture's, the owner's profile's since 2026-11-01. */
-const BODY = "41ffecb200000002.0400";
+/** The body every launch inspects unless --body names another: the owner's profile's since 11-01. */
+const DEFAULT_BODY = "41ffecb200000002.0400";
 
 /** Where the views check writes an inspection's timing files and its captures. */
 const TIMING_DIR = join(repo, "target", "views-check", "timing");
@@ -352,6 +355,10 @@ function optionsOf(args, profile) {
     const known = profile.MAC_PROFILE_DEFAULTS.levers.join(", ");
     return { problem: `no lever is named ${unknown.join(", ")}: the levers are ${known}` };
   }
+  const body = option(args, "body", DEFAULT_BODY);
+  if (!/^[0-9a-f]{16}\.[0-9a-f]{4}$/u.test(body)) {
+    return { problem: `--body takes a body's ID, such as ${DEFAULT_BODY}, not ${body}` };
+  }
   const rounds = Number(option(args, "rounds", "2"));
   const loadBound = Number(option(args, "load-bound", "4"));
   const port = Number(option(args, "port", "7880"));
@@ -366,6 +373,7 @@ function optionsOf(args, profile) {
   }
   return {
     machine,
+    body,
     out: option(args, "out", join(repo, "target", "mac-profile")),
     matrix: { settings, ratios, levers, pairSetting, rounds },
     loadBound,
@@ -494,6 +502,7 @@ function writeSummary(options, tree, profile) {
   const lines = profile.macProfileSummaryLines({
     machine: options.machine,
     tree,
+    body: options.body,
     options: options.matrix,
     kept,
     sweep: profile.sweepIn(join(options.out, "worker-sweep")),
@@ -535,12 +544,13 @@ async function build(log, profile) {
 }
 
 /**
- * Places the ship at {@link BODY} with the clock paused, on the server at `port`.
+ * Places the ship at `body` with the clock paused, on the server at `port`.
  *
  * @param {number} port
+ * @param {string} body
  * @returns {Promise<string>} The placement, its line of JSON.
  */
-function placeShip(port) {
+function placeShip(port, body) {
   return new Promise((resolve, reject) => {
     const child = start(
       "node",
@@ -551,7 +561,7 @@ function placeShip(port) {
         "--port",
         String(port),
         "--look-at",
-        BODY,
+        body,
         "--rate",
         "0",
         "--json",
@@ -596,16 +606,27 @@ async function main(args) {
     cwd: repo,
     encoding: "utf8",
   }).stdout.trim();
-  const started = profile.batchTreeIn(options.out);
-  if (started !== null && started !== tree) {
+  const started = profile.batchIn(options.out);
+  if (started !== null && started.tree !== tree) {
     console.error(
-      `macProfile: ${options.out} holds runs made on ${started}, not ${tree}: resume on that ` +
+      `macProfile: ${options.out} holds runs made on ${started.tree}, not ${tree}: resume on that ` +
         "commit, or give another --out",
     );
     return 2;
   }
+  if (started !== null && (started.body ?? DEFAULT_BODY) !== options.body) {
+    console.error(
+      `macProfile: ${options.out} holds runs of ${started.body ?? DEFAULT_BODY}, not ${options.body}: ` +
+        "give another --out",
+    );
+    return 2;
+  }
   if (started === null) {
-    writeJson(join(options.out, "batch.json"), { tree, startedAt: new Date().toISOString() });
+    writeJson(join(options.out, "batch.json"), {
+      tree,
+      body: options.body,
+      startedAt: new Date().toISOString(),
+    });
   }
   if (options.summaryOnly) {
     writeSummary(options, tree, profile);
@@ -638,14 +659,22 @@ async function main(args) {
   const common = ["--hidden", ...(options.software ? ["--software"] : [])];
   if (todo.length > 0) {
     const server = await startServer(binary, options.out, options.port, profile);
-    const placement = await placeShip(options.port);
+    const placement = await placeShip(options.port, options.body);
     writeFileSync(join(options.out, "placement.json"), placement);
     const universe = String(JSON.parse(placement).universe.id);
-    say(`the ship is placed at ${BODY} in universe ${universe}, its clock paused`);
+    say(`the ship is placed at ${options.body} in universe ${universe}, its clock paused`);
     /** @type {typeof import("../src/main/holdingRelay")} */
     const relays = (await load("src/main/holdingRelay.ts")).module;
     // The address given, so that a developer's HYPERION_SERVER_ADDR leads no launch elsewhere.
-    const inspection = ["--inspection", "--universe", universe, "--body", BODY, "--address", LOCAL];
+    const inspection = [
+      "--inspection",
+      "--universe",
+      universe,
+      "--body",
+      options.body,
+      "--address",
+      LOCAL,
+    ];
 
     // Each setting's sky, held to its final reply before the setting's first run.
     const warmDir = join(options.out, "warm-up");

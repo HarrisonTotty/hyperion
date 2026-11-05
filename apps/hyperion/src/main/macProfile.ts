@@ -639,6 +639,8 @@ export interface MacProfileSummaryInput {
   readonly machine: string;
   /** The tree the batch was built from, its commit. */
   readonly tree: string;
+  /** The body every launch inspects. */
+  readonly body: string;
   readonly options: MacProfileMatrixOptions;
   readonly kept: ReadonlyArray<KeptRun>;
   readonly sweep: {
@@ -684,7 +686,7 @@ export function macProfileSummaryLines(input: MacProfileSummaryInput): string[] 
   return [
     `# The Mac batch: ${input.machine}`,
     "",
-    `Tree ${input.tree}; ${String(byId.size)} of ${String(matrix.length)} runs kept. Each figure is ` +
+    `Tree ${input.tree}, body ${input.body}; ${String(byId.size)} of ${String(matrix.length)} runs kept. Each figure is ` +
       "a window's over its primary's draws: the interval between draws (median, p95 and fps at the " +
       "median) and the GPU's frame and passes (median ms; the pass timer " +
       `${timers.length === 0 ? "—" : timers.join(", ")}). A pair's side is the median of its runs' ` +
@@ -786,10 +788,21 @@ export function sweepIn(sweepDir: string): MacProfileSummaryInput["sweep"] {
   return { table, runs };
 }
 
-/** The tree a batch was started on, `batch.json`'s, or `null` for a batch not started. */
-export function batchTreeIn(out: string): string | null {
+/** What a batch was started on, its `batch.json`: its commit and its body; `null` for none. */
+export interface MacProfileBatch {
+  readonly tree: string;
+  /** The body its launches inspect, or `null` for a batch that did not record one: the default. */
+  readonly body: string | null;
+}
+
+/** The batch started in `out`, or `null` for a batch not started there. */
+export function batchIn(out: string): MacProfileBatch | null {
   const batch = readJsonFile(join(out, "batch.json"));
-  return isObject(batch) && typeof batch["tree"] === "string" ? batch["tree"] : null;
+  if (!isObject(batch) || typeof batch["tree"] !== "string") {
+    return null;
+  }
+  const body = batch["body"];
+  return { tree: batch["tree"], body: typeof body === "string" ? body : null };
 }
 
 /**

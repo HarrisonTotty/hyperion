@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { INSPECTION_TIMING_SCHEMA } from "./inspectionTiming";
 import {
+  batchIn,
   cargoExecutable,
   cpuTimeSeconds,
   type KeptRun,
@@ -294,13 +295,14 @@ describe("a lever's pair", () => {
     const lines = macProfileSummaryLines({
       machine: "Apple M5, 16 GiB",
       tree: "e9966e0",
+      body: "41ffecb200000002.0400",
       options: MAC_PROFILE_DEFAULTS,
       kept,
       sweep: { table: null, runs: [] },
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("5 of 40 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 40 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(
@@ -350,6 +352,19 @@ describe("the batch's files", () => {
     const kept = keptRunsIn(runs, matrix);
     expect(kept.map((each) => each.run.id)).toEqual([a.id]);
     expect(kept[0]?.record.after.serverCpuS).toBe(30);
+  });
+
+  it("reads the batch's commit and body, a batch that recorded no body the default's", () => {
+    const out = mkdtempSync(join(tmpdir(), "mac-profile-"));
+    dirs.push(out);
+    expect(batchIn(out)).toBeNull();
+    writeFileSync(join(out, "batch.json"), JSON.stringify({ tree: "24aef3e" }));
+    expect(batchIn(out)).toEqual({ tree: "24aef3e", body: null });
+    writeFileSync(
+      join(out, "batch.json"),
+      JSON.stringify({ tree: "24aef3e", body: "41ffecb200000002.0300" }),
+    );
+    expect(batchIn(out)).toEqual({ tree: "24aef3e", body: "41ffecb200000002.0300" });
   });
 
   it("finds the binary cargo built among its messages", () => {
