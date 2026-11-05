@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { norm, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import type { ProjectionCamera, Viewport } from "../camera/projection";
+import { type ProjectionCamera, projector, type Viewport } from "../camera/projection";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { cosineWindows, sampleCurve } from "./curve";
 
@@ -65,6 +65,33 @@ describe("sampleCurve", () => {
     expect({ behind: zs.filter((z) => z > -0.1 + 1e-9).length, runs: runs.length }).toEqual({
       behind: 0,
       runs: 2,
+    });
+  });
+
+  it("halves a span the view reaches until its ends' depths are within a factor of 2, a run cut at the near plane among them (R08.T17)", () => {
+    // A moon's orbit about a camera near its focus: a circle of 10⁹ m in the x–z plane, half of it
+    // behind the camera, cut where it meets the near plane, 0.1 m ahead and 10⁹ m to the side.
+    const project = projector(CAMERA, VIEWPORT);
+    const runs = sampleCurve(
+      {
+        point: (u) => vec3(1e9 * Math.sin(u), 0, -1e9 * Math.cos(u)),
+        windows: [[-Math.PI, Math.PI]],
+        initialSpans: 2,
+      },
+      CAMERA,
+      VIEWPORT,
+    );
+    const reached = runs.flatMap((run) =>
+      run.slice(1).flatMap((b, i) => {
+        const a = project(run[i] ?? b);
+        const z = project(b);
+        const onView = Math.max(a.xPx, z.xPx) >= 0 && Math.min(a.xPx, z.xPx) <= VIEWPORT.widthPx;
+        return onView ? [Math.max(a.depth, z.depth) / Math.min(a.depth, z.depth)] : [];
+      }),
+    );
+    expect({ reached: reached.length > 0, widest: Math.max(...reached) <= 2 }).toEqual({
+      reached: true,
+      widest: true,
     });
   });
 

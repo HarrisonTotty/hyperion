@@ -31,6 +31,22 @@ const MAX_DEPTH = 24;
  */
 const DEPTH_SAG_MAX_DEPTH = 8;
 
+/**
+ * The most a drawn chord's ends' reversed depths may differ by, a factor: 2 (R08.T17).
+ *
+ * @remarks
+ * A chord's reversed depth n ÷ w is affine along it on the view, and the GPU forms it there from
+ * its ends in `f32`, so that across a factor of R its far end's depth is resolved to about R ε of
+ * itself. A run cut at the near plane ends 0.1 m ahead of the camera, however far to the side,
+ * where a moon's orbit seen from near its focus stands 10⁹ m off: its chord from there projected
+ * some 10¹⁰ px long at depths 1 to 10⁻¹⁰, and drew across the planet it passes behind in its
+ * casing alone (the served giant's moons' orbits, check-giant-disc-colour's captures, 2026-11-04).
+ * Halved to {@link MAX_DEPTH} with the rest, a chord the view reaches holds the factor; pieces
+ * wholly off one side of the view, which are not refined, may keep more. A cut run takes at most
+ * that many more points each side of its cut, and a chord across a factor R about log₂ R.
+ */
+const DEPTH_RATIO_MAX = 2;
+
 /** How many bisections locate a curve's visibility boundary. */
 const BOUNDARY_ITERATIONS = 48;
 
@@ -71,6 +87,8 @@ interface Sample {
   readonly p: Vec3;
   readonly xPx: number;
   readonly yPx: number;
+  /** Its reversed depth, n ÷ w. */
+  readonly depth: number;
   readonly inFront: boolean;
 }
 
@@ -148,7 +166,8 @@ export function cosineWindows(
 /**
  * A curve cut into polylines whose chords each leave a screen-space sagitta under
  * {@link SAGITTA_TOLERANCE_PX} (plan R02, Design note 13), and a depth sag its spec allows
- * ({@link CurveSpec.depthSagWithin}; R02.T19.b).
+ * ({@link CurveSpec.depthSagWithin}; R02.T19.b), their ends' depths within
+ * {@link DEPTH_RATIO_MAX} of each other (R08.T17).
  *
  * @remarks
  * Each window is cut into even spans, and each span is halved while the projection of its midpoint
@@ -173,7 +192,14 @@ export function sampleCurve(
   const sample = (u: number): Sample => {
     const p = spec.point(u);
     const projected = project(p);
-    return { u, p, xPx: projected.xPx, yPx: projected.yPx, inFront: projected.inFront };
+    return {
+      u,
+      p,
+      xPx: projected.xPx,
+      yPx: projected.yPx,
+      depth: projected.depth,
+      inFront: projected.inFront,
+    };
   };
   const boundary = (inside: Sample, outside: Sample): Sample => {
     let drawn = inside;
@@ -228,6 +254,7 @@ export function sampleCurve(
       distanceToSegment(m, a, b) < SAGITTA_TOLERANCE_PX &&
       distanceToSegment(q1, a, b) < SAGITTA_TOLERANCE_PX &&
       distanceToSegment(q3, a, b) < SAGITTA_TOLERANCE_PX &&
+      Math.max(a.depth, b.depth) <= DEPTH_RATIO_MAX * Math.min(a.depth, b.depth) &&
       (within === undefined || depthSagAllowed(within, m, a, b));
     if (flat) {
       run?.push(b.p);
