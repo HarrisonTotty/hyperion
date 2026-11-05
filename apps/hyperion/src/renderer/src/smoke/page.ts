@@ -614,8 +614,9 @@ async function run(
   await group(8, "R08.T8.e's table: the march by slot's sources from the sources' table", () =>
     checkMarchTableBySlot(engine, checks, summary.fallback),
   );
-  // In part 8 after R08.T8.e's table's, over the thick read's march by slot (perf-thick-march).
-  await group(8, "perf-thick-march the thick read's march levers by slot", () =>
+  // perf-thick-march's thick read's march by slot, in part 9: with it part 8 took 292 s of its
+  // 360 s on a pod (32 vCPU), part 9 134 s without it.
+  await group(9, "perf-thick-march the thick read's march levers by slot", () =>
     checkThickMarchLeversBySlot(engine, checks, summary.fallback),
   );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
@@ -700,7 +701,7 @@ async function run(
     checkCatalogue(engine, status, ATMOSPHERE_LIMB_ENTRIES, checks),
   );
   // perf-thick-march's thick read's marches from the table and its packed limb's, in part 17 beside
-  // the thin read's packed kernels: parts 8 and 12 hold their checks.
+  // the thin read's packed kernels: parts 9 and 10 hold their checks.
   await group(17, "T9.b catalogue: the thick read's march levers' kernels", () =>
     checkCatalogue(engine, status, ATMOSPHERE_THICK_LEVER_ENTRIES, checks),
   );
@@ -775,8 +776,9 @@ async function run(
   await group(12, "R08.T8.e's table: the shared read's sources from the sources' table", () =>
     checkMarchTableShared(engine, checks, summary.fallback),
   );
-  // In part 12 after R08.T8.e's table's, over the thick read's shared read (perf-thick-march).
-  await group(12, "perf-thick-march the thick read's march levers over the shared read", () =>
+  // perf-thick-march's thick read's shared read, in part 10: with it part 12 took 330 s of its
+  // 360 s on a pod (32 vCPU), part 10 117 s without it.
+  await group(10, "perf-thick-march the thick read's march levers over the shared read", () =>
     checkThickMarchLeversShared(engine, checks, summary.fallback),
   );
   // R08.T18.b's thermal forms of the per-frame kernels, compiled and held to their twins, in part 12,

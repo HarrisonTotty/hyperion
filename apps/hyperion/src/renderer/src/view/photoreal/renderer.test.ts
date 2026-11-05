@@ -110,6 +110,8 @@ import {
   RAY_MARCH_SPECIAL_KERNEL,
   RAY_MARCH_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
   THICK_LIMB_KERNELS,
   SKY_VIEW_BELOW_DECK_KERNEL,
   SKY_VIEW_KERNEL,
@@ -140,6 +142,7 @@ import type { KernelPair } from "../engine/kernels";
 import { kernelKey, prepareKernel } from "../engine/webgpu/compute";
 import { BAKE_KERNELS } from "../sky/bake";
 import { between, seededRandom } from "../../test/seededRandom";
+import type { AtmosphereLeversOverride } from "../../../../preload/api";
 import { patternedDeckTables, patternedThickBake } from "../../test/thickTables";
 import {
   type FrameAtmosphere,
@@ -991,6 +994,74 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     tables.dispose();
   });
 
+  /** A renderer prepared for the test's view under a frame profile's `levers`. */
+  async function preparedWith(levers: AtmosphereLeversOverride | undefined): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly renderer: PhotorealRenderer;
+  }> {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(
+      VIEWPORT,
+      "high",
+      "eye",
+      { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+      levers,
+    );
+    return { engine, renderer };
+  }
+
+  it("makes the thick read's march from the table ahead on the settings' levers (perf-thick-march)", async () => {
+    const { engine, renderer } = await preparedWith(undefined);
+    expect(engine.kernelPairs.some((pair) => pair.name === RAY_MARCH_THICK_TABLE_KERNEL.name)).toBe(
+      true,
+    );
+    renderer.dispose();
+  });
+
+  it("makes no thick march from the table ahead under a frame profile's `per-step` (perf-thick-march)", async () => {
+    const { engine, renderer } = await preparedWith({ marchSourceTransmittance: "per-step" });
+    expect(engine.kernelPairs.some((pair) => pair.name === RAY_MARCH_THICK_TABLE_KERNEL.name)).toBe(
+      false,
+    );
+    renderer.dispose();
+  });
+
+  it.each([
+    [
+      "from the table on the settings' levers",
+      undefined,
+      RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL.name,
+    ],
+    [
+      "per step under a frame profile's `per-step`",
+      { marchSourceTransmittance: "per-step" } as const,
+      RAY_MARCH_THICK_SPECIAL_KERNEL.name,
+    ],
+  ] as const)(
+    "marches a thick body of one band over the shared read %s (perf-thick-march)",
+    async (_way, levers, march) => {
+      const { engine, renderer } = await preparedWith(levers);
+      const view = new RecordingView();
+      const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), 1));
+      renderer.render(view, {
+        ...frameWith([]),
+        ...(levers === undefined ? {} : { atmosphereLevers: levers }),
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      expect(
+        engine.dispatched
+          .map((d) => d.kernel)
+          .filter((name) => name.startsWith("atmosphere ray march")),
+      ).toEqual([march]);
+      renderer.dispose();
+      tables.dispose();
+    },
+  );
+
   it("draws a far body's composite over its air's area alone, over a copy of the colour it reads (R08.T16.a.2)", async () => {
     const { engine, view, renderer } = await preparedRenderer();
     // Some 8 px across the test's 64 px view.
@@ -1510,14 +1581,15 @@ async function overlayDatums(
  * transmittance, which the lit passes read on both settings, and the `disc cells` kernels' four
  * table-only twins, which the app's engine makes for a body of one band (`SourceTableEngine`), and
  * since R08.T8.e's table the thin read's marches' twenty-four table-only twins, made likewise;
- * since perf-thick-march the thick read's packed limb's eight kernels;
+ * since perf-thick-march the thick read's shared read's marches from the sources' table alone,
+ * general and specialised, and its packed limb's twelve kernels, per step and from the table;
  * since plan R14's T4.a the cluster cull,
  * the mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d
  * the depth pyramid's, made with the renderer; and the sky bake's four. Each is a module constant,
  * its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 105,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 111,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -1581,6 +1653,8 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
     BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   ].flatMap((pair) => tableOnlyKernel(pair) ?? []),
   ...MARCH_TABLE_ONLY_KERNELS,
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
   ...THICK_LIMB_KERNELS,
   CLUSTER_CULL_KERNEL,
   ...BAKE_KERNELS,
@@ -1781,8 +1855,10 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // where both leave it off; and under `packed` the first frame of each read and form from above
     // the top makes that pair of the packed limb's fourteen, with the resolve and the dispatches, in
     // the background, so that the thin first pass makes the pairs its kinds of air meet, and the
-    // rest stay unmade. Since perf-thick-march the thick pass makes the thick read's packed pairs
-    // its kinds of air meet, as the thin pass the thin read's.
+    // rest stay unmade. Since perf-thick-march the thick read's two marches from the sources' table
+    // are made ahead too where a setting takes the table, and the thick pass makes the thick read's
+    // packed pairs its kinds of air meet, per step or from the table, as the thin pass the thin
+    // read's.
     const made = new Set(engine.kernelPairs.map((pair) => pair.name));
     const limbMade = LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
     expect(limbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
@@ -1792,6 +1868,7 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
       47 +
       (leverOff((levers) => levers.marchCover === "tiles") ? 4 : -2) +
       (LIMB_KERNELS.length - limbMade) +
+      (leverOff((levers) => levers.marchSourceTransmittance === "table") ? 2 : 0) +
       (THICK_LIMB_KERNELS.length - thickLimbMade);
     expect([held[kinds.length - 1], held[2 * kinds.length - 1]]).toEqual([
       VIEW_KERNELS.length - BAKE_KERNELS.length - unmade - 1 - 4 - thickLimbMade,

@@ -107,9 +107,9 @@
  * A/B of the step's sources; it is refused without `--timing`, and may stand beside
  * `--composite-probe`.
  * `--march-cover area|tiles` and `--limb-rays per-texel|packed` (plan R08, R08.T8.d), and
- * `--march-sources table|per-step` (R08.T8.e's table), draw that profile's atmospheres with that
- * lever over its setting's, for the A/B of each lever on and off on one build; each is refused
- * without `--timing`.
+ * `--march-sources table|per-step` (R08.T8.e's table; since perf-thick-march the thick read's shared
+ * read too), draw that profile's atmospheres with that lever over its setting's, for the A/B of each
+ * lever on and off on one build; each is refused without `--timing`.
  * With `--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment` too (plan R08,
  * R08.T9.b's measurement) that profile makes the lit materials and kernels under the probe, every
  * source's transmittance through the air 1, a planetshine source's at its centre node alone, the

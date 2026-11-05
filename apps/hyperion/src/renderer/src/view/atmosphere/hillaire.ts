@@ -479,8 +479,11 @@ export type SourceTransmittance = "table" | "per-fragment";
  * lobes' layers for a medium with forward lobes (`marchSourceTable.wgsl`), a body of several bands
  * taking a source within 0.1 of the horizon's cosine by the sliced lookup, and a body of one band
  * drawn by the march's table-only twins (`sourceTableEngine.ts`); or `per-step`, the sliced lookup
- * a source a step, the way back. The thin read's marches alone: a thick, deck or self-luminous
- * body's march takes each step's sources per step under either.
+ * a source a step, the way back. The thin read's marches, and since perf-thick-march the thick
+ * read's shared read but over a deck on a body of one band, from the table alone
+ * ({@link RAY_MARCH_THICK_TABLE_KERNEL}); the thick read's march by slot, whose lookup is one read a
+ * source a step already, and its march over several bands, and a deck or self-luminous body's
+ * march, take each step's sources per step under either.
  */
 export type MarchSourceTransmittance = "table" | "per-step";
 
@@ -1038,7 +1041,8 @@ const TABLED_SLOT_READ: ReadonlyArray<readonly [string, string]> = [
  * `marchSourceTable.wgsl` appended, which declares the table at `atmosphere_source_table`: through
  * the table's one-texel stub every step takes the read's own lookup, as before the lever. Its name
  * is kept. The thick, deck and thermal marches are made from the march without it
- * ({@link RAY_MARCH_PER_STEP_KERNEL}), so that their kernels keep their bytes.
+ * ({@link RAY_MARCH_PER_STEP_KERNEL}), so that their kernels keep their bytes; the thick read's
+ * marches from the table are made from the march with it ({@link RAY_MARCH_THICK_TABLE_KERNEL}).
  *
  * @throws Error naming the kernel when its sources hold a rewritten line nowhere, or twice.
  */
@@ -1423,7 +1427,8 @@ export const LIMB_KERNELS: ReadonlyArray<KernelPair> = [
  * form and entry point (the footprint's, the tile cull's centre ray's, the packed limb's footprint
  * and its nodes), with `marchSourceTable.wgsl`'s SOURCE_TABLE_ONLY set, so that the sliced lookup a
  * source a step is compiled out. The app's engine makes each at its first such dispatch
- * (`sourceTableEngine.ts`); a thick, deck or self-luminous body's march is never given a table.
+ * (`sourceTableEngine.ts`); a deck or self-luminous body's march is never given a table, and the
+ * thick read's marches from the table are table-only themselves ({@link RAY_MARCH_THICK_TABLE_KERNEL}).
  */
 export const MARCH_TABLE_ONLY_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_KERNEL,
@@ -1573,6 +1578,28 @@ function withThickRowOnce(pair: KernelPair): KernelPair {
 }
 
 /**
+ * The thick read's march of `pair`, a thin march with the sources' table ({@link
+ * withMarchSourceTable}), from the table alone, named `name` (plan R08, perf-thick-march):
+ * {@link withThickRead}'s read with its row once a sample ({@link withThickRowOnce}) and
+ * `marchSourceTable.wgsl`'s SOURCE_TABLE_ONLY set (`surfaceLighting.ts`' `tableOnlyKernel`), so
+ * that every step's sources are the bound table's and the sliced lookup a source a step is compiled
+ * out: the march of a thick body of one band over the shared read, whose table holds every source a
+ * step takes. The thick read has no form with both ways: SwiftShader's GPU process crashed
+ * compiling the shared read's general one (exit 139), so a thick body of several bands marches per
+ * step; and its march by slot keeps its lookup, one read a source a step already, which the table
+ * did not beat on the pod.
+ *
+ * @throws Error naming the kernel where `pair` declares no sources' table.
+ */
+function thickFromTable(pair: KernelPair, name: string): KernelPair {
+  const tabled = tableOnlyKernel(withThickRowOnce(withThickRead(pair)));
+  if (tabled === null) {
+    throw new Error(`kernel ${pair.name} declares no sources' table`);
+  }
+  return { ...tabled, name };
+}
+
+/**
  * The thick read's march of `pair`, a thin march per step, with its row once a sample, named
  * `name` (perf-thick-march): {@link RAY_MARCH_THICK_KERNEL}'s arithmetic to the bit.
  */
@@ -1580,30 +1607,49 @@ function thickPerStep(pair: KernelPair, name: string): KernelPair {
   return { ...withThickRowOnce(withThickRead(pair)), name };
 }
 
+/**
+ * {@link RAY_MARCH_THICK_KERNEL} from the sources' table alone (plan R08, perf-thick-march;
+ * {@link MarchSourceTransmittance} `table` on the thick read): made from {@link RAY_MARCH_KERNEL}
+ * ({@link thickFromTable}), so that the thick read's march per step keeps its bytes; for a thick
+ * body of one band over the shared read.
+ */
+export const RAY_MARCH_THICK_TABLE_KERNEL = thickFromTable(
+  RAY_MARCH_KERNEL,
+  "atmosphere ray march, thick, from the sources' table",
+);
+/** {@link RAY_MARCH_THICK_TABLE_KERNEL} specialised for one band and no layer edge. */
+export const RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL = withMarchSpecialised(
+  RAY_MARCH_THICK_TABLE_KERNEL,
+);
+
 /** The thick read's forms of the march (R08.T14.c): it has no one-band, edged form. */
 export type ThickMarchForm = Exclude<MarchForm, "one band">;
 
+/** One read's packed entry point and node pass over the thick read, by form (perf-thick-march). */
+type ThickLimbForms = Readonly<
+  Record<ThickMarchForm, { readonly footprint: KernelPair; readonly nodes: KernelPair }>
+>;
+
 /**
- * Each read's packed entry point and node pass over the thick read, by form (plan R08,
- * perf-thick-march; {@link LimbRays} `packed` on the thick read): {@link LIMB_PAIRS}' thin forms
- * per step through {@link thickPerStep}, which march as the thick read's march per texel does, to
- * the bit.
+ * The packed entry points and node passes over the thick read (plan R08, perf-thick-march;
+ * {@link LimbRays} `packed` on the thick read): per step, each read's, {@link LIMB_PAIRS}' thin forms
+ * through {@link thickPerStep}, which march as the thick read's march per texel does, to the bit;
+ * and from the table, the shared read's through {@link thickFromTable}, for a thick body of one band
+ * over the shared read under {@link MarchSourceTransmittance} `table`.
  */
-const THICK_LIMB_PAIRS: Readonly<
-  Record<
-    MarchRead,
-    Readonly<Record<ThickMarchForm, { readonly footprint: KernelPair; readonly nodes: KernelPair }>>
-  >
-> = (() => {
+const THICK_LIMB_PAIRS: {
+  readonly "per step": Readonly<Record<MarchRead, ThickLimbForms>>;
+  readonly "from the table": ThickLimbForms;
+} = (() => {
   const thickFormsOf = (
     footprint: KernelPair,
     nodes: KernelPair,
-  ): Readonly<
-    Record<ThickMarchForm, { readonly footprint: KernelPair; readonly nodes: KernelPair }>
-  > => {
+    made: (pair: KernelPair, name: string) => KernelPair,
+    suffix: string,
+  ): ThickLimbForms => {
     const general = {
-      footprint: thickPerStep(footprint, `${footprint.name}, thick`),
-      nodes: thickPerStep(nodes, `${nodes.name}, thick`),
+      footprint: made(footprint, `${footprint.name}, thick${suffix}`),
+      nodes: made(nodes, `${nodes.name}, thick${suffix}`),
     };
     return {
       general,
@@ -1614,21 +1660,38 @@ const THICK_LIMB_PAIRS: Readonly<
     };
   };
   return {
-    "shared read": thickFormsOf(RAY_MARCH_PACKED_PER_STEP_KERNEL, RAY_MARCH_LIMB_PER_STEP_KERNEL),
-    "by slot": thickFormsOf(
-      RAY_MARCH_SLOTS_PACKED_PER_STEP_KERNEL,
-      RAY_MARCH_SLOTS_LIMB_PER_STEP_KERNEL,
+    "per step": {
+      "shared read": thickFormsOf(
+        RAY_MARCH_PACKED_PER_STEP_KERNEL,
+        RAY_MARCH_LIMB_PER_STEP_KERNEL,
+        thickPerStep,
+        "",
+      ),
+      "by slot": thickFormsOf(
+        RAY_MARCH_SLOTS_PACKED_PER_STEP_KERNEL,
+        RAY_MARCH_SLOTS_LIMB_PER_STEP_KERNEL,
+        thickPerStep,
+        "",
+      ),
+    },
+    "from the table": thickFormsOf(
+      RAY_MARCH_PACKED_KERNEL,
+      RAY_MARCH_LIMB_KERNEL,
+      thickFromTable,
+      ", from the sources' table",
     ),
   };
 })();
 
 /**
  * The thick read's packed kernels (perf-thick-march): each read's packed entry point and node pass
- * in each form; the resolve and the dispatches are {@link LIMB_KERNELS}'.
+ * per step in each form, then the shared read's from the table; the resolve and the dispatches are
+ * {@link LIMB_KERNELS}'.
  */
-export const THICK_LIMB_KERNELS: ReadonlyArray<KernelPair> = Object.values(
-  THICK_LIMB_PAIRS,
-).flatMap((forms) => Object.values(forms).flatMap(({ footprint, nodes }) => [footprint, nodes]));
+export const THICK_LIMB_KERNELS: ReadonlyArray<KernelPair> = [
+  ...Object.values(THICK_LIMB_PAIRS["per step"]),
+  THICK_LIMB_PAIRS["from the table"],
+].flatMap((forms) => Object.values(forms).flatMap(({ footprint, nodes }) => [footprint, nodes]));
 
 /**
  * The thermal source's rewrites of a per-frame kernel's sources (plan R08, R08.T18.b;
@@ -2208,13 +2271,14 @@ interface LimbPair {
 
 /**
  * The march whose far limb's node rays a frame packs (plan R08, R08.T8.d; perf-thick-march): the
- * thin read's ({@link LIMB_PAIRS}), or the thick read's but over a deck ({@link THICK_LIMB_PAIRS}).
+ * thin read's ({@link LIMB_PAIRS}), or the thick read's but over a deck, per step or, over the shared
+ * read, from the sources' table ({@link THICK_LIMB_PAIRS}).
  */
-type LimbMarch = "thin" | "thick";
+type LimbMarch = "thin" | "thick" | "thick from the table";
 
 /**
  * `march`'s packed entry point and node pass of `read` in `form`, or `null` where it has none: the
- * thick read has no one-band, edged form.
+ * thick read has no one-band, edged form, and none by slot from the table.
  */
 function limbPairsOf(
   march: LimbMarch,
@@ -2227,7 +2291,11 @@ function limbPairsOf(
       pairs = LIMB_PAIRS[read][form];
       break;
     case "thick":
-      pairs = form === "one band" ? null : THICK_LIMB_PAIRS[read][form];
+      pairs = form === "one band" ? null : THICK_LIMB_PAIRS["per step"][read][form];
+      break;
+    case "thick from the table":
+      pairs =
+        form === "one band" || read === "by slot" ? null : THICK_LIMB_PAIRS["from the table"][form];
       break;
   }
   return pairs;
@@ -2246,8 +2314,8 @@ interface LimbKernels {
 
 /**
  * The far limb's packed kernels on `engine` (R08.T8.d): the resolve, the dispatches and, of `reads`,
- * each form of `forms` made up front, asynchronously, the thin read's, and the thick read's in each
- * of `thickForms` (perf-thick-march); every other made at its first ask, in the background.
+ * each form of `forms` made up front, asynchronously, the thin read's, and the thick read's both ways
+ * in each of `thickForms` (perf-thick-march); every other made at its first ask, in the background.
  */
 async function limbKernelsOf(
   engine: RenderEngine,
@@ -2265,6 +2333,9 @@ async function limbKernelsOf(
     }
     for (const form of thickForms) {
       keys.push(["thick", read, form]);
+      if (read === "shared read") {
+        keys.push(["thick from the table", read, form]);
+      }
     }
   }
   const [pairs, resolve, dispatch] = await Promise.all([
@@ -2565,6 +2636,12 @@ interface ThickKernels {
   /** The march by slot ({@link RAY_MARCH_SLOTS_THICK_KERNEL}). */
   readonly rayMarchSlots: () => ThickMarchKernels;
   /**
+   * The march over the shared read from the sources' table alone ({@link RAY_MARCH_THICK_TABLE_KERNEL};
+   * perf-thick-march), for a body of one band over the shared read in a frame whose lever takes the
+   * table ({@link MarchSourceTransmittance}).
+   */
+  readonly tabledRayMarch: () => ThickMarchKernels;
+  /**
    * The march over a cloud deck ({@link RAY_MARCH_DECK_KERNEL}; R08.T15.a.2), for tables that hold
    * a deck table, made at its first frame.
    */
@@ -2619,6 +2696,7 @@ function thickKernelsOf(
     (made ??= (() => {
       let shared: ThickMarchKernels | null = null;
       let slots: ThickMarchKernels | null = null;
+      let tabledShared: ThickMarchKernels | null = null;
       let deckShared: ThickMarchKernels | null = null;
       let deckSlots: ThickMarchKernels | null = null;
       return {
@@ -2628,6 +2706,11 @@ function thickKernelsOf(
           (shared ??= marchOf(RAY_MARCH_THICK_KERNEL, RAY_MARCH_THICK_SPECIAL_KERNEL)),
         rayMarchSlots: () =>
           (slots ??= marchOf(RAY_MARCH_SLOTS_THICK_KERNEL, RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL)),
+        tabledRayMarch: () =>
+          (tabledShared ??= marchOf(
+            RAY_MARCH_THICK_TABLE_KERNEL,
+            RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
+          )),
         deckRayMarch: () =>
           (deckShared ??= marchOf(RAY_MARCH_DECK_KERNEL, RAY_MARCH_DECK_SPECIAL_KERNEL)),
         deckRayMarchSlots: () =>
@@ -2640,11 +2723,13 @@ function thickKernelsOf(
 /**
  * The thick kernels made up front by `createComputeAsync` (R08.T14.c; {@link FrameKernelsAhead.thick}):
  * the sky view, the aerial perspective and each read's march with its specialised form, as `reads`
- * asks; a read not asked is made at its first frame.
+ * asks, and where `tabled` its marches from the sources' table too (perf-thick-march); a read or a
+ * way not asked is made at its first frame.
  */
 async function thickKernelsAhead(
   engine: RenderEngine,
   reads: MarchReads,
+  tabled: boolean,
 ): Promise<() => ThickKernels> {
   const marchOf = async (
     made: boolean,
@@ -2669,7 +2754,7 @@ async function thickKernelsAhead(
     const kernels: ThickMarchKernels = { footprint, special: () => special };
     return () => kernels;
   };
-  const [skyView, aerial, rayMarch, rayMarchSlots] = await Promise.all([
+  const [skyView, aerial, rayMarch, rayMarchSlots, tabledRayMarch] = await Promise.all([
     engine.createComputeAsync(SKY_VIEW_THICK_KERNEL),
     engine.createComputeAsync(AERIAL_PERSPECTIVE_THICK_KERNEL),
     marchOf(reads !== "by slot", RAY_MARCH_THICK_KERNEL, RAY_MARCH_THICK_SPECIAL_KERNEL),
@@ -2677,6 +2762,11 @@ async function thickKernelsAhead(
       reads !== "shared read",
       RAY_MARCH_SLOTS_THICK_KERNEL,
       RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+    ),
+    marchOf(
+      tabled && reads !== "by slot",
+      RAY_MARCH_THICK_TABLE_KERNEL,
+      RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
     ),
   ]);
   // The deck's marches are made at their first frame: no view routes a deck before R08.T15.b.2.
@@ -2689,6 +2779,7 @@ async function thickKernelsAhead(
     aerial,
     rayMarch,
     rayMarchSlots,
+    tabledRayMarch,
     deckRayMarch,
     deckRayMarchSlots,
     // The kernels beneath a deck are made at their first frame, as the deck's marches are.
@@ -2748,10 +2839,13 @@ export interface FrameKernelsAhead {
    * Whether the kernels that read the thick table are made too (plan R08, R08.T14.c): for a caller
    * that draws a body with one, as the smoke's frame timing with the thick read forced does, and a
    * view once the polarisation correction is routed (R08.T14.f, `thick/routing.ts`'s
-   * `CORRECTION_ROUTED`), since every world with air then draws by them. Not where absent; then made
-   * at the first frame of tables that hold one.
+   * `CORRECTION_ROUTED`), since every world with air then draws by them; `with the table`, with the
+   * thick read's marches from the sources' table too (perf-thick-march;
+   * {@link RAY_MARCH_THICK_TABLE_KERNEL}), for a view whose setting takes
+   * {@link MarchSourceTransmittance} `table`. Not where absent; then made at the first frame of
+   * tables that hold one.
    */
-  readonly thick?: boolean;
+  readonly thick?: boolean | "with the table";
   /**
    * Whether the kernels' thermal forms are made too (plan R08, R08.T18.b): for a caller that draws a
    * self-luminous body, as the smoke's thermal group does. Not where absent; then made at the first
@@ -2774,8 +2868,9 @@ export interface FrameKernelsAhead {
   readonly packed?: boolean | ReadonlyArray<MarchForm>;
   /**
    * Whether the thick read's packed kernels are made too ({@link THICK_LIMB_KERNELS};
-   * perf-thick-march), of the reads asked, in its every form (`true`) or in those listed: for the
-   * smoke's check of them. Not where absent; then each made at the first frame that takes it.
+   * perf-thick-march), of the reads asked, both ways, in its every form (`true`) or in those listed:
+   * for the smoke's check of them. Not where absent; then each made at the first frame that takes
+   * it.
    */
   readonly thickPacked?: boolean | ReadonlyArray<ThickMarchForm>;
 }
@@ -2876,9 +2971,9 @@ export async function createAtmosphereFrameKernels(
     engine.createMaterialAsync(COMPOSITE_MATERIAL, ["rgba16float"], [triangle]),
   ]);
   const thick =
-    ahead.thick === true
-      ? await thickKernelsAhead(engine, reads)
-      : thickKernelsOf(engine, (pair) => pair);
+    ahead.thick === undefined || ahead.thick === false
+      ? thickKernelsOf(engine, (pair) => pair)
+      : await thickKernelsAhead(engine, reads, ahead.thick === "with the table");
   const thermal =
     ahead.thermal === true
       ? await thermalKernelsAhead(engine, reads)
@@ -4374,16 +4469,28 @@ export class HillaireAtmosphere {
     // Each step's sources from the sources' table (R08.T8.e's table, `MarchSourceTransmittance`):
     // the thin read's march under its lever's `table`, a body of one band's by the march's
     // table-only twins where the engine has them (`sourceTableEngine.ts`), and through the table's
-    // one-texel stub per step under `per-step`. The thick and thermal marches declare no table.
+    // one-texel stub per step under `per-step`; since perf-thick-march the thick read's march but
+    // over a deck under `table` over the shared read on a body of one band, by its marches from the
+    // table alone (`thickFromTable`), and per step by slot or on a body of several bands. The deck
+    // and thermal marches declare no table.
+    const thickLevers = thick !== null && deckTable === null;
+    const thickTabled =
+      thickLevers &&
+      this.#levers.marchSourceTransmittance === "table" &&
+      slotDepths === null &&
+      tables.plan.bands.length === 1;
     let sourceTable: TextureHandle | null = null;
     if (thick === null && thermal === null) {
       sourceTable =
         this.#levers.marchSourceTransmittance === "table"
           ? tables.sourceTransmittance()
           : tables.perFragmentSourceTransmittance;
+    } else if (thickTabled) {
+      sourceTable = tables.sourceTransmittance();
     }
     const sourceTableBound = sourceTable === null ? {} : { atmosphere_source_table: sourceTable };
-    // The march's kernels: the thin read's, with the tile cull's centre ray, or the thick read's.
+    // The march's kernels: the thin read's, with the tile cull's centre ray, or the thick read's,
+    // from the sources' table where its lever takes it.
     const march = (): FrameMarch =>
       thick === null
         ? {
@@ -4395,7 +4502,9 @@ export class HillaireAtmosphere {
             kernels:
               deckTable === null
                 ? slotDepths === null
-                  ? thick.rayMarch()
+                  ? thickTabled
+                    ? thick.tabledRayMarch()
+                    : thick.rayMarch()
                   : thick.rayMarchSlots()
                 : slotDepths === null
                   ? thick.deckRayMarch()
@@ -4459,14 +4568,14 @@ export class HillaireAtmosphere {
       // march's form, then the lists' dispatches, the node pass and the resolve, each texel's bits
       // the per-texel march's; per texel while the packed kernels are made. Where the camera's f32
       // h* stands on the top, either march gives the same bits. Since perf-thick-march the thick
-      // read's march but over a deck likewise.
+      // read's march but over a deck likewise, per step or from the sources' table as it marches.
       const cameraAt = this.#uniforms["camera"];
       const curvatureAt = this.#uniforms["curvature"];
       let limbMarch: LimbMarch | null = null;
       if (marched?.kind === "thin") {
         limbMarch = "thin";
-      } else if (marched?.kind === "thick" && deckTable === null) {
-        limbMarch = "thick";
+      } else if (marched?.kind === "thick" && thickLevers) {
+        limbMarch = thickTabled ? "thick from the table" : "thick";
       }
       const pair =
         deferUnread &&

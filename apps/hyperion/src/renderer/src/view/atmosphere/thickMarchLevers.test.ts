@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { earthBody } from "../../test/atmosphereFixtures";
+import {
+  earthBody,
+  saturnBody,
+  saturnClassMedium,
+  SATURN_SPHEROID,
+} from "../../test/atmosphereFixtures";
 import { wgslFunctions, wgslReached } from "../../test/atmosphereWgsl";
 import { boundNames, countingRenderEngine } from "../../test/countingRenderEngine";
 import { patternedDeckTables, patternedThickBake } from "../../test/thickTables";
@@ -8,7 +13,12 @@ import { lookAlong } from "../camera/quaternion";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { KernelPair } from "../engine/kernels";
 import { kernelBindings } from "../engine/webgpu/compute";
-import { R05_EARTH_REFERENCE, referenceSunIlluminanceLx } from "./earth";
+import {
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  R05_EARTH_REFERENCE,
+  referenceSunIlluminanceLx,
+} from "./earth";
 import {
   type AtmosphereCamera,
   type AtmosphereScene,
@@ -19,15 +29,22 @@ import {
   LIMB_RESOLVE_KERNEL,
   PER_PIXEL_LEVERS,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_KERNEL,
   RAY_MARCH_LIMB_KERNEL,
   RAY_MARCH_PACKED_KERNEL,
+  RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
   type SpheroidFigure,
   type SunState,
   TABLE_SIZES,
   tableRadiusM,
   THICK_LIMB_KERNELS,
+  withThickRead,
 } from "./hillaire";
+import thickSampleRowWgsl from "./shaders/thickSampleRow.wgsl?raw";
 import { SOURCE_TABLE_KERNEL_TEXTURE } from "./surfaceLighting";
 import { AtmosphereTables, kernelMedium } from "./tables";
 import { upperMediumOf } from "./thick/deckRead";
@@ -70,6 +87,9 @@ const NOON: SunState = {
 /** The deck's split over the datum, m: 3 km, as the deck read's tests stand it. */
 const DECK_ALTITUDE_M = 3_000;
 
+/** The sources' table's stub's name (`AtmosphereTables.perFragmentSourceTransmittance`). */
+const STUB = "atmosphere: sources' transmittance per fragment";
+
 /** The bindings `wgsl` declares that neither its entry point nor any function it reaches names. */
 function unreachedBindings(wgsl: string): string[] {
   const functions = wgslFunctions(wgsl);
@@ -88,8 +108,25 @@ function callsReached(wgsl: string, call: string): number {
     .reduce((sum, calls) => sum + calls, 0);
 }
 
-/** Every thick march the levers make: the packed kernels. */
-const LEVER_MARCHES: ReadonlyArray<KernelPair> = THICK_LIMB_KERNELS;
+/** The lines of `b` that differ from `a`'s, each as [a's, b's], trimmed. */
+function linesDiffering(a: string, b: string): ReadonlyArray<readonly [string, string]> {
+  const theirs = b.split("\n");
+  return a.split("\n").flatMap((line, i) => {
+    const other = theirs[i] ?? "";
+    return line === other ? [] : [[line.trim(), other.trim()] as const];
+  });
+}
+
+/** Every thick march the levers make: the footprints from the table, and the packed kernels. */
+const LEVER_MARCHES: ReadonlyArray<KernelPair> = [
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
+  ...THICK_LIMB_KERNELS,
+];
+
+/** The table-only line of `marchSourceTable.wgsl`, unset and set. */
+const TABLE_BOTH_WAYS = "const SOURCE_TABLE_ONLY : bool = false;";
+const TABLE_ALONE = "const SOURCE_TABLE_ONLY : bool = true;";
 
 describe("the thick read's march levers' kernels (perf-thick-march)", () => {
   it.each(LEVER_MARCHES.map((pair) => [pair.name, pair.reference]))(
@@ -99,8 +136,31 @@ describe("the thick read's march levers' kernels (perf-thick-march)", () => {
     },
   );
 
+  it("makes the march from the table from the thin one with it, differing only in its table alone and where it finds its row", () => {
+    const appended = `\n${thickSampleRowWgsl}`;
+    const tabled = RAY_MARCH_THICK_TABLE_KERNEL.reference;
+    const cleared = "  thickSampleRowFound = false;\n";
+    const searched = tabled
+      .slice(0, -appended.length)
+      .replace(cleared, "")
+      .replace(
+        "let row = thickSampleRowAt(start.scaledHeightM);",
+        "let row = thickRowAt(max(start.scaledHeightM, 0.0));",
+      )
+      .replace(TABLE_ALONE, TABLE_BOTH_WAYS);
+    expect(linesDiffering(withThickRead(RAY_MARCH_KERNEL).reference, searched)).toEqual([]);
+  });
+
+  it("appends the row's search once to the march from the table, which clears it once a step", () => {
+    const tabled = RAY_MARCH_THICK_TABLE_KERNEL.reference;
+    expect([
+      tabled.endsWith(`\n${thickSampleRowWgsl}`),
+      tabled.split("  thickSampleRowFound = false;\n").length,
+    ]).toEqual([true, 2]);
+  });
+
   it("leaves the thick read's march per step without the row once a sample", () => {
-    expect(RAY_MARCH_THICK_SPECIAL_KERNEL.reference).not.toContain("thickSampleRow");
+    expect(RAY_MARCH_THICK_KERNEL.reference).not.toContain("thickSampleRow");
   });
 
   it.each(LEVER_MARCHES.map((pair) => [pair.name, pair.reference]))(
@@ -120,7 +180,7 @@ describe("the thick read's march levers' kernels (perf-thick-march)", () => {
   // SwiftShader inlines every call, and its GPU process crashed on a march emitted twice in one
   // entry point (R08.T8.d): the thick read's packed kernels march through one call each.
   it("marches one ray through one call site in the thick read's packed entry points and node passes", () => {
-    expect(THICK_LIMB_KERNELS).toHaveLength(8);
+    expect(THICK_LIMB_KERNELS).toHaveLength(12);
     expect(THICK_LIMB_KERNELS.map((pair) => callsReached(pair.reference, "marchRay"))).toEqual(
       THICK_LIMB_KERNELS.map(() => 1),
     );
@@ -132,13 +192,27 @@ describe("the thick read's march levers' kernels (perf-thick-march)", () => {
     );
   });
 
-  it("declares no table in the thick read's packed kernels per step", () => {
-    expect(
-      LEVER_MARCHES.some((pair) => kernelBindings(pair.reference).has(SOURCE_TABLE_KERNEL_TEXTURE)),
-    ).toBe(false);
+  // SwiftShader's GPU process crashed compiling the shared read's general thick march with both
+  // ways (perf-thick-march): the thick read's marches take the table alone, or none.
+  it("takes each step's sources from the table alone in every thick march from it", () => {
+    const fromTable = LEVER_MARCHES.filter((pair) => pair.name.includes("from the sources' table"));
+    expect([
+      fromTable.length,
+      fromTable.every(
+        (pair) => pair.reference.includes(TABLE_ALONE) && !pair.reference.includes(TABLE_BOTH_WAYS),
+      ),
+    ]).toEqual([6, true]);
   });
 
-  it("names every packed kernel apart", () => {
+  it("declares no table in the thick read's packed kernels per step", () => {
+    const perStep = LEVER_MARCHES.filter((pair) => !pair.name.includes("from the sources' table"));
+    expect([
+      perStep.length,
+      perStep.some((pair) => kernelBindings(pair.reference).has(SOURCE_TABLE_KERNEL_TEXTURE)),
+    ]).toEqual([8, false]);
+  });
+
+  it("names every lever kernel apart", () => {
     expect(new Set(LEVER_MARCHES.map((pair) => pair.name)).size).toBe(LEVER_MARCHES.length);
   });
 
@@ -156,7 +230,9 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
   });
 
   /**
-   * R05's Earth over a thick table (or a deck), drawn from `camera` under `levers` over the
+   * R05's Earth over a thick table (or a deck), the measured Earth (by slot) or the Saturn-class
+   * figure over one, drawn from
+   * `camera` under `levers` over the
    * device's shared kernels, its first frame drawn and its background kernels made under the fake
    * clock; the second frame's march: each dispatch's kernel, its bindings' names, and the sources'
    * table it bound.
@@ -164,7 +240,7 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
   async function marched(
     levers: Partial<AtmosphereSettings>,
     camera: AtmosphereCamera = DISTANT,
-    body: "Earth" | "deck" = "Earth",
+    body: "Earth" | "by slot" | "deck" | "Saturn" = "Earth",
   ): Promise<{
     readonly kernels: string[];
     readonly bound: string[][];
@@ -174,19 +250,44 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
     vi.useFakeTimers();
     const engine = await countingRenderEngine();
     const kernels = await createAtmosphereFrameKernels(engine);
-    const tables = new AtmosphereTables(
-      engine,
-      body === "deck" ? upperMediumOf(R05_EARTH_REFERENCE, DECK_ALTITUDE_M) : R05_EARTH_REFERENCE,
-      tableRadiusM(WGS84),
-      [],
-      earthBody(),
-    );
+    const tables =
+      body === "Saturn"
+        ? new AtmosphereTables(
+            engine,
+            saturnClassMedium(),
+            tableRadiusM(SATURN_SPHEROID),
+            [],
+            saturnBody(),
+          )
+        : body === "by slot"
+          ? new AtmosphereTables(
+              engine,
+              EARTH_REFERENCE,
+              tableRadiusM(WGS84),
+              EARTH_REFERENCE_CURVES,
+              earthBody(),
+            )
+          : new AtmosphereTables(
+              engine,
+              body === "deck"
+                ? upperMediumOf(R05_EARTH_REFERENCE, DECK_ALTITUDE_M)
+                : R05_EARTH_REFERENCE,
+              tableRadiusM(WGS84),
+              [],
+              earthBody(),
+            );
     if (body === "deck") {
       tables.setDeckTables(
         patternedDeckTables(tables.plan.bands, kernelMedium(tables.medium), 1, DECK_ALTITUDE_M),
       );
     } else {
-      tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), 1));
+      tables.setThickTables(
+        patternedThickBake(
+          tables.plan.bands,
+          kernelMedium(tables.medium),
+          Math.max(1, tables.curves.length),
+        ),
+      );
     }
     const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels, {
       ...PER_PIXEL_LEVERS,
@@ -205,10 +306,10 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
     };
   }
 
-  /** The thick read's packed kernels in the specialised form, by their names. */
-  const packedSpecial = THICK_LIMB_KERNELS.filter((pair) => pair.name.endsWith("edge-free")).map(
-    (pair) => pair.name,
-  );
+  /** The thick read's packed kernels per step in the specialised form, by their names. */
+  const packedSpecial = THICK_LIMB_KERNELS.filter(
+    (pair) => pair.name.endsWith("edge-free") && !pair.name.includes("table"),
+  ).map((pair) => pair.name);
 
   it("marches per step and per texel by the thick read's own march on the way back, binding no table", async () => {
     const { kernels, table } = await marched({});
@@ -233,23 +334,108 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
     );
   });
 
-  it("marches per texel inside the air, where no footprint blends", async () => {
-    const { kernels } = await marched({ limbRays: "packed" }, NEAR);
-    expect(kernels).toEqual([RAY_MARCH_THICK_SPECIAL_KERNEL.name]);
+  it("takes each step's sources from the table per texel", async () => {
+    const { kernels } = await marched({ marchSourceTransmittance: "table" });
+    expect(kernels).toEqual([RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL.name]);
+  });
+
+  it("binds the sources' table, not its stub, to the march from it", async () => {
+    const { table } = await marched({ marchSourceTransmittance: "table" });
+    expect([
+      table[0] === STUB,
+      (table[0] ?? "").startsWith("atmosphere sources' transmittance"),
+    ]).toEqual([false, true]);
+  });
+
+  it("binds the march from the table as it declares", async () => {
+    const { bound } = await marched({ marchSourceTransmittance: "table" });
+    expect(bound[0]).toEqual(
+      [...kernelBindings(RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL.reference).keys()].toSorted(),
+    );
+  });
+
+  it("packs its limb from the table under both levers", async () => {
+    const { kernels } = await marched({
+      limbRays: "packed",
+      marchSourceTransmittance: "table",
+    });
+    expect(kernels).toEqual([
+      `${RAY_MARCH_PACKED_KERNEL.name}, thick, from the sources' table for one band, edge-free`,
+      LIMB_DISPATCH_KERNEL.name,
+      `${RAY_MARCH_LIMB_KERNEL.name}, thick, from the sources' table for one band, edge-free`,
+      LIMB_RESOLVE_KERNEL.name,
+    ]);
+  });
+
+  it("binds the packed limb from the table one sources' table, not its stub, in both passes", async () => {
+    const { table } = await marched({
+      limbRays: "packed",
+      marchSourceTransmittance: "table",
+    });
+    expect([table[0] === STUB, table[2] === table[0]]).toEqual([false, true]);
+  });
+
+  it("marches a thick body by slot per step under the table, binding none", async () => {
+    const { kernels, table } = await marched(
+      { marchSourceTransmittance: "table" },
+      DISTANT,
+      "by slot",
+    );
+    expect([kernels, table]).toEqual([[RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL.name], [undefined]]);
+  });
+
+  it("marches a thick body of several bands per step under the table, binding none", async () => {
+    const { kernels, table } = await marched(
+      { marchSourceTransmittance: "table" },
+      DISTANT,
+      "Saturn",
+    );
+    expect(kernels).toEqual([RAY_MARCH_THICK_KERNEL.name]);
+    expect(table).toEqual([undefined]);
+  });
+
+  it("marches from the table per texel inside the air, where no footprint blends", async () => {
+    const { kernels } = await marched(
+      { limbRays: "packed", marchSourceTransmittance: "table" },
+      NEAR,
+    );
+    expect(kernels).toEqual([RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL.name]);
   });
 
   it("makes no packed kernel inside the air", async () => {
-    const { made } = await marched({ limbRays: "packed" }, NEAR);
+    const { made } = await marched({ limbRays: "packed", marchSourceTransmittance: "table" }, NEAR);
     expect(made.filter((name) => name.includes("limb"))).toEqual([]);
   });
 
-  it("leaves a body over a deck to the deck's march, per texel, under the packed limb", async () => {
-    const { kernels, table } = await marched({ limbRays: "packed" }, DISTANT, "deck");
+  it("leaves a body over a deck to the deck's march, per step and per texel, under both levers", async () => {
+    const { kernels, table } = await marched(
+      { limbRays: "packed", marchSourceTransmittance: "table" },
+      DISTANT,
+      "deck",
+    );
     expect(kernels).toEqual([RAY_MARCH_DECK_SPECIAL_KERNEL.name]);
     expect(table).toEqual([undefined]);
   });
 
-  it("makes the thick read's packed kernels ahead in the forms asked", async () => {
+  it.each([
+    ["from the table", RAY_MARCH_THICK_TABLE_KERNEL],
+    ["from the table, specialised", RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL],
+    ["per step", RAY_MARCH_THICK_KERNEL],
+  ] as const)("makes the thick read's march %s ahead with the table", async (_way, pair) => {
+    const engine = await countingRenderEngine();
+    await createAtmosphereFrameKernels(engine, { thick: "with the table" });
+    expect(engine.kernelPairs.some((made) => made.name === pair.name)).toBe(true);
+  });
+
+  it("makes no thick march from the table ahead where not asked", async () => {
+    const engine = await countingRenderEngine();
+    await createAtmosphereFrameKernels(engine, { thick: true });
+    expect(engine.kernelPairs.some((pair) => pair.name.includes("from the sources' table"))).toBe(
+      false,
+    );
+  });
+
+  it("makes the thick read's packed kernels ahead in the forms asked, both ways", async () => {
     const engine = await countingRenderEngine();
     await createAtmosphereFrameKernels(engine, { reads: "shared read", thickPacked: ["special"] });
     const made = engine.kernelPairs.map((pair) => pair.name);
@@ -259,6 +445,6 @@ describe("HillaireAtmosphere's thick read under the march's levers (perf-thick-m
     expect([
       wanted.length,
       made.filter((name) => THICK_LIMB_KERNELS.some((pair) => pair.name === name)).toSorted(),
-    ]).toEqual([2, wanted.toSorted()]);
+    ]).toEqual([4, wanted.toSorted()]);
   });
 });

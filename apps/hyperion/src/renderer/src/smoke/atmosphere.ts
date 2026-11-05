@@ -3842,73 +3842,126 @@ async function checkMarchTableBodies(
   bodies: ReadonlyArray<AreaBody>,
   reads: "shared read" | "by slot",
 ): Promise<void> {
-  const written = engine instanceof SourceTableEngine ? engine.inner : engine;
   const kernels = await createAtmosphereFrameKernels(engine, { reads });
   try {
-    for (const body of bodies) {
-      const tables = areaTablesOf(engine, body);
-      try {
-        for (const frame of body.frames) {
-          const what = `R08.T8.e's table ${body.name}, ${frame.setting}, ${frame.name}`;
-          // The harness's GPU work runs in order: each frame is read back before the next draws.
+    await checkMarchTableOver(engine, checks, fallback, kernels, bodies, "R08.T8.e's table");
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
+ * {@link checkMarchTableBodies}' frames of `bodies` over the device's shared `kernels`, as `task`'s;
+ * a thick body's (perf-thick-march) without the twins, which its march from the table needs none
+ * of, but packed from the table, and one of several bands per step under it.
+ */
+async function checkMarchTableOver(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+  kernels: AtmosphereFrameKernels,
+  bodies: ReadonlyArray<AreaBody>,
+  task: string,
+): Promise<void> {
+  const written = engine instanceof SourceTableEngine ? engine.inner : engine;
+  for (const body of bodies) {
+    const tables = areaTablesOf(engine, body);
+    try {
+      for (const frame of body.frames) {
+        const what = `${task} ${body.name}, ${frame.setting}, ${frame.name}`;
+        // The harness's GPU work runs in order: each frame is read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const perStep = await areaReadsOf(written, tables, kernels, frame, "area");
+        // The same frame from the table, read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const table = await areaReadsOf(
+          written,
+          tables,
+          kernels,
+          frame,
+          "area",
+          "per-texel",
+          "table",
+        );
+        const oneBand = tables.plan.bands.length === 1;
+        if (body.thick === true && (!oneBand || tables.slotDepths !== null)) {
+          // The thick read takes the table over the shared read on a body of one band alone
+          // (perf-thick-march).
+          const same = halvesDiffering(perStep.march, table.march);
+          checks.check(
+            `${what}: a thick body by slot or of several bands marches per step under the sources' table, to the bit`,
+            same.texels === 0,
+            differenceOf("the march's target", same),
+          );
+          continue;
+        }
+        const { sky, held, worstStops, at } = marchTableAgreement(perStep.march, table.march);
+        const share = sky > 0 ? held / sky : 0;
+        checks.check(
+          `${what}: the march from the sources' table within 1/3 stop of the march per step at ${String(MARCH_TABLE_HELD_SHARE * 100)}% or more of its sky texels`,
+          sky > 0 && share >= MARCH_TABLE_HELD_SHARE,
+          `${String(held)} of ${String(sky)} sky texels (${(share * 100).toFixed(2)}%) within 1/3 stop; worst ${worstStops.toFixed(3)} stops, ${at}`,
+        );
+        if (body.thick === true) {
+          // The thick read's packed limb from the table (perf-thick-march), read back before the
+          // next draws: its march's target the per-texel one's, to the bit.
           // oxlint-disable-next-line no-await-in-loop
-          const perStep = await areaReadsOf(written, tables, kernels, frame, "area");
-          // The same frame from the table, read back before the next draws.
-          // oxlint-disable-next-line no-await-in-loop
-          const table = await areaReadsOf(
+          const packed = await areaReadsOf(
             written,
             tables,
             kernels,
             frame,
             "area",
-            "per-texel",
+            "packed",
             "table",
           );
-          const { sky, held, worstStops, at } = marchTableAgreement(perStep.march, table.march);
-          const share = sky > 0 ? held / sky : 0;
+          const marched = halvesDiffering(table.march, packed.march);
+          const composite = halvesDiffering(table.composite, packed.composite);
           checks.check(
-            `${what}: the march from the sources' table within 1/3 stop of the march per step at ${String(MARCH_TABLE_HELD_SHARE * 100)}% or more of its sky texels`,
-            sky > 0 && share >= MARCH_TABLE_HELD_SHARE,
-            `${String(held)} of ${String(sky)} sky texels (${(share * 100).toFixed(2)}%) within 1/3 stop; worst ${worstStops.toFixed(3)} stops, ${at}`,
+            `${what}: the thick read's march from the table with its far limb's node rays packed reads back as per texel, byte for byte on a fallback adapter and within 1 ulp on hardware`,
+            packed.packed !== null &&
+              (fallback
+                ? marched.texels === 0 && composite.texels === 0
+                : marched.ulps <= 1 && composite.ulps <= 1),
+            `${differenceOf("the march's target", marched)}, ${differenceOf("the composite's output", composite)}; ${String(packed.packed?.texels ?? 0)} texels packed, ${String(packed.packed?.rays ?? 0)} node rays`,
           );
-          if (tables.plan.bands.length !== 1 || !(engine instanceof SourceTableEngine)) {
-            continue;
-          }
-          // A first draw through the page's engine makes the twin; the next is drawn by it.
-          // oxlint-disable-next-line no-await-in-loop
-          await areaReadsOf(engine, tables, kernels, frame, "area", "per-texel", "table");
-          // The twin is made off the frame: the next draw takes it once it has settled.
-          // oxlint-disable-next-line no-await-in-loop
-          await engine.twinsSettled();
-          const swaps = engine.swaps;
-          // The frame by the twin, read back before the next draws.
-          // oxlint-disable-next-line no-await-in-loop
-          const twinned = await areaReadsOf(
-            engine,
-            tables,
-            kernels,
-            frame,
-            "area",
-            "per-texel",
-            "table",
-          );
-          const marched = halvesDiffering(table.march, twinned.march);
-          const composite = halvesDiffering(table.composite, twinned.composite);
-          const same = marched.texels === 0 && composite.texels === 0;
-          const withinUlp = marched.ulps <= 1 && composite.ulps <= 1;
-          checks.check(
-            `${what}: the march's table-only twin draws the march's bytes from the table, byte for byte on a fallback adapter and within 1 ulp on hardware`,
-            engine.swaps > swaps && (fallback ? same : withinUlp),
-            `${differenceOf("the march's target", marched)}, ${differenceOf("the composite's output", composite)}; ${String(engine.swaps - swaps)} dispatches by a twin`,
-          );
+          continue;
         }
-      } finally {
-        tables.dispose();
+        if (!oneBand || !(engine instanceof SourceTableEngine)) {
+          continue;
+        }
+        // A first draw through the page's engine makes the twin; the next is drawn by it.
+        // oxlint-disable-next-line no-await-in-loop
+        await areaReadsOf(engine, tables, kernels, frame, "area", "per-texel", "table");
+        // The twin is made off the frame: the next draw takes it once it has settled.
+        // oxlint-disable-next-line no-await-in-loop
+        await engine.twinsSettled();
+        const swaps = engine.swaps;
+        // The frame by the twin, read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const twinned = await areaReadsOf(
+          engine,
+          tables,
+          kernels,
+          frame,
+          "area",
+          "per-texel",
+          "table",
+        );
+        const marched = halvesDiffering(table.march, twinned.march);
+        const composite = halvesDiffering(table.composite, twinned.composite);
+        const same = marched.texels === 0 && composite.texels === 0;
+        const withinUlp = marched.ulps <= 1 && composite.ulps <= 1;
+        checks.check(
+          `${what}: the march's table-only twin draws the march's bytes from the table, byte for byte on a fallback adapter and within 1 ulp on hardware`,
+          engine.swaps > swaps && (fallback ? same : withinUlp),
+          `${differenceOf("the march's target", marched)}, ${differenceOf("the composite's output", composite)}; ${String(engine.swaps - swaps)} dispatches by a twin`,
+        );
       }
+    } finally {
+      tables.dispose();
     }
-  } finally {
-    engine.releaseMaterial(kernels.composite);
-    engine.releaseMesh(kernels.triangle);
   }
 }
 
@@ -4279,7 +4332,8 @@ const THICK_LEVER_FRAMES: ReadonlyArray<AreaFrame> = [
 
 /**
  * The thick read's levers' bodies of the shared read: R05's Earth over the thick table, its march
- * specialised, and the Saturn-class figure over it, of the general march and several bands.
+ * specialised, and the Saturn-class figure over it, of the general march and several bands, whose
+ * near-horizon sources the march from the table takes per step.
  */
 const THICK_LEVER_SHARED_BODIES: ReadonlyArray<AreaBody> = [
   {
@@ -4347,12 +4401,15 @@ async function titanLeverBody(): Promise<AreaBody> {
 }
 
 /**
- * The thick read's march levers (perf-thick-march; `hillaire.ts`'s `thickPerStep`) on `bodies`,
- * each over a thick table, over the device's shared kernels of `reads`, made ahead with the packed
- * limb's general and specialised forms: each frame over the air's area with its far limb's node
- * rays packed and its row once a sample, held to the thick read's general march over the whole
- * frame byte for byte on a fallback adapter and within T8.d's ulp on hardware
- * ({@link checkAreaBodies}).
+ * The thick read's march levers (perf-thick-march; `hillaire.ts`'s `thickPerStep` and
+ * `thickFromTable`) on `bodies`, each over a thick table, over the device's shared kernels of
+ * `reads`, made ahead in both ways and with the packed limb's general and specialised forms: each
+ * frame over the air's area with its far limb's node rays packed and its row once a sample, per
+ * step, held to the thick read's general march over the whole frame byte for byte on a fallback
+ * adapter and within T8.d's ulp on hardware ({@link checkAreaBodies}); then, on a body of one band,
+ * from the sources' table within 1/3 stop of per step at {@link MARCH_TABLE_HELD_SHARE} of its sky
+ * texels or more and packed from it as per texel to the bit, and on one of several per step under
+ * the table to the bit ({@link checkMarchTableOver}).
  */
 async function checkThickMarchLevers(
   engine: RenderEngine,
@@ -4363,7 +4420,7 @@ async function checkThickMarchLevers(
 ): Promise<void> {
   const kernels = await createAtmosphereFrameKernels(engine, {
     reads,
-    thick: true,
+    thick: "with the table",
     thickPacked: ["general", "special"],
   });
   try {
@@ -4376,6 +4433,14 @@ async function checkThickMarchLevers(
       false,
       "perf-thick-march",
       true,
+    );
+    await checkMarchTableOver(
+      engine,
+      checks,
+      fallback,
+      kernels,
+      bodies,
+      "perf-thick-march's table",
     );
   } finally {
     engine.releaseMaterial(kernels.composite);

@@ -21,7 +21,7 @@ import {
 import { boundNames, countingRenderEngine } from "../../test/countingRenderEngine";
 import { patternedThickBake } from "../../test/thickTables";
 import { lookAlong, quaternion } from "../camera/quaternion";
-import { WGSL_CATALOGUE } from "../engine/catalogue";
+import { ATMOSPHERE_THICK_LEVER_ENTRIES, WGSL_CATALOGUE } from "../engine/catalogue";
 import type { KernelPair } from "../engine/kernels";
 import type { TextureHandle } from "../engine/types";
 import { kernelBindings } from "../engine/webgpu/compute";
@@ -3043,21 +3043,31 @@ describe("the march's step's sources from the sources' table (R08.T8.e's table)"
     tables.dispose();
   });
 
-  it("declares the table in every thin march, and in no thick, deck or thermal one", () => {
+  it("declares the table in every thin march and the thick read's from it (perf-thick-march), and in no other thick, deck or thermal one", () => {
     const computes = WGSL_CATALOGUE.flatMap((entry) =>
       entry.kind === "compute" ? [entry.spec] : [],
     );
     const marches = computes.filter((pair) => pair.reference.includes("fn rayMarchSourcesAt("));
-    const perStep = marches.filter((pair) => /thick|thermal|deck/u.test(pair.name));
+    const levers = new Set(
+      ATMOSPHERE_THICK_LEVER_ENTRIES.flatMap((entry) =>
+        entry.kind === "compute" && entry.spec.name.includes("from the sources' table")
+          ? [entry.spec]
+          : [],
+      ),
+    );
+    const perStep = marches.filter(
+      (pair) => /thick|thermal|deck/u.test(pair.name) && !levers.has(pair),
+    );
     expect([
       marches.filter((pair) => !perStep.includes(pair)).every(declaresSourceTable),
       perStep.length,
       perStep.some(declaresSourceTable),
+      levers.size,
       computes
         .filter((pair) => declaresSourceTable(pair) && !marches.includes(pair))
         .every((pair) => pair.reference.includes("fn atmosphere_sun_transmittance(")),
       [RAY_MARCH_PER_STEP_KERNEL, RAY_MARCH_SLOTS_PER_STEP_KERNEL].some(declaresSourceTable),
-    ]).toEqual([true, 22, false, true, false]);
+    ]).toEqual([true, 22, false, 6, true, false]);
   });
 
   it("twins every thin march of both reads, in every form and entry point, its step's lookup compiled out", () => {

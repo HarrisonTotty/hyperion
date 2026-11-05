@@ -187,6 +187,16 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * and 34% at high against `per-step`, 20% and 16% against the march before the lever. The smoke
  * holds the march from the table within 1/3 stop of per step on 99.5% of its frames' sky texels
  * or more, and a body of one band's table-only march twins to the module's bytes.
+ *
+ * Since perf-thick-march both levers reach the thick read's march but over a deck, which every world
+ * with air takes once its correction lands. `packed` takes it byte for byte, within −6% to +4% of
+ * per texel on SwiftShader from orbit and from 400 km (pod, 32 vCPU; the measured Earth, R05's
+ * Earth and TEST TITAN over thick tables), though the limb's node rays are 33–51% of the march
+ * where they are a share (`--march-probe centre`): the pod's lanes wait little on a tile's slowest
+ * texel, so the owner's Mac decides it. `table` takes the thick read's shared read on a body of one
+ * band from the table alone, 16% off the march at high there; its march by slot, whose lookup is one
+ * read a source a step already, took 3–14% more from the table, and stays per step, as a body of
+ * several bands does.
  */
 export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSettings>> = {
   high: {

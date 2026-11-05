@@ -4603,8 +4603,8 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   `just test-render` pass. _Built 2026-10-22_ (Risks, "Deviations in T8.d, as built").
   _Reopened 2026-11-03 for the far limb's rays from orbit (the owner's M5 profile): built, the
   Mac A/B pending_ (Risks, "R08.T8.d's far limb from orbit, as built"). _On the thick read
-  2026-11-05: built, the Mac A/B pending_ (Risks, "R08.T8.d's packed limb on the thick read, as
-  built").
+  2026-11-05: built, the Mac A/B pending_ (Risks, "R08.T8.d's and R08.T8.e's levers on the thick
+  read, as built").
 
 - **R08.T8.e The march's sources and steps from outside the air** (`decision-r08-t8-leans.md`
   §9). At the setting's count the march is a blocker for R08.T10.b: from 400 km on high, after
@@ -4675,7 +4675,10 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   rows, the slab Earth from 400 km to 1.54 × 10⁷ m and the measured Earth at 10⁷ m; item 9
   withdrawn and half resolution above the band not taken. Closed 2026-10-26 with those 4 rows'
   miss recorded (`decision-r08-t8-leans.md` §16)_ (Risks, "Deviations in T8.e, as built", _QW2_,
-  _QW3_; "Deferred findings (2026-10-13 rule)" (R08.T8.e), _The hold's four rows_).
+  _QW3_; "Deferred findings (2026-10-13 rule)" (R08.T8.e), _The hold's four rows_). _The sources'
+  table built 2026-11-04, and on the thick read 2026-11-05, the Mac A/B pending_ (Risks, "R08.T8.e's
+  table: the march's step's sources from the sources' table, as built"; "R08.T8.d's and R08.T8.e's
+  levers on the thick read, as built").
 
 Widen R05's ray march to N terms and several sources: each body's list of Design note 7 (its stars
 and its planetshine sources), with no source skipped outside the air (since R08.T8.e both of
@@ -24892,9 +24895,10 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     area's form (four new centre kernels, `CENTRE_PAIRS`); a thick, deck or self-luminous body takes
     no cull and marches under `tiles` as under `area`. `FrameKernelsAhead.tiles`, `.packed` take
     `true` or a list of `MarchForm`s.
-  - _`packed`_ (thin read only, lean 2026-11-03): `rayMarchPacked.wgsl` lists each blended texel's
-    nodes and marches its centre alone; `limbDispatch.wgsl`, `limbNodes.wgsl` (`rayMarch.wgsl` less
-    its targets) one node an invocation, `limbResolve.wgsl` in node order; `LIMB_KERNELS`, 14.
+  - _`packed`_ (thin read only, lean 2026-11-03; the thick read's too since perf-thick-march,
+    below): `rayMarchPacked.wgsl` lists each blended texel's nodes and marches its centre alone;
+    `limbDispatch.wgsl`, `limbNodes.wgsl` (`rayMarch.wgsl` less its targets) one node an
+    invocation, `limbResolve.wgsl` in node order; `LIMB_KERNELS`, 14.
   - _When_: a view asks a body's (read, form) pair at its first frame from above the top and makes
     it in the background, marching per texel, the same bits, until then; a texel past the lists'
     room is marched per texel.
@@ -24958,7 +24962,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - The thick, deck and thermal marches are made from `RAY_MARCH_PER_STEP_KERNEL` and
     `RAY_MARCH_SLOTS_PER_STEP_KERNEL`, their bytes before it (pinned), and bind no table, so a
     thick or self-luminous body keeps the per-step cost: with it the thermal march hung
-    SwiftShader's GPU process as it compiled (smoke part 12); the thick and deck ones untried.
+    SwiftShader's GPU process as it compiled (smoke part 12); the thick and deck ones untried (the
+    thick read's: "R08.T8.d's and R08.T8.e's levers on the thick read, as built").
   - The sources' table gains a lobes' layer a band after the light slots' (layer B L + b,
     `sourceTableBuild.w` 1), on every medium, 32 KB a band: the stored depth without the absorbers,
     the march's lobes' read.
@@ -24975,23 +24980,37 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     and the packed limb's (compiled in part 16 only).
   - _Pending, the owner's Mac A/B_ (`--march-sources`, its command in the outbox's `gate.txt`) and
     the RTX QW.
-- **R08.T8.d's packed limb on the thick read, as built** (2026-11-05; lane perf-thick-march; no
-  generated value moves). The pod's figures are in the lane's outbox, `measurements.md`.
-  - `limbRays` `packed` reaches the thick read's march but over a deck, which every world with air
-    takes once its correction lands (`CORRECTION_ROUTED`): `THICK_LIMB_PAIRS` (`THICK_LIMB_KERNELS`,
-    8, the thin read's packed forms per step through `thickPerStep`; the resolve and the
-    dispatches shared).
-  - `RAY_MARCH_THICK_KERNEL` and its forms keep their bytes (the deck and thermal bases) and stay
-    the per-texel march.
-  - Exact (R08.T14.c's read): every lever kernel finds the altitude row once a sample
-    (`withThickRowOnce`, `thickSampleRow.wgsl`); the march per step, the sky view and the aerial
-    perspective still search a source.
-  - `LimbKernels.pair(march, read, form)`; `FrameKernelsAhead.thickPacked`.
-  - Catalogue: `ATMOSPHERE_THICK_LEVER_ENTRIES` (smoke part 17). VIEW's kernel bound 97 → 105.
-  - Smoke: parts 8 (by slot: the measured Earth, TEST TITAN) and 12 (the shared read: R05's Earth,
-    the Saturn-class figure), each over a patterned thick table, packed against the general thick
-    march over the whole frame to the bit.
-  - Left: the deck and thermal marches per texel.
+- **R08.T8.d's and R08.T8.e's levers on the thick read, as built** (2026-11-05; lane
+  perf-thick-march; no generated value moves). The pod's figures are in the lane's outbox,
+  `measurements.md`.
+  - Both levers reach the thick read's march but over a deck, which every world with air takes once
+    its correction lands (`CORRECTION_ROUTED`). `limbRays` `packed`: `THICK_LIMB_PAIRS`
+    (`THICK_LIMB_KERNELS`, 12: each read's per step, the shared read's from the table; the resolve
+    and the dispatches shared), on both settings (lean, 2026-11-05: byte for byte, and within −6% to
+    +4% of per texel on the pod, 32 vCPU; the Mac decides).
+  - `marchSourceTransmittance` `table` takes the thick read's shared read on a body of one band from
+    the table alone (`RAY_MARCH_THICK_TABLE_KERNEL`, specialised; `thickFromTable`,
+    `SOURCE_TABLE_ONLY` set): 16% off the march at high on the pod.
+  - Its march by slot stays per step (lean, 2026-11-05): its lookup is one read a source a step
+    already, and from the table it took 3–14% more on the pod.
+  - A thick body of several bands stays per step (lean, 2026-11-05): SwiftShader's GPU process
+    crashed (exit 139) compiling the shared read's general thick march with both ways, so the thick
+    read has no such form and no twins.
+  - `RAY_MARCH_THICK_KERNEL` and its forms keep their bytes (the deck and thermal bases).
+  - Exact: every lever kernel finds the altitude row once a sample (`withThickRowOnce`,
+    `thickSampleRow.wgsl`); the sky view and the aerial perspective still search a source.
+  - `LimbKernels.pair(march, read, form)`; `FrameKernelsAhead.thick` `"with the table"` and
+    `.thickPacked`; `ThickKernels.tabledRayMarch`.
+  - Catalogue: `ATMOSPHERE_THICK_LEVER_ENTRIES` (14, smoke part 17). VIEW's kernel bound 97 → 111.
+  - Smoke: parts 9 (by slot: the measured Earth, TEST TITAN) and 10 (the shared read: R05's Earth,
+    the Saturn-class figure; not 8 and 12, which they took to 292 and 330 s of 360), each over a
+    patterned thick table: packed per step against the general thick march over the whole frame to
+    the bit; R05's Earth from the table within 1/3 stop of per step at 99.5% of sky texels, and
+    packed from it as per texel to the bit; the others per step under the table to the bit.
+  - _Not byte-checked_: the shared read's general thick march from the table and its general packed
+    pair from it (compiled in part 17 only): no smoke body of one band takes the general shared
+    read.
+  - Left: the deck and thermal marches per step and per texel.
   - _Pending, the owner's Mac A/B_ on a routed body and the RTX QW (commands in the outbox's
     `gate.txt`).
 - **The chromophore gate, as built: it misses** (R08.T16.a.2, 2026-11-04; lane

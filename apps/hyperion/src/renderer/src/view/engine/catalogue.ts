@@ -45,6 +45,8 @@ import {
   RAY_MARCH_THERMAL_KERNEL,
   RAY_MARCH_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
   RAY_MARCH_THICK_THERMAL_KERNEL,
   SKY_VIEW_BELOW_DECK_KERNEL,
   SKY_VIEW_KERNEL,
@@ -265,14 +267,19 @@ export const ATMOSPHERE_THICK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
 
 /**
- * The thick read's march levers (perf-thick-march; `hillaire.ts`'s `thickPerStep`): the packed
- * limb's kernels of each read in both forms (`THICK_LIMB_KERNELS`; the resolve and the dispatches
- * are {@link ATMOSPHERE_LIMB_ENTRIES}'). The smoke page compiles them in a part of their own
- * (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
+ * The thick read's march levers (perf-thick-march; `hillaire.ts`'s `thickFromTable` and
+ * `thickPerStep`): the shared read's footprints from the sources' table alone, general and
+ * specialised, and the packed limb's kernels, each read's per step and the shared read's from the
+ * table, in both forms
+ * (`THICK_LIMB_KERNELS`; the resolve and the dispatches are {@link ATMOSPHERE_LIMB_ENTRIES}'). The
+ * smoke page compiles them in a part of their own (`smoke/page.ts`), for the watchdog of the part
+ * that compiles the rest.
  */
-export const ATMOSPHERE_THICK_LEVER_ENTRIES: ReadonlyArray<CatalogueEntry> = THICK_LIMB_KERNELS.map(
-  (spec): CatalogueEntry => ({ kind: "compute", spec }),
-);
+export const ATMOSPHERE_THICK_LEVER_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
+  ...THICK_LIMB_KERNELS,
+].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
 
 /**
  * R08.T18.b's per-frame atmosphere with the medium's own light (`hillaire.ts`' `withThermalSource`):

@@ -756,9 +756,16 @@ export class PhotorealRenderer {
           // priority, 2026-11-01), with the tile cull's where a setting takes it (R08.T8.d): either
           // setting's, since the frame-rate floor draws high's air at low's. The packed limb's are made
           // in the background at the first frame that takes them, each body's form alone, its frames
-          // marching per texel, the same bits, until then.
+          // marching per texel, the same bits, until then. The thick read's marches from the
+          // sources' table are made too where a setting takes it (perf-thick-march).
           createAtmosphereFrameKernels(engine, {
-            thick: CORRECTION_ROUTED,
+            thick: QUALITY_SETTINGS.some(
+              (each) =>
+                ({ ...SETTINGS[each].atmosphereLevers, ...levers }).marchSourceTransmittance ===
+                "table",
+            )
+              ? "with the table"
+              : CORRECTION_ROUTED,
             behind: true,
             tiles: QUALITY_SETTINGS.some(
               (each) => ({ ...SETTINGS[each].atmosphereLevers, ...levers }).marchCover === "tiles",
