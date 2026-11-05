@@ -34410,3 +34410,7 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     neighbouring belt (its composition only) and a member-parent's moons (none losing) move nothing.
   - _For 29's bump:_ delete and restate what `the_evaporated_bulk_is_held_only_until_the_29_bump`
     lists.
+- **P14.T53.g's solidus jump, not needed at 28 (lane `fix-solidus-jump`, 2026-11-05).** P14.T9.d's
+  margin moved both of the guard twin's new jumps at 27: 42002cb2000188e9.0a00 is a `Snowball` fixed
+  point and 42002cb2000494de.0100 a converged `RunawayGreenhouse` at 580 K. No guard jump at 28 has
+  a `MagmaOcean` end, so no `SOLIDUS_JUMP_VERSION` hold was built.
