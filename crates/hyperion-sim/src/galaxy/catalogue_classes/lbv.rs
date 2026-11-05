@@ -168,6 +168,17 @@ pub fn may_host(mass: SolarMasses, age_at_epoch: Years) -> bool {
     })
 }
 
+/// Whether [`may_host`] passes a primary of initial mass `mass` at some age at the epoch from
+/// `least_age` up: of a node's mass, and not past its last age. A census that counts a record
+/// without its track asks it of the least age the record can have (plan 12's lens walk, ruling
+/// 143.3).
+#[must_use]
+pub(crate) fn may_host_from(mass: SolarMasses, least_age: Years) -> bool {
+    LBV_SAMPLER
+        .node_of(mass)
+        .is_some_and(|k| least_age.value() <= host_ages(k).1.value())
+}
+
 /// The primary's luminous-blue-variable window of `stars`, clock times, if it overlaps the source
 /// horizon, −(H + L) to +H (plan 09, P09.T43): its start at or before +H and its end at or after
 /// −(H + L).
@@ -224,7 +235,13 @@ pub(crate) fn lbv_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
 /// the runaways as the core collapses do (P09.T43's runaway half).
 #[must_use]
 pub(crate) fn claims_its_placement(_galaxy: &Galaxy, record: &SystemRecord) -> bool {
-    !matches!(record.placement_class(), PlacementClass::Displaced { .. })
+    claims_placement(record.placement_class())
+}
+
+/// [`claims_its_placement`] of a record of placement class `class`.
+#[must_use]
+pub(crate) const fn claims_placement(class: PlacementClass) -> bool {
+    !matches!(class, PlacementClass::Displaced { .. })
 }
 
 /// One of the young field's components, as the class thins on it.

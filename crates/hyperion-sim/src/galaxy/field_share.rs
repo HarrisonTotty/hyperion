@@ -143,6 +143,21 @@ impl FieldShare {
         }
     }
 
+    /// [`keeps`](Self::keeps) where it reads no age, the factor of every component but the young
+    /// disc, bit for bit; `None` for the young disc.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is not one of the galaxy's components.
+    #[must_use]
+    pub(crate) fn keeps_at_every_age(&self, id: ComponentId, band: MassBand) -> Option<f64> {
+        let factor = self.factor(id, band);
+        self.young
+            .as_ref()
+            .is_none_or(|young| young.id != id)
+            .then_some(factor)
+    }
+
     /// The bytes the field owns on the heap.
     #[must_use]
     pub(crate) fn heap_bytes(&self) -> usize {

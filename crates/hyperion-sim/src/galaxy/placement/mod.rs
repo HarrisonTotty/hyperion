@@ -47,10 +47,12 @@ use std::error::Error;
 use std::fmt;
 
 pub use cache::{CellCache, NoCache};
+pub(crate) use candidate::Visited;
 #[cfg(test)]
 pub(crate) use candidate::catalogue_claims;
 pub use candidate::{CandidateOutcome, evaluate_candidate};
 pub use cell::{CellKey, candidate_count};
+pub(crate) use generate::visit_cell;
 pub use generate::{cell_heap_bytes, generate_cell, generate_cell_where};
 #[cfg(test)]
 pub(crate) use headroom::largest_headroom_mean;

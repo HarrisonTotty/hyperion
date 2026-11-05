@@ -27,7 +27,6 @@ mod draw;
 pub mod halo;
 pub mod spheroid;
 
-#[cfg(test)]
 pub(crate) use displaced::is_exempt;
 pub(crate) use displaced::{BallisticKick, class_velocity};
 pub use draw::{ESCAPE_CUT_ATTEMPTS, VelocityDraw, draw, draw_velocity};

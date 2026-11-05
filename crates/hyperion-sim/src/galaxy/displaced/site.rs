@@ -647,16 +647,38 @@ pub(crate) fn with_forced_margin<T>(margin: f64, run: impl FnOnce() -> T) -> T {
 /// The clock time is non-decreasing in the death age, so the ends decide.
 #[must_use]
 fn outside(start: UniverseTime, age_at_epoch: Years, (least, greatest): (Years, Years)) -> bool {
-    let all_before = match clock_time_of_death(age_at_epoch, greatest) {
-        Some(t) => t <= start,
-        // Off the clock: before it if the death age is below the age at the epoch.
-        None => greatest.value() < age_at_epoch.value(),
-    };
-    all_before
+    all_before(start, age_at_epoch, greatest)
         || match clock_time_of_death(age_at_epoch, least) {
             Some(t) => t > INTERVAL_END,
             None => least.value() > age_at_epoch.value(),
         }
+}
+
+/// Whether a death at any age up to `greatest` of a star `age_at_epoch` old at the epoch falls at
+/// or before `start`: [`outside`]'s first half. An older star dies earlier, so it holds at every
+/// age above one it holds at.
+#[must_use]
+fn all_before(start: UniverseTime, age_at_epoch: Years, greatest: Years) -> bool {
+    match clock_time_of_death(age_at_epoch, greatest) {
+        Some(t) => t <= start,
+        // Off the clock: before it if the death age is below the age at the epoch.
+        None => greatest.value() < age_at_epoch.value(),
+    }
+}
+
+/// Whether [`explosion_site`] finds no site for a grid record of initial mass `m0` at any age at
+/// the epoch from `least_age` up, whatever its other marks: [`decide`] refuses a primary under the
+/// least mass that dies, and at its first tier one that died before the interval at every death
+/// age of its mass bracket, which a grid record's metallicity draw, free of a helium excess, lets
+/// it read. Since an older primary died earlier ([`all_before`]), a refusal at `least_age` is one
+/// at every age above it. A census that counts a record without its track asks it (plan 12's lens
+/// walk, ruling 143.3).
+#[must_use]
+pub(crate) fn no_site_from(m0: SolarMasses, least_age: Years) -> bool {
+    !(MIN_INITIAL_MASS.value()..).contains(&m0.value())
+        || LifetimeBracket::shared()
+            .bracket(m0)
+            .is_some_and(|bracket| all_before(interval_start(), least_age, forced(bracket).1))
 }
 
 /// Whether a death at any age in `bracket`, years, of a star `age_at_epoch` old at the epoch,
@@ -857,6 +879,34 @@ mod tests {
     use crate::stellar::lifetime;
     use crate::stellar::system::{ClockDeath, SystemStars};
     use crate::units::{Dex, HeliumExcess, LightYears};
+
+    /// `no_site_from` (plan 12's lens walk): where it refuses a mass from an age, the mass
+    /// bracket's tier refuses it at that age and at every older one; it refuses a mass under the
+    /// least that dies, and not a death in the interval.
+    #[test]
+    fn no_site_from_an_age_refuses_every_older_age() {
+        let start = interval_start();
+        let mut refused = 0_u32;
+        for i in 0..=40_i32 {
+            let m0 = SolarMasses::new(8.0 * math::powf(150.0 / 8.0, f64::from(i) / 40.0));
+            let bracket = forced(LifetimeBracket::shared().bracket(m0).expect("band E"));
+            for least in [0.0, 1e6, 4e6, 1e7, 3e7, 5e7, 1e8, 1e9, 1e10, 1e12] {
+                if !no_site_from(m0, Years::new(least)) {
+                    continue;
+                }
+                refused += 1;
+                for older in [0.0, 1e-3, 1.0, 1e3, 1e6, 1e9, 1e10, 1e13] {
+                    let age = Years::new(least + older);
+                    assert!(outside(start, age, bracket), "{m0:?} at {age:?}");
+                }
+            }
+            // Dead a thousand years ago at its greatest death age: in the interval.
+            let recent = Years::new(bracket.1.value() + 1e3);
+            assert!(!no_site_from(m0, recent), "{m0:?}");
+        }
+        assert!(refused > 200, "{refused} refusals");
+        assert!(no_site_from(SolarMasses::new(0.05), Years::ZERO));
+    }
 
     fn years(y: i64) -> UniverseTime {
         UniverseTime::from_julian_years(y).unwrap()

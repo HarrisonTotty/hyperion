@@ -45,6 +45,11 @@
 //! by the bracket. Where it cannot, the exact fate is taken, as before. The record's age is then no
 //! longer its lifetime plus `s` to the bit, but at most the bracket's width more.
 //!
+//! A census that counts a record without reading it (plan 12's lens walk) draws the marks without
+//! that track ([`Tracks::Defer`]): where the table cannot answer, they stop with what the track
+//! cannot change, the primaries the record can have and how its age follows its death
+//! ([`Unbuilt`]).
+//!
 //! So placement calls `lifetime` at most twice per accepted layer-E record, and nothing else of
 //! the stellar stage but the metallicity draw. A living record's metallicity age is stored with
 //! it, at single precision, and the stellar stage's [`draw_metallicity`] reads it, so that it finds
@@ -153,26 +158,130 @@ pub(super) fn draw(
     position: &GalacticPosition,
     picked: Picked,
 ) -> Option<DrawnMarks> {
+    draw_with(galaxy, displaced, key, id, position, picked, Tracks::Build)
+        .unwrap_or_else(|_| unreachable!("marks that build their tracks never stop before one"))
+}
+
+/// [`draw`], building a track where the fate table cannot stand for it or, under
+/// [`Tracks::Defer`], stopping there with what the marks know of the dead record ([`Unbuilt`]).
+/// Marks that need no track are [`draw`]'s, bit for bit, under either.
+pub(super) fn draw_with(
+    galaxy: &Galaxy,
+    displaced: &DisplacedFields,
+    key: CellKey,
+    id: SystemId,
+    position: &GalacticPosition,
+    picked: Picked,
+    tracks: Tracks,
+) -> Result<Option<DrawnMarks>, Unbuilt> {
     let table = displaced.class_table();
     let band = key.band();
     match (band, picked) {
         (MassBand::E, Picked::Field(pick)) => {
-            Some(stay(galaxy, table, id, position, pick.component()))
+            stay(galaxy, table, id, position, pick.component(), tracks).map(Some)
         }
         (MassBand::D | MassBand::E, Picked::Displaced(class)) => {
-            Some(displaced_marks(galaxy, displaced, band, id, class))
+            displaced_marks(galaxy, displaced, band, id, class, tracks).map(Some)
         }
         (MassBand::D, Picked::Field(pick)) if ejects(table.component_source(pick.component())) => {
-            Some(runaway_reduction(
+            Ok(Some(runaway_reduction(
                 galaxy,
                 table,
                 key,
                 id,
                 position,
                 pick.component(),
-            ))
+            )))
         }
-        (_, Picked::Field(_) | Picked::Displaced(_)) => None,
+        (_, Picked::Field(_) | Picked::Displaced(_)) => Ok(None),
+    }
+}
+
+/// Whether a dead record's marks build its primary's track where the fate table cannot stand for
+/// it ([`table_fate`]), some 370 µs at 8–150 M☉ (pod, 2026-11-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Tracks {
+    /// Build it, as placement does.
+    Build,
+    /// Stop instead: a census that counts the record but never reads it needs only what the
+    /// track cannot change ([`Unbuilt`]; plan 12's lens walk, ruling 143.3).
+    Defer,
+}
+
+/// What a dead record's marks know where they stopped before a track ([`Tracks::Defer`]): its
+/// possible primaries, its placement class, and how its age follows its death ([`dead_age`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Unbuilt {
+    /// The initial mass and birth component of each primary the record can have: one, or two
+    /// where the first fate, unread, would decide between the first mass and the redraw
+    /// (`progenitor`).
+    primaries: Primaries,
+    placement: PlacementClass,
+    /// The time since death's range, years, `hi` `None` for no upper limit.
+    since: (Years, Option<Years>),
+    /// The rank of the age among those the range leaves.
+    u: f64,
+}
+
+impl Unbuilt {
+    /// The record's placement class.
+    #[must_use]
+    pub(super) const fn placement(&self) -> PlacementClass {
+        self.placement
+    }
+
+    /// The initial masses the record's primary can have.
+    pub(super) fn masses(&self) -> impl Iterator<Item = SolarMasses> + '_ {
+        self.primaries.iter().map(|(mass, _)| mass)
+    }
+
+    /// The least age at the epoch the record can have, whatever its death age `L` ≥ 0: below
+    /// the age [`dead_age`] gives it.
+    ///
+    /// That age is `L` plus the time since death, which is at least `lo`, and at least the age of
+    /// rank `u` among its birth component's ages on `[L + lo, b]`, with `b` the oldest age or
+    /// `L + hi`. That age is the quantile at `F(L + lo) + u (F(b) − F(L + lo))`, which is at
+    /// least `u F(b₀)` with `b₀` the oldest age or `hi`, at most `b`, so it is at least the
+    /// quantile at `u F(b₀)`, which reads no `L`. The rank is lowered by 10⁻¹² and a part in 10⁹,
+    /// and the age by a part in 10⁹, for the rounding of the draw's own arithmetic.
+    #[must_use]
+    pub(super) fn least_age(&self, galaxy: &Galaxy) -> Years {
+        let (lo, hi) = self.since;
+        let least = self
+            .primaries
+            .iter()
+            .map(|(_, component)| {
+                let ages = galaxy.fields().component(component).ages();
+                let b = hi.unwrap_or_else(|| ages.max());
+                let rank = (self.u * ages.cdf(b) * (1.0 - 1e-9) - 1e-12).max(0.0);
+                let quantile = ages.quantile(rank).value() * (1.0 - 1e-9);
+                quantile.max(lo.value())
+            })
+            .fold(f64::INFINITY, f64::min);
+        Years::new(least)
+    }
+}
+
+/// The primaries a dead record can have, one or two, each its initial mass and birth component.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Primaries {
+    first: (SolarMasses, ComponentId),
+    second: Option<(SolarMasses, ComponentId)>,
+}
+
+impl Primaries {
+    /// One primary.
+    #[must_use]
+    const fn one(mass: SolarMasses, component: ComponentId) -> Self {
+        Self {
+            first: (mass, component),
+            second: None,
+        }
+    }
+
+    /// Each primary.
+    fn iter(&self) -> impl Iterator<Item = (SolarMasses, ComponentId)> + '_ {
+        core::iter::once(self.first).chain(self.second)
     }
 }
 
@@ -308,9 +417,15 @@ impl FateRead {
 /// The fate of a star of `m`, `composition` and `draws` under the galaxy's stellar rules: the fate
 /// table's where it can stand for the track's ([`table_fate`]),
 /// and otherwise the track's, bit for bit, at the cost of [`lifetime`], whose death age it holds;
-/// counted in test builds as a lifetime call.
+/// counted in test builds as a lifetime call. `None` only there under [`Tracks::Defer`].
 #[must_use]
-fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &StarDraws) -> FateRead {
+fn fate(
+    galaxy: &Galaxy,
+    m: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+    tracks: Tracks,
+) -> Option<FateRead> {
     let m = if m > MAX_INITIAL_MASS {
         MAX_INITIAL_MASS
     } else {
@@ -318,16 +433,19 @@ fn fate(galaxy: &Galaxy, m: SolarMasses, composition: &Composition, draws: &Star
     };
     let rules = galaxy.rules();
     if let Some(read) = table_fate(m, composition, draws) {
-        return read;
+        return Some(read);
+    }
+    if tracks == Tracks::Defer {
+        return None;
     }
     #[cfg(test)]
     LIFETIME_CALLS.with(|calls| calls.set(calls.get() + 1));
-    FateRead::Exact(fate_of(
+    Some(FateRead::Exact(fate_of(
         m,
         composition,
         draws,
         TrackOptions::default().with_rules(rules.stellar),
-    ))
+    )))
 }
 
 /// The fate table's read of the fate of a star of `m` (at most [`MAX_INITIAL_MASS`]),
@@ -442,39 +560,55 @@ pub(super) enum Vertical {
 /// iron core collapses, so a record of a moving class (`reach`) whose fate gives it no such kick
 /// draws its mass once more, from the density above the node over its first mass. That costs a
 /// second fate, so no record calls more than two.
+///
+/// Under [`Tracks::Defer`], where a fate needs its track, the primaries it could have are given
+/// instead: the redraw's alone after a first fate read, and both draws after a first fate unread,
+/// whose kick would have chosen between them.
 fn progenitor(
     galaxy: &Galaxy,
     (z_ref, draws): (&Composition, &StarDraws),
     (masses, densities): (&[f64; MARK_MASS_NODES], &[f64; MARK_MASS_NODES]),
     born: impl Fn(SolarMasses) -> ComponentId,
-    reach: Reach,
+    (reach, tracks): (Reach, Tracks),
     stream: &mut Stream,
-) -> Progenitor {
+) -> Result<Progenitor, Primaries> {
     let density = PiecewiseLinear::new(masses, densities)
         .expect("a picked kind or category has weight, so a mass density");
     let mass = SolarMasses::new(density.sample(stream));
-    let first = fate(galaxy, mass, z_ref, draws);
-    if kickable(&first, reach) {
-        return Progenitor {
+    let first = fate(galaxy, mass, z_ref, draws, tracks);
+    if let Some(first) = first
+        && kickable(&first, reach)
+    {
+        return Ok(Progenitor {
             mass,
             component: born(mass),
             fate: first,
-        };
+        });
     }
     let above = masses.partition_point(|&node| node <= mass.value());
     let Ok(upper) = PiecewiseLinear::new(&masses[above..], &densities[above..]) else {
-        return Progenitor {
-            mass,
-            component: born(mass),
-            fate: first,
-        };
+        return first
+            .map(|fate| Progenitor {
+                mass,
+                component: born(mass),
+                fate,
+            })
+            .ok_or_else(|| Primaries::one(mass, born(mass)));
     };
-    let mass = SolarMasses::new(upper.sample(stream));
-    Progenitor {
-        mass,
-        component: born(mass),
-        fate: fate(galaxy, mass, z_ref, draws),
+    let redrawn = SolarMasses::new(upper.sample(stream));
+    if first.is_none() {
+        return Err(Primaries {
+            first: (mass, born(mass)),
+            second: Some((redrawn, born(redrawn))),
+        });
     }
+    fate(galaxy, redrawn, z_ref, draws, tracks)
+        .map(|fate| Progenitor {
+            mass: redrawn,
+            component: born(redrawn),
+            fate,
+        })
+        .ok_or_else(|| Primaries::one(redrawn, born(redrawn)))
 }
 
 /// A dead record's age and lifetime: the time since death on `[lo, hi]` of its birth component's
@@ -506,7 +640,8 @@ fn stay(
     id: SystemId,
     position: &GalacticPosition,
     c: ComponentId,
-) -> DrawnMarks {
+    tracks: Tracks,
+) -> Result<DrawnMarks, Unbuilt> {
     let marks = table.stay_marks(c);
     let index = pick(
         stream(galaxy, tags::DISPLACED_KIND, id).mark(),
@@ -541,7 +676,7 @@ fn stay(
                 life_ref,
             };
             let (age, metallicity_age, life) = star.living((ages.min(), below), u);
-            DrawnMarks {
+            Ok(DrawnMarks {
                 component: c,
                 mass,
                 age,
@@ -549,27 +684,35 @@ fn stay(
                 attempt: 0,
                 metallicity_age_years: Some(metallicity_age),
                 lifetime: Some(life),
-            }
+            })
         }
         StayCategory::Retained(speed) => {
+            let placement = PlacementClass::Retained { speed };
+            let since = (Years::ZERO, None);
             let star = progenitor(
                 galaxy,
                 (&z_ref, &draws_of(galaxy, id)),
                 (marks.masses(), marks.node_density(category)),
                 |_| c,
-                Reach::of(speed),
+                (Reach::of(speed), tracks),
                 &mut masses,
-            );
-            let (age, life) = dead_age(galaxy, &star, (Years::ZERO, None), u);
-            DrawnMarks {
+            )
+            .map_err(|primaries| Unbuilt {
+                primaries,
+                placement,
+                since,
+                u,
+            })?;
+            let (age, life) = dead_age(galaxy, &star, since, u);
+            Ok(DrawnMarks {
                 component: c,
                 mass: star.mass,
                 age,
-                placement: PlacementClass::Retained { speed },
+                placement,
                 attempt: 0,
                 metallicity_age_years: None,
                 lifetime: life,
-            }
+            })
         }
     }
 }
@@ -582,11 +725,12 @@ fn displaced_marks(
     band: MassBand,
     id: SystemId,
     class: DisplacedClassId,
-) -> DrawnMarks {
+    tracks: Tracks,
+) -> Result<DrawnMarks, Unbuilt> {
     let table = displaced.class_table();
     let key = displaced.class(class).key();
     if key == ClassKey::Hypervelocity {
-        return survivor_marks(galaxy, table, id, class);
+        return survivor_marks(galaxy, table, id, class, tracks);
     }
     let source = key
         .source()
@@ -609,11 +753,17 @@ fn displaced_marks(
             (&z_ref, &draws_of(galaxy, id)),
             (marks.masses(), &marks.node_density(kind)),
             |m| marks.component_at(kind, m, birth),
-            Reach::of(origin),
+            (Reach::of(origin), tracks),
             &mut masses,
-        );
+        )
+        .map_err(|primaries| Unbuilt {
+            primaries,
+            placement,
+            since: (lo, hi),
+            u,
+        })?;
         let (age, life) = dead_age(galaxy, &star, (lo, hi), u);
-        return DrawnMarks {
+        return Ok(DrawnMarks {
             component: star.component,
             mass: star.mass,
             age,
@@ -621,7 +771,7 @@ fn displaced_marks(
             attempt: 0,
             metallicity_age_years: None,
             lifetime: life,
-        };
+        });
     }
     let mass = SolarMasses::new(
         marks
@@ -665,7 +815,7 @@ fn displaced_marks(
         life_ref,
     };
     let (age, metallicity_age, life) = star.living(span, u);
-    DrawnMarks {
+    Ok(DrawnMarks {
         component: c,
         mass,
         age,
@@ -673,7 +823,7 @@ fn displaced_marks(
         attempt: 0,
         metallicity_age_years: Some(metallicity_age),
         lifetime: Some(life),
-    }
+    })
 }
 
 /// A hypervelocity survivor's marks (module documentation): its birth component on
@@ -685,13 +835,13 @@ fn displaced_marks(
 /// - a C/O one's progenitor is of the donor's initial mass by the initial–final relation's inverse
 ///   ([`donor_progenitor_mass`]), in layer D, dead at its source's reference composition at least
 ///   its flight's time since launch before the epoch, its age on `displaced.death`.
-#[must_use]
 fn survivor_marks(
     galaxy: &Galaxy,
     table: &ClassTable,
     id: SystemId,
     class: DisplacedClassId,
-) -> DrawnMarks {
+    tracks: Tracks,
+) -> Result<DrawnMarks, Unbuilt> {
     let survivors = table.survivors();
     let index = pick(
         stream(galaxy, tags::DISPLACED_BIRTH, id).mark(),
@@ -707,7 +857,7 @@ fn survivor_marks(
         kind: DisplacedKind::HypervelocitySurvivor,
     };
     match flight.donor_kind() {
-        DonorKind::Helium => DrawnMarks {
+        DonorKind::Helium => Ok(DrawnMarks {
             component,
             mass: flight.donor(),
             age: flight.since_launch(),
@@ -715,18 +865,24 @@ fn survivor_marks(
             attempt: 0,
             metallicity_age_years: None,
             lifetime: None,
-        },
+        }),
         DonorKind::CarbonOxygen => {
             let mass = donor_progenitor_mass(flight.donor());
             let z_ref = table.reference_composition(table.component_source(component));
+            let since = (flight.since_launch(), None);
+            let u = stream(galaxy, tags::DISPLACED_DEATH, id).uniform();
             let star = Progenitor {
                 mass,
                 component,
-                fate: fate(galaxy, mass, &z_ref, &draws_of(galaxy, id)),
+                fate: fate(galaxy, mass, &z_ref, &draws_of(galaxy, id), tracks).ok_or(Unbuilt {
+                    primaries: Primaries::one(mass, component),
+                    placement,
+                    since,
+                    u,
+                })?,
             };
-            let u = stream(galaxy, tags::DISPLACED_DEATH, id).uniform();
-            let (age, life) = dead_age(galaxy, &star, (flight.since_launch(), None), u);
-            DrawnMarks {
+            let (age, life) = dead_age(galaxy, &star, since, u);
+            Ok(DrawnMarks {
                 component,
                 mass,
                 age,
@@ -734,7 +890,7 @@ fn survivor_marks(
                 attempt: 0,
                 metallicity_age_years: None,
                 lifetime: life,
-            }
+            })
         }
     }
 }
@@ -1122,4 +1278,85 @@ fn ballistic_vertical(galaxy: &Galaxy, record: &SystemRecord) -> (LightYears, Ye
         LightYears::new(height),
         Years::new(record.age_at_epoch().value() - life.value()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::galaxy::displaced::hold::held;
+    use crate::galaxy::placement::candidate::place;
+    use crate::galaxy::placement::candidate_count;
+    use crate::galaxy::placement::cell::CellBound;
+    use crate::id::Layer;
+
+    /// Under [`Tracks::Defer`] the marks are [`draw`]'s wherever they need no track, and where
+    /// they stop, the record [`draw`] makes has one of the primaries they name, their placement,
+    /// and an age no less than their least: over the layer-D and layer-E candidates of cells in
+    /// the bulge, at Baade's window and at the Sun-like point.
+    #[test]
+    fn deferred_marks_are_the_marks_or_bound_the_record() {
+        let galaxy = held();
+        let displaced = galaxy
+            .fields()
+            .displaced()
+            .expect("the classes are installed");
+        let sites = [
+            [0.0, 3_000.0, 0.0],
+            [0.0, 0.0, -1_770.0],
+            [0.0, 26_000.0, 0.0],
+        ];
+        let (mut drawn, mut stopped) = (0_u32, 0_u32);
+        for at in sites {
+            let at = GalacticPosition::from_light_years(at).expect("in the cube");
+            for layer in [Layer::D, Layer::E] {
+                let first = CellKey::containing(layer, &at).expect("in the cube");
+                let [x, y, z] = first.gen_cell().to_array();
+                for dx in 0..2 {
+                    let key = CellKey::new(layer, [x + dx, y, z]).expect("in the cube");
+                    let bound = CellBound::of(galaxy, key);
+                    for index in 0..candidate_count(galaxy, key) {
+                        let Some(placed) = place(galaxy, key, index, &bound) else {
+                            continue;
+                        };
+                        let (id, position, picked) = placed.parts();
+                        let built = draw(galaxy, displaced, key, id, &position, picked);
+                        match draw_with(
+                            galaxy,
+                            displaced,
+                            key,
+                            id,
+                            &position,
+                            picked,
+                            Tracks::Defer,
+                        ) {
+                            Ok(deferred) => {
+                                assert_eq!(deferred, built, "{id:?}");
+                                drawn += 1;
+                            }
+                            Err(unbuilt) => {
+                                let built = built.expect("a dead record draws marks");
+                                assert!(
+                                    unbuilt
+                                        .masses()
+                                        .any(|m| m.value().total_cmp(&built.mass.value()).is_eq()),
+                                    "{id:?}: {built:?} of none of {unbuilt:?}"
+                                );
+                                assert_eq!(unbuilt.placement(), built.placement, "{id:?}");
+                                let least = unbuilt.least_age(galaxy);
+                                assert!(
+                                    least.value() <= built.age.value(),
+                                    "{id:?}: {built:?} younger than {least:?}"
+                                );
+                                stopped += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            drawn > 2_000 && stopped > 100,
+            "{drawn} drawn, {stopped} stopped"
+        );
+    }
 }

@@ -1350,3 +1350,25 @@ fn a_displaced_host_is_the_grid_s_from_27() {
         assert!(lbv_claims(&galaxy, &field), "{rules:?}");
     }
 }
+
+/// `may_host_from` (plan 12's lens walk): where it refuses a mass from an age, `may_host` refuses
+/// it at that age and every older one, and it passes a host's age.
+#[test]
+fn may_host_from_an_age_refuses_every_older_age() {
+    let mut refused = 0_u32;
+    for i in 0..=60_i32 {
+        let mass = SolarMasses::new(8.0 * crate::math::powf(150.0 / 8.0, f64::from(i) / 60.0));
+        for least in [0.0, 1e5, 1e6, 3e6, 5e6, 1e7, 3e7, 1e8, 1e10] {
+            if may_host_from(mass, Years::new(least)) {
+                continue;
+            }
+            refused += 1;
+            for older in [0.0, 1.0, 1e3, 1e6, 1e9] {
+                let age = Years::new(least + older);
+                assert!(!may_host(mass, age), "{mass:?} at {age:?}");
+            }
+        }
+    }
+    assert!(refused > 300, "{refused} refusals");
+    assert!(may_host_from(SolarMasses::new(60.0), Years::new(4.0e6)));
+}

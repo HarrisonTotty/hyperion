@@ -1622,10 +1622,17 @@ impl Trajectory {
 pub(crate) fn carved_by_the_loss_cone(galaxy: &Galaxy, record: &SystemRecord) -> bool {
     // The regime first: a record outside it, nearly every one, is answered by a distance, without
     // drawing its velocity.
-    galaxy.kinematics().is_some()
-        && galaxy.centre_motion().regime_at(record.epoch_position()) == Regime::Kepler
+    may_be_carved_at(galaxy, record.epoch_position())
         && loss_cone_verdict(galaxy, &EpochState::of_grid_record(galaxy, record))
             == LossConeVerdict::Inside
+}
+
+/// Whether [`carved_by_the_loss_cone`] can carve out a grid record whose epoch position is
+/// `position`: only in a galaxy with kinematic tables and inside the Kepler regime, so that a
+/// record elsewhere is answered without being made.
+#[must_use]
+pub(crate) fn may_be_carved_at(galaxy: &Galaxy, position: &GalacticPosition) -> bool {
+    galaxy.kinematics().is_some() && galaxy.centre_motion().regime_at(position) == Regime::Kepler
 }
 
 /// The relative margin every pad and reach below is widened by, 10⁻⁹: it covers the rounding of

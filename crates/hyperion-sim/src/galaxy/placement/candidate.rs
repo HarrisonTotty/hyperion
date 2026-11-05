@@ -16,18 +16,22 @@
 //! index.
 
 use super::cell::CellBound;
-use super::marks;
+use super::marks::{self, DrawnMarks, Tracks, Unbuilt};
 use super::record::{SystemKind, SystemRecord};
 use super::{CellKey, rogue_planet_saturation_density};
 use crate::coords::GalacticPosition;
-use crate::galaxy::catalogue_classes::lbv::lbv_claims;
+use crate::galaxy::catalogue_classes::lbv::{claims_placement, lbv_claims, may_host_from};
 use crate::galaxy::displaced::DisplacedClassId;
 #[cfg(test)]
 use crate::galaxy::displaced::site::explosion_site;
-use crate::galaxy::displaced::site::{ExplosionSite, explosion_site_knowing, recent_death_claim};
+use crate::galaxy::displaced::site::{
+    ExplosionSite, explosion_site_knowing, no_site_from, recent_death_claim,
+};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
-use crate::galaxy::motion::carved_by_the_loss_cone;
+use crate::galaxy::kinematics::is_exempt;
+use crate::galaxy::motion::{carved_by_the_loss_cone, may_be_carved_at};
+use crate::galaxy::query::SpeedCut;
 #[cfg(doc)]
 use crate::galaxy::shares::ShareMatrix;
 use crate::galaxy::{Galaxy, PointLy};
@@ -137,16 +141,105 @@ pub(super) fn evaluate_with_hook(
     bound: &CellBound,
     claims: impl Fn(&Galaxy, &SystemRecord, Option<Years>) -> bool,
 ) -> CandidateOutcome {
+    let Some(placed) = place(galaxy, key, index, bound) else {
+        return CandidateOutcome::Thinned;
+    };
+    evaluate_placed(galaxy, key, bound, placed, claims)
+}
+
+/// A candidate the thinning's pick kept, before its marks: its ID, position, acceptance mark and
+/// pick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Placed {
+    id: SystemId,
+    position: GalacticPosition,
+    mark: Mark,
+    picked: Picked,
+}
+
+#[cfg(test)]
+impl Placed {
+    /// The candidate's ID, epoch position and pick, for the tests that draw its marks.
+    pub(super) const fn parts(&self) -> (SystemId, GalacticPosition, Picked) {
+        (self.id, self.position, self.picked)
+    }
+}
+
+impl Placed {
+    /// What bounds its system's speed, from what its pick placed (plan 08, Design note 7).
+    #[must_use]
+    pub(super) fn speed_cut(&self, galaxy: &Galaxy) -> SpeedCut {
+        match (self.picked, galaxy.fields().displaced()) {
+            (Picked::Displaced(class), Some(displaced))
+                if is_exempt(displaced.class(class).key()) =>
+            {
+                SpeedCut::Pad
+            }
+            (Picked::Field(_) | Picked::Displaced(_), _) => SpeedCut::Escape,
+        }
+    }
+}
+
+/// Candidate `index` of `key` up to the thinning's pick, or `None` if the pick thins it: the
+/// first steps of [`evaluate_with_hook`].
+#[must_use]
+pub(super) fn place(
+    galaxy: &Galaxy,
+    key: CellKey,
+    index: u32,
+    bound: &CellBound,
+) -> Option<Placed> {
     let id = candidate_id(key, index);
     let position = candidate_position(galaxy.seed(), key, id);
     let mark = acceptance_mark(galaxy.seed(), id);
-    let Some(picked) = pick_component(galaxy, key, bound, &position, mark) else {
-        return CandidateOutcome::Thinned;
-    };
-    let drawn = galaxy
-        .fields()
-        .displaced()
-        .and_then(|displaced| marks::draw(galaxy, displaced, key, id, &position, picked));
+    let picked = pick_component(galaxy, key, bound, &position, mark)?;
+    Some(Placed {
+        id,
+        position,
+        mark,
+        picked,
+    })
+}
+
+/// The rest of [`evaluate_with_hook`] for a placed candidate: its marks, the field's share, the
+/// catalogue's claims and the loss cone.
+#[must_use]
+pub(super) fn evaluate_placed(
+    galaxy: &Galaxy,
+    key: CellKey,
+    bound: &CellBound,
+    placed: Placed,
+    claims: impl Fn(&Galaxy, &SystemRecord, Option<Years>) -> bool,
+) -> CandidateOutcome {
+    let drawn = galaxy.fields().displaced().and_then(|displaced| {
+        marks::draw(
+            galaxy,
+            displaced,
+            key,
+            placed.id,
+            &placed.position,
+            placed.picked,
+        )
+    });
+    settle(galaxy, key, bound, placed, drawn, claims)
+}
+
+/// The outcome of a placed candidate whose marks are `drawn`: its record, then the field's share,
+/// the catalogue's claims and the loss cone.
+#[must_use]
+fn settle(
+    galaxy: &Galaxy,
+    key: CellKey,
+    bound: &CellBound,
+    Placed {
+        id,
+        position,
+        mark,
+        picked,
+    }: Placed,
+    drawn: Option<DrawnMarks>,
+    claims: impl Fn(&Galaxy, &SystemRecord, Option<Years>) -> bool,
+) -> CandidateOutcome {
     let (record, lifetime) = if let Some(marks) = drawn {
         (
             SystemRecord::of_marks(galaxy, id, position, &marks),
@@ -165,7 +258,15 @@ pub(super) fn evaluate_with_hook(
     // P09.T35), after its marks, since φ reads the record's age; a displaced class's weight is
     // its budget's, the features' members included, and no field factor thins it.
     if let Picked::Field(pick) = picked
-        && !in_the_field(galaxy, key, bound.total(), mark, &pick, &record)
+        && !in_the_field(
+            galaxy,
+            key,
+            bound.total(),
+            mark,
+            &pick,
+            Some(record.age_at_epoch()),
+        )
+        .expect("the record's age is given")
     {
         return CandidateOutcome::Thinned;
     }
@@ -177,6 +278,104 @@ pub(super) fn evaluate_with_hook(
         CandidateOutcome::InLossCone
     } else {
         CandidateOutcome::Accepted(record)
+    }
+}
+
+/// What a walk of a cell makes of one of its candidates ([`visit_cell`](super::visit_cell)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Visited {
+    /// An accepted system the walk reads: its record, and what bounds its speed.
+    Read(SystemRecord, SpeedCut),
+    /// An accepted system the walk counts without reading: its ID.
+    Counted(SystemId),
+}
+
+/// Candidate `index` of `key` as a walk sees it, `None` if it is no system: whole, as
+/// [`evaluate_candidate_from_bound`] gives it, where `reads` asks for it by its epoch position and
+/// speed cut, and otherwise its ID if [`accepts_unread`] accepts it.
+#[must_use]
+pub(super) fn visit_candidate(
+    galaxy: &Galaxy,
+    key: CellKey,
+    index: u32,
+    bound: &CellBound,
+    reads: &mut impl FnMut(&GalacticPosition, SpeedCut) -> bool,
+) -> Option<Visited> {
+    let placed = place(galaxy, key, index, bound)?;
+    let cut = placed.speed_cut(galaxy);
+    if reads(&placed.position, cut) {
+        match evaluate_placed(galaxy, key, bound, placed, catalogue_claims) {
+            CandidateOutcome::Accepted(record) => Some(Visited::Read(record, cut)),
+            CandidateOutcome::Thinned
+            | CandidateOutcome::ClaimedByCatalogue
+            | CandidateOutcome::InLossCone => None,
+        }
+    } else {
+        accepts_unread(galaxy, key, bound, placed).then_some(Visited::Counted(placed.id))
+    }
+}
+
+/// Whether [`evaluate_placed`] accepts `placed` under [`catalogue_claims`], read no further than
+/// decides it: a census that counts the system but never reads it (plan 12's lens walk, ruling
+/// 143.3), bit for bit the whole evaluation's answer.
+///
+/// Away from the black hole's Kepler regime the loss cone carves nothing
+/// ([`may_be_carved_at`]), and outside layer E no class claims anything ([`may_claim`]), so there
+/// only the field's share decides, from the mark alone where it does not read the age
+/// ([`in_the_field`]). In layer E the marks are drawn without a track ([`Tracks::Defer`]): marks
+/// that need none settle as the whole evaluation does, and a dead record they stop at is accepted
+/// where neither class can claim it at any age it can have ([`claims_none_from`]). Anything else is
+/// evaluated whole.
+#[must_use]
+fn accepts_unread(galaxy: &Galaxy, key: CellKey, bound: &CellBound, placed: Placed) -> bool {
+    let field = if may_be_carved_at(galaxy, &placed.position) {
+        None
+    } else {
+        match placed.picked {
+            Picked::Field(pick) => {
+                in_the_field(galaxy, key, bound.total(), placed.mark, &pick, None)
+            }
+            Picked::Displaced(_) => Some(true),
+        }
+    };
+    match field {
+        Some(false) => return false,
+        Some(true) if !may_claim(galaxy, key.layer()) => return true,
+        Some(true) => {
+            let drawn = galaxy.fields().displaced().map(|displaced| {
+                marks::draw_with(
+                    galaxy,
+                    displaced,
+                    key,
+                    placed.id,
+                    &placed.position,
+                    placed.picked,
+                    Tracks::Defer,
+                )
+            });
+            match drawn {
+                None => {
+                    return settle(galaxy, key, bound, placed, None, catalogue_claims)
+                        .is_accepted();
+                }
+                Some(Ok(drawn)) => {
+                    return settle(galaxy, key, bound, placed, drawn, catalogue_claims)
+                        .is_accepted();
+                }
+                Some(Err(unbuilt)) if claims_none_from(galaxy, &unbuilt) => return true,
+                Some(Err(_)) => {}
+            }
+        }
+        None => {}
+    }
+    evaluate_placed(galaxy, key, bound, placed, catalogue_claims).is_accepted()
+}
+
+impl CandidateOutcome {
+    /// Whether the candidate is a system.
+    #[must_use]
+    const fn is_accepted(&self) -> bool {
+        matches!(self, Self::Accepted(_))
     }
 }
 
@@ -229,6 +428,11 @@ impl Pick {
 /// counts moving. With plan 08's displaced classes the slice is the stay's, and the share kept of
 /// it `1 − ancient_share ÷ stay_D` (P08.T12.a). For the tests' budget, without the field share or
 /// the carve-out, it keeps every candidate.
+///
+/// `age` is the record's age at the epoch, or `None` where it is not drawn: the answer is then
+/// `None` only where the share reads it, the young disc's ([`FieldShare::keeps_at_every_age`]).
+///
+/// [`FieldShare::keeps_at_every_age`]: crate::galaxy::field_share::FieldShare::keeps_at_every_age
 #[must_use]
 fn in_the_field(
     galaxy: &Galaxy,
@@ -236,8 +440,8 @@ fn in_the_field(
     bound: f64,
     mark: Mark,
     pick: &Pick,
-    record: &SystemRecord,
-) -> bool {
+    age: Option<Years>,
+) -> Option<bool> {
     let field = galaxy.field_share();
     let layer_d = match key.band() {
         MassBand::D => galaxy.layer_d_kept(pick.component),
@@ -249,16 +453,19 @@ fn in_the_field(
         | MassBand::RoguePlanet => None,
     };
     if field.is_none() && layer_d.is_none() {
-        return true;
+        return Some(true);
     }
-    let keeps = field.map_or(1.0, |field| {
-        field.keeps(pick.component, key.band(), record.age_at_epoch())
-    }) * layer_d.unwrap_or(1.0);
+    let share = match (field, age) {
+        (None, _) => 1.0,
+        (Some(field), Some(age)) => field.keeps(pick.component, key.band(), age),
+        (Some(field), None) => field.keeps_at_every_age(pick.component, key.band())?,
+    };
+    let keeps = share * layer_d.unwrap_or(1.0);
     let padded_bound = bound * (1.0 + BOUND_PADDING);
-    mark.is_below(Threshold::from_ratio(
+    Some(mark.is_below(Threshold::from_ratio(
         pick.below + keeps * pick.weight,
         padded_bound,
-    ))
+    )))
 }
 
 /// Whether a catalogue class claims this candidate (plan 03, Design note 5; plan 09, P09.T35).
@@ -294,6 +501,28 @@ pub(crate) fn catalogue_claims(
             claim,
         ) || lbv_claims(galaxy, record)
     })
+}
+
+/// Whether [`catalogue_claims`] can claim any record of `layer`: only under a claim, and only in
+/// layer E, the one both its classes ask.
+#[must_use]
+fn may_claim(galaxy: &Galaxy, layer: Layer) -> bool {
+    layer == Layer::E && recent_death_claim(galaxy.rules().carve_out).is_some()
+}
+
+/// Whether [`catalogue_claims`] claims none of the records `unbuilt` can be, whatever their death
+/// ages: each primary, at any age from the least the record can have ([`Unbuilt::least_age`]),
+/// died before the core collapses' interval at every death age its mass bracket allows, so they
+/// find no site ([`no_site_from`]), and is past the luminous blue variables' host ages, or is of
+/// a placement they do not claim ([`claims_placement`], [`may_host_from`]). Both hold at every
+/// older age, so they hold at the record's own.
+#[must_use]
+fn claims_none_from(galaxy: &Galaxy, unbuilt: &Unbuilt) -> bool {
+    let least = unbuilt.least_age(galaxy);
+    let hosts = claims_placement(unbuilt.placement());
+    unbuilt
+        .masses()
+        .all(|mass| no_site_from(mass, least) && !(hosts && may_host_from(mass, least)))
 }
 
 /// The core-collapse half of [`catalogue_claims`], with the site and the claim given: for a

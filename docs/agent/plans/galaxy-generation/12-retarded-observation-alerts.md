@@ -3082,3 +3082,19 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Also re-pinned, since it stopped plan 12's benches:_ `range_500ly_floor_d` 37,668 → 33,387
     (with `sky_caps`' `RANGE_REALISED`).
   - _Pending: the owner's quiet bench run._ The benches' figures are "pod, loaded".
+- **P12 perf, the lens walk within ruling 143.3's targets (lane `perf-lens-walk`, 2026-11-05, at
+  28; no output moves: the walk's candidates, events and census are the whole-cell walk's).**
+  - _The walk reads its cells in part._ `LensWalkPlan::walk` makes a system whole only where its
+    epoch position passes the cone with its own speed cut (crate-private `placement::visit_cell`,
+    `query::SpeedCut`); it counts the rest from their pick, and in layer E from plan 08's marks
+    without a track (`marks::Tracks::Defer`), whose dead records are refused the catalogue's claims
+    from the least age they can have (`site::no_site_from`, `lbv::may_host_from`).
+  - _The cache._ `walk`, `lens_candidates` and `lenses_along` keep their `cache` argument but ask
+    it for no cell, which they would have to generate whole (lean, 2026-11-05).
+  - _The speed cut._ In layers D and E the cone of every system but a member of the classes the
+    escape cut exempts takes the escape speed's bound, not the layer's pad; the cells still cover
+    the pad (lean, 2026-11-05).
+  - _Names._ `LensWalkPlan::chunks(threads)` and `lensing::CHUNKS_PER_THREAD` (4 runs a thread of
+    each layer, the largest cells first); the bench's pool walks them.
+  - _`hyperion-base`._ `running_sums` reserves its list: glibc's `realloc` serialised threads, so
+    `PiecewiseLinear::new` per dead record stopped layer E scaling past eight threads.

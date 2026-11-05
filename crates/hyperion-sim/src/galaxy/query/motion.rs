@@ -121,6 +121,24 @@ pub const fn escape_cut_holds(layer: Layer) -> bool {
     pad_speed(layer).value() <= PAD_SPEED.value()
 }
 
+/// What bounds one grid record's speed (plan 08, Design note 7; P08.T17): finer than
+/// [`escape_cut_holds`], which answers for a whole layer.
+///
+/// Plan 08 draws every grid velocity below the lesser of the local escape speed and [`PAD_SPEED`],
+/// the field's and every displaced class's alike, but for the classes the escape cut exempts, the
+/// fastest of each age bin and source and the hypervelocity survivors, which are cut at their
+/// layer's [`pad_speed`] (`kinematics::is_exempt`; P08.T17's
+/// `no_record_reaches_its_layers_pad_speed` holds both at 10⁵ members of each class). So in layers
+/// D and E, whose pad the exempt classes raise, every other record is still bound by the escape
+/// speed: plan 12's lens walk reads it from each candidate's pick (ruling 143.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum SpeedCut {
+    /// Below the lesser of the escape speed at the epoch position and [`PAD_SPEED`].
+    Escape,
+    /// Below the layer's [`pad_speed`] alone: a member of a class the escape cut exempts.
+    Pad,
+}
+
 /// How far a sphere must be padded to hold everything that could reach it by `t` at `speed`,
 /// light-years: `speed ÷ c × |t|`.
 ///
