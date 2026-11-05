@@ -1026,4 +1026,79 @@ mod tests {
         assert!(CensusRecords::All.takes(Population::Halo));
         assert!(!CensusRecords::Of(Population::Bulge).takes(Population::Halo));
     }
+    /// The fits' census galaxy (`hyperion-fit`'s manifests `binary_awd.toml` and
+    /// `binary_xrb.toml`) at the version in force.
+    fn census_galaxy() -> &'static Galaxy {
+        static GALAXY: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
+        GALAXY.get_or_init(|| {
+            Galaxy::from_params_for_binary_refit(
+                crate::rng::Seed::new(0x0b17_15a0_0000_0001),
+                crate::galaxy::params::GalaxyParams::milky_way_like(),
+                crate::GENERATOR_VERSION,
+            )
+            .expect("the Milky Way fixture builds")
+        })
+    }
+
+    /// The grid record of ID `raw` in `galaxy`.
+    fn grid_record(galaxy: &Galaxy, raw: u64) -> SystemRecord {
+        let id = crate::id::SystemId::from_raw(raw).expect("a grid ID");
+        let mut cell = Vec::new();
+        generate_cell(galaxy, CellKey::of(id).expect("a grid cell"), &mut cell);
+        *cell
+            .iter()
+            .find(|record| record.id() == id)
+            .expect("the cell holds its record")
+    }
+
+    /// A census's members of a record are its pairs at the generator's first attempt, the system
+    /// `SystemStars::generate` keeps where none is carved: under the record's own multiplicity, so
+    /// that a displaced record, which the generator shows single, has none, and on its primary's
+    /// kept attempt of plan 08's kick loop (P15.T10.b; train 27's finding). On the fits' census
+    /// galaxy the census took the young thin disc's displaced remnant `0x819386e02000009e` for an
+    /// X-ray binary, and the retained remnants `0x826787a000000099`, a Be/X binary, and
+    /// `0x820754dfd000001d` for the pairs their primaries' own draws make; the retained
+    /// `0x821f746000000100` is an X-ray binary at the generator's first attempt too.
+    #[test]
+    fn a_record_s_members_are_its_pairs_at_the_generator_s_first_attempt() {
+        let galaxy = census_galaxy();
+        let mut generated_members = 0;
+        for raw in [
+            0x8193_86e0_2000_009e,
+            0x8267_87a0_0000_0099,
+            0x8207_54df_d000_001d,
+            0x821f_7460_0000_0100,
+        ] {
+            let record = grid_record(galaxy, raw);
+            let mut found = Vec::new();
+            members_of(galaxy, &record, &CENSUS_CLASSES, &mut found);
+            let stars = SystemStars::generate_at(
+                galaxy,
+                &record,
+                &draw_metallicity(galaxy, &record),
+                crate::stellar::system::grid_multiplicity(&record),
+                RedrawAttempt::FIRST,
+            );
+            let age = record.age_at_epoch();
+            let generated: Vec<(CarvedClass, &BinaryTimeline)> = stars
+                .pairs()
+                .iter()
+                .filter_map(|pair| {
+                    carved_class(pair.timeline(), age)
+                        .filter(|class| CENSUS_CLASSES.contains(class))
+                        .map(|class| (class, pair.timeline()))
+                })
+                .collect();
+            let census: Vec<(CarvedClass, &BinaryTimeline)> =
+                found.iter().map(|m| (m.class, &m.timeline)).collect();
+            assert!(
+                census == generated,
+                "{raw:#x}: the census's {:?} against the generator's {:?}",
+                census.iter().map(|m| m.0).collect::<Vec<_>>(),
+                generated.iter().map(|m| m.0).collect::<Vec<_>>()
+            );
+            generated_members += generated.len();
+        }
+        assert_eq!(generated_members, 1, "the last record keeps its member");
+    }
 }
