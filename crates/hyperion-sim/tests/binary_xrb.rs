@@ -97,12 +97,18 @@ struct Marks {
     log_since_supernova: f64,
 }
 
-/// The catalogue's entries in the disc's plane, the cells within 41,000 ly of the centre in and just
-/// below it: about half the galaxy's, in its mix of kinds.
+/// The catalogue's entries about the disc's plane, in its mix of kinds: the cells within 41,000 ly
+/// of the centre and 1,024 ly of the plane, two layers of them on each side of it. At 27 they
+/// hold 5,411 entries, the two in and just below the plane 3,364 of them, where until 27 those two
+/// held over 4,000, about half the galaxy's: the refit on 27's engine (P15.T10.b) gives the young
+/// thin disc's high-mass side about ten hosts, where the scratch row gave it 0.16 of them, so that
+/// the low-mass side's thicker components hold the rest, and the features' lists hold part of each
+/// component's (P11.T8.f).
 fn catalogue_marks(galaxy: &Galaxy) -> Vec<Marks> {
     let process = XrayBinaries::new(galaxy);
     let mut marks = Vec::new();
-    let cells = (-80..80).flat_map(|y| (-80..80).flat_map(move |x| [[x, y, 0], [x, y, -1]]));
+    let cells =
+        (-80..80).flat_map(|y| (-80..80).flat_map(move |x| [1, 0, -1, -2].map(|z| [x, y, z])));
     for cell in cells {
         let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, cell).expect("a cell");
         let entries = CatalogueClassCell::generate(galaxy, &process, key).into_entries();
@@ -277,7 +283,10 @@ const MEMBERS: usize = 200;
 /// degree of freedom under 0.97 of them, which refuses only a mark whose engine members all fall
 /// into one tenth of the catalogue's law (the statistic per degree of freedom is then the members'
 /// count). P15.T10.b's fit must bring every mark under the 99.9% point, about 3.1 at nine degrees
-/// of freedom.
+/// of freedom. On the table refitted on 27's engine: 1.5–6.0 over the four marks the engine's 200
+/// low-mass members define, the accretor's mass and the rate under that point and the period and
+/// the donor's mass past it (a finding), the donor's the worst (the engine's median 0.171 M☉
+/// against the table's 0.183); the recoil's two marks have too few members to compare.
 const SCRATCH_CHI_SQUARE_PER_DOF: f64 = 0.97;
 
 /// A scan of every host of the galaxy, the cells within 51,200 ly of the centre along the plane and

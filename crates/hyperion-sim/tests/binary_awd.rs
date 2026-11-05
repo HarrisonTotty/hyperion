@@ -161,10 +161,16 @@ fn donor_kind(phase: Phase) -> AwdDonorKind {
 }
 
 /// The catalogue's entries of `side` in cells about the solar circle, within 2,500 ly of the
-/// Sun-like point along y and 5,000 ly along x, in and below the plane, until there are `n`.
+/// Sun-like point along y and out along x, the nearest columns first, in and below the plane,
+/// until there are `n`. At 27 the fast hosts' 2,000 reach 16,000 ly along x and the slow hosts'
+/// 2,000 ly. Until 27 they lay within 5,000 ly, where 27's cells hold 678 fast hosts: the fitted
+/// rows (P15.T10.b's refit at 27, each donor kind scaled to its observed figure) give the fast
+/// hosts about a sixth of the scratch rows' rate at the solar circle (the old thin disc's
+/// 7.6 × 10⁻⁶ hosts per solar mass formed against 4.8 × 10⁻⁵), and the features' lists hold part
+/// of them (P11.T8.f).
 fn catalogue_marks(galaxy: &Galaxy, side: AwdSide, n: usize) -> Vec<Marks> {
     let mut marks = Vec::with_capacity(n + 32);
-    let cells = (0..10_i32)
+    let cells = (0..32_i32)
         .flat_map(|step| {
             if step == 0 {
                 vec![0]
@@ -323,7 +329,10 @@ const MEMBERS: usize = 300;
 /// engine members all but fall into one tenth of the catalogue's law. Measured at 600 members (2026-10-31): 52–509 over the
 /// ten marks and classes, the fast hosts' periods the worst (the engine's median 18 hours against
 /// the table's 3.4), so about half that at 300; P15.T10.b's fit must bring every mark under the
-/// 99.9% point, about 3.1 at nine degrees of freedom.
+/// 99.9% point, about 3.1 at nine degrees of freedom. On the fitted tables at 27, at 300: 3.5–7.3
+/// over the fast hosts' marks and 3.1–13.9 over the slow hosts', their donors' masses the worst
+/// (the engine's median 0.030 M☉ against the table's 0.053), all but the slow hosts' periods past
+/// that point (a finding).
 const SCRATCH_CHI_SQUARE_PER_DOF: f64 = 290.0;
 
 /// A scan of 10⁶ hosts of both classes, cells along the disc's plane from the solar circle

@@ -19,28 +19,42 @@ pub const MEMBER_STREAMS: u64 = 16;
 /// `n` prior members of `class` near the solar circle, drawn on [`MEMBER_STREAMS`] streams at once
 /// (one thread each; on wasm32-wasip1, in turn) from cells they share (`MemberCells`), and joined
 /// in stream order.
+///
+/// A stream draws its share of `n` layer by layer, each layer's part of it rounded
+/// (`MemberCells::members_in`), so a row whose layers' parts round down gives a stream fewer: the
+/// share is raised until the streams give `n` (from 27 the fast accreting white dwarfs' fitted
+/// row, 0.108, 0.868 and 0.024 of layers C–E, gives 18 of a stream's 19, and 288 of 300). A larger
+/// share keeps each stream's members of a layer and draws more after them, from the cells kept.
 pub fn brute_force_class_members(
     galaxy: &Galaxy,
     class: CarvedClass,
     n: usize,
 ) -> Vec<ClassMember> {
     let streams = usize::try_from(MEMBER_STREAMS).expect("sixteen streams");
-    let share = n.div_ceil(streams);
-    let mut members = Vec::with_capacity(n + streams);
     let cells = MemberCells::new(galaxy);
-    #[cfg(not(target_family = "wasm"))]
-    std::thread::scope(|scope| {
-        let cells = &cells;
-        let handles: Vec<_> = (0..MEMBER_STREAMS)
-            .map(|s| scope.spawn(move || cells.members_in(class, share, s)))
-            .collect();
-        for handle in handles {
-            members.extend(handle.join().expect("a member draw finishes"));
+    let draw = |share: usize| {
+        let mut members = Vec::with_capacity(share * streams);
+        #[cfg(not(target_family = "wasm"))]
+        std::thread::scope(|scope| {
+            let cells = &cells;
+            let handles: Vec<_> = (0..MEMBER_STREAMS)
+                .map(|s| scope.spawn(move || cells.members_in(class, share, s)))
+                .collect();
+            for handle in handles {
+                members.extend(handle.join().expect("a member draw finishes"));
+            }
+        });
+        #[cfg(target_family = "wasm")]
+        for s in 0..MEMBER_STREAMS {
+            members.extend(cells.members_in(class, share, s));
         }
-    });
-    #[cfg(target_family = "wasm")]
-    for s in 0..MEMBER_STREAMS {
-        members.extend(cells.members_in(class, share, s));
+        members
+    };
+    let mut share = n.div_ceil(streams);
+    let mut members = draw(share);
+    while members.len() < n {
+        share += 1;
+        members = draw(share);
     }
     members.truncate(n);
     members
