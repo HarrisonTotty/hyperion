@@ -314,6 +314,53 @@ describe("PlanetViewerDisplay", () => {
     expect(tilt).toHaveProperty("value", "—");
   });
 
+  it("opens its planet in VIEW's ORBIT camera", async () => {
+    const { socket, user } = await renderViewer();
+    await openUniverse(socket, user);
+    await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+    await showPlanet(socket, toInputsDto(DEFAULT_INPUTS));
+    expect(screen.getByRole("button", { name: "0 ORBIT" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("leaves the sun where its orbit puts it as the display mounts", async () => {
+    await renderViewer();
+    expect([
+      screen.getByRole("button", { name: "ORBITAL" }).getAttribute("aria-pressed"),
+      screen.queryByRole("textbox", { name: "LATITUDE" }),
+    ]).toEqual(["true", null]);
+  });
+
+  it("holds the sun over the prime meridian on the equator once HELD is pressed", async () => {
+    const { user } = await renderViewer();
+    await user.click(screen.getByRole("button", { name: "HELD" }));
+    expect(screen.getByRole("textbox", { name: "LATITUDE" })).toHaveProperty("value", "0.0");
+  });
+
+  it("refuses a latitude outside -90 to 90 with what is valid", async () => {
+    const { user } = await renderViewer();
+    await user.click(screen.getByRole("button", { name: "HELD" }));
+    const latitude = screen.getByRole("textbox", { name: "LATITUDE" });
+    await user.clear(latitude);
+    await user.type(latitude, "95{Enter}");
+    expect(wholeText("LATITUDE INVALID: enter -90.0 to 90.0")).toHaveLength(1);
+  });
+
+  it("takes a latitude in range and shows it to a tenth", async () => {
+    const { user } = await renderViewer();
+    await user.click(screen.getByRole("button", { name: "HELD" }));
+    const latitude = screen.getByRole("textbox", { name: "LATITUDE" });
+    await user.clear(latitude);
+    await user.type(latitude, "30{Enter}");
+    expect(latitude).toHaveProperty("value", "30.0");
+  });
+
+  it("gives the sun back to its orbit under ORBITAL", async () => {
+    const { user } = await renderViewer();
+    await user.click(screen.getByRole("button", { name: "HELD" }));
+    await user.click(screen.getByRole("button", { name: "ORBITAL" }));
+    expect(screen.queryByRole("textbox", { name: "LATITUDE" })).toBeNull();
+  });
+
   it("offers VIEW no SCENE selector: its one scene is the planet", async () => {
     const { socket, user } = await renderViewer();
     await openUniverse(socket, user);

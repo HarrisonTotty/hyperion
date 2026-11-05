@@ -4321,6 +4321,18 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   margin-left: 0.5rem;
 }
 
+/* SUN's legend holds its two settings beside its name. */
+.planet-sun__legend {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.planet-sun__modes {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
 /* SEED and GENERATE on one row, the seed's field taking what the button leaves. */
 .planet-inputs__generate {
   display: flex;

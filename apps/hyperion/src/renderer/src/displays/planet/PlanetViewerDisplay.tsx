@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId } from "react";
+import { memo, useCallback, useEffect, useId, useMemo } from "react";
 
 import { StatusText } from "../../components/StatusText";
 import { useServerLink } from "../../lib/serverLink";
@@ -10,7 +10,9 @@ import { ViewDisplay } from "../view/ViewDisplay";
 import { ViewSceneProvider } from "../view/ViewSceneProvider";
 import { GENERATE_KEY, PlanetInputsPanel } from "./PlanetInputsPanel";
 import { PlanetViewerBar, RANDOMIZE_KEY } from "./PlanetViewerBar";
+import { SunControl } from "./SunControl";
 import { usePlanetViewer } from "./usePlanetViewer";
+import { heldSunStatement } from "./viewerScene";
 
 /** Props of {@link PlanetViewerDisplay}: what `App` hands `VIEW`, which the viewer draws with. */
 export interface PlanetViewerDisplayProps {
@@ -31,7 +33,8 @@ export interface PlanetViewerDisplayProps {
  *   views, held by a `ViewSceneProvider` of its own whose one scene is the planet's body inspection,
  *   with no `SCENE` selector and no subscription to the server's scene. Each planet shown is a new
  *   opening, its camera framed afresh.
- * - Until a planet is shown the view's place says how to show one.
+ * - Until a planet is shown the view's place says how to show one. While `SUN` is `HELD` the
+ *   view's label block says where (`heldSunStatement`), since the light is not the records'.
  * - `G` generates and `N` randomizes from anywhere on the display but a text field and a view's
  *   canvas, whose letters are the flight keys.
  * - Hidden, it costs nothing: `Activity` tears its effects down, `VIEW`'s engine, loop, terrain
@@ -77,11 +80,17 @@ function PlanetViewerPanels({
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [generate, draw, heldBack]);
+  const sunStatement = heldSunStatement(viewer.sun);
+  const hostStatements = useMemo(
+    () => (sunStatement === null ? NO_STATEMENTS : [sunStatement]),
+    [sunStatement],
+  );
   const renderView = useCallback(
     () => (
       <ViewDisplay
         sceneBar={false}
         sceneOptions={NO_KEPT_SCENES}
+        hostStatements={hostStatements}
         setting={setting}
         platform={platform}
         performanceThreads={performanceThreads}
@@ -89,13 +98,18 @@ function PlanetViewerPanels({
         atmosphereLevers={atmosphereLevers}
       />
     ),
-    [setting, platform, performanceThreads, geometry, atmosphereLevers],
+    [setting, platform, performanceThreads, geometry, atmosphereLevers, hostStatements],
   );
   const { shown } = viewer;
   return (
     <div className="planet-viewer">
       <div className="planet-viewer__inputs">
-        <PlanetInputsPanel viewer={viewer} heldBack={heldBack} heldBackId={heldBackId} />
+        <PlanetInputsPanel
+          viewer={viewer}
+          heldBack={heldBack}
+          heldBackId={heldBackId}
+          sun={<SunControl sun={viewer.sun} onSun={viewer.setSun} />}
+        />
       </div>
       <div className="planet-viewer__view">
         <PlanetViewerBar
@@ -125,6 +139,9 @@ function PlanetViewerPanels({
 
 /** The viewer offers `VIEW` no kept test scene: its one scene is its planet's inspection. */
 const NO_KEPT_SCENES: ReadonlyArray<never> = [];
+
+/** The label block's statements of a sun where the records put it: none. */
+const NO_STATEMENTS: ReadonlyArray<string> = [];
 
 /** The `PLANET VIEWER` display (see {@link PlanetViewerPanels}), memoised as `VIEW` is. */
 export const PlanetViewerDisplay = memo(PlanetViewerPanels);

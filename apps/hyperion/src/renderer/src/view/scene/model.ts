@@ -352,6 +352,11 @@ export interface ViewScene {
    * view reads as a server scene's; absent for every other kept scene and for the server's.
    */
   readonly served?: ServedSceneSource;
+  /**
+   * The body an `ORBIT` camera is offered about (plan R15, T4): the `PLANET VIEWER`'s planet;
+   * absent for every other scene, which offers no `ORBIT`.
+   */
+  readonly orbitHome?: BodyIdHex;
 }
 
 /**
@@ -437,5 +442,10 @@ export function cameraSceneOf(scene: ViewScene): CameraScene {
             lengthM: own.hull.lengthM,
           },
     defaultPose: scene.defaultPose,
+    orbitBodies: scene.bodies.flatMap((body) =>
+      body.kind !== "star" && body.radiusM > 0 ? [{ id: body.id, radiusM: body.radiusM }] : [],
+    ),
+    // Only the PLANET VIEWER's scene offers ORBIT, about its planet (plan R15, T4).
+    orbitHome: scene.orbitHome ?? null,
   };
 }

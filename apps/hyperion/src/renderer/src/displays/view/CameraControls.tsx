@@ -68,6 +68,7 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
   { preset: "seat", key: "1" },
   { preset: "chase", key: "2" },
   { preset: "free", key: "3" },
+  { preset: "orbit", key: "0" },
 ];
 
 /** The rate's chord as the words of its limit reason name it, before the platform's is set. */
@@ -141,11 +142,16 @@ export function CameraControls({
   const widest = fovDeg >= Math.max(...FOV_STEPS_DEG);
   const slowest = rateStep <= 0;
   const fastest = rateStep >= maxRateStep;
-  const anyHeldBack = PRESET_KEYS.some(({ preset: each }) => !offered.includes(each));
+  // `ORBIT` stands only where the scene has a body to hold it about (plan R15, T4); the others stand
+  // held back where they cannot act.
+  const shownPresets = PRESET_KEYS.filter(
+    ({ preset: each }) => each !== "orbit" || offered.includes(each),
+  );
+  const anyHeldBack = shownPresets.some(({ preset: each }) => !offered.includes(each));
   const body = (
     <>
       <fieldset className="preset-buttons" aria-label="Camera presets">
-        {PRESET_KEYS.map(({ preset: each, key }) => {
+        {shownPresets.map(({ preset: each, key }) => {
           const heldBack = !offered.includes(each);
           return (
             <button

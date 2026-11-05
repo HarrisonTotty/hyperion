@@ -57,9 +57,12 @@ export function pressAt(
 /** How a drag turns a view's camera: as a look, or as an orbit about what it chases. */
 export type DragKind = "look" | "orbit";
 
-/** How a drag turns a camera in `preset`: an orbit in `CHASE`, a look in `FREE` and `SEAT`. */
+/**
+ * How a drag turns a camera in `preset`: an orbit in `CHASE` and `ORBIT` (about the body, plan R15,
+ * T4), a look in `FREE` and `SEAT`.
+ */
 export function dragKindOf(preset: CameraPreset): DragKind {
-  return preset === "chase" ? "orbit" : "look";
+  return preset === "chase" || preset === "orbit" ? "orbit" : "look";
 }
 
 /**

@@ -36,7 +36,8 @@ import { toBodiesRequest, toSystemBodiesModel } from "../../lib/system/bodiesWir
 import { REQUEST_TIMEOUT_MS, type RequestState } from "../../lib/useServerRequest";
 import type { BodyInspection } from "../../view/scenes/inspectionScene";
 import { surveyInspected } from "../../view/scenes/inspectionSurvey";
-import { type InspectionOpening, inspectionOption } from "../view/ViewSceneProvider";
+import type { InspectionOpening } from "../view/ViewSceneProvider";
+import { ORBITAL_SUN, type SunHolder, type SunSetting, viewerScene } from "./viewerScene";
 import {
   DEFAULT_INPUTS,
   fromInputsDto,
@@ -109,6 +110,10 @@ export interface PlanetViewer {
   readonly setDrawSeed: (seed: SeedHex) => void;
   /** The draw seed of the last draw whose planet was shown, or `null` before the first. */
   readonly lastDraw: SeedHex | null;
+  /** Where the planet's sun stands (`viewerScene.ts`): `ORBITAL` as the display mounts. */
+  readonly sun: SunSetting;
+  /** Sets the sun, which moves the light at the view's next frame, the scene kept. */
+  readonly setSun: (sun: SunSetting) => void;
 }
 
 /** The draw seed `RANDOMIZE` starts from as the display mounts. */
@@ -196,9 +201,13 @@ function failedCommand(
  * The inspection's kept scene of `inspection`, or why it cannot be drawn: a planet the generator
  * destroyed, or one not present at the epoch, has no body to draw (`inspectionScene` throws).
  */
-function openedOption(inspection: BodyInspection): InspectionOpening["option"] | string {
+function openedOption(
+  inspection: BodyInspection,
+  sun: SunHolder,
+): InspectionOpening["option"] | string {
   try {
-    return inspectionOption(inspection);
+    const kept = viewerScene(inspection, sun);
+    return { name: kept.name, make: () => kept };
   } catch (error: unknown) {
     const reason = error instanceof Error ? error.message : String(error);
     return `the planet is not drawn at the epoch: ${reason}`;
@@ -302,6 +311,9 @@ export function usePlanetViewer(
   const [command, setCommand] = useState<ViewerCommand | null>(null);
   const [shown, setShown] = useState<ShownPlanet | null>(null);
   const [drawSeed, setDrawSeed] = useState<SeedHex>(FIRST_DRAW_SEED);
+  const [sun, setSunState] = useState<SunSetting>(ORBITAL_SUN);
+  // The scene reads the sun at every frame from this holder, which `setSun` writes with the state.
+  const sunHolder = useRef<SunHolder>({ current: ORBITAL_SUN });
   const [lastDraw, setLastDraw] = useState<SeedHex | null>(null);
   // The command in flight, whose controller a newer command and the unmount abort.
   const flight = useRef<AbortController | null>(null);
@@ -335,7 +347,7 @@ export function usePlanetViewer(
         setCommand(outcome.command);
         return false;
       }
-      const option = openedOption(outcome.inspection);
+      const option = openedOption(outcome.inspection, sunHolder.current);
       if (typeof option === "string") {
         setCommand({
           kind,
@@ -428,6 +440,10 @@ export function usePlanetViewer(
   const setInputs = useCallback((next: PlanetInputs): void => {
     setInputsState(next);
   }, []);
+  const setSun = useCallback((next: SunSetting): void => {
+    sunHolder.current.current = next;
+    setSunState(next);
+  }, []);
 
   return {
     inputs,
@@ -441,5 +457,7 @@ export function usePlanetViewer(
     drawSeed,
     setDrawSeed,
     lastDraw,
+    sun,
+    setSun,
   };
 }

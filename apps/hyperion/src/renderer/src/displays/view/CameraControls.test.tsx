@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PrimaryModifier } from "../../lib/platform";
 import { statusLine } from "../../test/statusLine";
+import type { CameraPreset } from "../../view/camera/state";
 import { CameraControls } from "./CameraControls";
 import type { CameraPlace } from "./cameraPlace";
 
@@ -15,11 +16,15 @@ const PLACE: CameraPlace = {
 };
 
 /** The camera panel at `rateStep` of the 0–12 steps, for `modifier`'s platform. */
-function renderAt(rateStep: number, modifier: PrimaryModifier): void {
+function renderAt(
+  rateStep: number,
+  modifier: PrimaryModifier,
+  offered: ReadonlyArray<CameraPreset> = ["seat", "chase", "free"],
+): void {
   render(
     <CameraControls
       preset="free"
-      offered={["seat", "chase", "free"]}
+      offered={offered}
       fovDeg={60}
       rateStep={rateStep}
       maxRateStep={12}
@@ -98,5 +103,17 @@ describe("the camera panel's readings (decision-r07-t19f-position, item 2)", () 
         ),
       );
     expect(following).toEqual([true, true, true]);
+  });
+});
+
+describe("the camera panel's presets (plan R15, T4)", () => {
+  it("shows ORBIT only where the scene offers it", () => {
+    renderAt(6, "ctrl");
+    expect(screen.queryByRole("button", { name: "0 ORBIT" })).toBeNull();
+  });
+
+  it("shows ORBIT with its key where the scene offers it", () => {
+    renderAt(6, "ctrl", ["free", "orbit"]);
+    expect(screen.getByRole("button", { name: "0 ORBIT" })).toBeInTheDocument();
   });
 });

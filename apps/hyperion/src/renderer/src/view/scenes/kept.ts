@@ -50,6 +50,12 @@ export interface KeptScene {
    * the display's meter as it stands where absent, as every other kept scene opens.
    */
   readonly startMeter?: MeterMode;
+  /**
+   * The preset a view of it opens in: `orbit` for the `PLANET VIEWER`'s planet (plan R15, T4), held
+   * about the scene's own body from its framed pose; the scene's own start where absent (`SEAT`
+   * with an own ship, `FREE` without), as every other kept scene opens.
+   */
+  readonly startPreset?: "orbit";
 }
 
 /** The kept scenes' system: a made-up ID, labelled as a test wherever it is shown. */

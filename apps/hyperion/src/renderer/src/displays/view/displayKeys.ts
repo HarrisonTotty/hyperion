@@ -82,12 +82,15 @@ export const MAXIMIZED_KEYS = `MAXIMIZE VIEW: ${MAXIMIZE_KEY} SHOWS PANELS`;
  *
  * @param gridStands - Whether the `CONTROLS` view's `GRID` row stands (`gridRowStands`), and so its
  *   key acts.
+ * @param orbitOffered - Whether the `CONTROLS` view's scene offers `ORBIT` (plan R15, T4), whose key
+ *   then follows `3 FREE`.
  */
-export function hiddenControlKeys(gridStands: boolean): string {
+export function hiddenControlKeys(gridStands: boolean, orbitOffered: boolean): string {
   return [
     "1 SEAT",
     "2 CHASE",
     "3 FREE",
+    ...(orbitOffered ? ["0 ORBIT"] : []),
     `${STYLE_TOGGLE_KEY} STYLE`,
     ...(gridStands ? [`${GRID_KEY} GRID`] : []),
     `${ENABLE_KEY} ENABLE`,
@@ -108,15 +111,17 @@ export function hiddenControlKeys(gridStands: boolean): string {
  * @param controls - The `CONTROLS` view's name, or `null` while it is `PRIMARY`.
  * @param selected - The name of the `CONTROLS` view's selection, or `null` with none.
  * @param gridStands - Whether the `CONTROLS` view's `GRID` row stands.
+ * @param orbitOffered - Whether the `CONTROLS` view's scene offers `ORBIT`.
  */
 export function maximizedKeys(
   controls: string | null,
   selected: string | null,
   gridStands: boolean,
+  orbitOffered: boolean,
 ): ReadonlyArray<string> {
   return [
     MAXIMIZED_KEYS,
-    hiddenControlKeys(gridStands),
+    hiddenControlKeys(gridStands, orbitOffered),
     ...(controls === null ? [] : [`CONTROLS ${controls}`]),
     ...(selected === null ? [] : [`SELECTED ${selected}`]),
   ];

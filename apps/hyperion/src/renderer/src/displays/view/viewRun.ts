@@ -19,6 +19,7 @@ import { norm, sub } from "../../geometry/vec3";
 import { flightInput, type ViewKeyAction } from "../../view/camera/keys";
 import {
   changeFreeRate,
+  type FreeCameraInput,
   FREE_ROTATION_RATE_DEG_PER_S,
   freeRateMPerS,
   MAX_FREE_STEP_S,
@@ -32,10 +33,12 @@ import {
   NO_TURN,
   type ViewTurn,
 } from "../../view/camera/look";
+import { coRotated, orbitDragged, orbitLooked, orbitZoomed } from "../../view/camera/orbit";
 import type { CameraFrame, CameraPose } from "../../view/camera/pose";
 import {
   advanceEasedMove,
   type CameraPreset,
+  type CameraScene,
   type CameraState,
   type CameraTarget,
   type CutDestination,
@@ -47,6 +50,7 @@ import {
   newCameraState,
   nextTarget,
   onSystemChange,
+  type OrbitBody,
   stepFov,
   targetPosition,
   turnLook,
@@ -171,13 +175,19 @@ export interface ViewRun {
  */
 export function startRun(kept: KeptScene): ViewRun {
   const scene = kept.sceneAt(0);
-  const camera = newCameraState(cameraSceneOf(scene), "camera");
-  return {
-    source: { kind: "kept", kept },
-    tS: 0,
-    scene,
-    camera: kept.startStyle === undefined ? camera : { ...camera, style: kept.startStyle },
-  };
+  const fresh = newCameraState(cameraSceneOf(scene), "camera");
+  const camera = kept.startStyle === undefined ? fresh : { ...fresh, style: kept.startStyle };
+  const run: ViewRun = { source: { kind: "kept", kept }, tS: 0, scene, camera };
+  if (kept.startPreset === undefined) {
+    return run;
+  }
+  // A scene that opens in `ORBIT` (plan R15, T4) cuts to it at once, as its key would.
+  const orbit = commandRun(
+    run,
+    { kind: "preset", preset: kept.startPreset },
+    { easedMoves: false, reducedMotion: true },
+  );
+  return orbit.kind === "done" ? orbit.run : run;
 }
 
 /**
@@ -186,10 +196,20 @@ export function startRun(kept: KeptScene): ViewRun {
  * 2026-11-01); `run` itself for any other scene or camera.
  */
 export function framedRun(run: ViewRun, aspect: number): ViewRun {
-  const pose =
-    run.source.kind === "kept" && run.camera.preset === "free"
+  const framed =
+    run.source.kind === "kept" && (run.camera.preset === "free" || run.camera.preset === "orbit")
       ? run.source.kept.framedPoseFor?.(aspect)
       : undefined;
+  // An `ORBIT` camera takes the framed pose only where it is about the framed body, in its frame.
+  const pose =
+    framed !== undefined &&
+    run.camera.preset === "orbit" &&
+    (framed.frame.kind !== run.camera.pose.frame.kind ||
+      (framed.frame.kind === "body" &&
+        run.camera.pose.frame.kind === "body" &&
+        framed.frame.body !== run.camera.pose.frame.body))
+      ? undefined
+      : framed;
   return pose === undefined ? run : { ...run, camera: { ...run.camera, pose } };
 }
 
@@ -275,7 +295,91 @@ export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
       camera = onSystemChange(camera, cameraSceneOf(scene));
     }
   }
+  camera = withGround(camera, run.scene, scene);
   return { ...run, tS, scene, camera: flyCamera(camera, scene, dtS, input) };
+}
+
+/**
+ * `run` with its `ORBIT` camera zoomed `steps` steps about its body (plan R15, T4), or refused
+ * outside `ORBIT`, so that a wheel never moves another camera unseen.
+ */
+function orbitZoomRun(run: ViewRun, steps: number, scene: CameraScene): CommandResult {
+  const body = orbitHeldBody(run.camera, scene);
+  if (body === null) {
+    return { kind: "refused", reason: "not_orbit" };
+  }
+  return {
+    kind: "done",
+    run: {
+      ...run,
+      camera: { ...run.camera, pose: orbitZoomed(run.camera.pose, steps, body.radiusM) },
+    },
+  };
+}
+
+/** The body an `ORBIT` camera is held about, its pose's frame's, or `null` outside `ORBIT`. */
+function orbitHeldBody(camera: CameraState, scene: CameraScene): OrbitBody | null {
+  const frame = camera.pose.frame;
+  if (camera.preset !== "orbit" || frame.kind !== "body") {
+    return null;
+  }
+  return scene.orbitBodies.find((body) => body.id === frame.body) ?? null;
+}
+
+/** An `ORBIT` camera's turn about its body under the arrows, rad/s before its altitude's share. */
+const ORBIT_ARROW_RAD_PER_S = 0.5;
+
+/** An `ORBIT` camera's zoom under `W` and `S`, steps a second. */
+const ORBIT_ZOOM_STEPS_PER_S = 4;
+
+/** An `ORBIT` camera's tilt under `R` and `F` and its heading under `Q` and `E`, rad/s. */
+const ORBIT_LOOK_RAD_PER_S = Math.PI / 4;
+
+/**
+ * An `ORBIT` camera one frame on (plan R15, T4): turned about its body by the frame's drag and by
+ * the arrows, which move it over the ground the way they point; zoomed by `W` (in) and `S` (out);
+ * tilted towards the horizon by `R` and back by `F`; turned in heading by `Q` and `E`. Each is the
+ * operator's own motion, which reduced motion leaves as it is.
+ */
+function flyOrbit(
+  camera: CameraState,
+  scene: CameraScene,
+  dtS: number,
+  keys: FreeCameraInput,
+  dragged: ViewTurn,
+): CameraState {
+  const body = orbitHeldBody(camera, scene);
+  if (body === null) {
+    return camera;
+  }
+  const arrows: ViewTurn = {
+    yawRad: -keys.rotate.y * ORBIT_ARROW_RAD_PER_S * dtS,
+    pitchRad: -keys.rotate.x * ORBIT_ARROW_RAD_PER_S * dtS,
+  };
+  let pose = orbitDragged(camera.pose, addTurns(dragged, arrows), body.radiusM);
+  pose = orbitZoomed(pose, -keys.translate.z * ORBIT_ZOOM_STEPS_PER_S * dtS, body.radiusM);
+  pose = orbitLooked(
+    pose,
+    keys.translate.y * ORBIT_LOOK_RAD_PER_S * dtS,
+    keys.rotate.z * ORBIT_LOOK_RAD_PER_S * dtS,
+  );
+  return { ...camera, pose };
+}
+
+/**
+ * `camera` turned with its body's spin from `before`'s scene to `after`'s, where it is an `ORBIT`
+ * camera and both scenes give the body's rotation: it hovers over one place of the ground.
+ */
+function withGround(camera: CameraState, before: ViewScene, after: ViewScene): CameraState {
+  const frame = camera.pose.frame;
+  if (camera.preset !== "orbit" || frame.kind !== "body") {
+    return camera;
+  }
+  const from = sceneOrigins(before).bodyFixedRotation(frame.body);
+  const to = sceneOrigins(after).bodyFixedRotation(frame.body);
+  return from === null || to === null
+    ? camera
+    : { ...camera, pose: coRotated(camera.pose, from, to) };
 }
 
 /** The free camera's full rotation rate, rad/s, at which the arrows turn a look offset too. */
@@ -307,6 +411,9 @@ function flyCamera(
           yawRad: keys.rotate.y * ARROW_TURN_RAD_PER_S * dtS,
           pitchRad: keys.rotate.x * ARROW_TURN_RAD_PER_S * dtS,
         };
+  if (camera.preset === "orbit") {
+    return advanceEasedMove(flyOrbit(camera, cameraScene, dtS, keys, dragged), dtS);
+  }
   const looked = turnLook(camera, addTurns(dragged, arrows), cameraScene);
   const following = turnFreeCamera(followPreset(looked, cameraScene), dragged);
   const flown = stepFreeCamera(following, keys, dtS, input.reducedMotion, cameraScene).state;
@@ -374,7 +481,10 @@ export const WIREFRAME_ONLY: StyleAvailability = { wireframe: true, photorealist
  */
 export type CommandResult =
   | { readonly kind: "done"; readonly run: ViewRun }
-  | { readonly kind: "refused"; readonly reason: "no_own_ship" | "not_free" };
+  | {
+      readonly kind: "refused";
+      readonly reason: "no_own_ship" | "no_body" | "not_free" | "not_orbit";
+    };
 
 function cut(run: ViewRun, to: CutDestination, options: CutOptions): CommandResult {
   const result = cutTo(run.camera, to, cameraSceneOf(run.scene), options);
@@ -427,6 +537,9 @@ export function commandRun(
             }
           : { kind: "refused", reason: "not_free" };
       break;
+    case "zoom":
+      result = orbitZoomRun(run, action.steps, cameraScene);
+      break;
     case "style": {
       const style = action.style === "toggle" ? otherStyle(run.camera.style) : action.style;
       result = {
@@ -457,6 +570,7 @@ export const PRESET_NAMES: Readonly<Record<CameraPreset, string>> = {
   seat: "SEAT",
   chase: "CHASE",
   free: "FREE",
+  orbit: "ORBIT",
 };
 
 /** A body's frame's name: `BODY <designation>`. */

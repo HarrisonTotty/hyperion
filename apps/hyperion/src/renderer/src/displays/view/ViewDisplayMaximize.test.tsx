@@ -215,10 +215,13 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
   it("names 5 GRID among the hidden controls' keys only while its row stands", async () => {
     const view = await setup();
     await pressMaximize(view);
-    const wireframe = linePart(hiddenControlKeys(false)) !== null;
+    const wireframe = linePart(hiddenControlKeys(false, false)) !== null;
     await view.user.keyboard("4");
     await playFor(view, 4);
-    expect([wireframe, linePart(hiddenControlKeys(true))]).toEqual([true, expect.any(HTMLElement)]);
+    expect([wireframe, linePart(hiddenControlKeys(true, false))]).toEqual([
+      true,
+      expect.any(HTMLElement),
+    ]);
   });
 
   it("states a keyed ENABLE held back for want of a meter after NOT AVAILABLE", async () => {
@@ -232,7 +235,7 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
   it("names every key of the controls it hides on its line", async () => {
     const view = await setup();
     await pressMaximize(view);
-    expect(linePart(hiddenControlKeys(false))).toBeVisible();
+    expect(linePart(hiddenControlKeys(false, false))).toBeVisible();
   });
 
   it("runs its line on from the key legend's, in one row that wraps between parts", async () => {
@@ -412,6 +415,12 @@ describe("VIEW's MAXIMIZE VIEW (the owner's request, 2026-11-01)", () => {
       expect(linePart("CONTROLS INSTRUMENT 1")).toBeVisible();
     });
 
+    it("stands no NO OWN SHIP where the scene has one", async () => {
+      const view = await setup();
+      await pressMaximize(view);
+      expect(shownLines(NO_OWN_SHIP)).toHaveLength(0);
+    });
+
     it("stands NO OWN SHIP where the scene has none", async () => {
       const view = await setup();
       await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
@@ -537,7 +546,7 @@ describe("the primary's upper label block under MAXIMIZE VIEW (the owner's rulin
   it("names 9 on the strip with the other keys", async () => {
     const view = await setup();
     await pressMaximize(view);
-    expect(linePart(hiddenControlKeys(false))?.textContent).toContain(
+    expect(linePart(hiddenControlKeys(false, false))?.textContent).toContain(
       `${LABEL_BLOCK_KEY} LABEL BLOCK`,
     );
   });
@@ -692,7 +701,7 @@ describe("VIEW's display keys (the owner's request, 2026-11-01)", () => {
       viewDisplayKey(press(GRID_KEY)),
       viewDisplayKey(press("7")),
       viewDisplayKey(press("8")),
-      hiddenControlKeys(true),
+      hiddenControlKeys(true, false),
     ]).toEqual([
       { kind: "preset", preset: "seat" },
       { kind: "preset", preset: "chase" },

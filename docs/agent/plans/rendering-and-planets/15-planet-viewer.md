@@ -179,3 +179,24 @@ every galaxy system takes the code it took before. No `GENERATOR_VERSION` change
 - R15.T3 (lean, 2026-11-05): the field units hold: `SMA` and `FORMED AT` are always in AU, and
   `ROTATION` is in d, capped at 1,000 d for entry. The slot for T4's `SUN` is
   `PlanetInputsPanel`'s `sun` prop. The new names are in the guide's nomenclature list.
+- R15.T4 (built): `view/camera/orbit.ts` holds the `ORBIT` camera's pose (`orbitStart`,
+  `orbitDragged`, `orbitZoomed`, `orbitLooked`, `coRotated`). `CameraPreset` gains `orbit`, with
+  `CameraScene.orbitBodies` and `orbitHome`, `ViewScene.orbitHome`, `KeptScene.startPreset`, the
+  `zoom` command (`ViewCanvas`'s wheel) and `KeyLegend`'s `ORBIT` line. `displays/planet/viewerScene.ts`
+  (`SunSetting`, `sunnedScene`, `viewerScene`) and `SunControl` fill the panel's `sun` slot.
+- R15.T4 (lean, 2026-11-05): `ORBIT` is offered only by a scene that names its body
+  (`ViewScene.orbitHome`, which only the viewer sets), so `VIEW`'s other scenes and their captures
+  are unchanged. Its key is `0`.
+- R15.T4 (lean, 2026-11-05): the floor is 10 m above the body's reference radius, not above the
+  ground. The camera reads no terrain height, so above the datum it can stand inside high ground.
+- R15.T4 (lean, 2026-11-05): tilt and heading are on `R`/`F` and `Q`/`E`, the free camera's keys,
+  with no Shift-drag. The wheel and `W`/`S` zoom, and the arrows orbit at 0.5 rad/s, scaled as a
+  drag is by altitude over distance.
+- R15.T4 (lean, 2026-11-05): `SUN` is `ORBITAL` (where the records put it, as it opens) or `HELD`
+  at a body-fixed `LATITUDE` and `LONGITUDE`, which turns every star about the planet at its own
+  distance. In `ORBIT` the camera turns with the ground, so it hovers over one place.
+- R15.T4 (lean, 2026-11-05): while `HELD`, the view's label block states `SUN HELD: LATITUDE … ·
+LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`'s hidden keys
+  name `0 ORBIT` where it is offered, and the key legend follows the `CONTROLS` view's preset.
+- R15.T4 (lean, 2026-11-05): `ORBIT` also names a preset now, beside the `SYSTEM` panel and the
+  legend entry of that name. The owner may want another name for the preset.

@@ -121,6 +121,8 @@ export function aCameraScene(
     ],
     ownShip: anOwnShip(),
     defaultPose: aCameraPose(),
+    orbitBodies: [],
+    orbitHome: null,
     ...overrides,
   };
 }

@@ -336,9 +336,6 @@ const NO_STARS: ReadonlyArray<ViewStar> = [];
 /** The pointer's reach to a mark, rem: half the guide's 2 rem target, as plan 05's pick has it. */
 const PICK_REM = 1;
 
-/** The camera presets, every one of which a scene with an own ship offers. */
-const PRESET_COUNT = Object.keys(PRESET_NAMES).length;
-
 /** The folding panels, in the side column's order. */
 const FOLD_PANELS: ReadonlyArray<FoldPanel> = [
   "instruments",
@@ -422,6 +419,11 @@ interface ViewDisplayProps {
    * scene is its own planet's inspection alone, gives none (plan R15).
    */
   readonly sceneBar?: boolean | undefined;
+  /**
+   * What the display's host states on the primary's label block after the scene's opening's
+   * statements, stable in identity: the `PLANET VIEWER`'s held sun (plan R15, T4); none by default.
+   */
+  readonly hostStatements?: ReadonlyArray<LabelStatement> | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -1871,6 +1873,10 @@ function ViewStage({
   };
   const fovDeg = (): number => runRef.current.camera.fovDeg;
   const dragKind = (): DragKind => dragKindOf(runRef.current.camera.preset);
+  // A wheel zooms an `ORBIT` camera (plan R15, T4) and is refused in every other preset.
+  const onZoom = (steps: number): void => {
+    commandView(VIEW_ID, { kind: "zoom", steps });
+  };
   // Where the primary's camera is, at the readouts' rate, for its label block and camera panel.
   const place = useCameraPlace(shown.run);
 
@@ -2168,7 +2174,9 @@ function ViewStage({
       : controlledShown.photoreal === "failed";
   // The first style's refusal, as the style control shows it.
   const styleReason = controlledRefusals.wireframe ?? controlledRefusals.photorealistic;
-  const noOwnShip = offeredPresets(cameraSceneOf(controlledRun.scene)).length < PRESET_COUNT;
+  const controlledCamera = cameraSceneOf(controlledRun.scene);
+  const noOwnShip = controlledCamera.ownShip === null;
+  const orbitOffered = offeredPresets(controlledCamera).includes("orbit");
   // The exposure's status, `AUTO NOT AVAILABLE: …`, which stands under the row while it is folded.
   const exposureStanding = autoNotAvailable(meterShown);
   // The faults and statuses that stand for the panels hidden, folded in the compact layout or every
@@ -2283,6 +2291,7 @@ function ViewStage({
         controlsView === VIEW_ID ? null : viewDisplayName(controlsView),
         selectedName,
         gridStands,
+        orbitOffered,
       ).map((part) => (
         <p className="view__keys view__foot-item" key={part}>
           {footDot}
@@ -2340,6 +2349,7 @@ function ViewStage({
               onPress={onPress}
               onTurn={onTurn}
               onPick={onPick}
+              onZoom={onZoom}
             >
               <ViewMarkLabels
                 anchors={shown.anchors}
@@ -2463,7 +2473,13 @@ function ViewStage({
          */}
         <div className="view__foot">
           <div className="view__foot-lines">
-            {engineLine === null ? <KeyLegend id={legendId} modifier={modifier} /> : null}
+            {engineLine === null ? (
+              <KeyLegend
+                id={legendId}
+                modifier={modifier}
+                orbit={controlledRun.camera.preset === "orbit"}
+              />
+            ) : null}
             {maximizedPart}
           </div>
           {maximized ? (
@@ -2888,6 +2904,7 @@ function ViewPanels({
   watchTerrain,
   opticsWorkers = startOpticsWorker,
   sceneBar = true,
+  hostStatements = NO_SCENE_STATEMENTS,
 }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
@@ -3074,8 +3091,8 @@ function ViewPanels({
   const inspected = server === null && inspection !== null && option === inspection.option;
   const sceneStatements = useMemo((): ReadonlyArray<LabelStatement> => {
     const statement = inspected ? surveyPassStatement(surveyOutcome) : null;
-    return statement === null ? NO_SCENE_STATEMENTS : [statement];
-  }, [inspected, surveyOutcome]);
+    return statement === null ? hostStatements : [statement, ...hostStatements];
+  }, [inspected, surveyOutcome, hostStatements]);
   const source = useMemo(
     (): StageSource => (server === null ? { kind: "kept", option } : { kind: "server", server }),
     [server, option],
