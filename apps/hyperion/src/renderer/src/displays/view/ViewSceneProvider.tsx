@@ -154,7 +154,9 @@ export function ViewSceneProvider({
     }),
     [scene, sceneName, keptName, knownSystem, choose, open, closeInspection],
   );
-  return (
-    <ViewSceneContext value={host}>{children(viewProvenance(sceneName, scene))}</ViewSceneContext>
-  );
+  // What it wraps is made again for its provenance, not at every push of the scene, which reaches
+  // the scene's consumers through the context alone (lane perf-render-thread-2).
+  const provenance = viewProvenance(sceneName, scene);
+  const content = useMemo(() => children(provenance), [children, provenance]);
+  return <ViewSceneContext value={host}>{content}</ViewSceneContext>;
 }

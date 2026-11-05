@@ -173,6 +173,22 @@ describe("useScene", () => {
     ]);
   });
 
+  it("hands a render for another cause the same scene, and a push a new one (lane perf-render-thread-2)", async () => {
+    const { result, rerender, socket } = renderScene();
+    await opens(socket, 3);
+    const opened = result.current;
+    rerender();
+    const again = result.current;
+    act(() => {
+      socket.serverNotifies(3, heartbeat(1, 4_600));
+    });
+    expect([again === opened, result.current === opened, result.current.model?.sequence]).toEqual([
+      true,
+      false,
+      1,
+    ]);
+  });
+
   it("receives the scene and renders it at the pushed time extrapolated at its rate", async () => {
     const { result, socket } = renderScene();
     await opens(socket, 3);

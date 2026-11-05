@@ -28,7 +28,6 @@ import type { Anchor } from "../../spatial/drawList";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
 import { pick } from "../../spatial/pick";
 import type { ScreenBoxPx } from "../../spatial/symbols";
-import { useThrottledValue } from "../../spatial/useThrottledValue";
 import { maxFreeRateStep } from "../../view/camera/freeCamera";
 import { BudgetedScale, drawsInFrame, PrimaryFrameTimes } from "../../view/budget/framePacing";
 import {
@@ -882,6 +881,7 @@ function ViewStage({
   const runRef = useRef<ViewRun>(initial);
   // Whether the run has been framed for the stage's aspect, as a kept scene may ask once.
   const framedRef = useRef(false);
+  // What the loop last published, with each command's run at once, which the specs' styles read.
   const [published, setPublished] = useState<Published>({
     run: initial,
     anchors: [],
@@ -895,7 +895,29 @@ function ViewStage({
     atmosphere: NO_ATMOSPHERE_SHOWN,
     imageLimited: false,
   });
-  const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
+  // What the readouts show, changed at most every READOUT_INTERVAL_MS (Design note 18): the loop's
+  // publish at its turn, which a command's run waits for, or where no loop runs a command's at once
+  // or at its hold's end; set with the publish rather than held in a throttle, whose holds each
+  // rendered the stage again (lane perf-render-thread-2).
+  const [shown, setShown] = useState<Published>(published);
+  // Whether the drawing loop runs, publishing the run at its turn.
+  const loopRunsRef = useRef(false);
+  // A command's run where no loop runs: shown at once, or at its hold's end (`CommandReadouts`).
+  const [commandReadouts] = useState(() => new CommandReadouts(READOUT_INTERVAL_MS));
+  const showCommanded = useCallback((): void => {
+    // A loop started meanwhile publishes the run at its own turn.
+    if (!loopRunsRef.current) {
+      const run = runRef.current;
+      setShown((previous) => ({ ...previous, run }));
+    }
+  }, []);
+  // Its hold stops while the stage is hidden, a run left waiting shown at the end of a new one.
+  useEffect(() => {
+    commandReadouts.start();
+    return () => {
+      commandReadouts.stop();
+    };
+  }, [commandReadouts]);
   // What the label block's terrain lines are made from, its FRAME body's survey and the terrain
   // readout's latest answer (R10.T12; `GroundReadouts`), or `null` where it states none: published
   // with the readouts at 4 Hz and, for a choice of BASELINE, out of their turn, and not throttled
@@ -1605,7 +1627,7 @@ function ViewStage({
           inputs.onExposureChange(auto.control);
         }
         setMetering(auto.metering);
-        setPublished({
+        const next: Published = {
           run,
           anchors,
           drawnStyle,
@@ -1620,7 +1642,9 @@ function ViewStage({
               ? NO_ATMOSPHERE_SHOWN
               : atmosphereShownOf(atmosphereReport, run.scene),
           imageLimited: imageLimited && drawnStyle === "photorealistic",
-        });
+        };
+        setPublished(next);
+        setShown(next);
         setGround(grounds.publish(session, run, nowMs, inputs.slopeBaselineM));
       } else if (grounds.due(inputs.slopeBaselineM)) {
         // A choice of BASELINE is asked at once, and its answer stands as it comes, out of the
@@ -1630,7 +1654,9 @@ function ViewStage({
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
+    loopRunsRef.current = true;
     return () => {
+      loopRunsRef.current = false;
       cancelAnimationFrame(frame);
       unsubscribeTimes();
       unsubscribeTimesRestored();
@@ -1654,6 +1680,10 @@ function ViewStage({
       }
       runRef.current = result.run;
       setPublished((previous) => ({ ...previous, run: result.run }));
+      // Its readout at the loop's next publish, or where no loop runs through the command's hold.
+      if (!loopRunsRef.current) {
+        commandReadouts.offer(showCommanded);
+      }
       if (commandCutsImage(action, result.run)) {
         cutRef.current = true;
       }
@@ -1661,7 +1691,7 @@ function ViewStage({
         setSelection(result.run.camera.target);
       }
     },
-    [easedMoves, reducedMotion, availability],
+    [easedMoves, reducedMotion, availability, commandReadouts, showCommanded],
   );
 
   // Each view's command, through the styles its adapter and the budget allow it (R07.T19).
@@ -2623,6 +2653,70 @@ function ViewStage({
 }
 
 /**
+ * The readouts of the commands given while no drawing loop publishes them (lane
+ * perf-render-thread-2): the first shown at once, then at most one an interval, the latest at each
+ * interval's end, timed by timeouts alone, as R02's 4 Hz readouts are (Design note 18).
+ */
+class CommandReadouts {
+  readonly #intervalMs: number;
+  /** Shows the latest commanded run, as the latest command gave it. */
+  #show: () => void = () => undefined;
+  #timer: number | null = null;
+  #waiting = false;
+
+  /** @param intervalMs - The shortest time between two readouts shown, ms. */
+  constructor(intervalMs: number) {
+    this.#intervalMs = intervalMs;
+  }
+
+  /**
+   * A command's run, which `show` shows: at once outside a hold, which it starts, else at the
+   * hold's end.
+   */
+  offer(show: () => void): void {
+    this.#show = show;
+    if (this.#timer !== null) {
+      this.#waiting = true;
+      return;
+    }
+    this.#show();
+    this.#hold();
+  }
+
+  /** Starts again after {@link CommandReadouts.stop}: a run left waiting is shown at a hold's end. */
+  start(): void {
+    if (this.#waiting && this.#timer === null) {
+      this.#hold();
+    }
+  }
+
+  /** Stops the hold's timeout, a run waiting kept for the next start. */
+  stop(): void {
+    if (this.#timer !== null) {
+      window.clearTimeout(this.#timer);
+      this.#timer = null;
+    }
+  }
+
+  #hold(): void {
+    this.#timer = window.setTimeout(() => {
+      this.#timer = null;
+      if (this.#waiting) {
+        this.#waiting = false;
+        this.#show();
+        this.#hold();
+      }
+    }, this.#intervalMs);
+  }
+}
+
+/**
+ * The stage, rendered for its own props and state alone (lane perf-render-thread-2): the scene's
+ * pushes and the connection's pings render the display above it, which hands it the same inputs.
+ */
+const Stage = memo(ViewStage);
+
+/**
  * The `PRIMARY` view's label block's lines with where its camera is and where it looks after
  * `CAMERA`, `POSITION` and `POINTING` (R07.T19.f; `placeLines`). An instrument's block leaves them
  * to the camera panel: at 1280 × 720 its slot has no room for another line.
@@ -2834,19 +2928,22 @@ function ViewPanels({
   const standing = serverSceneStanding(scene);
   // The server's scene is chosen by default; a kept scene stands in while it cannot be drawn.
   const serverChosen = sceneName === SERVER_SCENE_NAME;
-  const model = scene.model;
-  const sceneSystem = model?.system ?? null;
-  const server: ServerInput | null =
-    viewProvenance(sceneName, scene) === "server" && model !== null && sceneSystem !== null
+  // One input a scene and choice, so that the stage, memoised, renders for neither a parent's
+  // render nor a context's (lane perf-render-thread-2).
+  const server = useMemo((): ServerInput | null => {
+    const model = scene.model;
+    const sceneSystem = model?.system ?? null;
+    return viewProvenance(sceneName, scene) === "server" && model !== null && sceneSystem !== null
       ? {
           model,
           place: systemPlace(sceneSystem.model.system, sceneSystem.place, knownSystem),
-          stale: standing.stale,
+          stale: serverSceneStanding(scene).stale,
           frameAt: scene.frameAt,
           reportCamera: scene.reportCamera,
           removeCamera: scene.removeCamera,
         }
       : null;
+  }, [scene, sceneName, knownSystem]);
   // The body inspection is offered after the kept scenes while it is open (the owner's request).
   const offered = inspection === null ? sceneOptions : [...sceneOptions, inspection.option];
   const option = offered.find((each) => each.name === (serverChosen ? keptName : sceneName));
@@ -2967,10 +3064,27 @@ function ViewPanels({
     }
   }, [terrain, surveyOutcome]);
   // The inspection's plate states its pass while it is out and once it is refused (closed-loop).
-  const surveyStatement =
-    server === null && inspection !== null && option === inspection.option
-      ? surveyPassStatement(surveyOutcome)
-      : null;
+  const inspected = server === null && inspection !== null && option === inspection.option;
+  const sceneStatements = useMemo((): ReadonlyArray<LabelStatement> => {
+    const statement = inspected ? surveyPassStatement(surveyOutcome) : null;
+    return statement === null ? NO_SCENE_STATEMENTS : [statement];
+  }, [inspected, surveyOutcome]);
+  const source = useMemo(
+    (): StageSource => (server === null ? { kind: "kept", option } : { kind: "server", server }),
+    [server, option],
+  );
+  const onMeterChange = useCallback(
+    (chosen: MeterMode): void => {
+      setMeterChoice((choice) => chooseMeter(choice, chosen, opening, startMeter));
+    },
+    [opening, startMeter],
+  );
+  const onMaximize = useCallback((): void => {
+    setMaximize(toggledMaximize);
+  }, []);
+  const onLabelBlock = useCallback((): void => {
+    setMaximize(toggledLabelBlock);
+  }, []);
   // The views check's terrain run watches the session (R10.T16.d); no other launch gives a watch.
   useEffect(
     () => (terrain === null || watchTerrain === undefined ? undefined : watchTerrain(terrain)),
@@ -3055,16 +3169,14 @@ function ViewPanels({
           </div>
         )}
       </div>
-      <ViewStage
+      <Stage
         key={opening}
-        source={server === null ? { kind: "kept", option } : { kind: "server", server }}
+        source={source}
         engineState={engineState}
         exposure={exposure}
         onExposureChange={setExposure}
         meter={meter}
-        onMeterChange={(chosen) => {
-          setMeterChoice((choice) => chooseMeter(choice, chosen, opening, startMeter));
-        }}
+        onMeterChange={onMeterChange}
         easedMoves={easedMoves}
         onEasedMovesChange={setEasedMoves}
         slopeBaselineM={slopeBaselineM}
@@ -3072,12 +3184,8 @@ function ViewPanels({
         placePage={placePage}
         onPlacePage={setPlacePage}
         maximize={maximize}
-        onMaximize={() => {
-          setMaximize(toggledMaximize);
-        }}
-        onLabelBlock={() => {
-          setMaximize(toggledLabelBlock);
-        }}
+        onMaximize={onMaximize}
+        onLabelBlock={onLabelBlock}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
         universe={universe}
@@ -3088,7 +3196,7 @@ function ViewPanels({
         terrain={terrain}
         atmosphere={atmosphere}
         linkUp={link.status === "connected"}
-        sceneStatements={surveyStatement === null ? NO_SCENE_STATEMENTS : [surveyStatement]}
+        sceneStatements={sceneStatements}
       />
     </div>
   );

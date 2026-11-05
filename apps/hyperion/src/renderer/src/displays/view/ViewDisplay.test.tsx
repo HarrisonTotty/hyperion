@@ -236,6 +236,11 @@ function planetAnchor({ run, list }: ReturnType<typeof firstFrameMarks>): DrawAn
   return anchor;
 }
 
+/** The camera panel's field of view, `FOV 60°`. */
+function fovReading(): string | null {
+  return screen.getByRole("status", { name: "Field of view" }).textContent;
+}
+
 /** Lets the engine's promises settle. */
 async function settle(): Promise<void> {
   await act(async () => {
@@ -690,6 +695,55 @@ describe("the VIEW display", () => {
     expect(
       screen.getByText(statusLine("NOT AVAILABLE: CTRL+↓, RATE at its lowest step")),
     ).toBeInTheDocument();
+  });
+
+  it("states the camera's pointing at the readouts' 4 Hz turns as it turns, and not between them (lane perf-render-thread-2)", async () => {
+    const { user, advance } = setup();
+    await settle();
+    advance(300);
+    await user.click(screen.getByRole("application"));
+    const pointing = screen.getByRole("status", { name: "Camera pointing" });
+    await user.keyboard("{ArrowLeft>}");
+    // A second of turning, read every 50 ms.
+    const readings = Array.from({ length: 20 }, () => {
+      advance(50);
+      return pointing.textContent;
+    });
+    const changes = readings.filter((reading, i) => i > 0 && reading !== readings[i - 1]).length;
+    expect([changes >= 3, changes <= 4]).toEqual([true, true]);
+  });
+
+  it("states a command's readout at once while no view is drawn, and the next an interval on (lane perf-render-thread-2)", async () => {
+    // An engine that is never made: no view is drawn, and no loop publishes.
+    const fake = fakeViewEngineSource();
+    const { user, advance } = setup({
+      source: { ...fake.source, load: () => new Promise(() => undefined) },
+    });
+    const before = fovReading();
+    await user.keyboard("+");
+    const first = fovReading();
+    await user.keyboard("+");
+    const held = fovReading();
+    advance(300);
+    expect([screen.queryByRole("application"), [before, first, held, fovReading()]]).toEqual([
+      null,
+      ["FOV 60°", "FOV 45°", "FOV 45°", "FOV 30°"],
+    ]);
+  });
+
+  it("states a command's readout held when the display was hidden once it is shown again (lane perf-render-thread-2)", async () => {
+    const fake = fakeViewEngineSource();
+    const { user, advance, rerender } = setup({
+      source: { ...fake.source, load: () => new Promise(() => undefined) },
+    });
+    await user.keyboard("+");
+    await user.keyboard("+");
+    const held = fovReading();
+    rerender("hidden");
+    advance(300);
+    rerender("visible");
+    advance(300);
+    expect([held, fovReading()]).toEqual(["FOV 45°", "FOV 30°"]);
   });
 
   it("moves a mark's label with its mark every frame, between readouts", async () => {

@@ -17,7 +17,7 @@ import type {
   SystemIdHex,
   UniverseIdHex,
 } from "@hyperion/protocol";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import type { ViewId } from "../../view/camera/state";
 import { RECONNECT_DELAY_MS } from "../connection";
@@ -610,7 +610,7 @@ class SceneStore {
 
 /**
  * Subscribes a display to the scene of `universe` and keeps it: the model after every push, the
- * time to render at, and the reports of the display's cameras.
+ * time to render at, and the reports of the display's cameras, one view a push.
  *
  * @remarks
  * Subscribes when the link is up, and again when it returns, after a gap or a step back in the
@@ -655,12 +655,17 @@ export function useScene(universe: UniverseIdHex | null, options: SceneOptions):
     };
   }, [store, connected]);
 
-  return {
-    ...snapshot,
-    frameAt: store.frameAt,
-    reportCamera: store.reportCamera,
-    removeCamera: store.removeCamera,
-    onSurface: store.onSurface,
-    retry: store.retry,
-  };
+  // One view a snapshot, so that a render of the caller's for another cause, its parent's, hands
+  // its consumers the same scene (lane perf-render-thread-2).
+  return useMemo(
+    () => ({
+      ...snapshot,
+      frameAt: store.frameAt,
+      reportCamera: store.reportCamera,
+      removeCamera: store.removeCamera,
+      onSurface: store.onSurface,
+      retry: store.retry,
+    }),
+    [snapshot, store],
+  );
 }

@@ -2191,3 +2191,16 @@ highest step`, naming the key held back as the field of view's ends name theirs;
     (`bodies.ts`' `OutlineView`), not at each of its bisections' points.
   - The star sprites take their projector and pixel solid angle once a frame
     (`projection.ts`' `pixelSolidAngleBy`).
+- **The render thread's next cuts and React's renders** (perf-render-thread-2, 2026-11-05), each
+  bit for bit.
+  - The sky label's darkest band texel is kept a band (`viewSky.ts`), and the sky's sprites keep
+    each selection's names, illuminances and places (`sprites.ts`); `StarSprite.directionF32` is
+    gone.
+  - `useScene` hands out one view a snapshot, and `ViewSceneProvider` makes its children again
+    for their provenance alone; the stage is `memo`'d (`Stage`), so `ViewPanels`' props to it stay
+    stable (`useMemo`, `useCallback`) and a new one must too.
+  - The stage has no `useThrottledValue`: the loop sets `published` and `shown` at its 4 Hz turn;
+    a command sets `published` at once and reaches `shown` at the loop's next turn, or with no loop
+    at once and then at the interval's end.
+  - The inspection timing file is version 5: each window's React commits (`react`, the
+    check-only hook of `reactCommits.ts`) and each thread's `reactMs`.

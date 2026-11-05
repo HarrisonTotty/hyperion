@@ -4,7 +4,7 @@
  */
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { use } from "react";
+import { type ReactNode, use } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UniverseProvider } from "../../components/UniverseProvider";
@@ -104,6 +104,26 @@ describe("the scene host's body inspection (the owner's request)", () => {
 
     expect(shown()).toBe("PRECISION TEST");
     expect(screen.getByRole("status", { name: "Offered" })).toHaveTextContent("none");
+  });
+
+  it("makes what it wraps again for its provenance alone, its consumers reading the rest (lane perf-render-thread-2)", async () => {
+    const wrapped = vi.fn<(provenance: string) => ReactNode>(() => <Choice />);
+    const user = userEvent.setup();
+    render(
+      <ServerLinkHarness>
+        <UniverseProvider>
+          <ViewSceneProvider active={false} knownSystem={null} inspection={null}>
+            {wrapped}
+          </ViewSceneProvider>
+        </UniverseProvider>
+      </ServerLinkHarness>,
+    );
+    act(() => {
+      FakeWebSocket.latest().serverWelcomes();
+    });
+    const made = wrapped.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "PRECISION TEST" }));
+    expect([shown(), wrapped.mock.calls.length - made]).toEqual(["PRECISION TEST", 0]);
   });
 
   it("keeps the scene before when a new opening takes the shown one's place", async () => {
