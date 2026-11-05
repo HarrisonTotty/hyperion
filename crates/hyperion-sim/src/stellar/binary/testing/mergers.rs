@@ -264,8 +264,8 @@ pub struct MergerCensusPlan<'a> {
 /// A census of the engine's mergers of `class` among `plan`'s records of its bands' layers at its
 /// site, of its populations, from the cells of `part` (plan 15's P15.T10.b, the merger classes' reference; the bands
 /// [`merger_census_bands`]'s): each layer's records in its band's share of the bands' systems, from cells of its own
-/// met once each in [`class_census_in`]'s order, each record's first attempt run through the
-/// engine as the generator draws it ([`mergers_of`]), and each pair it merged into `class` kept,
+/// met once each in [`class_census_in`](super::class_census_in)'s order, each record's first attempt run through the
+/// engine as the generator draws it (`mergers_of`), and each pair it merged into `class` kept,
 /// weighted by its component's age hazard at its merger age ([`MergerMember::weight`]). `read`
 /// makes each member what the census keeps of it as it is found: a merger's timeline is some
 /// 90 kB, so a census of tens of thousands keeps their marks, not their timelines.

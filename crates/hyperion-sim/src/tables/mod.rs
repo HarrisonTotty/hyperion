@@ -152,6 +152,18 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: false,
     },
     TableInfo {
+        name: "binary_merger",
+        revision: 0,
+        since_generator_version: 29,
+        provisional: false,
+    },
+    TableInfo {
+        name: "binary_nsm",
+        revision: 0,
+        since_generator_version: 29,
+        provisional: false,
+    },
+    TableInfo {
         name: "binary_pair_light_c",
         revision: 0,
         since_generator_version: 29,

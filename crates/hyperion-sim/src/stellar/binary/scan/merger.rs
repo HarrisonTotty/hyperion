@@ -67,7 +67,9 @@ use crate::stellar::sse::{
 };
 use crate::stellar::system::track_mass_of;
 use crate::stellar::{Composition, Phase, StarState};
-use crate::tables::binary::{MERGER_SAMPLER, MergerChannel, MergerMark, MergerPick};
+#[cfg(doc)]
+use crate::tables::binary::MERGER_SAMPLER;
+use crate::tables::binary::{MergerChannel, MergerMark, MergerPick};
 use crate::time::{CLOCK_WINDOW_H, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
@@ -325,7 +327,7 @@ pub(crate) fn merger_marks_at(galaxy: &Galaxy, host: BinaryHost) -> Option<Merge
     let seed = galaxy.seed();
     let system = host.system();
     let key = host.key();
-    let sampler = ClassSampler::new(&MERGER_SAMPLER);
+    let sampler = ClassSampler::new(galaxy.rules().merger_tables.merger_sampler());
     // 2. T and the age.
     let (merger_time, mut stream) = merger_time_stream(seed, system);
     let rank = sampler.draw(MergerMark::AgeRank, 0.0, &mut stream);
@@ -407,13 +409,14 @@ fn contact_pair(
     (merger_age, mass_ratio): (Years, MergerMark),
     stream: &mut Stream,
 ) -> Option<DrawnPair> {
-    let sampler = ClassSampler::new(&MERGER_SAMPLER);
+    let table = galaxy.rules().merger_tables.merger_sampler();
+    let sampler = ClassSampler::new(table);
     let turn_off = turn_off_mass(Years::new(merger_age.value().max(0.0)), composition).value();
     let floor = MIN_INITIAL_MASS.value();
     // The lightest primary whose secondary at the mark's largest ratio is a track's.
-    let lightest = floor / MERGER_SAMPLER.mark(mass_ratio).limits().1;
+    let lightest = floor / table.mark(mass_ratio).limits().1;
     let range = |band: MassBand| (band.lo().max(floor).max(lightest), band.hi().min(turn_off));
-    let shares = MERGER_SAMPLER.pick(MergerPick::Layer).weights();
+    let shares = table.pick(MergerPick::Layer).weights();
     let mut weights = [0.0; 5];
     for ((weight, &share), band) in weights.iter_mut().zip(shares).zip(MassBand::ALL) {
         let (lo, hi) = range(band);
@@ -426,10 +429,11 @@ fn contact_pair(
     let fallback = weights.iter().rposition(|&w| w > 0.0)?;
     let layer = mark.pick_weighted(&weights, total).unwrap_or(fallback);
     let (lo, hi) = range(MassBand::ALL[layer]);
-    let rank = sampler.draw(MergerMark::PrimaryRank, 0.0, stream);
+    let condition = layer_condition(layer);
+    let rank = sampler.draw(MergerMark::PrimaryRank, condition, stream);
     let m1 = galaxy.mass_function().quantile_in(lo, hi, rank);
-    let q_floor = sampler.rank_of(mass_ratio, 0.0, floor / m1);
-    let q = sampler.draw_in_ranks(mass_ratio, 0.0, (q_floor, 1.0), stream);
+    let q_floor = sampler.rank_of(mass_ratio, condition, floor / m1);
+    let q = sampler.draw_in_ranks(mass_ratio, condition, (q_floor, 1.0), stream);
     let m2 = (q * m1).clamp(floor, m1);
     let masses = [SolarMasses::new(m1), SolarMasses::new(m2)];
     let rules = galaxy.rules().stellar;
@@ -439,6 +443,15 @@ fn contact_pair(
         masses,
         stars: [star(0)?, star(1)?],
     })
+}
+
+/// The condition a mark drawn after the layer `layer` (its index in [`MassBand::ALL`]) takes: the
+/// index itself, across which the fitted sampler's marks conditional on the layer hold each
+/// layer's law at its node (P15.T10.b's merger step, from 31); the scratch sampler's marks follow
+/// no condition, so that it draws as at 0.
+#[must_use]
+fn layer_condition(layer: usize) -> f64 {
+    f64::from(u8::try_from(layer).expect("a stellar layer's index, 0–4"))
 }
 
 /// The phases of an evolved donor at its merger: past its main sequence and living, from the
@@ -480,7 +493,8 @@ fn evolved_pair(
     (age_at_epoch, merger_age): (Years, Years),
     stream: &mut Stream,
 ) -> Option<DrawnPair> {
-    let sampler = ClassSampler::new(&MERGER_SAMPLER);
+    let table = galaxy.rules().merger_tables.merger_sampler();
+    let sampler = ClassSampler::new(table);
     let rules = galaxy.rules().stellar;
     let options = TrackOptions::default().with_rules(rules);
     if merger_age.value().is_nan() || merger_age.value() <= 0.0 {
@@ -490,7 +504,7 @@ fn evolved_pair(
     let floor = MIN_INITIAL_MASS.value();
     let living_end = heaviest_living(composition, &draws[0], options, merger_age, turn_off).value();
     let turn_off = turn_off.value();
-    let shares = MERGER_SAMPLER.pick(MergerPick::Layer).weights();
+    let shares = table.pick(MergerPick::Layer).weights();
     let mut weights = [0.0; 5];
     for ((weight, &share), band) in weights.iter_mut().zip(shares).zip(MassBand::ALL) {
         if band.lo() < living_end && turn_off < band.hi() {
@@ -503,7 +517,8 @@ fn evolved_pair(
     let layer = mark.pick_weighted(&weights, total).unwrap_or(fallback);
     let band = MassBand::ALL[layer];
     let (m_lo, m_hi) = (band.lo().max(turn_off), band.hi().min(living_end));
-    let rank = sampler.draw(MergerMark::EvolvedPrimaryRank, 0.0, stream);
+    let condition = layer_condition(layer);
+    let rank = sampler.draw(MergerMark::EvolvedPrimaryRank, condition, stream);
     let m1 = galaxy.mass_function().quantile_in(m_lo, m_hi, rank);
     let donor = Track::to_age_with(
         track_mass_of(SolarMasses::new(m1)),
@@ -526,10 +541,10 @@ fn evolved_pair(
     }
     let ratio = companion_ratio_mark(donor.phase());
     let ranks = (
-        sampler.rank_of(ratio, 0.0, floor / m1),
-        sampler.rank_of(ratio, 0.0, ceiling / m1),
+        sampler.rank_of(ratio, condition, floor / m1),
+        sampler.rank_of(ratio, condition, ceiling / m1),
     );
-    let q = sampler.draw_in_ranks(ratio, 0.0, ranks, stream);
+    let q = sampler.draw_in_ranks(ratio, condition, ranks, stream);
     let m2 = (q * m1).clamp(floor, ceiling);
     let masses = [SolarMasses::new(m1), SolarMasses::new(m2)];
     let companion = main_sequence_at(masses[1], composition, &draws[1], rules, merger_age)?;
@@ -598,7 +613,7 @@ fn dynamical_pair(
     (age_at_epoch, merger_age): (Years, Years),
     stream: &mut Stream,
 ) -> Option<DrawnPair> {
-    let sampler = ClassSampler::new(&MERGER_SAMPLER);
+    let sampler = ClassSampler::new(galaxy.rules().merger_tables.merger_sampler());
     let rules = galaxy.rules().stellar;
     if merger_age.value().is_nan() || merger_age.value() <= 0.0 {
         return None;

@@ -559,6 +559,8 @@ mod channels_hold;
 #[cfg(test)]
 mod engine_channels_hold;
 #[cfg(test)]
+mod fitted_tables;
+#[cfg(test)]
 mod reference;
 #[cfg(test)]
 mod tests;

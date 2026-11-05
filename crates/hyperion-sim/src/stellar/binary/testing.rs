@@ -21,8 +21,8 @@ pub(crate) mod remnant_pair;
 pub use ia_pool::{IaPoolCensus, IaPoolMember, ia_pool_census_in};
 pub use merger_marks::{NsmReading, StellarMergerReading};
 pub use mergers::{
-    MergerCensus, MergerMember, brute_force_merger_members_in, merger_census_bands,
-    merger_census_in,
+    MergerCensus, MergerCensusPlan, MergerMember, brute_force_merger_members_in,
+    merger_census_bands, merger_census_in,
 };
 
 pub use members::{

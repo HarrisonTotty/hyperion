@@ -30,6 +30,7 @@ use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::members::recent::FeatureClassesRules;
 use crate::stellar::rules::StellarRules;
+use crate::tables::binary::{CLASS_SHARES, CLASS_SHARES_31, ClassShareTable};
 
 /// The galaxy-side holds of the next galaxy train, carried by the `Galaxy` value
 /// (decision-galaxy-25-train §1).
@@ -52,8 +53,10 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
-    /// The merger classes' step (P15.T10.b's mergers, held at 31, [`MergerTableRules`]): whether
-    /// their census draws the generator's own pairs. Read only where a census runs.
+    /// The merger classes' step (P15.T10.b's mergers, held at 31, [`MergerTableRules`]): their
+    /// samplers, their rows of the share matrix's class shares, read where the galaxy is built, so
+    /// that `Galaxy::with_rules` refuses to change it, and whether their census draws the
+    /// generator's own pairs.
     pub(crate) merger_tables: MergerTableRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
@@ -81,6 +84,17 @@ impl GalaxyRules {
     #[must_use]
     pub(crate) const fn every_31_hold() -> Self {
         Self::of_version(GeneratorVersion::new(31))
+    }
+
+    /// The share rows the galaxy reads: the version's [`CLASS_SHARES`], and from 31 its merger
+    /// classes' rows fitted on the generator's own pairs, [`CLASS_SHARES_31`]
+    /// ([`MergerTableRules::Fitted`]).
+    #[must_use]
+    pub(crate) const fn class_shares(self) -> &'static ClassShareTable {
+        match self.merger_tables {
+            MergerTableRules::Scratch => &CLASS_SHARES,
+            MergerTableRules::Fitted => &CLASS_SHARES_31,
+        }
     }
 }
 

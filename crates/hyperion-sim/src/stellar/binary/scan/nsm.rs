@@ -50,9 +50,10 @@ use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
 use crate::stellar::remnant::structure::neutron_star_radius;
 use crate::stellar::system::track_mass_of;
 use crate::stellar::{Composition, Phase, lifetime};
+#[cfg(doc)]
+use crate::tables::binary::NSM_SAMPLER;
 use crate::tables::binary::{
-    NSM_BLACK_HOLE_PROGENITORS, NSM_NEUTRON_STAR_PROGENITORS, NSM_SAMPLER, NsmMark, NsmPairKind,
-    NsmPick,
+    NSM_BLACK_HOLE_PROGENITORS, NSM_NEUTRON_STAR_PROGENITORS, NsmMark, NsmPairKind, NsmPick,
 };
 use crate::time::UniverseTime;
 use crate::units::consts::{GM_SUN, SOLAR_RADIUS_M, SPEED_OF_LIGHT};
@@ -471,7 +472,7 @@ pub(crate) fn nsm_marks_at(galaxy: &Galaxy, host: BinaryHost) -> Option<NsmScanM
     let seed = galaxy.seed();
     let system = host.system();
     let key = host.key();
-    let sampler = ClassSampler::new(&NSM_SAMPLER);
+    let sampler = ClassSampler::new(galaxy.rules().merger_tables.nsm_sampler());
     // 2. T and the age.
     let (merger_time, mut stream) = nsm_time_stream(seed, system);
     let rank = sampler.draw(NsmMark::AgeRank, 0.0, &mut stream);

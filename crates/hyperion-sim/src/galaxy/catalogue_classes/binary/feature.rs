@@ -52,7 +52,9 @@ use crate::stellar::binary::light_curves::XrayAccretor;
 use crate::stellar::binary::scan::{awd_marks_at, merger_marks_at, nsm_marks_at, xrb_marks_at};
 use crate::stellar::binary::{BinaryTimeline, CarvedClass};
 use crate::stellar::system::SystemStars;
-use crate::tables::binary::{CLASS_SHARES, ClassShareRow, NsmPairKind};
+#[cfg(doc)]
+use crate::tables::binary::CLASS_SHARES;
+use crate::tables::binary::{ClassShareRow, NsmPairKind};
 use crate::units::{Dex, HeliumExcess, SolarMasses, Years};
 
 /// What an entry of a feature's list shares with its feature (P11.T8.f): its members' population,
@@ -392,9 +394,11 @@ pub(crate) fn hosts_per_formed_mass(
         CarvedClass::AccretingWdFast
         | CarvedClass::AccretingWdSlow
         | CarvedClass::StellarMerger
-        | CarvedClass::NeutronStarMerger => {
-            CLASS_SHARES.row(carved).hosts_per_formed_mass(population)
-        }
+        | CarvedClass::NeutronStarMerger => galaxy
+            .rules()
+            .class_shares()
+            .row(carved)
+            .hosts_per_formed_mass(population),
     }
 }
 
@@ -413,7 +417,10 @@ pub(crate) fn globular_hosts(
     population: Population,
     mass: SolarMasses,
 ) -> f64 {
-    let row = CLASS_SHARES.row(carved_of(class).expect("a listed class is plan 11's"));
+    let row = galaxy
+        .rules()
+        .class_shares()
+        .row(carved_of(class).expect("a listed class is plan 11's"));
     let weights = galaxy.feature_shares().globular_band_weights();
     let band_weight = MassBand::ALL.iter().fold(0.0, |sum, &band| {
         sum + row.layer_share(band) * weights[band.index()]

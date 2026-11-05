@@ -84,6 +84,7 @@
 //! "P11.T8.e.b as built", after "The centre's feature-level index, ruled"). Against 13 bits, 393
 //! of the 10³ seeds failed (P11.T8.e, "as measured").
 
+use crate::GENERATOR_VERSION;
 use crate::galaxy::features::centre::events::victims::expected_victims;
 use crate::galaxy::features::centre::recent::forecast_candidates;
 use crate::galaxy::features::centre::{BuildCentreError, CentreClasses, CentreProfile};
@@ -95,9 +96,12 @@ use crate::galaxy::imf::MassFunction;
 use crate::galaxy::params::GalaxyParams;
 #[cfg(doc)]
 use crate::galaxy::placement::check_index_headroom;
+use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, POPULATIONS};
 use crate::stellar::binary::CarvedClass;
-use crate::tables::binary::{CLASS_SHARES, ClassShareRow, ClassShareTable};
+#[cfg(doc)]
+use crate::tables::binary::CLASS_SHARES;
+use crate::tables::binary::{ClassShareRow, ClassShareTable};
 use crate::units::SolarMasses;
 
 #[cfg(doc)]
@@ -341,7 +345,7 @@ pub fn centre_list_forecast(params: &GalaxyParams) -> Result<CentreListForecast,
         &CentreProfile::from_params(params)?,
         mass_function.as_ref(),
         params.mean_formed_mass(),
-        &CLASS_SHARES,
+        GalaxyRules::of_version(GENERATOR_VERSION).class_shares(),
     ))
 }
 
@@ -360,7 +364,7 @@ fn galaxy_centre_forecast(galaxy: &Galaxy) -> Result<CentreListForecast, BuildCe
         &profile,
         galaxy.mass_function(),
         galaxy.mean_formed_mass(),
-        &CLASS_SHARES,
+        galaxy.rules().class_shares(),
     ))
 }
 

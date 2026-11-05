@@ -261,6 +261,8 @@ pub struct NsmReading {
     pub black_hole_progenitor: Option<f64>,
     /// `NsmMark::AgeRank`'s value: T's rank in its component's law among the born systems.
     pub age_rank: f64,
+    /// The merger age T, Julian years.
+    pub merger_age: f64,
 }
 
 impl NsmReading {
@@ -297,6 +299,7 @@ impl NsmReading {
             neutron_star_progenitors: [at(0).map(|n| n.1), at(1).map(|n| n.1)],
             black_hole_progenitor: hole.first().map(|h| h.1),
             age_rank,
+            merger_age: t.value(),
         })
     }
 

@@ -1,0 +1,19 @@
+# The stellar mergers' smoke run: censuses of a small share of the full run's records at
+# generator version 31, whose few members leave most marks the scratch table's; some seconds on
+# four threads.
+task = "binary_merger"
+
+[params]
+seed = 0x0b17_15a0_0000_0001
+generator_version = 31
+records = 20_000
+population_records = 600
+parts = 4
+part_count = 8
+young_thin_disc_site = [0, 0, 0, 40_000, 40_000, 600]
+bulge_site = [0, 0, 0, 5_000, 5_000, 2_000]
+long_bar_site = [0, 0, 0, 16_000, 4_000, 1_000]
+nuclear_disc_site = [0, 0, 0, 800, 800, 200]
+halo_site = [0, 0, 10_000, 10_000, 10_000, 5_000]
+min_members = 20
+total_hosts = 9.0e4

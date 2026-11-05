@@ -3529,6 +3529,89 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
       record single, so it keeps fewer of the young thin disc's high-mass pairs. The black-hole
       transients are 1,297, in range. The merger step at 31 moves no X-ray binary's row, and under
       every 31 hold both counts are the same, so this is beyond its fits.
+- **T10.b's merger step, on the generator's own pairs (2026-11-05; held at 31, nothing moves at
+  28–30; main's rulings: the lists of trains 29 and 30 are frozen).**
+  - _The census._ `brute_force_merger_members_in`'s `mergers_of` drew every record's first
+    attempt under `Free` multiplicity on its primary's own draws, as the class census did before
+    509ddc33. Of the first 40 non-field records of layers D and E with a merger in a probe, 22
+    differed from the generator's first attempt: 13 displaced, 9 retained. From 31
+    (`MergerTableRules`, `MERGER_TABLES_VERSION`, in `every_31_hold`) it draws the generator's
+    first attempt; below 31 its held arm keeps every slow test's pins.
+    `from_31_a_record_s_mergers_are_its_pairs_at_the_generator_s_first_attempt` pins four
+    records.
+  - _The reference._ `merger_census_in` runs a `MergerCensusPlan` over the class census's cell walk
+    (`census_cells`), its bands' records in their shares, weighting each merger by its age hazard,
+    with the records it ran by population and the members' Kish size. Its bands are A–E for the
+    stellar mergers, whose dynamical donors (0.1–0.7 M☉) are layers A's and B's, and D–E for the
+    neutron-star mergers (`merger_census_bands`). _Deviation:_ the brief's C–E would miss the
+    dynamical donors. `StellarMergerReading` and `NsmReading` read a merger as the classes'
+    samplers draw it, over the ranges the scan draws in.
+  - _The pilot_ (8 parts of 64, 50,000 records a part, 8 threads): the stellar mergers 10,310
+    members, a Kish size of 370.5, in 29 s; the neutron-star mergers (D–E) 3,460 members, 104.1,
+    in 313 s, E alone 189.4 a 160,000 records. The runs were sized from it: 4 × 10⁶ slab records
+    and 8 × 10⁶, a Kish size of some 2,000 or more a half.
+  - _The tasks_ `binary_merger` and `binary_nsm` (hyperion-fit's `tasks::binary_classes::mergers`),
+    each its own block of `_31` items and its class's row of the share table. They first ran
+    `--since 28` (the emitter's ceiling then) at 30's rules. When the hold moved to 31 (main,
+    2026-11-07: train 30's list frozen) they ran again `--since 29` at 31's, which are 30's with
+    the hold's version moved, and every number of both blocks is the same to the bit.
+    - The stellar mergers: the channel choice the covered members' weighted shares; the layer
+      choice, which serves the contact and the evolved channels and which the scan restricts at
+      each T, at the fixed point at which the class's realised layers are the members' own; the
+      contact pair's and the evolved donor's marks conditional on the layer (the layer's index
+      the condition, node 4b layer b's law where its Kish size is at least 50), which the scan now
+      passes, the scratch sampler ignoring it; the age rank and the dynamical pair's marks
+      unconditional; a mark with a Kish size under 50 kept as the scratch sampler has it.
+    - The neutron-star mergers: each mark unconditional; a pair of two black holes left out.
+    - The rows: the covered members' weighted rates a record by population and band, scaled to the
+      brainstorm's totals, 9 × 10⁴ stellar mergers and ten neutron-star mergers in the horizon.
+  - _The stellar mergers' fit_ (9.3 min at 8 threads): 7,175 slab members, a Kish size of 2,245.
+    - Of the weight, 0.435 is the class's channels' none: white dwarfs beside a main-sequence or a
+      giant star (some a quarter of the weight), two evolved stars, helium stars, and heavier
+      main-sequence donors out of contact. _A finding:_ the brief's compact-companion channel,
+      0.29 of the engine's at 27, is 0.43 here, its census fixed.
+    - Channels: contact 0.030, evolved donor 0.935, dynamical 0.035 (the scratch 0.15/0.50/0.35).
+    - Layers at the fixed point: C 0.006, D 0.003, E 0.991, whose realised mix is the members' C
+      0.665, D 0.317, E 0.019: the scan opens layer E only at young T, so E's weight must be high
+      for its share there. The row's layers, the dynamical donors' A and B included:
+      0.008/0.019/0.589/0.336/0.048.
+    - The contact pair's two marks and the core-helium-burning donor's companion keep the scratch
+      law (too few members).
+  - _The neutron-star mergers' fit_ (110 min at 8 threads): 2,910 slab members, a Kish size of
+    579, under the brief's 2,000, a finding (the pilot's 104 a 400,000 records projected 2,000).
+    - The slab is 32,000 by 8,000 by 3,000 ly about the solar circle (`slab_site`, new and
+      optional in `CensusParams`; the default's layer-D cells held 167,000 of a part's 196,000
+      records, so the first run stopped after 101 minutes).
+    - Pair kinds: two neutron stars 0.537, a black hole's 0.463. No pair of two black holes.
+    - Of the weight, a neutron star's progenitor lies outside the sim's 8–20 M☉ in 0.640 and a
+      black hole's outside 25–60 M☉ in 0.331: _a finding_, since the ranges are code
+      (`NSM_NEUTRON_STAR_PROGENITORS`, `NSM_BLACK_HOLE_PROGENITORS`) and the ranks are held at
+      their ends.
+    - The row's layers: D 0.073, E 0.927. Every mark is fitted.
+  - _The hold._ `MergerTableRules::{Scratch, Fitted}`: the samplers (`merger_sampler`,
+    `nsm_sampler`), the census's arm, and the share table (`GalaxyRules::class_shares`:
+    `CLASS_SHARES`, from 31 `CLASS_SHARES_31`, its merger rows the fitted ones).
+    `Galaxy::with_rules` refuses to change it. Rebased onto v29 (land/next cd57398f), it is
+    `GalaxyRules`' only versioned field.
+  - _Tests_ (`merger::fitted_tables`): from 31 a galaxy reads the fitted tables, and its classes'
+    hosts at Milky Way parameters are 0.2–0.5 red novae a year (0.31) and 5–20 neutron-star
+    mergers; the tables are in shape; slow, the counts over ten seeds and each class's 10,000
+    entries against the census's held-out half by a weighted K–S at 1%, the brief's, a miss
+    pinned. The shape's resolution of the other classes' tests (held-out within the critical
+    distance of the in-sample one) is printed, not tested: here the in-sample distance is as far.
+  - _The stellar mergers against the engine at 31_ (3,686 held-out mergers, 10,000 entries): the
+    class's channels are the engine's (contact 0.030 against 0.021, evolved 0.943 against 0.944,
+    dynamical 0.027 against 0.035), and every compared mark misses, pinned (`MERGER_MISSES`): its
+    held-out, in-sample and scratch class's distances, then the engine's and the class's medians.
+    - Log total initial mass: 0.525, 0.529, 0.629; 0.465 and 0.202.
+    - Mass ratio: 0.346, 0.329, 0.223; 0.484 and 0.237.
+    - Log primary initial mass: 0.468, 0.493, 0.606; 0.268 and 0.069.
+    - Log merger age: 0.482, 0.497, 0.503; 9.150 and 9.804.
+    - _A finding, for P11.T8.c:_ the class's mergers are older than the engine's, so lighter, with
+      lighter companions under the lower turn-off. It draws one age rank over every component,
+      and its row gives each population one rate a system, where the engine's mergers lie in the
+      old thin disc's younger sub-discs: no fit of these tables can give the class the engine's
+      ages. The fit takes the masses' distances down a fifth and the ratio's up a half.
 - **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
   research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
   - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is

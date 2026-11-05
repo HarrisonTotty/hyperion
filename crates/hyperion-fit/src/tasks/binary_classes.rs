@@ -54,6 +54,7 @@
 
 pub mod donor_rows;
 mod marks;
+pub mod mergers;
 pub mod xrb;
 
 use std::fmt::Write as _;
@@ -172,6 +173,9 @@ pub struct CensusParams {
     pub part_count: u64,
     /// Each population's own site, in [`OWN_SITES`]' order.
     pub sites: [(Population, CensusSite); 5],
+    /// The slab's site: the manifest's `slab_site`, or the solar circle's
+    /// ([`CensusSite::SOLAR_CIRCLE`]) without it.
+    pub slab: CensusSite,
 }
 
 impl CensusParams {
@@ -206,6 +210,11 @@ impl CensusParams {
             parts: manifest.u64("parts")?,
             part_count: manifest.u64("part_count")?,
             sites: own_sites(manifest)?,
+            slab: if manifest.params().contains_key("slab_site") {
+                site_of(manifest, "slab_site")?
+            } else {
+                CensusSite::SOLAR_CIRCLE
+            },
         };
         if params.records == 0 || params.population_records == 0 || params.young_records == 0 {
             return Err(ManifestParamError::new("records", "positive"));
@@ -241,6 +250,14 @@ impl CensusParams {
 fn own_sites(manifest: &Manifest) -> Result<[(Population, CensusSite); 5], ManifestParamError> {
     let mut out = [(Population::Halo, CensusSite::SOLAR_CIRCLE); 5];
     for (slot, &(population, key)) in out.iter_mut().zip(&OWN_SITES) {
+        *slot = (population, site_of(manifest, key)?);
+    }
+    Ok(out)
+}
+
+/// The site `key` of `manifest`, as `[x, y, z, half_x, half_y, half_z]` light-years.
+fn site_of(manifest: &Manifest, key: &str) -> Result<CensusSite, ManifestParamError> {
+    {
         let bad = || ManifestParamError::new(key, "six whole numbers of light-years");
         let numbers: Vec<i64> = manifest
             .params()
@@ -257,9 +274,8 @@ fn own_sites(manifest: &Manifest) -> Result<[(Population, CensusSite); 5], Manif
         let [Ok(hx), Ok(hy), Ok(hz)] = half else {
             return Err(bad());
         };
-        *slot = (population, CensusSite::new([cx, cy, cz], [hx, hy, hz]));
+        Ok(CensusSite::new([cx, cy, cz], [hx, hy, hz]))
     }
-    Ok(out)
 }
 
 /// One census's members and records in one band, its parts joined in order.
@@ -368,7 +384,7 @@ pub fn run_censuses(
     threads: NonZeroUsize,
 ) -> Result<Censuses, RunCensusError> {
     let plans: Vec<CensusPlan> = std::iter::once(CensusPlan {
-        site: CensusSite::SOLAR_CIRCLE,
+        site: params.slab,
         whose: CensusRecords::All,
         records: params.records,
     })

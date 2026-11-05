@@ -26,6 +26,30 @@ provisional = false
 acceptance = "212 values (4 metallicity intervals × 53 age bins) from 1116180 evaluations of the cooling fits; stored V +10.27 to +16.42 mag, margin included, 0 with no V; every interval's floor rises or holds with age; the sim's `no_cooling_star_is_brighter_than_its_floor` checks 20,000 random cooling stars against it and `the_lazy_values_are_fresh_builds` holds it to a fresh build"
 
 [[table]]
+name = "binary_merger"
+path = "binary.rs"
+task = "binary_merger"
+revision = 0
+inputs_sha256 = "ab00c82f45a90665f044fca8c84efa29db5affa712bdfed13211022e15a2ae58"
+body_sha256 = "8dd1ee754c7bd934eb40c8c6545c3242caed9319d18a1c0a1529e40e0d4afe3f"
+fingerprint = [0.6709887138678556, 0.1185609499810464, 0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 32.0, 0.0, 660300442.9930085, 0.0, 132693060.07669601, 0.0, 684424073.1467187, 0.0, 203414168.6319185, 0.0, 321893691.6470565, 0.0, 48634296.22086901, 0.0, 6454135.8510592785, 0.0, 47746909.59213701, 0.0, 4069731.4356553066]
+since_generator_version = 29
+provisional = false
+acceptance = "7175 members, Kish 2245; of the weight, uncovered 0.435, contact 0.017, evolved donor 0.528, dynamical 0.020; channels 0.030/0.935/0.035; layers 0.000/0.000/0.006/0.003/0.991 (target 0.000/0.000/0.665/0.317/0.019, realised 0.000/0.000/0.665/0.317/0.019); layers 0.008/0.019/0.589/0.336/0.048 rates a system 3.90e-11/9.73e-13/2.68e-13/2.17e-13/3.12e-13/7.05e-13/2.37e-13; scratch marks: PrimaryRank, ContactMassRatio, HeliumBurningMassRatio; the K–S tests against the other half of the census are the sim's slow `merger_tables::the_stellar_merger_sampler_against_the_engine`"
+
+[[table]]
+name = "binary_nsm"
+path = "binary.rs"
+task = "binary_nsm"
+revision = 0
+inputs_sha256 = "dd4bf064d56f60bb7b3bcb1f22693b3d19b75551a6594ba2686063ec67ac85c9"
+body_sha256 = "0e016ab78d5f112475207625328ae29eeb9cae45f95d156cce7f058b0bc889a0"
+fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 29.0, 0.0, 153680261.30380228]
+since_generator_version = 29
+provisional = false
+acceptance = "2910 members, Kish 579; pair kinds 0.537/0.463; of the weight, two black holes 0.000, a neutron star's progenitor outside 8–20 M☉ 0.640, a black hole's outside 25–60 M☉ 0.331; layers 0.000/0.000/0.000/0.073/0.927 rates a system 1.51e-12/1.95e-14/9.39e-16/2.72e-15/4.52e-15/1.61e-14/1.90e-15; scratch marks: none; the K–S tests against the other half of the census are the sim's slow `merger_tables::the_neutron_star_merger_sampler_against_the_engine`"
+
+[[table]]
 name = "binary_pair_light_c"
 path = "binary_pair_light_c.rs"
 task = "binary_pair_light_c"

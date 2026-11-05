@@ -9,14 +9,22 @@
 //! mergers the grid never holds: of the first 40 non-field records of layers D and E with a merger
 //! in a probe, 22 differed from the generator's first attempt, 13 of them displaced.
 //!
-//! Below 31 every galaxy's merger census draws as before ([`MergerTableRules::Scratch`]), so that
-//! every figure its slow tests pin keeps its bits; from 31 it draws the generator's first attempt
-//! ([`MergerTableRules::Fitted`]). The tests reach the new arm through
+//! Below 31 every galaxy's merger census draws as before, and its stellar and neutron-star merger
+//! classes read the scratch samplers and rows ([`MergerTableRules::Scratch`]), so that every
+//! generated value and every figure the slow tests pin keeps its bits; from 31 the census draws
+//! the generator's first attempt, and tasks `binary_merger` and `binary_nsm` fit the classes'
+//! samplers ([`MERGER_SAMPLER_31`], [`NSM_SAMPLER_31`]) and rows (`tables::binary`'s
+//! `CLASS_SHARES_31`) to it ([`MergerTableRules::Fitted`]). The tests reach the new arm through
 //! `GalaxyRules::every_31_hold()`. The bump to 31 deletes this hold: this module with its
-//! tripwire, the galaxy rules' `merger_tables` field and `every_31_hold`, and the census's held
-//! arm, and re-pins what moves.
+//! tripwire, the galaxy rules' `merger_tables` field and `every_31_hold`, the census's held arm and
+//! the scratch merger samplers' reads, renames the `_31` items over the scratch ones, and re-pins
+//! what moves.
 
 use crate::GeneratorVersion;
+use crate::tables::binary::{
+    ClassSamplerTable, MERGER_SAMPLER, MERGER_SAMPLER_31, MergerMark, MergerPick, NSM_SAMPLER,
+    NSM_SAMPLER_31, NsmMark, NsmPick,
+};
 
 /// The generator version from which the merger classes' step is in force (P15.T10.b's mergers):
 /// the merger census draws the generator's first attempt.
@@ -42,6 +50,26 @@ impl MergerTableRules {
             Self::Fitted
         } else {
             Self::Scratch
+        }
+    }
+
+    /// The stellar mergers' sampler: the scratch [`MERGER_SAMPLER`], or from 31 the fitted
+    /// [`MERGER_SAMPLER_31`].
+    #[must_use]
+    pub(crate) const fn merger_sampler(self) -> &'static ClassSamplerTable<MergerMark, MergerPick> {
+        match self {
+            Self::Scratch => &MERGER_SAMPLER,
+            Self::Fitted => &MERGER_SAMPLER_31,
+        }
+    }
+
+    /// The neutron-star mergers' sampler: the scratch [`NSM_SAMPLER`], or from 31 the fitted
+    /// [`NSM_SAMPLER_31`].
+    #[must_use]
+    pub(crate) const fn nsm_sampler(self) -> &'static ClassSamplerTable<NsmMark, NsmPick> {
+        match self {
+            Self::Scratch => &NSM_SAMPLER,
+            Self::Fitted => &NSM_SAMPLER_31,
         }
     }
 
