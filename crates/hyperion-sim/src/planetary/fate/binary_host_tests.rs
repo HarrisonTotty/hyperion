@@ -2,6 +2,7 @@
 //! its pair's timeline, on real systems of the sample.
 
 use super::*;
+use crate::GeneratorVersion;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::orbit::{Eccentricity, Orientation};
@@ -9,7 +10,6 @@ use crate::planetary::hosts::young::FormationDraws;
 use crate::planetary::testing::{PairHistory, first_paired_system, with_every_27_hold};
 use crate::stellar::system::SystemStars;
 use crate::units::{AstronomicalUnits, Megayears, Radians};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 /// The system tests' universe.
 const SEED: Seed = Seed::new(0x5eed_0014_0030);
@@ -637,27 +637,43 @@ fn planets_of<'s>(
         .filter_map(crate::planetary::system::Body::fate)
 }
 
-/// A planet placed on its zone's inner limit stays in its zone while nothing moves the limit or
-/// its orbit, and leaves it only once the limit lies past its orbit by more than
-/// [`ZONE_EDGE_TOLERANCE`] of it (research-leans-35 §4, W1). `SystemId(0x41ffacb1ff800002)`'s
-/// circumbinary planet lies on its zone's P-type limit of 1.166 au, on a circular orbit about a
+/// A planet on its zone's inner limit stays in its zone while nothing moves the limit or its orbit,
+/// and leaves it only once the limit lies past its orbit by more than [`ZONE_EDGE_TOLERANCE`] of it
+/// (research-leans-35 §4, W1). `SystemId(0x41ffacb1ff800002)`'s circumbinary planet, placed
+/// [`P_TYPE_PLACEMENT_MARGIN`] outside its zone's P-type limit of 1.166 au from generator version
+/// 28, is taken back onto the limit on its circular orbit, where below 28 it was placed, about a
 /// pair whose mass holds to 3.25 Gyr. There the primary's wind turns on, and the pair's fit moves
-/// out past the planet by 10⁻⁶ of it within 2 Myr: the fate unbound it a rounding past the limit.
+/// out past the planet by 10⁻⁶ of it within 2 Myr: the fate unbinds it a rounding past the limit.
+///
+/// [`P_TYPE_PLACEMENT_MARGIN`]: crate::planetary::placement::zones::P_TYPE_PLACEMENT_MARGIN
 #[test]
 fn a_planet_on_its_zone_s_inner_limit_stays_while_nothing_moves_it() {
+    use crate::planetary::placement::zones::P_TYPE_PLACEMENT_MARGIN;
     let galaxy = census_galaxy();
-    with_every_27_hold(|| {
+    {
         let (ctx, system) = census_system(&galaxy, 0x41ff_acb1_ff80_0002);
-        let (zone, body) = system
+        let (zone, placed) = system
             .zones()
             .iter()
             .find_map(|zone| {
-                let inner = zone.inner()?;
+                let margin = zone.inner()? * (1.0 + P_TYPE_PLACEMENT_MARGIN);
                 planets_of(&system, zone)
-                    .find(|body| (body.orbit().periapsis() / inner - 1.0).abs() < 1e-12)
+                    .find(|body| (body.orbit().periapsis() / margin - 1.0).abs() < 1e-12)
                     .map(|body| (zone, body))
             })
-            .expect("a planet placed on its zone's inner limit");
+            .expect("a planet placed its margin outside its zone's inner limit");
+        let orbit = placed
+            .orbit()
+            .scaled(
+                zone.inner().unwrap() / placed.orbit().periapsis(),
+                placed.orbit().gravitational_parameter(),
+            )
+            .unwrap();
+        let on_the_limit =
+            FateBody::new(*placed.formation(), orbit, placed.mass(), placed.density())
+                .unwrap()
+                .evaporating();
+        let body = &on_the_limit;
         let (pair, _) = pair_of(ctx.pairs(), zone.members().next().unwrap()).unwrap();
         let timeline = pair.timeline();
         let host = FateHost::evolved(&ctx, zone);
@@ -710,68 +726,20 @@ fn a_planet_on_its_zone_s_inner_limit_stays_while_nothing_moves_it() {
             ctx.id(),
             inner / periapsis - 1.0
         );
-    });
-}
-
-/// The zones' placement margin is held until the 27 → 28 bump: the rules in force put a planet on
-/// its zone's P-type limit, the tests' switch and 28's helper reach the margin, and 27's helper
-/// does not.
-#[test]
-fn the_zone_placement_margin_is_held_only_until_the_28_bump() {
-    use crate::planetary::placement::zones::{
-        ZONE_PLACEMENT_MARGIN_VERSION, ZonePlacementMarginRules, with_zone_placement_margin,
-    };
-    use crate::planetary::testing::with_every_28_hold;
-    assert!(
-        GENERATOR_VERSION < ZONE_PLACEMENT_MARGIN_VERSION,
-        "the 27 → 28 bump places a planet 3% inside its pair's P-type limit: delete \
-         `ZONE_PLACEMENT_MARGIN_VERSION`, `ZonePlacementMarginRules` with its `OnTheLimit` arm and \
-         its read in `Placer::new`, the tests' `with_zone_placement_margin`, its switch in \
-         `with_every_28_hold` (and the helper, if no other 28 hold is left), its line in \
-         `HeldRules`, and this test; restate the tests held below 28"
-    );
-    assert_eq!(
-        ZonePlacementMarginRules::in_force(),
-        ZonePlacementMarginRules::OnTheLimit
-    );
-    assert_eq!(
-        with_zone_placement_margin(
-            ZonePlacementMarginRules::Margin,
-            ZonePlacementMarginRules::in_force
-        ),
-        ZonePlacementMarginRules::Margin
-    );
-    assert_eq!(
-        with_every_28_hold(ZonePlacementMarginRules::in_force),
-        ZonePlacementMarginRules::Margin
-    );
-    assert_eq!(
-        with_every_27_hold(ZonePlacementMarginRules::in_force),
-        ZonePlacementMarginRules::OnTheLimit
-    );
-    assert_eq!(
-        with_every_28_hold(|| {
-            with_zone_placement_margin(
-                ZonePlacementMarginRules::OnTheLimit,
-                ZonePlacementMarginRules::in_force,
-            )
-        }),
-        ZonePlacementMarginRules::OnTheLimit
-    );
+    }
 }
 
 /// One of the census's edge planets, kept [`P_TYPE_PLACEMENT_MARGIN`] inside its zone's P-type
-/// limit under every 28 hold, stays present up to its pair's first common envelope
-/// (research-leans-37 §1). `SystemId(0x41ffacb1ff800002)`'s circumbinary planet lies on the limit
-/// under every 27 hold, and is unbound at 3.25 Gyr as the primary's wind moves the pair's fit out
-/// past it, before the pair's common envelope and merger at 3.56 Gyr; at 28 it is placed at
-/// q = 1.03 × the limit on the same circular orbit, which no drift before the envelope reaches.
+/// limit (from generator version 28), stays present up to its pair's first common envelope
+/// (research-leans-37 §1). `SystemId(0x41ffacb1ff800002)`'s circumbinary planet lay on the limit
+/// below 28, and was unbound at 3.25 Gyr as the primary's wind moved the pair's fit out past it,
+/// before the pair's common envelope and merger at 3.56 Gyr; it is placed at q = 1.03 × the limit
+/// on the same circular orbit, which no drift before the envelope reaches.
 ///
 /// [`P_TYPE_PLACEMENT_MARGIN`]: crate::planetary::placement::zones::P_TYPE_PLACEMENT_MARGIN
 #[test]
 fn a_census_edge_planet_placed_inside_its_margin_stays_present_to_its_pair_s_first_envelope() {
     use crate::planetary::placement::zones::P_TYPE_PLACEMENT_MARGIN;
-    use crate::planetary::testing::with_every_28_hold;
     let galaxy = census_galaxy();
     // The edge planet's fate among its zone's planets to just before its pair's first envelope,
     // with its orbit as placed and its zone's inner limit.
@@ -802,17 +770,7 @@ fn a_census_edge_planet_placed_inside_its_margin_stays_present_to_its_pair_s_fir
             fate.ending(),
         )
     };
-    let (id, orbit, inner, before, ending) = with_every_27_hold(edge_planet);
-    assert!(
-        (orbit.periapsis() / inner - 1.0).abs() < 1e-12,
-        "{id:?}: q {:?} against the limit {inner:?}",
-        orbit.periapsis()
-    );
-    assert!(
-        matches!(before, BodyState::Unbound { .. }),
-        "{id:?}: {ending:?} before its pair's envelope under every 27 hold"
-    );
-    let (id, orbit, inner, before, ending) = with_every_28_hold(edge_planet);
+    let (id, orbit, inner, before, ending) = edge_planet();
     assert!(
         (orbit.periapsis() / (inner * (1.0 + P_TYPE_PLACEMENT_MARGIN)) - 1.0).abs() < 1e-12
             && orbit.eccentricity().value() < 1e-12,
@@ -823,7 +781,7 @@ fn a_census_edge_planet_placed_inside_its_margin_stays_present_to_its_pair_s_fir
     assert_eq!(
         before,
         BodyState::Present,
-        "{id:?}: {ending:?} before its pair's envelope under every 28 hold"
+        "{id:?}: {ending:?} before its pair's envelope"
     );
 }
 

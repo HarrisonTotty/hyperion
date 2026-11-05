@@ -30,7 +30,7 @@
 //!    eccentricities it assumes. A member is placed only where it is admitted:
 //!    - inside the zone's limits and the disc's edges, and inside the snow line for a group that
 //!      stays inside it (from generator version 28, 3% outside a pair's P-type inner limit, the
-//!      fit's accuracy: P14.T9.d, `ZonePlacementMarginRules`); a compact chain is not held by the
+//!      fit's accuracy: P14.T9.d, `P_TYPE_PLACEMENT_MARGIN`); a compact chain is not held by the
 //!      disc's inner edge, since its first period's law (Mulders et al. 2018) is the innermost
 //!      planets' as observed, which the spread of discs' inner edges already shapes (Lee and
 //!      Chiang 2017; ruling 60);
@@ -121,7 +121,7 @@ use crate::planetary::placement::spacing::{
     MAX_SPACING_STEP, Neighbour, SpacingDraws, SpacingKind, draw_pair_spacing, mutual_hill_factor,
     mutual_hill_radius, next_semi_major_axis, satisfies_floor, spacing_floor,
 };
-use crate::planetary::placement::zones::ZonePlacementMarginRules;
+use crate::planetary::placement::zones::P_TYPE_PLACEMENT_MARGIN;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::draws::UnitUniform;
 use crate::units::consts::{EARTH_MASS_KG, GM_EARTH, GM_SUN, SECONDS_PER_DAY, SOLAR_MASS_KG};
@@ -888,9 +888,7 @@ impl<'a> Placer<'a> {
         // A zone's inner limit is a pair's P-type limit, which the disc is cut at. From version 28
         // a planet keeps the fit's accuracy outside it (P14.T9.d, research-leans-37 §1), in every
         // bound read from it: `lo`, the cavity floor and the eccentricity limit.
-        let zone_inner = limits
-            .inner()
-            .map(|r| ZonePlacementMarginRules::in_force().placement_inner(r));
+        let zone_inner = limits.inner().map(|r| r * (1.0 + P_TYPE_PLACEMENT_MARGIN));
         let lo = zone_inner.map_or(disc.inner_edge(), |r| r.max_of(disc.inner_edge()));
         let hi = limits
             .outer()
@@ -2272,15 +2270,13 @@ mod tests {
         assert!(planets > 30, "{planets}");
     }
 
-    /// P14.T9.d (research-leans-37 §1): under every 28 hold a planet whose law puts it inside its
-    /// zone's P-type limit is placed at q = 1.03 × the limit on a circular orbit, and no planet's
-    /// periapsis lies nearer the limit; under every 27 hold such a planet sits on the limit. A
+    /// P14.T9.d (research-leans-37 §1, from generator version 28): a planet whose law puts it
+    /// inside its zone's P-type limit is placed at q = 1.03 × the limit on a circular orbit, and no
+    /// planet's periapsis lies nearer the limit; below 28 such a planet sat on the limit. A
     /// compact chain about a 1.6 M☉ pair whose limit is 0.4 au, beyond most of its first periods'
     /// law (Mulders et al. 2018), is held at its bound.
     #[test]
     fn a_planet_whose_law_lies_inside_a_p_type_limit_is_placed_its_margin_inside_it() {
-        use crate::planetary::placement::zones::P_TYPE_PLACEMENT_MARGIN;
-        use crate::planetary::testing::{with_every_27_hold, with_every_28_hold};
         let pair = zams_host(1.6, 0.0);
         let inner = au(0.4);
         let limits = Truncation::NONE.with_inner(inner);
@@ -2305,20 +2301,16 @@ mod tests {
         };
         let (mut hosts, mut held) = (0, 0);
         for i in 0..40 {
-            let (Some(at_27), Some(at_28)) = (
-                with_every_27_hold(|| innermost(i)),
-                with_every_28_hold(|| innermost(i)),
-            ) else {
+            let Some(at_28) = innermost(i) else {
                 continue;
             };
             hosts += 1;
-            assert!(at_27.periapsis() >= inner * (1.0 - 1e-12), "{i}");
             assert!(
                 at_28.periapsis() >= margin * (1.0 - 1e-12),
                 "{i}: q {:?} inside {margin:?}",
                 at_28.periapsis()
             );
-            if (at_27.periapsis() / inner - 1.0).abs() < 1e-12 {
+            if (at_28.periapsis() / margin - 1.0).abs() < 1e-12 {
                 held += 1;
                 assert!(
                     (at_28.periapsis() / margin - 1.0).abs() < 1e-12

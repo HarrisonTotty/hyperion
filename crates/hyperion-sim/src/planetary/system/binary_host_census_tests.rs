@@ -11,14 +11,13 @@
 //! a planet whose zone's stars the engine has left with no mass; a planet that lay outside its
 //! zone at its pair's state at one of the pair's segment boundaries since it formed
 //! ([`OrbitZone::limits_at`]); and a planet of a zone that holds a star a supernova released from
-//! the system (P11.T10), which goes with its star or is unbound. The census runs under every 27
-//! hold and on the same galaxy under every 28 hold, and prints both. A zone that holds a released
-//! star is read for the last two columns alone, its stars' states not being the engine's to
-//! compare.
+//! the system (P11.T10), which goes with its star or is unbound. The census runs under the
+//! version's rules and prints its counts. A zone that holds a released star is read for the last
+//! two columns alone, its stars' states not being the engine's to compare.
 //!
 //! Each census also counts, by cause, the planets unbound by the zones at their pairs' evaluated
-//! states alone ([`ZoneLoss`]), and the planets placed on their zone's P-type limit, which 28's
-//! placement margin keeps off it (research-leans-37 §1).
+//! states alone ([`ZoneLoss`]), and the planets placed on their zone's P-type limit, which the
+//! placement margin keeps off it from 28 (research-leans-37 §1).
 //!
 //! The test is native only, as the other censuses are.
 
@@ -31,9 +30,7 @@ use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{Existence, SystemKind, SystemRecord};
 use crate::planetary::placement::zones::{PairBound, ZONE_EDGE_TOLERANCE};
-use crate::planetary::testing::{
-    PairHistory, SampleFilter, sample_records, with_every_27_hold, with_every_28_hold,
-};
+use crate::planetary::testing::{PairHistory, SampleFilter, sample_records, with_every_28_hold};
 use crate::stellar::system::SystemStars;
 use crate::stellar::system::{PairTimeline, SystemState, pair_of};
 
@@ -462,19 +459,19 @@ fn census_of(galaxy: &Galaxy, records: &[SystemRecord], census: &mut Census) {
     }
 }
 
-/// The binary hosts' census at 27, and under every 28 hold: every present planet's zone light
+/// The binary hosts' census at the version's rules: every present planet's zone light
 /// reads as the engine's (P14.T1.e) and the mass its orbit follows is the engine's, no S-type
 /// planet of a pair that went through a common envelope is left, and none orbits a host the
 /// engine left with no mass (P14.T28.g), none has left its zone at its pair's evaluated state,
 /// and none is of a zone that holds a star a supernova released (P14.T9.d), where under the
 /// single models, in the research's sample of 500,000 systems, some 19,000, 19,600, 392, 549 and
-/// 1,432 did not (research-binary-hosts §1). Under every 28 hold no planet is placed on its
-/// zone's P-type limit, where under every 27 hold some are (research-leans-37 §1); the planets
-/// unbound by the zone check alone are printed by cause, unjudged.
+/// 1,432 did not (research-binary-hosts §1). No planet is placed on its zone's P-type limit,
+/// where below 28 some were (research-leans-37 §1); the planets unbound by the zone check alone
+/// are printed by cause, unjudged.
 #[test]
-#[ignore = "slow: the binary hosts' census, 100,000 systems under two rules, about 3 min"]
+#[ignore = "slow: the binary hosts' census, 100,000 systems, about 90 s"]
 fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
-    let (mut after, mut margin) = (Census::default(), Census::default());
+    let mut margin = Census::default();
     for seed in GALAXY_SEEDS {
         let galaxy = Galaxy::from_params_at_version(
             Seed::new(seed),
@@ -483,15 +480,11 @@ fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
         )
         .expect("the Milky Way fixture's gas is mostly neutral");
         let records = sample_records(&galaxy, SYSTEMS, SampleFilter::ALL).unwrap();
-        with_every_27_hold(|| census_of(&galaxy, &records, &mut after));
         with_every_28_hold(|| census_of(&galaxy, &records, &mut margin));
     }
-    eprintln!(
-        "{}\n{}",
-        after.table("every 27 hold"),
-        margin.table("every 28 hold")
-    );
-    for (version, census) in [(27, &after), (28, &margin)] {
+    eprintln!("{}", margin.table("every 28 hold"));
+    {
+        let (version, census) = (28, &margin);
         for (history, row) in &census.rows {
             assert_eq!(
                 row.light_unequal, 0,
@@ -519,7 +512,5 @@ fn the_binary_hosts_census_reads_every_paired_star_as_the_engine_does() {
             );
         }
     }
-    assert_eq!(after.total().planets, margin.total().planets);
-    assert!(after.on_the_limit > 0, "no planet on a P-type limit at 27");
     assert_eq!(margin.on_the_limit, 0, "planets on a P-type limit at 28");
 }
