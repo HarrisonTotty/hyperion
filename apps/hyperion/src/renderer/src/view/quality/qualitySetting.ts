@@ -182,8 +182,8 @@ export interface GeometrySettings {
    * drops moved onto the coarser mesh by a distance morph of its own, and stride 1 in the forced
    * region. Read where `litClusters` is on; the overlay's depth then takes its own pass at stride
    * 1, whatever `overlayDepth` says. On each setting where its acceptance passes on the pod's
-   * seamless probe, else `off` (the brief's ruling, 2026-11-02): `measured` on low, `off` on high,
-   * where a frame's change moved the ground past its 1 px.
+   * seamless probe, else `off` (the brief's ruling, 2026-11-02): `measured` on both, since a
+   * coarse–fine hold's release fades as its onset does (`StrideHoldFades`).
    */
   readonly strides: "off" | "measured";
   /**
@@ -396,7 +396,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       pageBytes: 128 * 2 ** 20,
       meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
       finClusters: true,
-      strides: "off",
+      strides: "measured",
       occlusion: "off",
     },
     decoration: true,

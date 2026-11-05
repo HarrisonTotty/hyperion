@@ -481,6 +481,8 @@ function PASS_ENTRIES(made: Made): number {
 /** A streamed pass at {@link NEAR} whose every bake is wholly surveyed: its patches interior. */
 async function clusteredPass(setting: "high" | "low" = "high"): Promise<Made> {
   const made = await litPass(setting);
+  // At stride 1, as the cluster path's own checks draw.
+  made.pass.setGeometry({ ...SETTINGS[setting].geometry, strides: "off" });
   // Its ground's changes cut at their first draw, so that no record's heights fade, which the cull
   // keeps whole (R10.T16.i; R14.T1.g).
   made.pass.setReducedMotion(true);
@@ -489,6 +491,12 @@ async function clusteredPass(setting: "high" | "low" = "high"): Promise<Made> {
   stream(made, [passView(PRIMARY, NEAR)], 24);
   return made;
 }
+
+/**
+ * The high setting's geometry with every cluster at stride 1 (R14.T3.c's `strides` off): the
+ * cluster path's draws and lists as T1 and T2 check them.
+ */
+const HIGH_AT_STRIDE_1: GeometrySettings = { ...SETTINGS.high.geometry, strides: "off" };
 
 /** The high setting's geometry with the lit pass by the interior mesh: T1.e's overlay alone. */
 const OVERLAY_ALONE: GeometrySettings = { ...SETTINGS.high.geometry, litClusters: false };
@@ -1628,6 +1636,7 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
   /** A streamed pass at {@link NEAR} over {@link halfSurveyed}'s layers, its fades cut. */
   async function edgePass(given?: CountingRenderEngine, reducedMotion = true): Promise<Made> {
     const made = await litPass("high", given);
+    made.pass.setGeometry(HIGH_AT_STRIDE_1);
     made.pass.setReducedMotion(reducedMotion);
     made.lane().layers = halfSurveyed();
     // Until nothing more is asked for, so that no patch is drawn by a stand-in.
@@ -2028,7 +2037,7 @@ describe("the camera's strides on the cluster path (plan R14, R14.T3.c)", () => 
 
   it("draws at stride 1, every record without a scale or edges' bands, while the lever is off", async () => {
     const made = await measuredPass();
-    made.pass.setGeometry(SETTINGS.high.geometry);
+    made.pass.setGeometry(HIGH_AT_STRIDE_1);
     made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const cull = made.engine.dispatched.findLast((d) => d.kernel === LIT_CULL) ?? fail();
     const records = stridesOf(made);
@@ -2177,7 +2186,7 @@ function pyramidOf(made: Made, builds = 0): HandPyramid {
 }
 
 describe("the two-pass occlusion on the cluster path (plan R14, R14.T3.d)", () => {
-  const OCCLUDED: GeometrySettings = { ...SETTINGS.high.geometry, occlusion: "hzb" };
+  const OCCLUDED: GeometrySettings = { ...HIGH_AT_STRIDE_1, occlusion: "hzb" };
 
   /** The kind of the last lit cull's pass `index`. */
   function lastKind(made: Made, index: number): number {

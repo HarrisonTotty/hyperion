@@ -706,11 +706,18 @@ function stridesOf(stats: ReadonlyArray<ClusterPassStats> | null): string {
 }
 
 /**
+ * The high setting's geometry with every cluster at stride 1 (R14.T3.c's `strides` off): the
+ * frames the lit mesh and the way back draw byte for byte, and the cascades' checks, which the
+ * camera's strides would move apart.
+ */
+const HIGH_AT_STRIDE_1: GeometrySettings = { ...SETTINGS.high.geometry, strides: "off" };
+
+/**
  * The high setting's geometry at stride 1, every cascade rendered every frame, the edge patches by
  * their lit mesh: its exact levers alone (plan R14, R14.T1.c), R14.T1.g's checked apart.
  */
 const RECEIVERS_CULLED: GeometrySettings = {
-  ...SETTINGS.high.geometry,
+  ...HIGH_AT_STRIDE_1,
   casterStrideCap: 1,
   farCascadeRate: 1,
   finClusters: false,
@@ -720,7 +727,7 @@ const RECEIVERS_CULLED: GeometrySettings = {
  * The high setting's geometry with every cascade rendered every frame (plan R14, R14.T6.b): T1.d's
  * casters at their texel alone, and the far cascades' every-frame flight.
  */
-const EVERY_FRAME: GeometrySettings = { ...SETTINGS.high.geometry, farCascadeRate: 1 };
+const EVERY_FRAME: GeometrySettings = { ...HIGH_AT_STRIDE_1, farCascadeRate: 1 };
 
 /** R14.T6.b's flight: its frames, and the camera's step a frame, m: 300 m/s at 60 Hz. */
 const FLIGHT_FRAMES = 4;
@@ -1161,7 +1168,7 @@ export async function checkShadowCascades(
       target === null
         ? ["none"]
         : await layerDigests(engine, target.depth, target.layers, target.sizePx);
-    made.setGeometry(SETTINGS.high.geometry);
+    made.setGeometry(HIGH_AT_STRIDE_1);
     const casting = casterTriangles(alone.cascades?.litMeshCasters ?? [], aloneStats);
     const culled = casterTriangles(cascades?.litMeshCasters ?? [], culledStats);
     const prior = casterTriangles(unlevered.cascades?.litMeshCasters ?? [], null);
@@ -1197,7 +1204,7 @@ export async function checkShadowCascades(
     made.setGeometry({ ...RECEIVERS_CULLED, finClusters: true });
     const finned = made.drawFor(passView.id, frameInput(view, light, true, performance.now()));
     const shadowedFins = await texelsOf(engine, "cascades: fins", view, finned.draws);
-    made.setGeometry(SETTINGS.high.geometry);
+    made.setGeometry(HIGH_AT_STRIDE_1);
     const withFins = casterTriangles(finAlone.cascades?.litMeshCasters ?? [], finAloneStats);
     // The edge patches' own casters without the receivers' cull: the lit mesh's before, and after
     // the frame's less the interior patches' clusters, the same in both.
@@ -1332,10 +1339,10 @@ export async function checkShadowCascades(
       };
     };
     const everyFrame = await fly(EVERY_FRAME, "frame");
-    const atFour = await fly(SETTINGS.high.geometry, "frame");
+    const atFour = await fly(HIGH_AT_STRIDE_1, "frame");
     const everyFrameMaps = await fly({ ...EVERY_FRAME, casterDepthCull: false }, "far maps");
-    const atFourMaps = await fly({ ...SETTINGS.high.geometry, casterDepthCull: false }, "far maps");
-    made.setGeometry(SETTINGS.high.geometry);
+    const atFourMaps = await fly({ ...HIGH_AT_STRIDE_1, casterDepthCull: false }, "far maps");
+    made.setGeometry(HIGH_AT_STRIDE_1);
     const everyShadowed = everyFrame.shadowed ?? new Float32Array(0);
     const fourShadowed = atFour.shadowed ?? new Float32Array(0);
     const edges = stopsApart(everyShadowed, fourShadowed);
@@ -1371,7 +1378,7 @@ export async function checkShadowCascades(
     // then as many frames hovering at its end, with time stopped (the sun still) and running (the
     // sun setting at a day's rate).
     const passesOver = (sunStepRad: number): number[][] => {
-      made.setGeometry(SETTINGS.high.geometry);
+      made.setGeometry(HIGH_AT_STRIDE_1);
       const flown: number[][] = [];
       for (let k = 0; k < 2 * FLIGHT_FRAMES; k += 1) {
         const at = viewFrom(
