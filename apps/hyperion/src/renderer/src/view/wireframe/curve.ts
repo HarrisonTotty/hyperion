@@ -1,4 +1,4 @@
-import { add, dot, scale, sub, type Vec3 } from "../../geometry/vec3";
+import { add, dot, norm, scale, sub, type Vec3 } from "../../geometry/vec3";
 import { type ProjectionCamera, projector, type Viewport } from "../camera/projection";
 
 /**
@@ -60,6 +60,30 @@ const OFF_SCREEN_MARGIN_PX = 64;
  */
 export type DepthSagWithin = (curveM: Vec3, chordM: Vec3, halfChordM: number) => boolean;
 
+/**
+ * How far a chord of a curve on no body's surface, an orbit or a ring's edge, may stand from it
+ * along the line of sight, a share of the curve's distance: 10⁻³ (R08.T17; lean, 2026-11-05).
+ *
+ * @remarks
+ * Seen from near its centre such a curve is nearly a great circle, which the view's gnomonic
+ * projection draws straight, so its lateral sagitta took one chord across the field: over 2θ of
+ * arc a chord stands R (1 − cos θ) inside it, 2% at the first spans' 22.5°, and the served giant
+ * `41ffecb1ffc00013.0400`'s moons' orbits, 6–9.5 Gm out, drew across the planet they pass behind
+ * from 243 Mm. At 10⁻³ an arc takes chords of 5.1° at most there, and the curve's order against a
+ * body holds wherever their distances part by more than that share; seen from afar the share costs
+ * no point.
+ */
+export const CURVE_DEPTH_SAG_SHARE = 1e-3;
+
+/**
+ * The {@link DepthSagWithin} of a curve on no body's surface: whether the chord's point nearest it
+ * stands within {@link CURVE_DEPTH_SAG_SHARE} of the curve's distance from the camera.
+ */
+export function distanceSagWithin(curveM: Vec3, chordM: Vec3): boolean {
+  const distanceM = norm(curveM);
+  return Math.abs(distanceM - norm(chordM)) <= CURVE_DEPTH_SAG_SHARE * distanceM;
+}
+
 /** A closed interval of a curve's parameter. */
 export type ParameterWindow = readonly [number, number];
 
@@ -76,8 +100,9 @@ export interface CurveSpec {
   readonly initialSpans: number;
   /**
    * How far a chord may sag behind the curve: a body's graticule, drawn over its own occluder, asks
-   * its depth inside the surface (`graticule`). Absent for a curve that no occluder stands just
-   * behind, which is subdivided for its lateral sagitta alone.
+   * its depth inside the surface (`graticule`); an orbit or a ring's edge asks
+   * {@link distanceSagWithin} (R08.T17). Absent for a curve subdivided for its lateral sagitta
+   * alone.
    */
   readonly depthSagWithin?: DepthSagWithin;
 }

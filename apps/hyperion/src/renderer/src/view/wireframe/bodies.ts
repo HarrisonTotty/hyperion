@@ -19,6 +19,7 @@ import { occluderRadius } from "../depth/depth";
 import {
   cosineWindows,
   type DepthSagWithin,
+  distanceSagWithin,
   type ParameterWindow,
   type Polyline,
   sampleCurve,
@@ -1101,7 +1102,8 @@ export interface RingLines {
 
 /**
  * A ring's ellipses as the camera sees them: its inner and outer edges, subdivided to the sagitta
- * tolerance, and a radial tick every 10° from one to the other (plan R02, Design note 13), apart,
+ * tolerance and within `CURVE_DEPTH_SAG_SHARE` of their distance along the view (R08.T17), and a
+ * radial tick every 10° from one to the other (plan R02, Design note 13), apart,
  * so that the photorealistic overlay may leave the ticks out with its `GRID` (R08.T17).
  */
 export function ringEllipse(
@@ -1121,6 +1123,7 @@ export function ringEllipse(
         point: (t) => at(radiusM, t),
         windows: [[0, 2 * Math.PI]],
         initialSpans: 36,
+        depthSagWithin: distanceSagWithin,
       },
       camera,
       viewport,

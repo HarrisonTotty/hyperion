@@ -70,6 +70,53 @@ describe("orbitPath", () => {
     expect(worstPx).toBeLessThan(0.25);
   });
 
+  it("keeps its chords within 10⁻³ of the orbit's distance along the view, seen edge-on from inside it (R08.T17)", () => {
+    // A moon's orbit about a camera in its plane 2 × 10⁸ m from its planet, as from the served
+    // giant 41ffecb1ffc00013.0400: it projects to one straight line, which its lateral sagitta
+    // alone drew in chords cutting across its inside, nearer than the planet.
+    const far: KeplerOrbit = {
+      ...ORBIT,
+      semiMajorAxisM: 6.8e9,
+      eccentricity: 0.1,
+      inclinationRad: 0,
+    };
+    const parentM = vec3(0, 2e8, 0);
+    const camera: ProjectionCamera = {
+      orientation: lookAlong(parentM, vec3(0, 0, 1)),
+      fovXRad: Math.PI / 3,
+    };
+    const ellipse = ellipseOf(far);
+    const curve = Array.from({ length: 20_000 }, (_, k) =>
+      add(parentM, ellipse((2 * Math.PI * k) / 20_000)),
+    );
+    const worst = orbitPath(far, parentM, camera, VIEWPORT)
+      .flatMap((run) =>
+        run.slice(1).flatMap((b, i) => {
+          const a = run[i] ?? b;
+          // The chords the view reaches: a span wholly off one side is not refined.
+          const [pa, pb] = [project(a, camera, VIEWPORT), project(b, camera, VIEWPORT)];
+          const reaches =
+            Math.max(pa.xPx, pb.xPx) >= 0 &&
+            Math.min(pa.xPx, pb.xPx) <= VIEWPORT.widthPx &&
+            Math.max(pa.yPx, pb.yPx) >= 0 &&
+            Math.min(pa.yPx, pb.yPx) <= VIEWPORT.heightPx;
+          if (!reaches) {
+            return [];
+          }
+          const middle = vec3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+          let nearest = curve[0] ?? middle;
+          for (const p of curve) {
+            if (norm(sub(p, middle)) < norm(sub(nearest, middle))) {
+              nearest = p;
+            }
+          }
+          return [Math.abs(norm(nearest) - norm(middle)) / norm(nearest)];
+        }),
+      )
+      .reduce((most, share) => Math.max(most, share), 0);
+    expect(worst).toBeLessThan(1.01e-3);
+  });
+
   it("takes fewer points far away than near", () => {
     const count = (distanceM: number): number => {
       const { camera, parentM } = cameraAt(distanceM);

@@ -2204,3 +2204,17 @@ highest step`, naming the key held back as the field of view's ends name theirs;
     at once and then at the interval's end.
   - The inspection timing file is version 5: each window's React commits (`react`, the
     check-only hook of `reactCommits.ts`) and each thread's `reactMs`.
+- **A served giant's orbits and rings over the image** (R08.T17's fix lane, 2026-11-05).
+  - The moons' orbits, seen nearly edge-on from inside them, drew across the planet they pass
+    behind, in black casings. `curve.ts`' `sampleCurve` halves a span until its ends' reversed
+    depths are within `DEPTH_RATIO_MAX`, 2 (a run cut at the near plane ends 0.1 m ahead and 10⁹ m
+    aside); `Sample` gains `depth`. Orbits and ring edges take `distanceSagWithin`: a chord's
+    nearest point within `CURVE_DEPTH_SAG_SHARE`, 10⁻³ of the curve's distance (lean,
+    2026-11-05), where an edge-on chord cut across the orbit's inside.
+  - `ringEllipse` returns `RingLines` (`edges`, `ticks`); the draw list draws the ticks as
+    `ring:<body>:ticks` with `LineBatch.grid`, which `overlayDrawList` leaves out at GRID OFF, the
+    edges kept as the ring's stand-in (Design note 17; lean, 2026-11-05).
+  - _SwiftShader's alone_: from 243 Mm, one or two of those orbits' casings still cross the planet
+    in black at some view sizes, their strokes hidden. An f64 check, 64 points a chord, finds no
+    chord before the planet, and a casing and its stroke differ in depth by under 1% there. Pending
+    the owner's GPU look.
