@@ -201,6 +201,14 @@ pub const TUBE_TABLE_CACHE_BYTES: usize = 64 << 20;
 /// more than any budget the server should give them: it is cold whatever the cache holds.
 pub const CENTRE_ORBIT_CACHE_BYTES: usize = 128 << 20;
 
+/// The byte budget of the catalogue features' and the galactic centre's lists as the alert walks
+/// read them, of every galaxy the server holds (plan 09's P09.T36 in plan 12's walks; the alerts'
+/// `SharedListedHostsCache`): each feature cell's lists, charged as if every class's hosts were
+/// found. The Milky Way fixture's whole cube comes to 66.5 MB, its 1,556 feature cells and its
+/// centre (fix-p09-alert-walk-features-2), so this holds one such galaxy's whole set, which a
+/// background walk of the whole cube reads, with room.
+pub const LISTED_HOSTS_CACHE_BYTES: usize = 96 << 20;
+
 /// The byte budget of the galaxies' spray tables, which the global lists' shell orbits and every
 /// tube's spray step in (P10.T5.b's `SharedSprayForces`): some 160 kB a galaxy, so this holds
 /// every galaxy the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room.

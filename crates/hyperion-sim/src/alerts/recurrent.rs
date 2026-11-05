@@ -109,10 +109,23 @@ mod binaries;
 mod eruptions;
 mod lit;
 
+pub(super) use binaries::{BinaryListing, NovaWalk, xray_binary_host_detections};
 use binaries::{nova_scan_cell, xray_binary_scan_cell};
 pub use eruptions::{
     BuildEruptionHostError, EruptionClass, EruptionHost, giant_eruption_scan_cell,
 };
+pub(super) use eruptions::{EruptionListing, EruptionWalk};
+
+/// The longest an event of `kind`, one the recurrent walk lists or a merger's, lasts, Julian years:
+/// its registry row's duration (P09.T36's lists, whose pads read it).
+///
+/// # Panics
+///
+/// If the row has no end, which no kind but the supernovae', walked apart, has.
+#[must_use]
+pub(super) fn longest_years(kind: TransientKind) -> f64 {
+    lit::longest(kind).as_julian_years_f64()
+}
 
 /// The longest a magnetar stays one after its neutron star's birth, Julian years: 10¹⁹ G yr ÷
 /// `B_Q`, 227,272.7, which a field born far above the critical field approaches (plan 06's

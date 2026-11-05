@@ -730,7 +730,30 @@ impl FeatureLevelList {
     /// feature has one, and a catalogue feature's 13-bit index.
     #[must_use]
     pub fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Self {
-        let stars = FeatureStars::listing(galaxy, feature).map(FeatureStars::tabulated);
+        Self::of_stars(
+            galaxy,
+            feature,
+            FeatureStars::listing(galaxy, feature).map(FeatureStars::tabulated),
+        )
+    }
+
+    /// The registered classes of `feature`'s list, in list order, each with its expected
+    /// candidates and its count after the clamp: [`of`](Self::of)'s, bit for bit, made without its
+    /// profile's table, which only its entries' places read (plan 12's alert walks, P09.T36 there).
+    #[must_use]
+    pub(crate) fn class_counts_of(
+        galaxy: &Galaxy,
+        feature: &FeatureRecord,
+    ) -> Vec<(ClassId, f64, u32)> {
+        Self::of_stars(galaxy, feature, FeatureStars::listing(galaxy, feature))
+            .class_counts()
+            .collect()
+    }
+
+    /// The list of `feature` whose stars are `stars` ([`of`](Self::of)'s, tabulated or not: the
+    /// table changes no count and no place).
+    #[must_use]
+    fn of_stars(galaxy: &Galaxy, feature: &FeatureRecord, stars: Option<FeatureStars>) -> Self {
         let mut classes = stars
             .as_ref()
             .map_or_else(Vec::new, |stars| stars.list_classes(galaxy));
@@ -955,14 +978,14 @@ impl FeatureLevelList {
             && self.counts.iter().all(|&n| n == 0)
     }
 
-    /// The expected candidates of `class` on the list, the mean its count was drawn on, 0 if it is
-    /// not registered: what plan 12's census counts a list's hosts by (P09.T36 there).
-    #[must_use]
-    pub(crate) fn expected(&self, class: ClassId) -> f64 {
+    /// Each registered class, in list order, with its expected candidates, the mean its count was
+    /// drawn on, and its count after the clamp: what plan 12's census counts a list's hosts by
+    /// (P09.T36 there).
+    pub(crate) fn class_counts(&self) -> impl Iterator<Item = (ClassId, f64, u32)> + '_ {
         self.classes
             .iter()
-            .find(|c| c.class == class)
-            .map_or(0.0, |c| c.expected)
+            .zip(&self.counts)
+            .map(|(class, &count)| (class.class, class.expected, count))
     }
 
     /// The count of `class` on the list, 0 if it is not registered.
@@ -1140,6 +1163,31 @@ impl FeatureLevelList {
         let entry = self.entry(index)?;
         let class = RecentClass::of(entry.class())?;
         stars.entry_when(galaxy, class, index, entry.position(), wanted)
+    }
+
+    /// The core collapse at `index` whose death's time and kick were read first, `told`
+    /// (`FeatureStars::core_collapse_death`, found without its place): the rest of the class's test
+    /// at its place and its entry, [`recent_entry`](Self::recent_entry)'s bit for bit, or `None`
+    /// where the test refuses it, or for an index of another class or past the list. What plan 12's
+    /// alert walks build of a death whose time their cut takes (P09.T36 there).
+    #[must_use]
+    pub(crate) fn core_collapse_told(
+        &self,
+        galaxy: &Galaxy,
+        index: u16,
+        told: (UniverseTime, Option<NatalKick>),
+    ) -> Option<RecentEntry> {
+        let stars = self.stars.as_ref()?;
+        let entry = self.entry(index)?;
+        if entry.class() != ClassId::CORE_COLLAPSE {
+            return None;
+        }
+        let (record, range) = stars.core_collapse_draws(galaxy, index)?;
+        stars.core_collapse_entry(
+            galaxy,
+            entry.position(),
+            &CandidateDeath::of(record, range, told),
+        )
     }
 
     /// Every entry of the recent classes that their tests keep, in index order.

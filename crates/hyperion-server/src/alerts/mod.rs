@@ -12,11 +12,14 @@
 //! each walk among the subscriptions that ask for it and keeps them in a byte budget. The wire's
 //! `alerts` topic opens a subscription, runs its scans, records the pushes that fall due in the
 //! universe's Knowledge, sightings and clears (P12.T8.c), pushes its census, and answers
-//! `alerts_observer` and `alerts_acknowledge` (P12.T9.a). Each universe's contacts are opened once
+//! `alerts_observer` and `alerts_acknowledge` (P12.T9.a). The features' and the centre's lists
+//! that the walks read from generator version 29 are kept between walks in a byte budget of their
+//! own (`SharedListedHostsCache`). Each universe's contacts are opened once
 //! and shared (`UniverseContacts`), and every subscription of the universe pushes the contacts any
 //! of them changed.
 
 mod contacts;
+mod listed;
 mod scan;
 mod schedule;
 mod service;
@@ -25,6 +28,7 @@ mod testing;
 mod topic;
 
 pub(crate) use contacts::UniverseContacts;
+pub(crate) use listed::SharedListedHostsCache;
 pub(crate) use service::AlertScans;
 pub(crate) use topic::open;
 

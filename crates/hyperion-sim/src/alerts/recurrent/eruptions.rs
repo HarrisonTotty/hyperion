@@ -20,15 +20,17 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::coords::GalacticPosition;
 use crate::events::{EventSeries, TimeWindow, tags};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::lbv::{LbvEntry, LbvProcess};
 use crate::galaxy::catalogue_classes::{
-    CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassProcess,
+    CatalogueCellKey, CatalogueClassCell, CatalogueMotion, ClassId, ClassProcess,
 };
 use crate::id::{BodyId, SystemId};
-use crate::stellar::events::lbv::{LbvModel, MAX_DURATION};
+use crate::stellar::events::lbv::{Eruption, LbvModel, MAX_DURATION};
 use crate::time::{Span, UniverseTime};
+use crate::units::LightYears;
 use crate::units::consts::SPEED_OF_LIGHT;
 
 use super::super::reach::kind_reach;
@@ -196,43 +198,89 @@ pub fn giant_eruption_scan_cell<P: EruptionClass>(
     if cell.class() != class || !query.classes().contains(class) {
         return;
     }
-    let observer = *query.observer_position();
-    let reach = kind_reach(TransientKind::GiantEruption, query.sensor());
+    let walk = EruptionWalk::new(class, query);
     let start = out.len();
-    let (mut listed, mut events) = (Vec::new(), Vec::new());
+    let mut listing = EruptionListing::default();
     for entry in CatalogueClassCell::generate(galaxy, process, cell).entries() {
         let Some(host) = process.eruption_host(galaxy, entry.value()) else {
             continue;
         };
+        walk.host(galaxy, ctx, query, &host, &mut listing, out);
+    }
+    sort_detections(&mut out[start..]);
+}
+
+/// The buffers a walk lends each luminous blue variable's listing of its eruptions, cleared for
+/// each host and kept for their allocations: plan 06's eruptions and the walk's events.
+#[derive(Debug, Default)]
+pub(in crate::alerts) struct EruptionListing {
+    listed: Vec<Eruption>,
+    events: Vec<LitEvent>,
+}
+
+/// The giant eruptions' walk of one class for one query (module documentation): its observer and
+/// the eruptions' reach, found once for every host.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(in crate::alerts) struct EruptionWalk {
+    class: ClassId,
+    observer: GalacticPosition,
+    reach: LightYears,
+}
+
+impl EruptionWalk {
+    /// The walk of `class`'s giant eruptions for `query`.
+    #[must_use]
+    pub(in crate::alerts) fn new(class: ClassId, query: &AlertQuery) -> Self {
+        Self {
+            class,
+            observer: *query.observer_position(),
+            reach: kind_reach(TransientKind::GiantEruption, query.sensor()),
+        }
+    }
+
+    /// Appends to `out` the detections of `host`'s giant eruptions that `query`'s sensor sees in
+    /// its window, unsorted: a cell's entry's, or a feature's or the galactic centre's list's
+    /// (P09.T36 in the walks). Its star is built only for a host whose window meets its emission
+    /// interval (module documentation).
+    pub(in crate::alerts) fn host(
+        &self,
+        galaxy: &Galaxy,
+        ctx: &mut AlertContext<'_>,
+        query: &AlertQuery,
+        host: &EruptionHost,
+        listing: &mut EruptionListing,
+        out: &mut Vec<Detection>,
+    ) {
         let Some(interval) = emission_interval(
             host.motion(),
-            &observer,
+            &self.observer,
             query.window(),
             MAX_DURATION,
-            reach,
+            self.reach,
         ) else {
-            continue;
+            return;
         };
         if !host.may_erupt_in(interval) {
-            continue;
+            return;
         }
         let star = host.star().to_star();
         let Some(model) = LbvModel::of(&star) else {
-            continue;
+            return;
         };
         let series = EventSeries::new(galaxy.seed(), tags::STAR_LBV_ERUPTION, host.body().into());
-        listed.clear();
-        model.eruptions_in(&series, interval, &mut listed);
-        events.clear();
-        events.extend(listed.iter().map(LitEvent::of_eruption));
+        listing.listed.clear();
+        model.eruptions_in(&series, interval, &mut listing.listed);
+        listing.events.clear();
+        listing
+            .events
+            .extend(listing.listed.iter().map(LitEvent::of_eruption));
         let lit = LitHost {
             host: host.host(),
-            class,
+            class: self.class,
             motion: *host.motion(),
         };
-        host_detections(galaxy, ctx, query, &lit, &events, out);
+        host_detections(galaxy, ctx, query, &lit, &listing.events, out);
     }
-    sort_detections(&mut out[start..]);
 }
 
 #[cfg(test)]

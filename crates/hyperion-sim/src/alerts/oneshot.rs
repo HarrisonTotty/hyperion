@@ -68,6 +68,7 @@
 use crate::coords::GalacticPosition;
 use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::binary::feature::ListedBinary;
 use crate::galaxy::catalogue_classes::binary::{
     MergerEntry, NeutronStarMergers, NsmEntry, StellarMergers,
 };
@@ -316,15 +317,7 @@ impl OneShotClass for StellarMergers {
     }
 
     fn event(&self, galaxy: &Galaxy, entry: &MergerEntry) -> Option<OneShotEvent> {
-        let scan = entry.scan();
-        let system = BinarySystem::stellar_merger(galaxy.seed(), scan);
-        merger_event(
-            &system,
-            scan.merger_time(),
-            entry.record().id(),
-            *entry.motion(),
-            &mut Vec::with_capacity(1),
-        )
+        stellar_merger_event(galaxy, entry)
     }
 
     /// Every event of the cell ([`cell_events`](Self::cell_events)): a merger's candidates read no
@@ -361,15 +354,7 @@ impl OneShotClass for NeutronStarMergers {
     }
 
     fn event(&self, galaxy: &Galaxy, entry: &NsmEntry) -> Option<OneShotEvent> {
-        let scan = entry.scan();
-        let system = BinarySystem::neutron_star_merger(galaxy.seed(), scan);
-        merger_event(
-            &system,
-            scan.merger_time(),
-            entry.record().id(),
-            *entry.motion(),
-            &mut Vec::with_capacity(1),
-        )
+        neutron_star_merger_event(galaxy, entry)
     }
 
     /// Every event of the cell ([`cell_events`](Self::cell_events)): a merger's candidates read no
@@ -397,6 +382,51 @@ impl OneShotClass for NeutronStarMergers {
                 merger_event(&system, scan.merger_time(), scan.id(), motion, &mut listed)
             })
             .collect()
+    }
+}
+
+/// The luminous red nova of the stellar merger `entry` of `galaxy`, at its T and moving with it, or
+/// `None` where it makes none: a cell's entry's ([`StellarMergers`]' event) or a feature's or the
+/// galactic centre's list's (P09.T36 in the walks).
+#[must_use]
+fn stellar_merger_event(galaxy: &Galaxy, entry: &MergerEntry) -> Option<OneShotEvent> {
+    let scan = entry.scan();
+    let system = BinarySystem::stellar_merger(galaxy.seed(), scan);
+    merger_event(
+        &system,
+        scan.merger_time(),
+        entry.record().id(),
+        *entry.motion(),
+        &mut Vec::with_capacity(1),
+    )
+}
+
+/// The kilonova of the neutron-star merger `entry` of `galaxy`, at its T and moving with it, or
+/// `None` where it makes none, as [`stellar_merger_event`] (a black hole that swallows its neutron
+/// star whole).
+#[must_use]
+fn neutron_star_merger_event(galaxy: &Galaxy, entry: &NsmEntry) -> Option<OneShotEvent> {
+    let scan = entry.scan();
+    let system = BinarySystem::neutron_star_merger(galaxy.seed(), scan);
+    merger_event(
+        &system,
+        scan.merger_time(),
+        entry.record().id(),
+        *entry.motion(),
+        &mut Vec::with_capacity(1),
+    )
+}
+
+/// The one-shot event of the merger `entry` on a feature's or the galactic centre's list
+/// (P11.T8.f), as its class's walk makes a cell's entry's: a stellar merger's luminous red nova or
+/// a neutron-star merger's kilonova; `None` for an entry of another class or a merger that makes
+/// none.
+#[must_use]
+pub(super) fn listed_merger_event(galaxy: &Galaxy, entry: &ListedBinary) -> Option<OneShotEvent> {
+    match entry {
+        ListedBinary::StellarMerger(entry) => stellar_merger_event(galaxy, entry),
+        ListedBinary::NeutronStarMerger(entry) => neutron_star_merger_event(galaxy, entry),
+        ListedBinary::AccretingWd(_) | ListedBinary::XrayBinary(_) => None,
     }
 }
 

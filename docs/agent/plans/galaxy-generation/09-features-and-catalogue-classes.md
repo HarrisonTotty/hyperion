@@ -1535,7 +1535,8 @@ _The field half built behind its hold (lane `p09-t2c`, step 2, 2026-10-31, at `G
 
 _Built behind its hold (lane `p09-t2c`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24, no output
 moved): see Risks, "P09.T36 as built". The alert walks read its lists from 29 (lane
-`fix-p09-alert-walk-features`, 2026-11-05): see Risks, "P09.T36 in the alert walks"._
+`fix-p09-alert-walk-features`, 2026-11-05), every class they hold (lane
+`fix-p09-alert-walk-features-2`, 2026-11-05): see Risks, "P09.T36 in the alert walks"._
 
 #### P09.T37 Merge into the range query
 
@@ -6108,6 +6109,27 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - _Lookup (lean, 2026-11-05)._ A list is read through a ball about its feature (its reach plus its
     bulk travel, capped at `LIFETIME_REACH`), the features found at `UNBOUND_PAD_SPEED`; lists are
     built afresh each walk, not from the interior cache, whose `listed_of` builds every death.
+- **P09.T36 in the alert walks, every class (lane `fix-p09-alert-walk-features-2`, 2026-11-05, at
+  28, behind the same hold; no output moved).** Supersedes the lane before's classes, `unwalked_by`,
+  `FeatureLevelList::expected` and its lists built afresh.
+  - _Classes._ From 29 every class the lists hold is walked beside its cells (`listed::Walked::of`):
+    the LBVs, both white dwarf classes, the X-ray binaries and both merger classes with the core
+    collapses and the Type Ia; `AlertSource::FeatureLists` is `Complete` from 29
+    (`ListedWalk::source_status`). The bump deletes `source_status`'s held arm with the hold.
+  - _Names (alerts)._ `alerts::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache}`,
+    `AlertContext::with_listed_hosts`; the cells' per-host steps `NovaWalk`, `EruptionWalk`,
+    `xray_binary_host_detections` and `oneshot::listed_merger_event`, which the cells' walks call
+    bit for bit.
+  - _Names (plan 09)._ `FeatureLevelList::{class_counts_of, class_counts, core_collapse_told}`.
+  - _Server._ `alerts::SharedListedHostsCache` (`AppState::listed_hosts`, in
+    `LISTED_HOSTS_CACHE_BYTES`), lent to `walk_interactive` and `walk_slabs`.
+  - _Kept lists (lean, 2026-11-05)._ Kept per feature cell: each feature's class counts, its core
+    collapses' deaths read time first (their entries built each walk where the cut takes them),
+    the other classes' kept hosts, each found when first read and charged as if found; one job
+    builds a cell while the others wait.
+  - _Centre (lean, 2026-11-05)._ Its living hosts' ball pads their travel at their places' fastest
+    speed (`ListedHosts::centre_fastest`), uncapped; the features' living hosts', at their bulk
+    speed, uncapped too; deaths keep the cap.
 - **P09.T5, the superbubbles' merge and walls (lane `fix-p09-superbubble-extinction`, 2026-11-05,
   at 27 and 3; held until `SUPERBUBBLE_MERGE_VERSION` = 29, no output moved).**
   - _Sim._ `GasModifier::Wall` (a shell that replaces the field outside every hole; the densest

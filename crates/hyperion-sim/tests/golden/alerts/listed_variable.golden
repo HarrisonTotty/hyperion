@@ -1,0 +1,6 @@
+# generator_version = 28
+GiantEruption Some(ClassId(4)) Onset in Photometric(V)
+event e849e31870000001.0000:0107000000000100
+host = 0xe849e31870000001
+arrival 5612913628 s 19212871 ns
+flux = 0x3febef560c3cf4fe  # 0.8729658354783678

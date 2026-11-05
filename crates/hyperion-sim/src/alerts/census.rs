@@ -27,13 +27,13 @@
 //!    flares, which have no class, and the disruptions of the victims on its feature-level list,
 //!    [`ClassId::TIDAL_DISRUPTION_VICTIM`]'s hosts, whose census is the list's count. Without a
 //!    global list in the context ([`AlertContext::with_global_list`]) neither is walked.
-//! 3. **The other sources** of class members, which hold none yet and answer none
-//!    ([`SourceCensus`]): the dwarf cores' feature-level lists on the global list (P10.T7.b) and
-//!    the catalogue features' (P09.T36). From generator version 29 the core collapses' and the
-//!    Type Ia's walks read the catalogue features' and the centre's lists of their recently dead
-//!    beside their cells, under their own census (part 1, [`listed`](super::listed)), and the
-//!    lists' source names what is left on them: their luminous blue variables (P09.T43) and plan
-//!    11's binary classes (P11.T8.f).
+//! 3. **The other sources** of class members ([`SourceCensus`]): the dwarf cores' feature-level
+//!    lists on the global list, which hold none yet and answer none (P10.T7.b), and the catalogue
+//!    features'. From generator version 29 every class's walk reads the catalogue features' and
+//!    the centre's lists of its hosts beside its cells, under its own census (part 1,
+//!    [`listed`](super::listed)): their recently dead (P09.T36), their luminous blue variables
+//!    (P09.T43) and plan 11's binary classes (P11.T8.f), so the lists' source is complete; below
+//!    it, it names the task that walks them (P09.T36).
 //! 4. **The local events** of an observed range result's systems ([`local_events`], P12.T5.e),
 //!    with the same query.
 //!
@@ -92,9 +92,8 @@ pub enum AlertSource {
     /// The dwarf cores of the global list, through their feature-level lists.
     DwarfCores,
     /// Plan 09's catalogue features within reach, through their feature-level lists. From
-    /// generator version 29 their recently dead are walked with their classes, the core collapses
-    /// and the Type Ia (part 1 of the module documentation), and this source's census names what
-    /// the lists hold that no walk reads: their luminous blue variables and plan 11's binaries.
+    /// generator version 29 every class they hold is walked with its class (part 1 of the module
+    /// documentation), and this source is complete; below it, unwalked.
     FeatureLists,
 }
 
@@ -192,11 +191,8 @@ pub trait AlertClasses {
 /// The production walks of the catalogue classes, as built:
 ///
 /// - [`ClassId::CORE_COLLAPSE`]: its supernovae ([`one_shot_detections`], P12.T5.b) and its
-///   magnetars ([`magnetar_detections`], P12.T5.c), on plan 09's process, and from generator
-///   version 29 those of the recently dead on the features' and the centre's lists
-///   ([`listed`](super::listed));
-/// - [`ClassId::TYPE_IA`]: its supernovae, on plan 09's process (P09.T34.a), and from 29 the
-///   lists';
+///   magnetars ([`magnetar_detections`], P12.T5.c), on plan 09's process;
+/// - [`ClassId::TYPE_IA`]: its supernovae, on plan 09's process (P09.T34.a);
 /// - [`ClassId::STELLAR_MERGER`] and [`ClassId::NEUTRON_STAR_MERGER`]: their luminous red novae
 ///   and kilonovae ([`one_shot_detections`], P12.T5.b), on plan 11's processes, read from their
 ///   scan marks;
@@ -205,7 +201,9 @@ pub trait AlertClasses {
 ///   [`ClassId::LUMINOUS_BLUE_VARIABLE`]: its giant eruptions ([`recurrent_detections`],
 ///   P12.T5.c), each counted on its own process; the dwarf novae are local (P12.T5.e).
 ///
-/// Every class but the centre's victims is walked here.
+/// From generator version 29 each class's walk reads the hosts of the features' and the centre's
+/// lists beside its cells ([`listed`](super::listed)). Every class but the centre's victims is
+/// walked here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProductionAlertClasses;
 
@@ -238,41 +236,47 @@ impl AlertClasses for ProductionAlertClasses {
             }
             ClassId::STELLAR_MERGER => {
                 let process = || StellarMergers::new(galaxy);
-                class_alerts(galaxy, query, class, process, |process| {
+                let walk = |ctx: &mut AlertContext<'_>, process: &_, out: &mut _| {
                     one_shot_detections(galaxy, ctx, query, process, out);
-                })
+                };
+                listed_class_alerts(galaxy, (ctx, query), class, process, walk, out)
             }
             ClassId::NEUTRON_STAR_MERGER => {
                 let process = || NeutronStarMergers::new(galaxy);
-                class_alerts(galaxy, query, class, process, |process| {
+                let walk = |ctx: &mut AlertContext<'_>, process: &_, out: &mut _| {
                     one_shot_detections(galaxy, ctx, query, process, out);
-                })
+                };
+                listed_class_alerts(galaxy, (ctx, query), class, process, walk, out)
             }
             // The recurrent walk builds the class's process for each cell it scans (`scan_cell`);
             // the one here counts the hosts.
             ClassId::ACCRETING_WHITE_DWARF => {
                 let process = || AccretingWdFast::new(galaxy);
-                class_alerts(galaxy, query, class, process, |_| {
+                let walk = |ctx: &mut AlertContext<'_>, _: &_, out: &mut _| {
                     recurrent_detections(galaxy, ctx, class, query, out);
-                })
+                };
+                listed_class_alerts(galaxy, (ctx, query), class, process, walk, out)
             }
             ClassId::ACCRETING_WHITE_DWARF_SLOW => {
                 let process = || AccretingWdSlow::new(galaxy);
-                class_alerts(galaxy, query, class, process, |_| {
+                let walk = |ctx: &mut AlertContext<'_>, _: &_, out: &mut _| {
                     recurrent_detections(galaxy, ctx, class, query, out);
-                })
+                };
+                listed_class_alerts(galaxy, (ctx, query), class, process, walk, out)
             }
             ClassId::XRAY_BINARY => {
                 let process = || XrayBinaries::new(galaxy);
-                class_alerts(galaxy, query, class, process, |_| {
+                let walk = |ctx: &mut AlertContext<'_>, _: &_, out: &mut _| {
                     recurrent_detections(galaxy, ctx, class, query, out);
-                })
+                };
+                listed_class_alerts(galaxy, (ctx, query), class, process, walk, out)
             }
             ClassId::LUMINOUS_BLUE_VARIABLE => {
                 let process = || LbvProcess::new(galaxy);
-                class_alerts(galaxy, query, class, process, |_| {
+                let walk = |ctx: &mut AlertContext<'_>, _: &_, out: &mut _| {
                     recurrent_detections(galaxy, ctx, class, query, out);
-                })
+                };
+                listed_class_alerts(galaxy, (ctx, query), class, process, walk, out)
             }
             // The victims are the centre's, walked through the global list (trait
             // documentation); a class registered later is walked by the task that adds it.
@@ -353,11 +357,11 @@ pub fn class_alerts<P: ClassProcess>(
     }
 }
 
-/// [`class_alerts`] for a class whose recently dead the features' and the centre's lists hold too
-/// (P09.T36; [`listed`](super::listed)): where its cells alone leave it complete, the lists its
-/// walk reads add their expected candidates to its cells', and a class still complete is walked,
-/// `walk` over its cells, then its lists, into `out`. Below the lists' version
-/// (`LISTED_ALERTS_VERSION`) it is [`class_alerts`] bit for bit.
+/// [`class_alerts`] for a class whose hosts the features' and the centre's lists hold too
+/// (P09.T36, P09.T43, P11.T8.f; [`listed`](super::listed)): where its cells alone leave it
+/// complete, the lists its walk reads add their expected candidates to its cells', and a class
+/// still complete is walked, `walk` over its cells, then its lists, into `out`. Below the lists'
+/// version (`LISTED_ALERTS_VERSION`) it is [`class_alerts`] bit for bit.
 /// A class its cells send to the background or put over its limit is not counted further: a
 /// background walk counts the candidates its lists drew ([`listed_scan_slab`](super::listed_scan_slab)).
 ///
@@ -377,7 +381,10 @@ fn listed_class_alerts<P: ClassProcess>(
         Counted::Done(census) => census,
         Counted::Cells(cells) => {
             let listed = (status_of(cells.expected, query) == ClassStatus::Complete)
-                .then(|| ListedWalk::find(galaxy, ctx.feature_cells(), query, class))
+                .then(|| {
+                    let lists = (ctx.feature_cells(), ctx.listed_hosts());
+                    ListedWalk::find(galaxy, lists, query, class)
+                })
                 .flatten();
             let expected = listed
                 .as_ref()
@@ -643,7 +650,7 @@ pub fn alerts_in_with<L: AlertClasses + ?Sized, S: StarsCache>(
         },
         SourceCensus {
             source: AlertSource::FeatureLists,
-            status: SourceStatus::Unwalked(Unwalked::NotBuilt(ListedWalk::unwalked_by(galaxy))),
+            status: ListedWalk::source_status(galaxy),
         },
     ];
     local_events(galaxy, ctx, query, observed, stars, cache, &mut detections);

@@ -1,41 +1,59 @@
-//! The recently dead of the catalogue features' and the galactic centre's feature-level lists in
-//! the alert walks (plan 09's P09.T36 in plan 12's walks), from generator version 29
-//! (`LISTED_ALERTS_VERSION`).
+//! The hosts of the catalogue features' and the galactic centre's feature-level lists in the alert
+//! walks (plan 09's P09.T36, P09.T43 and plan 11's P11.T8.f in plan 12's walks), from generator
+//! version 29 (`LISTED_ALERTS_VERSION`).
 //!
 //! From version 27 the young field gives most of its young stars to the features that bore them
 //! (P09.T2.c), and their deaths are their lists' (P09.T36): the core collapses of the nurseries and
 //! the young open clusters, the Type Ia of every cluster, and the centre's own after its victims.
-//! The walks of [`ClassId::CORE_COLLAPSE`] and [`ClassId::TYPE_IA`] read them beside the class's
-//! cells, under the class's one census, and in the same order: their detections are merged with
-//! the cells' by arrival and then by event.
+//! The lists hold the luminous blue variables of the young features too (P09.T43), and plan 11's
+//! binary classes of every feature with members (P11.T8.f), which the catalogue gives up there.
+//! Every class's walk reads them beside the class's cells, under the class's one census, and in the
+//! same order: their detections are merged with the cells' by arrival and then by event.
 //!
 //! # What is read
 //!
-//! A list is read for each kind the class's walk sees: a core collapse's supernova
-//! ([`TransientKind::CoreCollapse`]) and its magnetar ([`TransientKind::MagnetarBurst`]), a Type
-//! Ia's supernova ([`TransientKind::TypeIa`]), each within its [`kind_reach`]. An entry's epoch
-//! place lies within its feature's reach of its centre, and its site on its candidate's line at the
-//! feature's bulk velocity, so a death that can light the window at T lies within the reach and
-//! the bulk speed times |T| of the centre; a magnetar's remnant lies within [`LIFETIME_REACH`] of
-//! its site, by `DeathMarks::of`'s cap. So:
+//! A list is read for each kind the class's walk sees, each within its [`kind_reach`]:
+//!
+//! - [`ClassId::CORE_COLLAPSE`]: its supernovae ([`TransientKind::CoreCollapse`]) and its
+//!   magnetars ([`TransientKind::MagnetarBurst`]); [`ClassId::TYPE_IA`]: its supernovae;
+//! - [`ClassId::LUMINOUS_BLUE_VARIABLE`]: its giant eruptions;
+//! - [`ClassId::ACCRETING_WHITE_DWARF`] and [`ClassId::ACCRETING_WHITE_DWARF_SLOW`]: their novae;
+//!   [`ClassId::XRAY_BINARY`]: its transients' outbursts, its bursters' Type I bursts and its Be/X
+//!   outbursts;
+//! - [`ClassId::STELLAR_MERGER`] and [`ClassId::NEUTRON_STAR_MERGER`]: their luminous red novae
+//!   and kilonovae.
+//!
+//! An entry's epoch place lies within its feature's reach of its centre, and it moves on a line at
+//! the feature's bulk velocity, so an event at T whose light can reach the window lies within the
+//! reach and the bulk speed times |T| of the centre; a magnetar's remnant lies within
+//! [`LIFETIME_REACH`] of its site, by `DeathMarks::of`'s cap, which bounds a death's travel too.
+//! So:
 //!
 //! - **The features.** Those whose reach touches the sphere of the kind's reach about the observer
 //!   padded by that travel at [`UNBOUND_PAD_SPEED`], above every feature's bulk speed
 //!   ([`FeatureCatalogue::near`], through the context's feature cells,
 //!   [`AlertContext::with_feature_cells`]), and then, from the feature's own bulk speed, those
-//!   whose deaths' ball can come within the reach. Only these build their lists.
-//! - **The centre.** Its list (`CentreRecent`), whose entries move at their own velocities, its
-//!   ball the centre's reach padded by [`LIFETIME_REACH`], by the same cap.
-//! - **The deaths.** Each list's entries of the class whose death's time, read first, can light the
-//!   window from the ball (the alert walks' cut of a class cell, P12.T8.b.2, about the ball in place of a
-//!   cell's box): only these build their stars (`FeatureLevelList::recent_entry_when`).
+//!   whose hosts' ball can come within the reach.
+//! - **The centre.** Its list, whose entries move at their own velocities: for its deaths, its
+//!   ball the centre's reach padded by [`LIFETIME_REACH`], by the same cap; for its living hosts,
+//!   padded by their travel at the fastest of them.
+//! - **The deaths.** Each list's deaths of the class whose time, read first, can light the window
+//!   from the ball (the alert walks' cut of a class cell, P12.T8.b.2, about the ball in place of a
+//!   cell's box): only these build their entries. A living host reads no time first, and its own
+//!   emission interval decides, as a cell's host's does.
+//!
+//! What a walk reads of a list that no window changes, each class's counts and its hosts, is kept
+//! between walks ([`ListedHostsCache`]; [`AlertContext::with_listed_hosts`]), so a walk of the whole cube
+//! builds no list another walk has built (fix-p09-alert-walk-features-2).
 //!
 //! # The walks
 //!
-//! A death's supernova is a [`OneShotEvent`] of its explosion on the list's member, its event
-//! named as its [`SupernovaEntry`] would name it, and is detected as the class's own walk detects
-//! its entries' ([`one_shot_detections`]); a core collapse's neutron star born above the critical
-//! field is a [`MagnetarHost`], walked as the class's magnetars are ([`magnetar_detections`]).
+//! Each host is walked as its class's own walk walks a cell's: a death's supernova is a
+//! [`OneShotEvent`] of its explosion on the list's member, its event named as its
+//! [`SupernovaEntry`] would name it ([`one_shot_detections`]), and a core collapse's neutron star
+//! born above the critical field a [`MagnetarHost`] ([`magnetar_detections`]); a variable an
+//! [`EruptionHost`], a white dwarf or an X-ray binary its scan marks, and a merger its one event
+//! ([`recurrent_detections`]' and [`one_shot_detections`]' per-host steps).
 //!
 //! The census adds the lists' expected candidates of the class to its cells' when the cells alone
 //! leave the class complete ([`class_alerts`](super::class_alerts)'s "the candidates its walk
@@ -44,14 +62,14 @@
 //! last slab taking those beyond, and the centre in the slab of the origin ([`listed_scan_slab`]):
 //! over every slab, merged, the detections are the interactive walk's, each to the bit.
 //!
-//! Below the version no walk reads a list, and every walk is the cells' alone, bit for bit. The
-//! lists' luminous blue variables (P09.T43) and plan 11's binary classes on them (P11.T8.f) are not
-//! walked yet ([`AlertSource::FeatureLists`](super::AlertSource::FeatureLists)).
+//! Below the version no walk reads a list, and every walk is the cells' alone, bit for bit.
 //!
 //! [`one_shot_detections`]: super::one_shot_detections
 //! [`magnetar_detections`]: super::magnetar_detections
+//! [`recurrent_detections`]: super::recurrent_detections
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
@@ -61,15 +79,14 @@ use crate::galaxy::catalogue_classes::{CatalogueMotion, ClassId, class_slabs};
 use crate::galaxy::features::catalogue::{
     EDGE, FeatureCatalogue, FeatureCellCache, FeatureRecord, MAX_FEATURE_REACH, bulk_velocity,
 };
-use crate::galaxy::features::centre::events::victims::victim_count;
 use crate::galaxy::features::centre::profile::REACH;
-use crate::galaxy::features::centre::recent::{CentreRecent, TracerProfiles};
 use crate::galaxy::features::members::FeatureLevelList;
-use crate::galaxy::features::members::recent::{RecentClass, RecentEntry};
+use crate::galaxy::features::members::recent::RecentEntry;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::{QuerySphere, UNBOUND_PAD_SPEED};
 use crate::id::SystemId;
 use crate::stellar::Composition;
+use crate::stellar::binary::scan::{AwdScanMarks, XrbScanMarks};
 use crate::time::UniverseTime;
 use crate::units::consts::SPEED_OF_LIGHT;
 use crate::units::{LightYears, MetresPerSecond};
@@ -79,27 +96,35 @@ use super::cut;
 use super::oneshot::{OneShotEvent, candidate, detect};
 use super::reach::kind_reach;
 use super::recurrent::{
-    MAGNETAR_ACTIVE_SPAN, MagnetarHost, StarRecipe, emission_of, hosts_detections, sort_detections,
+    BinaryListing, EruptionHost, EruptionListing, EruptionWalk, MAGNETAR_ACTIVE_SPAN, MagnetarHost,
+    NovaWalk, StarRecipe, emission_of, hosts_detections, longest_years, sort_detections,
+    xray_binary_host_detections,
 };
 use super::registry::TransientKind;
-use super::{AlertContext, AlertQuery, Detection};
+use super::{AlertContext, AlertQuery, Detection, SourceStatus, Unwalked};
 
-/// The generator version from which the alert walks read the recently dead of the features' and
-/// the galactic centre's lists beside the classes' cells (module documentation): 29, train 27's
-/// finding that from 27 the walks see the field's deaths alone (fix-p09-alert-walk-features).
+mod hosts;
+
+use hosts::ClassHosts;
+pub use hosts::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache};
+
+/// The generator version from which the alert walks read the hosts of the features' and the
+/// galactic centre's lists beside the classes' cells (module documentation): 29, train 27's
+/// finding that from 27 the walks see the field's deaths alone (fix-p09-alert-walk-features), and
+/// the lists' other classes with them (fix-p09-alert-walk-features-2).
 ///
 /// Below it `ListedAlertsRules::of_version` is `ListedAlertsRules::FieldAlone`, and every walk is
 /// version 27's bit for bit. 29's bump deletes this hold, `ListedAlertsRules` with its `FieldAlone`
 /// arm, `GalaxyRules::listed_alerts`, the `match` in `ListedWalk::rules_read`, the held arm of
-/// `ListedWalk::unwalked_by` and its tripwire (`the_listed_alerts_are_held_only_until_the_29_bump`).
+/// `ListedWalk::source_status` and its tripwire (`the_listed_alerts_are_held_only_until_the_29_bump`).
 pub(crate) const LISTED_ALERTS_VERSION: GeneratorVersion = GeneratorVersion::new(29);
 
-/// Whether the alert walks read the lists' recently dead (its hold, [`LISTED_ALERTS_VERSION`]).
+/// Whether the alert walks read the lists' hosts (its hold, [`LISTED_ALERTS_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ListedAlertsRules {
     /// Version 28's and before: the classes' cells alone.
     FieldAlone,
-    /// Version 29's: the lists' recently dead beside them.
+    /// Version 29's: the lists' hosts beside them.
     Lists,
 }
 
@@ -122,70 +147,154 @@ const PAD_MARGIN: f64 = 1e-9;
 /// The absolute margin on a pad or a reach, ly.
 const NEAR_MARGIN_LY: f64 = 1e-6;
 
+/// The most kinds one class's lists are walked for: the X-ray binaries' three.
+const MAX_KINDS: usize = 3;
+
+/// How a class's hosts on the lists are walked (module documentation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Walked {
+    /// Deaths: their supernovae, and a core collapse's magnetar.
+    Deaths,
+    /// Luminous blue variables' giant eruptions.
+    Eruptions,
+    /// Accreting white dwarfs' novae.
+    Novae,
+    /// X-ray binaries' outbursts and bursts.
+    XrayBinaries,
+    /// Mergers' one events.
+    Mergers,
+}
+
+impl Walked {
+    /// How `class`'s hosts are walked, and the kinds its lists are walked for, in the order its
+    /// walk reads them; `None` for a class no catalogue feature's list holds.
+    #[must_use]
+    fn of(class: ClassId) -> Option<(Self, &'static [TransientKind])> {
+        use TransientKind as K;
+        Some(match class {
+            ClassId::CORE_COLLAPSE => (Self::Deaths, &[K::CoreCollapse, K::MagnetarBurst]),
+            ClassId::TYPE_IA => (Self::Deaths, &[K::TypeIa]),
+            ClassId::LUMINOUS_BLUE_VARIABLE => (Self::Eruptions, &[K::GiantEruption]),
+            ClassId::ACCRETING_WHITE_DWARF | ClassId::ACCRETING_WHITE_DWARF_SLOW => {
+                (Self::Novae, &[K::Nova])
+            }
+            ClassId::XRAY_BINARY => (
+                Self::XrayBinaries,
+                &[K::XrayTransient, K::XrayBurst, K::BeXOutburst],
+            ),
+            ClassId::STELLAR_MERGER => (Self::Mergers, &[K::LuminousRedNova]),
+            ClassId::NEUTRON_STAR_MERGER => (Self::Mergers, &[K::Kilonova]),
+            // The victims are the centre's alone, walked through the global list.
+            _ => return None,
+        })
+    }
+
+    /// Whether its hosts die, so that their travel is capped at [`LIFETIME_REACH`] and their times
+    /// read first.
+    #[must_use]
+    const fn dies(self) -> bool {
+        matches!(self, Self::Deaths)
+    }
+}
+
+/// How long after its onset an event of `kind` can give light that reaches a window, Julian
+/// years, in [`site_pad`]'s terms: a supernova's [`SUPERNOVA_LIGHT_YEARS`], a magnetar's active
+/// span and its remnant's [`LIFETIME_REACH`] of light ([`magnetar_span_years`]), and any other
+/// event's longest duration, its registry row's.
+#[must_use]
+fn span_years(kind: TransientKind) -> f64 {
+    match kind {
+        TransientKind::CoreCollapse | TransientKind::TypeIa => SUPERNOVA_LIGHT_YEARS,
+        TransientKind::MagnetarBurst => magnetar_span_years(),
+        other => longest_years(other),
+    }
+}
+
+/// How far beyond a list's ball of sites an event of `kind` can go off, ly: a magnetar's remnant
+/// within [`LIFETIME_REACH`] of its site; nothing for any other.
+#[must_use]
+fn beyond_ly(kind: TransientKind) -> f64 {
+    if kind == TransientKind::MagnetarBurst {
+        LIFETIME_REACH.value()
+    } else {
+        0.0
+    }
+}
+
 /// The kinds a class's lists are walked for, each with its reach for a query's sensor (module
-/// documentation): none for a class with no recent deaths, or one the query does not ask about.
+/// documentation), in the class's order, those the sensor does not see left out.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Reaches {
-    /// The supernovae's kind and reach, if the sensor sees them.
-    supernovae: Option<(TransientKind, LightYears)>,
-    /// The magnetars' reach, for the core collapses, if the sensor sees them.
-    magnetars: Option<LightYears>,
+    walked: Walked,
+    kinds: [Option<(TransientKind, LightYears)>; MAX_KINDS],
 }
 
 impl Reaches {
-    /// The kinds `class`'s lists are walked for, for `query`.
+    /// The kinds `class`'s lists are walked for, for `query`; `None` for a class the query does not
+    /// ask about, one no list holds, or one none of whose kinds the sensor sees.
     #[must_use]
-    fn of(class: ClassId, query: &AlertQuery) -> Self {
-        let seen = |kind| {
-            let reach = kind_reach(kind, query.sensor());
-            (reach > LightYears::ZERO).then_some(reach)
-        };
-        let none = Self {
-            supernovae: None,
-            magnetars: None,
-        };
+    fn of(class: ClassId, query: &AlertQuery) -> Option<Self> {
         if !query.classes().contains(class) {
-            return none;
+            return None;
         }
-        match RecentClass::of(class) {
-            Some(RecentClass::CoreCollapse) => Self {
-                supernovae: seen(TransientKind::CoreCollapse)
-                    .map(|reach| (TransientKind::CoreCollapse, reach)),
-                magnetars: seen(TransientKind::MagnetarBurst),
-            },
-            Some(RecentClass::TypeIa) => Self {
-                supernovae: seen(TransientKind::TypeIa).map(|reach| (TransientKind::TypeIa, reach)),
-                magnetars: None,
-            },
-            // The lists' variables' eruptions are not walked yet (module documentation).
-            Some(RecentClass::LuminousBlueVariable) | None => none,
+        let (walked, all) = Walked::of(class)?;
+        let mut kinds = [None; MAX_KINDS];
+        for (slot, &kind) in kinds.iter_mut().zip(all) {
+            let reach = kind_reach(kind, query.sensor());
+            *slot = (reach > LightYears::ZERO).then_some((kind, reach));
         }
+        kinds
+            .iter()
+            .any(Option::is_some)
+            .then_some(Self { walked, kinds })
     }
 
-    /// Whether no kind is walked.
+    /// The kinds seen, with their reaches.
+    fn seen(&self) -> impl Iterator<Item = (TransientKind, LightYears)> + '_ {
+        self.kinds.iter().flatten().copied()
+    }
+
+    /// The reach of `kind`, if it is walked and seen.
     #[must_use]
-    const fn is_empty(&self) -> bool {
-        self.supernovae.is_none() && self.magnetars.is_none()
+    fn reach_of(&self, kind: TransientKind) -> Option<LightYears> {
+        self.seen()
+            .find(|&(k, _)| k == kind)
+            .map(|(_, reach)| reach)
+    }
+
+    /// The pad a list of reach `reach_ly` about a centre `distance_ly` from the observer, moving at
+    /// `beta` of light's speed, takes for an event lighting within `span_years` ([`site_pad`]),
+    /// capped at [`LIFETIME_REACH`] for a class whose hosts die.
+    #[must_use]
+    fn pad(
+        &self,
+        query: &AlertQuery,
+        (span_years, distance_ly): (f64, f64),
+        (reach_ly, beta): (f64, f64),
+    ) -> f64 {
+        site_pad(
+            query,
+            span_years,
+            distance_ly,
+            (reach_ly, beta),
+            self.walked,
+        )
     }
 
     /// The radius about the observer within which every catalogue feature whose list can light the
     /// window lies within its own reach ([`FeatureCatalogue::near`]'s test), ly: each kind's reach
-    /// with [`Balls::of`]'s margins, a magnetar's remnant's [`LIFETIME_REACH`], and the pad of a
+    /// with [`Balls::of`]'s margins and what lies beyond its sites ([`beyond_ly`]), and the pad of a
     /// feature at [`UNBOUND_PAD_SPEED`] as far off as the reach allows ([`lookup_pad`]).
     #[must_use]
     fn lookup_radius(&self, query: &AlertQuery) -> LightYears {
         let beta = MetresPerSecond::from(UNBOUND_PAD_SPEED).value() / SPEED_OF_LIGHT;
         let reach = MAX_FEATURE_REACH.value();
         let seen = |r: LightYears| r.value() * (1.0 + PAD_MARGIN) + NEAR_MARGIN_LY;
-        let supernovae = self.supernovae.map_or(0.0, |(_, r)| {
-            seen(r) + lookup_pad(query, SUPERNOVA_LIGHT_YEARS, seen(r), reach, beta)
+        let radius = self.seen().fold(0.0, |far: f64, (kind, r)| {
+            let r = seen(r) + beyond_ly(kind);
+            far.max(r + lookup_pad(query, span_years(kind), (r, reach), beta, self.walked))
         });
-        let magnetars = self.magnetars.map_or(0.0, |r| {
-            let extra = LIFETIME_REACH.value();
-            let r = seen(r) + extra;
-            r + lookup_pad(query, magnetar_span_years(), r, reach, beta)
-        });
-        LightYears::new(supernovae.max(magnetars))
+        LightYears::new(radius)
     }
 }
 
@@ -204,27 +313,38 @@ fn latest_years(query: &AlertQuery) -> f64 {
     years(window.start()).max(years(window.end()))
 }
 
-/// How far beyond its reach `reach_ly` from its centre a death of a list `distance_ly` from the
-/// observer may lie when its light can reach `query`'s window, ly, its feature moving at `beta` of
-/// light's speed: its feature's travel from the epoch to the death. Light covers a light-year a
-/// Julian year, so years and light-years add.
+/// How far beyond its reach `reach_ly` from its centre a host of a list `distance_ly` from the
+/// observer may lie when the light of its event can reach `query`'s window, ly, its feature moving
+/// at `beta` of light's speed: its feature's travel from the epoch to the event. Light covers a
+/// light-year a Julian year, so years and light-years add.
 ///
-/// A death at T whose light can reach the window within `span_years` of it lies at most
-/// distance + reach + β|T| from the observer, so |T| ≤ (|t|max + span + distance + reach)
-/// ÷ (1 − β), and its site within reach + β|T| of the centre; a year more covers the walks' day
-/// margins. Never more than [`LIFETIME_REACH`], the cap's bound on any line's travel from its site
-/// over its entry's lifetime.
+/// An event at T whose light can reach the window within `span_years` of it lies at most
+/// distance + reach + β|T| from the observer, so |T| ≤ (|t|max + span + distance + reach + 1)
+/// ÷ (1 − β), and its host within reach + β|T| of the centre; a year more covers the walks' day
+/// margins. For hosts that die, walked as `walked`, never more than [`LIFETIME_REACH`], the cap's
+/// bound on any line's travel from its site over its entry's lifetime.
 #[must_use]
 fn site_pad(
     query: &AlertQuery,
     span_years: f64,
     distance_ly: f64,
-    reach_ly: f64,
-    beta: f64,
+    (reach_ly, beta): (f64, f64),
+    walked: Walked,
 ) -> f64 {
     let k = pad_rate(beta);
-    (k * (latest_years(query) + span_years + distance_ly + reach_ly + 1.0) + NEAR_MARGIN_LY)
-        .min(LIFETIME_REACH.value())
+    let pad =
+        k * (latest_years(query) + span_years + distance_ly + reach_ly + 1.0) + NEAR_MARGIN_LY;
+    capped(pad, walked)
+}
+
+/// `pad` for hosts walked as `walked`: at most [`LIFETIME_REACH`] for hosts that die.
+#[must_use]
+fn capped(pad: f64, walked: Walked) -> f64 {
+    if walked.dies() {
+        pad.min(LIFETIME_REACH.value())
+    } else {
+        pad
+    }
 }
 
 /// The pad a list's site takes a light-year of its bound on |T|, ly: β ÷ (1 − β) with a relative
@@ -235,7 +355,7 @@ fn pad_rate(beta: f64) -> f64 {
 }
 
 /// A bound on [`site_pad`] of any list a lookup of `radius_ly` keeps whose ball comes within it,
-/// ly, for lists of reach at most `reach_ly`.
+/// ly, for lists of reach at most `reach_ly` whose hosts are walked as `walked`.
 ///
 /// Such a list lies at most radius + reach + its pad P from the observer, and P = k (|t|max +
 /// span + its distance + reach + 1) + ε for k = [`pad_rate`], so P ≤ k (|t|max + span + radius +
@@ -245,32 +365,29 @@ fn pad_rate(beta: f64) -> f64 {
 fn lookup_pad(
     query: &AlertQuery,
     span_years: f64,
-    radius_ly: f64,
-    reach_ly: f64,
+    (radius_ly, reach_ly): (f64, f64),
     beta: f64,
+    walked: Walked,
 ) -> f64 {
     let k = pad_rate(beta);
     let years = latest_years(query) + span_years + radius_ly + 2.0 * reach_ly + 1.0;
     let fixed = (k * years + NEAR_MARGIN_LY) / (1.0 - k);
-    (fixed * (1.0 + PAD_MARGIN) + NEAR_MARGIN_LY).min(LIFETIME_REACH.value())
+    capped(fixed * (1.0 + PAD_MARGIN) + NEAR_MARGIN_LY, walked)
 }
 
-/// One list's balls for a walk: about its centre, the radius that holds every site of its deaths
-/// that can light the window for each kind walked, ly (module documentation), and whether each
-/// comes within its kind's reach of the observer.
+/// One list's balls for a walk: about its centre, the radius that holds every place of its hosts
+/// from which an event of each kind walked can light the window, ly (module documentation), where
+/// it comes within its kind's reach of the observer.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Balls {
     centre: GalacticPosition,
-    /// The supernovae's site ball, if it comes within their reach.
-    supernovae: Option<LightYears>,
-    /// The magnetars' site ball, if it comes within their reach with the remnant's
-    /// [`LIFETIME_REACH`].
-    magnetars: Option<LightYears>,
+    /// Each kind's ball, in [`Reaches`]' order, where it comes within its reach.
+    kinds: [Option<(TransientKind, LightYears)>; MAX_KINDS],
 }
 
 impl Balls {
     /// The balls of a list about `centre` whose entries lie within `reach_ly` of it at the epoch,
-    /// its sites within `pad(span_years, distance_ly)` more, ly, for `query` and `reaches`.
+    /// its hosts within `pad(span_years, distance_ly)` more, ly, for `query` and `reaches`.
     #[must_use]
     fn of(
         query: &AlertQuery,
@@ -283,24 +400,19 @@ impl Balls {
             (distance - radius - extra <= seen.value() * (1.0 + PAD_MARGIN) + NEAR_MARGIN_LY)
                 .then_some(LightYears::new(radius))
         };
-        let supernovae = reaches.supernovae.and_then(|(_, seen)| {
-            let radius = reach_ly + pad(SUPERNOVA_LIGHT_YEARS, distance);
-            within(radius, 0.0, seen)
-        });
-        let magnetars = reaches.magnetars.and_then(|seen| {
-            let radius = reach_ly + pad(magnetar_span_years(), distance);
-            within(radius, LIFETIME_REACH.value(), seen)
-        });
-        Self {
-            centre,
-            supernovae,
-            magnetars,
+        let mut kinds = [None; MAX_KINDS];
+        for (slot, reach) in kinds.iter_mut().zip(&reaches.kinds) {
+            *slot = reach.and_then(|(kind, seen)| {
+                let radius = reach_ly + pad(span_years(kind), distance);
+                within(radius, beyond_ly(kind), seen).map(|radius| (kind, radius))
+            });
         }
+        Self { centre, kinds }
     }
 
     /// The balls of `feature`'s list, or `None` for a feature with no bulk motion, which lists
-    /// nothing (a cloud, or a galaxy without its kinematic tables), or whose deaths reach no
-    /// kind's sphere.
+    /// nothing (a cloud, or a galaxy without its kinematic tables), or whose hosts reach no kind's
+    /// sphere.
     #[must_use]
     fn of_feature(
         galaxy: &Galaxy,
@@ -317,41 +429,52 @@ impl Balls {
         let beta = speed.value() / SPEED_OF_LIGHT;
         let reach = feature.reach().value();
         Self::of(query, reaches, (*feature.position(), reach), |span, d| {
-            site_pad(query, span, d, reach, beta)
+            reaches.pad(query, (span, d), (reach, beta))
         })
         .reaching()
     }
 
-    /// The balls of the galactic centre's list, whose entries move at their own velocities: the
-    /// centre's [`REACH`] and the cap's [`LIFETIME_REACH`].
+    /// The balls of the galactic centre's list, whose entries move at their own velocities: its
+    /// [`REACH`], and for its deaths the cap's [`LIFETIME_REACH`], for its living hosts their travel
+    /// at `beta`, the fastest's speed over light's ([`site_pad`]).
     #[must_use]
-    fn of_centre(query: &AlertQuery, reaches: &Reaches) -> Option<Self> {
+    fn of_centre(query: &AlertQuery, reaches: &Reaches, beta: f64) -> Option<Self> {
+        let reach = REACH.value();
         Self::of(
             query,
             reaches,
-            (GalacticPosition::ORIGIN, REACH.value()),
-            |_, _| LIFETIME_REACH.value(),
+            (GalacticPosition::ORIGIN, reach),
+            |span, d| {
+                if reaches.walked.dies() {
+                    LIFETIME_REACH.value()
+                } else {
+                    reaches.pad(query, (span, d), (reach, beta))
+                }
+            },
         )
         .reaching()
     }
 
     /// The balls, if any comes within its kind's reach.
     #[must_use]
-    const fn reaching(self) -> Option<Self> {
-        if self.supernovae.is_some() || self.magnetars.is_some() {
-            Some(self)
-        } else {
-            None
-        }
+    fn reaching(self) -> Option<Self> {
+        self.kinds.iter().any(Option::is_some).then_some(self)
     }
 
-    /// Whether a death at `t` can light `query`'s window from a ball (the cut).
+    /// Whether a death at `t` can light `query`'s window from a ball (the cut): a supernova's, or a
+    /// magnetar's.
     fn wanted(&self, query: &AlertQuery) -> impl Fn(UniverseTime) -> bool {
-        let supernovae = self
-            .supernovae
+        let ball = |wanted: TransientKind| {
+            self.kinds
+                .iter()
+                .flatten()
+                .find(|&&(kind, _)| kind == wanted)
+                .map(|&(_, radius)| radius)
+        };
+        let supernovae = ball(TransientKind::CoreCollapse)
+            .or_else(|| ball(TransientKind::TypeIa))
             .map(|radius| cut::one_shot_ball(query, &self.centre, radius));
-        let magnetars = self
-            .magnetars
+        let magnetars = ball(TransientKind::MagnetarBurst)
             .map(|radius| cut::magnetars_ball(query, &self.centre, radius));
         move |t| {
             supernovae.as_ref().is_some_and(|cut| cut(t))
@@ -424,14 +547,22 @@ impl Death {
 }
 
 /// What a walk read of a class's lists (module documentation): the lists' expected candidates of
-/// the class and the candidates they drew, and their deaths whose time can light the window, in
-/// the lists' order (the catalogue's cell and index order, the centre's last) and each list's
-/// index order.
+/// the class and the candidates they drew, and their hosts that can light the window, in the lists'
+/// order (the catalogue's cell and index order, the centre's last) and each list's index order.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ListedWalk {
     expected: f64,
     drawn: u64,
+    /// The deaths whose time can light the window.
     deaths: Vec<Death>,
+    /// The luminous blue variables.
+    eruptions: Vec<EruptionHost>,
+    /// The accreting white dwarfs.
+    novae: Vec<AwdScanMarks>,
+    /// The X-ray binaries.
+    xray_binaries: Vec<XrbScanMarks>,
+    /// The mergers' events.
+    mergers: Vec<OneShotEvent>,
 }
 
 impl ListedWalk {
@@ -445,8 +576,9 @@ impl ListedWalk {
     }
 
     /// The lists of `class` that `query`'s walk reads in `galaxy`, their features through `cells`
-    /// (module documentation), or `None` below [`LISTED_ALERTS_VERSION`] and for a class no list
-    /// holds or whose kinds the sensor does not see.
+    /// and the lists as the walks read them through `lists` (module documentation), or `None` below
+    /// [`LISTED_ALERTS_VERSION`] and for a class no list holds or whose kinds the sensor does not
+    /// see.
     ///
     /// # Panics
     ///
@@ -455,20 +587,24 @@ impl ListedWalk {
     #[must_use]
     pub(crate) fn find(
         galaxy: &Galaxy,
-        cells: &dyn FeatureCellCache,
+        (cells, lists): (&dyn FeatureCellCache, &dyn ListedHostsCache),
         query: &AlertQuery,
         class: ClassId,
     ) -> Option<Self> {
-        let reaches = Reaches::of(class, query);
-        if !Self::rules_read(galaxy) || reaches.is_empty() {
+        if !Self::rules_read(galaxy) {
             return None;
         }
+        let reaches = Reaches::of(class, query)?;
         let mut walk = Self::default();
+        let observer = query.observer_position();
         let radius = reaches.lookup_radius(query);
-        for feature in FeatureCatalogue::near(galaxy, query.observer_position(), radius, cells) {
-            walk.read_feature(galaxy, query, &reaches, class, &feature);
+        let mut found = Vec::new();
+        for (cell, last) in FeatureCatalogue::cells_near(galaxy, observer, radius) {
+            found.clear();
+            FeatureCatalogue::found_in(galaxy, cells, (cell, last), (observer, radius), &mut found);
+            walk.read_cell(galaxy, (cells, lists), (query, &reaches, class), &found);
         }
-        walk.read_centre(galaxy, query, &reaches, class);
+        walk.read_centre(galaxy, lists, (query, &reaches, class));
         Some(walk)
     }
 
@@ -477,76 +613,140 @@ impl ListedWalk {
     #[must_use]
     fn find_in_slab(
         galaxy: &Galaxy,
-        cells: &dyn FeatureCellCache,
+        (cells, lists): (&dyn FeatureCellCache, &dyn ListedHostsCache),
         query: &AlertQuery,
         (class, sphere, x): (ClassId, &QuerySphere, i32),
     ) -> Self {
-        let reaches = Reaches::of(class, query);
         let mut walk = Self::default();
         let slabs = class_slabs(class, sphere);
-        if !Self::rules_read(galaxy) || reaches.is_empty() || !slabs.contains(&x) {
+        if !Self::rules_read(galaxy) || !slabs.contains(&x) {
             return walk;
         }
-        let edge = class
+        let Some(reaches) = Reaches::of(class, query) else {
+            return walk;
+        };
+        let log2 = class
             .cell_log2_ly()
-            .map(|log2| f64::from(1_u32 << log2))
             .expect("a class whose lists are walked has a grid");
+        let edge = f64::from(1_u32 << log2);
         let (lo, hi) = slab_bounds(&slabs, x, edge);
         let observer = query.observer_position();
         let radius = reaches.lookup_radius(query);
-        let mut found = Vec::new();
-        for (cell, last) in FeatureCatalogue::cells_near(galaxy, observer, radius) {
-            // Closed at both faces: a centre's x in light-years may round onto its cell's face.
+        let mut cells_near = FeatureCatalogue::cells_near(galaxy, observer, radius);
+        // Closed at both faces: a centre's x in light-years may round onto its cell's face.
+        cells_near.retain(|(cell, _)| {
             let low = f64::from(cell.to_array()[0]) * EDGE;
-            if low > hi || low + EDGE < lo {
-                continue;
-            }
+            low <= hi && low + EDGE >= lo
+        });
+        // The slabs of one column of feature cells, which a background scan's jobs walk side by
+        // side, each start on its own cells, so that each builds its own lists first rather than
+        // waiting on another's (`ListedHostsCache`); the detections are sorted whatever the order.
+        // A feature cell, `EDGE` = 4,096 ly, spans 2^(12 − log2) slabs of the class's cells.
+        let per_column = 1_i32 << 12_u32.saturating_sub(log2);
+        debug_assert_eq!(f64::from(per_column) * edge, EDGE.max(edge));
+        let place = usize::try_from(x.rem_euclid(per_column)).expect("a remainder is not negative");
+        let per_column = usize::try_from(per_column).expect("a column's slabs are few");
+        let start = cells_near.len() * place / per_column;
+        cells_near.rotate_left(start);
+        let mut found = Vec::new();
+        for (cell, last) in cells_near {
+            found.clear();
             FeatureCatalogue::found_in(galaxy, cells, (cell, last), (observer, radius), &mut found);
-        }
-        for feature in found {
-            let at = feature.position().to_light_years_f64()[0];
-            if (lo..hi).contains(&at) {
-                walk.read_feature(galaxy, query, &reaches, class, &feature);
-            }
+            found.retain(|feature| (lo..hi).contains(&feature.position().to_light_years_f64()[0]));
+            walk.read_cell(galaxy, (cells, lists), (query, &reaches, class), &found);
         }
         if (lo..hi).contains(&0.0) {
-            walk.read_centre(galaxy, query, &reaches, class);
+            walk.read_centre(galaxy, lists, (query, &reaches, class));
         }
         walk
     }
 
-    /// Reads `feature`'s list, if its deaths can reach a kind's sphere.
-    fn read_feature(
+    /// Reads the lists of `found`, features of one cell in index order, whose hosts can reach a
+    /// kind's sphere: the cell's lists found through `lists` when the first is needed.
+    fn read_cell(
         &mut self,
         galaxy: &Galaxy,
-        query: &AlertQuery,
-        reaches: &Reaches,
-        class: ClassId,
-        feature: &FeatureRecord,
+        (cells, lists): (&dyn FeatureCellCache, &dyn ListedHostsCache),
+        (query, reaches, class): (&AlertQuery, &Reaches, ClassId),
+        found: &[FeatureRecord],
     ) {
-        let Some(balls) = Balls::of_feature(galaxy, query, reaches, feature) else {
-            return;
-        };
-        let list = FeatureLevelList::of(galaxy, feature);
-        let count = list.count(class);
-        self.expected += list.expected(class);
-        self.drawn += u64::from(count);
-        if count == 0 {
-            return;
-        }
-        let wanted = balls.wanted(query);
-        let entries = list.entries().filter(|entry| entry.class() == class);
-        for entry in entries {
-            if let Some(death) = list
-                .recent_entry_when(galaxy, entry.index(), &wanted)
-                .and_then(|entry| Death::of_feature(galaxy, &entry))
-            {
-                self.deaths.push(death);
-            }
+        let mut listed: Option<Arc<ListedCell>> = None;
+        for feature in found {
+            let Some(balls) = Balls::of_feature(galaxy, query, reaches, feature) else {
+                continue;
+            };
+            let cell = listed.get_or_insert_with(|| lists.cell(galaxy, feature.id().cell(), cells));
+            let Some(hosts) = cell.hosts(feature) else {
+                continue;
+            };
+            self.read_feature(galaxy, (query, reaches, class), (feature, &balls), hosts);
         }
     }
 
-    /// Reads the galactic centre's list, if its deaths can reach a kind's sphere.
+    /// Reads `feature`'s list, `hosts`, whose hosts can reach a kind's sphere from `balls`.
+    fn read_feature(
+        &mut self,
+        galaxy: &Galaxy,
+        (query, reaches, class): (&AlertQuery, &Reaches, ClassId),
+        (feature, balls): (&FeatureRecord, &Balls),
+        hosts: &ListedHosts,
+    ) {
+        let (expected, count) = hosts.class(class);
+        self.expected += expected;
+        self.drawn += u64::from(count);
+        let Some(found) = hosts.feature_hosts(galaxy, feature, class) else {
+            return;
+        };
+        if let ClassHosts::Told(told) = found {
+            let wanted = balls.wanted(query);
+            let mut taken = told.iter().filter(|told| wanted(told.death)).peekable();
+            if taken.peek().is_none() {
+                return;
+            }
+            // Its entries' places read its profile's table, made for the deaths the cut takes.
+            let list = FeatureLevelList::of(galaxy, feature);
+            self.deaths.extend(taken.filter_map(|told| {
+                list.core_collapse_told(galaxy, told.index, (told.death, told.kick))
+                    .and_then(|entry| Death::of_feature(galaxy, &entry))
+            }));
+            return;
+        }
+        self.take(query, balls, reaches, found);
+    }
+
+    /// Takes the hosts `found` of a list whose balls are `balls`: its deaths that the cut takes, or
+    /// every living host.
+    fn take(&mut self, query: &AlertQuery, balls: &Balls, reaches: &Reaches, found: &ClassHosts) {
+        debug_assert!(
+            matches!(
+                (reaches.walked, found),
+                (Walked::Deaths, ClassHosts::Deaths(_))
+                    | (Walked::Eruptions, ClassHosts::Eruptions(_))
+                    | (Walked::Novae, ClassHosts::Novae(_))
+                    | (Walked::XrayBinaries, ClassHosts::XrayBinaries(_))
+                    | (Walked::Mergers, ClassHosts::Mergers(_))
+            ),
+            "a class's hosts are walked as its class walks them"
+        );
+        match found {
+            ClassHosts::Told(_) => {}
+            ClassHosts::Deaths(deaths) => {
+                let wanted = balls.wanted(query);
+                self.deaths.extend(
+                    deaths
+                        .iter()
+                        .filter(|death| wanted(death.explosion))
+                        .cloned(),
+                );
+            }
+            ClassHosts::Eruptions(hosts) => self.eruptions.extend(hosts.iter().cloned()),
+            ClassHosts::Novae(marks) => self.novae.extend_from_slice(marks),
+            ClassHosts::XrayBinaries(marks) => self.xray_binaries.extend_from_slice(marks),
+            ClassHosts::Mergers(events) => self.mergers.extend_from_slice(events),
+        }
+    }
+
+    /// Reads the galactic centre's list through `lists`, if its hosts can reach a kind's sphere.
     ///
     /// # Panics
     ///
@@ -554,71 +754,42 @@ impl ListedWalk {
     fn read_centre(
         &mut self,
         galaxy: &Galaxy,
-        query: &AlertQuery,
-        reaches: &Reaches,
-        class: ClassId,
+        lists: &dyn ListedHostsCache,
+        (query, reaches, class): (&AlertQuery, &Reaches, ClassId),
     ) {
-        let Some(balls) = Balls::of_centre(query, reaches) else {
-            return;
+        // Its deaths' ball is the cap's, known before the list is read; its living hosts' needs the
+        // fastest of them.
+        let (centre, balls) = if reaches.walked.dies() {
+            let Some(balls) = Balls::of_centre(query, reaches, 0.0) else {
+                return;
+            };
+            (lists.centre(galaxy), balls)
+        } else {
+            let centre = lists.centre(galaxy);
+            let beta = centre.centre_fastest(galaxy, class);
+            let Some(balls) = Balls::of_centre(query, reaches, beta) else {
+                return;
+            };
+            (centre, balls)
         };
-        let Some(recent_class) = RecentClass::of(class) else {
-            return;
-        };
-        let model = galaxy
-            .centre()
-            .expect("no galaxy the builder allows fails its centre (CentreModel::new's tests)");
-        let victims = victim_count(galaxy)
-            .expect("no galaxy the builder allows fails its disruptions' model");
-        let recent = CentreRecent::new(galaxy, model, victims);
-        let expected = recent
-            .expected()
-            .iter()
-            .filter(|(c, _)| *c == recent_class)
-            .map(|(_, expected)| expected)
-            .sum::<f64>();
-        let list = recent.list(galaxy);
-        let count = list.count(class);
+        let (expected, count) = centre.class(class);
         self.expected += expected;
         self.drawn += u64::from(count);
-        if count == 0 {
-            return;
-        }
-        let wanted = balls.wanted(query);
-        let profiles = TracerProfiles::of(model);
-        for entry in list.entries().filter(|entry| entry.class() == class) {
-            let Some(kept) = recent
-                .place(galaxy, model, &profiles, recent_class, entry.index())
-                .and_then(|place| place.kept(galaxy))
-            else {
-                continue;
-            };
-            let (Some(site), Some(kind)) = (kept.site(), kept.explosion_kind()) else {
-                continue;
-            };
-            if !wanted(site.death()) {
-                continue;
-            }
-            let member = kept.member();
-            self.deaths.push(Death::of_parts(
-                galaxy,
-                (member.record(), *member.composition()),
-                kind,
-                site.death(),
-                (*kept.motion(), kept.supernova()),
-            ));
+        if let Some(found) = centre.centre_hosts(galaxy, class) {
+            self.take(query, &balls, reaches, found);
         }
     }
 
-    /// The task that walks what the features' lists hold that no walk reads in `galaxy` (the
-    /// census's [`AlertSource::FeatureLists`](super::AlertSource::FeatureLists)): every class below
-    /// [`LISTED_ALERTS_VERSION`] (P09.T36), and from it the luminous blue variables (P09.T43) and
-    /// plan 11's binary classes (P11.T8.f).
+    /// The status of the catalogue features' lists' source in `galaxy` (the census's
+    /// [`AlertSource::FeatureLists`](super::AlertSource::FeatureLists)): walked with their classes
+    /// from [`LISTED_ALERTS_VERSION`], every class they hold, and below it not walked, their task
+    /// P09.T36.
     #[must_use]
-    pub(crate) fn unwalked_by(galaxy: &Galaxy) -> &'static str {
+    pub(crate) fn source_status(galaxy: &Galaxy) -> SourceStatus {
         if Self::rules_read(galaxy) {
-            "P09.T43, P11.T8.f"
+            SourceStatus::Complete
         } else {
-            "P09.T36"
+            SourceStatus::Unwalked(Unwalked::NotBuilt("P09.T36"))
         }
     }
 
@@ -634,9 +805,8 @@ impl ListedWalk {
         self.drawn
     }
 
-    /// Appends to `out` the detections of the deaths' supernovae and magnetars of `class` that
-    /// `query`'s sensor sees in its window, sorted by arrival and then by event (module
-    /// documentation).
+    /// Appends to `out` the detections of the hosts of `class` read that `query`'s sensor sees in
+    /// its window, sorted by arrival and then by event (module documentation).
     pub(crate) fn detections(
         &self,
         galaxy: &Galaxy,
@@ -646,37 +816,82 @@ impl ListedWalk {
         out: &mut Vec<Detection>,
     ) {
         let start = out.len();
-        let reaches = Reaches::of(class, query);
+        let Some(reaches) = Reaches::of(class, query) else {
+            return;
+        };
         let observer = *query.observer_position();
-        if let Some((kind, _)) = reaches.supernovae {
-            let candidates = self
-                .deaths
-                .iter()
-                .map(|death| {
-                    OneShotEvent::of_explosion(
-                        death.host,
-                        death.explosion,
-                        death.kind,
-                        death.motion,
-                    )
-                })
-                .filter_map(|event| candidate(&event, &observer, query));
-            for candidate in candidates {
-                if let Some(detection) = detect(galaxy, ctx, query, class, kind, &candidate) {
-                    out.push(detection);
+        match reaches.walked {
+            Walked::Deaths => {
+                let supernova = [TransientKind::CoreCollapse, TransientKind::TypeIa]
+                    .into_iter()
+                    .find(|&kind| reaches.reach_of(kind).is_some());
+                if let Some(kind) = supernova {
+                    let candidates = self
+                        .deaths
+                        .iter()
+                        .map(|death| {
+                            OneShotEvent::of_explosion(
+                                death.host,
+                                death.explosion,
+                                death.kind,
+                                death.motion,
+                            )
+                        })
+                        .filter_map(|event| candidate(&event, &observer, query));
+                    for candidate in candidates {
+                        if let Some(detection) = detect(galaxy, ctx, query, class, kind, &candidate)
+                        {
+                            out.push(detection);
+                        }
+                    }
+                }
+                if reaches.reach_of(TransientKind::MagnetarBurst).is_some() {
+                    let active = self
+                        .deaths
+                        .iter()
+                        .filter_map(|death| death.magnetar.as_ref())
+                        .filter_map(|host| {
+                            emission_of(host, &observer, query)
+                                .map(|interval| (host.clone(), interval))
+                        })
+                        .collect();
+                    hosts_detections(galaxy, ctx, query, class, active, out);
                 }
             }
-        }
-        if reaches.magnetars.is_some() {
-            let active = self
-                .deaths
-                .iter()
-                .filter_map(|death| death.magnetar.as_ref())
-                .filter_map(|host| {
-                    emission_of(host, &observer, query).map(|interval| (host.clone(), interval))
-                })
-                .collect();
-            hosts_detections(galaxy, ctx, query, class, active, out);
+            Walked::Eruptions => {
+                let walk = EruptionWalk::new(class, query);
+                let mut listing = EruptionListing::default();
+                for host in &self.eruptions {
+                    walk.host(galaxy, ctx, query, host, &mut listing, out);
+                }
+            }
+            Walked::Novae => {
+                let walk = NovaWalk::new(class, query);
+                let mut listing = BinaryListing::default();
+                for marks in &self.novae {
+                    walk.host(galaxy, ctx, query, marks, &mut listing, out);
+                }
+            }
+            Walked::XrayBinaries => {
+                let mut listing = BinaryListing::default();
+                for marks in &self.xray_binaries {
+                    xray_binary_host_detections(galaxy, ctx, query, marks, &mut listing, out);
+                }
+            }
+            Walked::Mergers => {
+                if let Some((kind, _)) = reaches.seen().next() {
+                    for candidate in self
+                        .mergers
+                        .iter()
+                        .filter_map(|event| candidate(event, &observer, query))
+                    {
+                        if let Some(detection) = detect(galaxy, ctx, query, class, kind, &candidate)
+                        {
+                            out.push(detection);
+                        }
+                    }
+                }
+            }
         }
         sort_detections(&mut out[start..]);
     }
@@ -699,9 +914,9 @@ fn slab_bounds(slabs: &Range<i32>, x: i32, edge: f64) -> (f64, f64) {
     (lo, hi)
 }
 
-/// Appends to `out` the detections of the recently dead of `class` on the lists of the features
-/// whose centres lie in the x-slab `x` of `sphere`, sorted by arrival and then by event, and
-/// returns the candidates of the class those lists drew (module documentation).
+/// Appends to `out` the detections of the hosts of `class` on the lists of the features whose
+/// centres lie in the x-slab `x` of `sphere`, sorted by arrival and then by event, and returns the
+/// candidates of the class those lists drew (module documentation).
 ///
 /// `sphere` is the class's sphere of a background walk for `query`, whose slabs are
 /// [`class_slabs`]'s: the first slab takes the features below it, the last those above, and the
@@ -711,7 +926,8 @@ fn slab_bounds(slabs: &Range<i32>, x: i32, edge: f64) -> (f64, f64) {
 /// ([`alerts_in`](super::alerts_in)), each to the bit, in any order and with any cache. Nothing
 /// below generator version 29 (`LISTED_ALERTS_VERSION`), for a class no list holds, a slab outside
 /// the sphere's, or a class the query does not ask about. The features are read through the
-/// context's feature cells ([`AlertContext::with_feature_cells`]).
+/// context's feature cells ([`AlertContext::with_feature_cells`]) and their lists through its
+/// listed hosts ([`AlertContext::with_listed_hosts`]).
 ///
 /// # Panics
 ///
@@ -769,10 +985,15 @@ pub fn listed_scan_slab(
     x: i32,
     out: &mut Vec<Detection>,
 ) -> u64 {
-    if RecentClass::of(class).is_none() {
+    if Walked::of(class).is_none() {
         return 0;
     }
-    let walk = ListedWalk::find_in_slab(galaxy, ctx.feature_cells(), query, (class, sphere, x));
+    let walk = ListedWalk::find_in_slab(
+        galaxy,
+        (ctx.feature_cells(), ctx.listed_hosts()),
+        query,
+        (class, sphere, x),
+    );
     walk.detections(galaxy, ctx, query, class, out);
     walk.drawn()
 }

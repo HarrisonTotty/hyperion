@@ -24,9 +24,9 @@
 //!   the luminous blue variables' giant eruptions (P12.T5.c);
 //! - the galactic centre's walk ([`centre`]), its black hole's flares and tidal disruptions, and
 //!   the local events of a range query's systems ([`local`](mod@local), P12.T5.e);
-//! - the recently dead of the features' and the centre's lists ([`listed`]), which the core
-//!   collapses' and the Type Ia's walks read beside their cells from generator version 29
-//!   (P09.T36);
+//! - the hosts of the features' and the centre's lists ([`listed`]), which every class's walk
+//!   reads beside its cells from generator version 29 (P09.T36, P09.T43, P11.T8.f), the lists kept
+//!   between walks through the context ([`ListedHostsCache`]);
 //! - "what went off?" ([`alerts_in`], [`census`]): the census per class (Design note 7), each
 //!   class's walk, the global list's centre and the local events, merged (P12.T5.d).
 //!
@@ -74,7 +74,7 @@ pub use census::{
 };
 pub use centre::{TAIL_TEMPERATURE, centre_detections};
 pub use light::{band_share, binary_luminosity, binary_peak, supernova_luminosity, supernova_peak};
-pub use listed::listed_scan_slab;
+pub use listed::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache, listed_scan_slab};
 pub use local::{LocalEventsCache, local_events};
 pub use oneshot::{
     NoOneShotCells, OneShotCells, OneShotClass, OneShotEvent, OneShotLight, one_shot_detections,
@@ -852,9 +852,11 @@ impl AlertResult {
 /// them, each cell is generated for its visit. T5.d's is plan 10's [`GlobalList`]
 /// ([`with_global_list`](Self::with_global_list)), through whose entries [`alerts_in`] walks the
 /// galactic centre; without it, the centre is not walked and the result says so. Plan 09's
-/// feature cells ([`with_feature_cells`](Self::with_feature_cells)) are where the core collapses'
-/// and the Type Ia's walks find the features whose lists they read from generator version 29
-/// ([`listed`]); without them, each feature cell is generated for its lookup.
+/// feature cells ([`with_feature_cells`](Self::with_feature_cells)) are where the classes' walks
+/// find the features whose lists they read from generator version 29 ([`listed`]), and the lists
+/// as the walks read them are kept in its listed hosts
+/// ([`with_listed_hosts`](Self::with_listed_hosts)); without them, each feature cell is generated
+/// for its lookup, and each list read is built for its walk.
 pub struct AlertContext<'a> {
     noise: &'a mut NoiseCache,
     gas: &'a dyn GasModifierSource,
@@ -862,6 +864,7 @@ pub struct AlertContext<'a> {
     magnetar_cells: Option<&'a mut dyn MagnetarCells>,
     global_list: Option<&'a GlobalList>,
     feature_cells: Option<&'a dyn FeatureCellCache>,
+    listed_hosts: Option<&'a dyn ListedHostsCache>,
     /// The modifiers of the last line of sight, kept for its allocation.
     modifiers: Vec<GasModifier>,
 }
@@ -883,12 +886,13 @@ impl<'a> AlertContext<'a> {
             magnetar_cells: None,
             global_list: None,
             feature_cells: None,
+            listed_hosts: None,
             modifiers: Vec::new(),
         }
     }
 
-    /// The same context, lending the walks of the lists' recently dead plan 09's feature cells from
-    /// `cells` (P09.T36, [`listed`]): a cache of `galaxy`'s own, as a cell cache must be.
+    /// The same context, lending the walks of the lists' hosts plan 09's feature cells from `cells`
+    /// (P09.T36, [`listed`]): a cache of `galaxy`'s own, as a cell cache must be.
     #[must_use]
     pub fn with_feature_cells(self, cells: &'a dyn FeatureCellCache) -> Self {
         Self {
@@ -901,6 +905,23 @@ impl<'a> AlertContext<'a> {
     #[must_use]
     pub(crate) fn feature_cells(&self) -> &'a dyn FeatureCellCache {
         self.feature_cells.unwrap_or(&NoFeatureCache)
+    }
+
+    /// The same context, lending the walks of the lists' hosts the lists as they read them from
+    /// `lists` ([`listed`]), so that a walk builds no list another walk has built: a cache of
+    /// `galaxy`'s own, as a cell cache must be. What it holds changes no detection and no census.
+    #[must_use]
+    pub fn with_listed_hosts(self, lists: &'a dyn ListedHostsCache) -> Self {
+        Self {
+            listed_hosts: Some(lists),
+            ..self
+        }
+    }
+
+    /// The listed hosts lent, or the cache that keeps nothing.
+    #[must_use]
+    pub(crate) fn listed_hosts(&self) -> &'a dyn ListedHostsCache {
+        self.listed_hosts.unwrap_or(&NoListedHostsCache)
     }
 
     /// The same context, lending [`alerts_in`] `galaxy`'s global list, `list` (P12.T5.d): it

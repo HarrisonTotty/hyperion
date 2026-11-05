@@ -51,8 +51,8 @@ use crate::compute::{
 use crate::connections::Connections;
 use crate::limits::{
     BULK_QUEUE_CAPACITY, CENTRE_ORBIT_CACHE_BYTES, GALAXY_FEATURES_CACHE_BYTES,
-    GLOBAL_LIST_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY, SPRAY_FORCE_CACHE_BYTES,
-    TUBE_TABLE_CACHE_BYTES,
+    GLOBAL_LIST_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY, LISTED_HOSTS_CACHE_BYTES,
+    SPRAY_FORCE_CACHE_BYTES, TUBE_TABLE_CACHE_BYTES,
 };
 use crate::requests::{
     Handler, Handlers, SKY_FILES_DIR, SkyReplyCache, SkyReplyFiles, SkySettings,
@@ -202,6 +202,9 @@ pub(crate) struct AppState {
     /// The alert scans walked so far, shared by the alerts subscriptions, in the configured byte
     /// budget (plan 12, P12.T8.b).
     pub(crate) alert_scans: alerts::AlertScans,
+    /// The features' and the centre's lists as the alert walks read them, kept between walks in
+    /// [`LISTED_HOSTS_CACHE_BYTES`] (plan 09's P09.T36 in plan 12's walks).
+    pub(crate) listed_hosts: alerts::SharedListedHostsCache,
 }
 
 impl Server {
@@ -318,6 +321,7 @@ impl Server {
                 surface,
                 contacts: alerts::UniverseContacts::new(),
                 alert_scans: alerts::AlertScans::new(config.alert_cache_bytes()),
+                listed_hosts: alerts::SharedListedHostsCache::new(LISTED_HOSTS_CACHE_BYTES),
             }),
         })
     }

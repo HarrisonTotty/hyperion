@@ -312,6 +312,88 @@ async fn from_29_a_background_walk_gives_the_interactive_walks_listed_pushes() {
     server.shutdown().await.unwrap();
 }
 
+/// From generator version 29 a background walk of the slow accreting white dwarfs in slab jobs gives
+/// the interactive walk's pushes with the features' lists' (the sim's `listed`), each once, and
+/// reads its lists from the server's listed hosts, which a second walk finds them in: 1 ly from a
+/// globular's slow nova that begins 764.6 years after the epoch at [−9,792.8, −5,763.1,
+/// −17,139.2] ly in seed 9's galaxy at 29, through a V sensor through which the novae reach 50 ly,
+/// over the first scan's year. Its member's onset is detected.
+#[tokio::test]
+async fn from_29_a_background_walk_of_the_slow_novae_gives_the_interactive_walks_listed_pushes() {
+    let (server, _data_dir) = server(|config| config).await;
+    let state = server.state();
+    let galaxy = galaxy_at_29();
+    let key = GalaxyKey::new(
+        crate::alerts::testing::SEED,
+        hyperion_sim::GeneratorVersion::new(29),
+    );
+    let host = hyperion_sim::id::SystemId::from_raw(0xe6b9_6000_7000_0057).unwrap();
+    let at = GalacticPosition::from_light_years([-9_792.817, -5_763.148, -17_138.163]).unwrap();
+    // Its light arrives 765.574 years after the epoch, inside the first scan's year.
+    let start = UniverseTime::from_julian_years(765).unwrap();
+    let probe = 1e-6;
+    let reach = kind_reach(TransientKind::Nova, &v_sensor(probe, probe)).value();
+    let detect = probe * (reach / 50.0) * (reach / 50.0);
+    let class = ClassId::ACCRETING_WHITE_DWARF_SLOW;
+    let (subscription, first) = Subscription::new(
+        Observer::new(at, start).unwrap(),
+        v_sensor(detect, detect * 10.0),
+        ClassSet::of(class),
+        hyperion_sim::alerts::DEFAULT_HOST_LIMIT,
+    );
+    let spec = ScanSpec::new(key, &subscription, &first).unwrap();
+    let token = CancelToken::new();
+    let plan = background_plan(galaxy, &spec, class, 1).unwrap();
+    let walk = || {
+        let jobs: Vec<_> = plan
+            .jobs()
+            .iter()
+            .cloned()
+            .map(|slabs| walk_slabs(state, galaxy, &spec, &plan, slabs, &token).unwrap())
+            .collect();
+        ScanResult::of_jobs(jobs)
+    };
+    let whole = walk();
+    let listed = state.listed_hosts.counters();
+    assert!(listed.entries() > 0, "the walk keeps its lists: {listed:?}");
+    assert_eq!(walk(), whole, "a second walk of the kept lists");
+    assert_eq!(
+        state.listed_hosts.counters().misses(),
+        listed.misses(),
+        "the second walk builds no list"
+    );
+    let interactive = walk_interactive(state, galaxy, &spec, &mut LocalEventsCache::default());
+    assert_eq!(
+        interactive.background().count(),
+        0,
+        "{:?}",
+        interactive.census()
+    );
+    let interactive: Vec<_> = interactive
+        .tracks()
+        .iter()
+        .filter(|track| track.detection().class() == Some(class))
+        .cloned()
+        .collect();
+    let pushes = pushes_of(&subscription, &first, whole.tracks().to_vec());
+    assert_eq!(pushes, pushes_of(&subscription, &first, interactive));
+    let once: BTreeSet<_> = pushes.iter().collect();
+    assert_eq!(once.len(), pushes.len(), "each push once: {pushes:?}");
+    let nova = whole
+        .tracks()
+        .iter()
+        .find(|track| track.detection().host() == host)
+        .expect("the listed nova is tracked");
+    let event = nova.detection().event();
+    assert!(
+        pushes
+            .iter()
+            .any(|&(_, e, crossing)| e == event && crossing == Crossing::Detect),
+        "the listed nova is detected: {pushes:?}"
+    );
+    server.shutdown().await.unwrap();
+}
+
 /// A sensor that sees across the galaxy, V 10⁻¹² W m⁻², plans its core collapses as the root
 /// cube's 256 x-slabs of 512 ly cells, in order and without a gap: 256 jobs of the service's one
 /// slab, 64 of four, and at most 256 however few slabs a job is asked to take. The plan holds the slabs, never a list of the

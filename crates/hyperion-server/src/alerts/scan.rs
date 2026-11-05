@@ -20,9 +20,10 @@
 //! features at the epoch while they are served: so a host's light is the same whichever scan lists
 //! it, as the schedule asks (lean, 2026-11-01). The centre's black hole is not walked: the server
 //! holds no universe's global list, so its census says so (`Unwalked::NoGlobalList`; lean,
-//! 2026-11-01). From generator version 29 the core collapses' and the Type Ia's walks read the
-//! recently dead of the features' lists and the centre's beside their cells (the sim's `listed`),
-//! through the server's feature cells, interactive and in the background jobs' slabs alike.
+//! 2026-11-01). From generator version 29 every class's walk reads the hosts of the features'
+//! lists and the centre's beside its cells (the sim's `listed`), through the server's feature
+//! cells and its listed hosts (`SharedListedHostsCache`), interactive and in the background jobs'
+//! slabs alike.
 
 use std::mem::size_of;
 use std::ops::Range;
@@ -364,9 +365,12 @@ pub(crate) fn walk_interactive(
     let mut cells = state.cells.handle(key);
     let mut stars = state.systems.handle(key);
     let feature_cells = state.feature_cells.handle(key);
+    let listed = state.listed_hosts.handle(key);
     let gas = WalkGas::of(state, galaxy, &feature_cells);
     let mut noise = NoiseCache::with_capacity(NOISE_ENTRIES);
-    let mut ctx = AlertContext::new(&mut noise, gas.source()).with_feature_cells(&feature_cells);
+    let mut ctx = AlertContext::new(&mut noise, gas.source())
+        .with_feature_cells(&feature_cells)
+        .with_listed_hosts(&listed);
     let mut detections = Vec::new();
     let mut census = Vec::new();
     for class in spec.query.classes().iter() {
@@ -554,10 +558,10 @@ fn reaches(query: &AlertQuery, reach: LightYears, key: &CatalogueCellKey) -> boo
 /// magnetars, each kind where it can reach the sensor, cut to the candidates whose time read first
 /// can light the window (`one_shot_scan_cell`, `magnetar_scan_cell`); or, for a class walked
 /// through its recurrent events alone, those events where they can reach the sensor
-/// (`RecurrentProcess::scan_cell`, every candidate read). For the core collapses and the Type Ia,
-/// from generator version 29, each slab's features' lists of their recently dead too
-/// (`listed_scan_slab`), their candidates counted with the cells'. `None` if `token` was
-/// cancelled before the last cell.
+/// (`RecurrentProcess::scan_cell`, every candidate read). From generator version 29, each slab's
+/// features' lists of the class's hosts too (`listed_scan_slab`, through the server's listed
+/// hosts), their candidates counted with the cells'. `None` if `token` was cancelled before the
+/// last cell.
 ///
 /// Over every job of the plan, in any order, the tracks are the class's own in
 /// [`walk_interactive`], each to the bit: each cell's walk is a pure function of the cell.
@@ -571,9 +575,12 @@ pub(crate) fn walk_slabs(
     token: &CancelToken,
 ) -> Option<SlabsWalked> {
     let feature_cells = state.feature_cells.handle(spec.galaxy);
+    let listed = state.listed_hosts.handle(spec.galaxy);
     let gas = WalkGas::of(state, galaxy, &feature_cells);
     let mut noise = NoiseCache::with_capacity(NOISE_ENTRIES);
-    let mut ctx = AlertContext::new(&mut noise, gas.source()).with_feature_cells(&feature_cells);
+    let mut ctx = AlertContext::new(&mut noise, gas.source())
+        .with_feature_cells(&feature_cells)
+        .with_listed_hosts(&listed);
     let mut detections = Vec::new();
     let mut drawn: u64 = 0;
     let process = plan.process.as_ref();
@@ -631,8 +638,8 @@ pub(crate) fn walk_slabs(
                 }
             }
         }
-        // The recently dead on the lists of the features whose centres lie in the slab, from 29
-        // (the sim's `listed`): nothing for a class whose lists no walk reads, or below 29.
+        // The class's hosts on the lists of the features whose centres lie in the slab, from 29
+        // (the sim's `listed`): nothing for a class no list holds, or below 29.
         drawn += listed_scan_slab(
             galaxy,
             &mut ctx,
