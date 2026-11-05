@@ -461,10 +461,13 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
 
     // A luminous-blue-variable host of the class grid (plan 09, P09.T43): its system on its
     // straight line, its record's existence, and its stars, whose window is the entry's. Its line
-    // is a catalogue system's, so the observer's drift refuses it, as it says.
+    // is a catalogue system's, so the observer's drift refuses it, as it says. From 27 the
+    // features hold most young stars (P09.T2.c), and the field's sixteen hosts in the disc's
+    // 24 × 24 × 2 cells of 4,096 ly about the centre lie off the stretch towards the Sun that held
+    // one at 26, so the first of those cells' is taken (P12.T13).
     let process = LbvProcess::new(&galaxy);
-    let entry = (3..8)
-        .flat_map(|y| [[0, y, 0], [0, y, -1]])
+    let entry = (-12..12)
+        .flat_map(|y| (-12..12).flat_map(move |x| [[x, y, 0], [x, y, -1]]))
         .map(|cell| {
             CatalogueCellKey::new(ClassId::LUMINOUS_BLUE_VARIABLE, cell)
                 .expect("a cell of the root cube")
@@ -651,8 +654,10 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
     }
 
     // An X-ray binary of the class grid (plan 11, P11.T8.b), a low-mass host from the cells about
-    // the centre and a high-mass one from the inner disc: its system on its one straight line, its
-    // record's existence and its stars (its pair, from its marks).
+    // the centre and a high-mass one from the disc: its system on its one straight line, its
+    // record's existence and its stars (its pair, from its marks). From 27 the features hold most
+    // young stars (P09.T2.c), and the plane's cells within 20,480 ly of the centre hold four
+    // high-mass hosts, none in the stretch of the inner disc that held one at 26 (P12.T13).
     let xrb = XrayBinaries::new(&galaxy);
     let xrb_entry = |cells: Vec<[i32; 3]>, side: XrbSide| {
         cells.into_iter().find_map(|cell| {
@@ -669,8 +674,8 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
     };
     let low = xrb_entry(block(-4..4, -4..4), XrbSide::LowMass)
         .expect("the centre has low-mass X-ray binaries");
-    let high = xrb_entry(block(-12..12, 10..14), XrbSide::HighMass)
-        .expect("the inner disc has high-mass X-ray binaries");
+    let high = xrb_entry(block(-40..40, -40..40), XrbSide::HighMass)
+        .expect("the disc has high-mass X-ray binaries");
     for entry in [low, high] {
         let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
         let record = catalogue.record();

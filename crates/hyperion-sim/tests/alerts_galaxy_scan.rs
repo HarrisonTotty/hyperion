@@ -318,8 +318,10 @@ fn alerts_galaxy_scan_finds_a_magnetar_nearby_as_the_walk_as_built() {
 }
 
 /// The whole cube's core collapses through a V limit of 10⁻¹² W m⁻² over the first 1,000 years from
-/// the Sun-like point: the cut walk over each slab's occupied cells is the walk as built, four
-/// onsets, arriving 364.2, 527.1, 531.8 and 629.3 years after the epoch (research's figures).
+/// the Sun-like point: the cut walk over each slab's occupied cells is the walk as built, one
+/// onset, arriving 360.6 years after the epoch (re-measured at 27, P12.T13: the features hold most
+/// young stars from 27, P09.T2.c, and the field's walk does not read their deaths, P09.T36; four at
+/// 26, arriving 364.2, 527.1, 531.8 and 629.3 years after it, research's figures).
 #[test]
 #[ignore = "slow: walks every core-collapse cell of the cube whole, some 100 CPU-s"]
 fn alerts_galaxy_scan_finds_the_whole_cubes_supernovae_as_the_walk_as_built() {
@@ -351,8 +353,8 @@ fn alerts_galaxy_scan_finds_the_whole_cubes_supernovae_as_the_walk_as_built() {
         .filter(|detection| detection.phase() == DetectionPhase::Onset)
         .map(|detection| detection.arrival().since_epoch().as_julian_years_f64())
         .collect();
-    assert_eq!(onsets.len(), 4, "{onsets:?}");
-    for (onset, expected) in onsets.iter().zip([364.2, 527.1, 531.8, 629.3]) {
+    assert_eq!(onsets.len(), 1, "{onsets:?}");
+    for (onset, expected) in onsets.iter().zip([360.6]) {
         assert!((onset - expected).abs() < 0.05, "{onsets:?}");
     }
 }
@@ -445,8 +447,8 @@ fn alerts_galaxy_scan_walks_the_x_ray_binaries_occupied_cells_as_built() {
 
 /// As the X-ray binaries' fast test, for both accreting white dwarf classes' novae and the
 /// luminous blue variables' giant eruptions, over the whole cube: through a V limit of twelfth
-/// magnitude over the first decade (the sim's own example of the novae), 91 fast novae, 11 slow
-/// and one eruption (measured 2026-11-01).
+/// magnitude over the first decade (the sim's own example of the novae), 63 fast novae, 7 slow
+/// and no eruption (re-measured at 27, P12.T13; 91, 11 and one at 26, measured 2026-11-01).
 #[test]
 #[ignore = "slow: scans every cell of the three classes across the cube twice, some 6 minutes"]
 fn alerts_galaxy_scan_walks_the_novae_and_eruptions_occupied_cells_as_built() {
@@ -455,13 +457,15 @@ fn alerts_galaxy_scan_walks_the_novae_and_eruptions_occupied_cells_as_built() {
         AlertBand::Photometric(Band::V),
         3.631e-8 * 0.084 * 1.584_893e-5,
     );
-    for (class, seen) in [
-        (ClassId::ACCRETING_WHITE_DWARF, 91),
-        (ClassId::ACCRETING_WHITE_DWARF_SLOW, 11),
-        (ClassId::LUMINOUS_BLUE_VARIABLE, 1),
-    ] {
+    let seen = [
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+        ClassId::LUMINOUS_BLUE_VARIABLE,
+    ]
+    .map(|class| {
         let (built, cut) = recurrent_both(class, &query(sun(), class, twelfth.clone(), 0, 10));
         assert_eq!(first_difference(&cut, &built), None, "{class}");
-        assert_eq!(built.len(), seen, "{class}");
-    }
+        built.len()
+    });
+    assert_eq!(seen, [63, 7, 0]);
 }

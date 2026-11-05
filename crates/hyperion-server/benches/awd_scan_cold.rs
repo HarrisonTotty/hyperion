@@ -7,8 +7,9 @@
 //!
 //! The query is the sim's own example of the novae: the fast hosts' class, through a V limit of
 //! twelfth magnitude at the Sun-like point [0, 26,000, 20] ly of seed 9's galaxy over the first
-//! decade, 91 novae (measured 2026-11-01). The brainstorm's "seconds" is the target, and more than
-//! 10 s a finding for plan 11's scan marks (plan 12's P12.T8).
+//! decade, 63 novae (re-measured at 27, P12.T13; 91 at 26, measured 2026-11-01). The brainstorm's
+//! "seconds" is the target, and more than 10 s a finding for plan 11's scan marks (plan 12's
+//! P12.T8). Measured at 27 (P12.T13; pod, 48 vCPU, loaded): 841 ms on 47 workers.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -122,7 +123,7 @@ fn awd_scan(c: &mut Criterion) {
     let query = query();
     assert_eq!(
         walk(&runtime, &pool, &galaxy, &query).len(),
-        91,
+        63,
         "the decade's novae"
     );
     let mut group = c.benchmark_group("awd_scan_cold");

@@ -669,10 +669,10 @@ const V_ZERO_POINT: f64 = 3.631e-8 * 0.084;
 /// The galaxy's novae a year that a visual sensor at the Sun sees begin, to V = 12, over a decade
 /// from the epoch, through plan 07's dust: every cell of both accreting white dwarf classes the
 /// scan plans, the whole cube, walked on eight threads. Plan 11 generates 46.0 a year in this
-/// galaxy (P11.T9.b), and 9.8 a year are seen; about ten a year are found in the Milky Way, most
-/// of them brighter than twelfth magnitude, against 26–50 a year in all (Shafter 2017, ApJ 834,
-/// 196; De et al. 2021, ApJ 912, 19; Kawash et al. 2022, ApJ 937, 64; recalled, not read at
-/// source). Pinned as measured.
+/// galaxy (P11.T9.b), and 9.4 a year are seen (9.8 at 26); about ten a year are found in the
+/// Milky Way, most of them brighter than twelfth magnitude, against 26–50 a year in all (Shafter
+/// 2017, ApJ 834, 196; De et al. 2021, ApJ 912, 19; Kawash et al. 2022, ApJ 937, 64; recalled, not
+/// read at source). Pinned as measured.
 #[test]
 #[ignore = "slow: walks every accreting white dwarf cell of the cube for a decade"]
 // Its eight threads: wasip1 spawns none.
@@ -737,7 +737,8 @@ fn the_galaxys_novae_seen_from_the_sun_a_year() {
     #[expect(clippy::cast_precision_loss, reason = "a count of tens")]
     let a_year = onsets.len() as f64 / 10.0;
     eprintln!("{a_year} novae a year seen to V = 12");
-    // Measured 2026-10-31: 98 in the decade, 87 of them of fast hosts, from 2.1 to 12.0 mag at
-    // 3,051 to 50,149 ly, the median 21,515 ly.
-    assert_eq!(onsets.len(), 98, "pinned as measured: {a_year} a year");
+    // Re-measured at 27 (P12.T13): 94 in the decade, from 2.9 to 12.0 mag at 6,454 to 45,934 ly,
+    // the median 19,213 ly. At 26 (2026-10-31): 98, 87 of them of fast hosts, from 2.1 to 12.0
+    // mag at 3,051 to 50,149 ly, the median 21,515 ly.
+    assert_eq!(onsets.len(), 94, "pinned as measured: {a_year} a year");
 }

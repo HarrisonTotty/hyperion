@@ -181,32 +181,42 @@ impl OneShotCells for KeepCells {
     }
 }
 
-/// The last core collapse before +990 years by the solar circle in `galaxy`, as P12.T5.b's slow
-/// test finds it.
+/// The latest core collapse between 900 years before and after the epoch about the solar circle in
+/// `galaxy`, in squares widened by 6 cells until one is there, as P12.T5.b's slow test finds its
+/// later death. From 27 the features hold most young stars, whose deaths the field's walk does not
+/// read (P09.T2.c, P09.T36), and the 288 cells of the solar circle that held one at 26 hold none
+/// (P12.T13).
 fn latest_death(galaxy: &Galaxy, process: &CoreCollapseProcess) -> OneShotEvent {
-    let mut death: Option<OneShotEvent> = None;
-    for y in 44..56 {
-        for x in -6..6 {
-            for z in [-1, 0] {
-                let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [x, y, z]).unwrap();
-                for entry in CatalogueClassCell::generate(galaxy, process, key).entries() {
-                    let event = process
-                        .event(galaxy, entry.value())
-                        .expect("a core collapse makes its one event");
-                    let t = event.emitted().since_epoch().as_julian_years_f64();
-                    if (400.0..990.0).contains(&t)
-                        && death.is_none_or(|last| event.emitted() > last.emitted())
-                    {
-                        death = Some(event);
+    let mut half = 6;
+    loop {
+        let mut death: Option<OneShotEvent> = None;
+        for y in 50 - half..50 + half {
+            for x in -half..half {
+                for z in [-1, 0] {
+                    let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [x, y, z]).unwrap();
+                    for entry in CatalogueClassCell::generate(galaxy, process, key).entries() {
+                        let event = process
+                            .event(galaxy, entry.value())
+                            .expect("a core collapse makes its one event");
+                        let t = event.emitted().since_epoch().as_julian_years_f64();
+                        if (-900.0..900.0).contains(&t)
+                            && death.is_none_or(|last| event.emitted() > last.emitted())
+                        {
+                            death = Some(event);
+                        }
                     }
                 }
             }
         }
+        if let Some(death) = death {
+            return death;
+        }
+        assert!(half < 48, "a recent death about the solar circle");
+        half += 6;
     }
-    death.expect("a death to come by the solar circle")
 }
 
-/// A core collapse to come in the galaxy of seed 9, by the solar circle, seen from 50 ly: the
+/// A recent core collapse in the galaxy of seed 9, about the solar circle, seen from 50 ly: the
 /// subscription half a year before its light arrives pushes it once as a bearing and once as a
 /// host, each when its own light crosses the limit after the arrival and before the peak, and the
 /// renewal that lists it in progress, with the same light, adds neither again.

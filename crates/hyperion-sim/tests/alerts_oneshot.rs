@@ -727,41 +727,69 @@ fn one_shot_alerts_see_a_slow_riser_at_its_onset_not_while_it_rises_below_the_li
     assert!((ratio - 1.0).abs() < 1e-9, "{ratio}");
 }
 
+/// Two deaths of `process` whose light can reach an observer within ±H, in squares about the
+/// solar circle widened by 6 cells until they hold one to see go off and in progress (from
+/// 1,200 ly above and 800 ly beside: between 1,800 and 400 years ago), the earliest, and a later
+/// one to see go off from 50 ly (between 1,000 years ago and 900 years on), the latest.
+fn two_recent_deaths(
+    galaxy: &Galaxy,
+    process: &CoreCollapseProcess,
+    cells: &mut KeepCells,
+) -> (OneShotEvent, OneShotEvent) {
+    let mut half = 6;
+    loop {
+        let mut deaths = Vec::new();
+        for y in 50 - half..50 + half {
+            for x in -half..half {
+                for z in [-1, 0] {
+                    let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [x, y, z]).unwrap();
+                    for event in cells.events(galaxy, process, key) {
+                        let t = event.emitted().since_epoch().as_julian_years_f64();
+                        if (-2_000.0..990.0).contains(&t) {
+                            deaths.push((t, *event));
+                        }
+                    }
+                }
+            }
+        }
+        deaths.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let past = deaths.iter().find(|(t, _)| (-1_800.0..-400.0).contains(t));
+        let future = past.and_then(|(_, first)| {
+            deaths
+                .iter()
+                .rev()
+                .find(|(t, e)| (-1_000.0..900.0).contains(t) && e.event() != first.event())
+        });
+        if let (Some(&(_, past)), Some(&(_, future))) = (past, future) {
+            eprintln!(
+                "{} recent deaths in {} cells square: {deaths:?}",
+                deaths.len(),
+                2 * half
+            );
+            return (past, future);
+        }
+        assert!(half < 48, "two recent deaths about the solar circle");
+        half += 6;
+    }
+}
+
 /// The production core collapses: three observers about two recent deaths of the galaxy of seed 9
-/// found along the solar circle, with windows of a year and a century, through V and K limits that
+/// found about the solar circle, with windows of a year and a century, through V and K limits that
 /// reach some 1,600 ly; the walk is the brute force's, and each observer sees its death.
+///
+/// The deaths are the earliest between 1,800 and 400 years before the epoch, whose light reaches
+/// both of its observers inside the clock window, and the latest after it that lights it from 50
+/// ly, found in squares about the solar circle widened by 6 cells until both are there. From 27 the
+/// features hold most young stars, whose deaths the field's walk does not read (P09.T2.c, P09.T36),
+/// and the 288 cells of the solar circle that held both at 26 hold none (P12.T13): the square's
+/// half-width reaches 30 cells, 15,360 ly, in seed 9.
 #[test]
 #[ignore = "slow: generates the core-collapse class's cells about three observers, a few seconds of cells each"]
 fn one_shot_alerts_of_the_core_collapses_are_the_brute_forces() {
     let galaxy = Galaxy::new(Seed::new(9));
     let process = CoreCollapseProcess::new(&galaxy);
     let mut cells = KeepCells::default();
-    // The deaths whose light can reach an observer within ±H, by the solar circle.
-    let mut deaths = Vec::new();
-    for y in 44..56 {
-        for x in -6..6 {
-            for z in [-1, 0] {
-                let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [x, y, z]).unwrap();
-                for event in cells.events(&galaxy, &process, key) {
-                    let t = event.emitted().since_epoch().as_julian_years_f64();
-                    if (-2_000.0..990.0).contains(&t) {
-                        deaths.push((t, *event));
-                    }
-                }
-            }
-        }
-    }
-    deaths.sort_by(|a, b| a.0.total_cmp(&b.0));
-    eprintln!("{} recent deaths: {deaths:?}", deaths.len());
-    let past = deaths
-        .iter()
-        .find(|(t, _)| *t < -400.0)
-        .expect("a death in the past");
-    let future = deaths
-        .iter()
-        .rev()
-        .find(|(t, _)| *t > 400.0)
-        .expect("a death to come");
+    let (past, future) = two_recent_deaths(&galaxy, &process, &mut cells);
     let sensor = sensor(&[
         (AlertBand::Photometric(Band::V), 7.6e-6),
         (AlertBand::Photometric(Band::K), 1.4e-6),
@@ -780,10 +808,8 @@ fn one_shot_alerts_of_the_core_collapses_are_the_brute_forces() {
             .since_epoch()
             .as_julian_years_f64()
     };
-    let (_, past) = *past;
-    let (_, future) = *future;
     // Above the past death, 1,200 ly up, to see it go off; beside it, 800 ly coreward in the
-    // plane, to see it in progress 20 days on; 50 ly from the death to come.
+    // plane, to see it in progress 20 days on; 50 ly from the later death.
     let above = place(&past, [0.0, 0.0, 1.0], 1_200.0);
     let beside = place(&past, [0.0, -1.0, 0.0], 800.0);
     let near = place(&future, [1.0, 0.0, 0.0], 50.0);
@@ -1059,10 +1085,13 @@ fn events_between<P: OneShotClass>(
 }
 
 /// The production Type Ia of seed 9's galaxy: two of the explosions of the disc within 30,000 ly
-/// of the centre in the last millennium or so and the next 700 years, the earliest and the latest,
-/// seen from 200 ly above the first go off, from 150 ly beside it in progress 20 and 40 days on,
-/// and from 50 ly beside the second go off, through V and K limits that reach some 1,100 and 650
-/// ly; the walk is the brute force's.
+/// of the centre in the last millennium or so and the next 700 years, the earliest that is no Type
+/// Iax and the latest, seen from 200 ly above the first go off, from 150 ly beside it in progress
+/// 20 and 40 days on, and from 50 ly beside the second go off, through V and K limits that reach
+/// some 1,100 and 650 ly for the class's brightest; the walk is the brute force's. A Type Iax is
+/// some ten times fainter than a normal one and fades fast, so 40 days on its light at 150 ly is
+/// under the limits (at 27 the earliest is one, P12.T13), and the watch in progress takes a normal
+/// Type Ia.
 #[test]
 #[ignore = "slow: generates the Type Ia class's cells of the disc and about three observers"]
 fn one_shot_alerts_of_the_type_ia_are_the_brute_forces() {
@@ -1071,7 +1100,13 @@ fn one_shot_alerts_of_the_type_ia_are_the_brute_forces() {
     let disc = (-60..60).flat_map(|y| (-60..60).flat_map(move |x| (-2..2).map(move |z| [x, y, z])));
     let found = events_between(&galaxy, &process, disc, -1_050.0..700.0);
     eprintln!("{} Type Ia: {found:?}", found.len());
-    let (Some(&first), Some(&second)) = (found.first(), found.last()) else {
+    let normal = |event: &&OneShotEvent| {
+        !matches!(
+            event.light(),
+            OneShotLight::Supernova(SupernovaKind::TypeIa(IaChannel::Iax))
+        )
+    };
+    let (Some(&first), Some(&second)) = (found.iter().find(normal), found.last()) else {
         panic!("two Type Ia in the disc");
     };
     assert_ne!(first.event(), second.event());

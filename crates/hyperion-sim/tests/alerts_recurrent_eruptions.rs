@@ -475,7 +475,10 @@ fn the_sensor_reaches_the_sphere() {
 /// The production class of the galaxy of seed 9: beside the first host along the disc whose
 /// eruption's light reaches a point a light-year above it inside the clock window, over a year
 /// about its arrival. The walk is the brute force's, the production dispatch the generic walk's,
-/// and the observer sees the eruption.
+/// and the observer sees the eruption. The search starts at the centre's cells: from 27 the
+/// features hold most young stars (P09.T2.c), and of the field's 41 hosts in the disc's 24 × 24 × 2
+/// cells of 4,096 ly about the centre, the one that erupts in the clock window lies in cell
+/// [−1, 0, 0], at +515 years (P12.T13).
 #[test]
 #[ignore = "slow: generates the luminous blue variables' cells within 6,100 ly of a host"]
 fn eruption_alerts_of_the_luminous_blue_variables_are_the_brute_forces() {
@@ -485,7 +488,7 @@ fn eruption_alerts_of_the_luminous_blue_variables_are_the_brute_forces() {
     let h = CLOCK_WINDOW_H.as_seconds_f64() - YEAR;
     let clock = window(shifted(UniverseTime::EPOCH, -h - YEAR), 2.0 * h);
     let mut target = None;
-    'search: for y in 1..12 {
+    'search: for y in 0..12 {
         for x in [0, -1, 1] {
             for z in [0, -1] {
                 let key =
