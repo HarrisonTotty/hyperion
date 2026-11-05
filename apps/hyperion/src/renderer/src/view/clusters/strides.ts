@@ -52,7 +52,8 @@
  *   vertices, not at its record's, which lies on the patch's edge. Each vertex the mask draws, its
  *   strips' among them, is then placed by one band whatever cluster draws it, and each cluster's
  *   band is at least the band of every vertex it drops, as on a whole patch. The edge bands and
- *   holds are none of the mask's.
+ *   holds are none of the mask's. Its β is its own, wider ({@link STRIDE_MASK_BAND_FRACTION}), its
+ *   cull's and its vertices' alike.
  * - **The records.** The blocks' errors reach the vertex stage in their slot's record and the
  *   edges' bands in the instance's, as half floats of kilometres rounded up
  *   ({@link edgeBandHalf}).
@@ -93,6 +94,24 @@ import { TERRAIN_SUB_PATCH_MASK } from "./terrain";
  * unchanged (the lane's outbox). The widest within the restated 0.031 + 10%.
  */
 export const STRIDE_BAND_FRACTION = 0.002;
+
+/**
+ * β of a stand-in's mask (R14.T3.c's stand-ins; see the module's remarks' masks): wider than a whole
+ * patch's {@link STRIDE_BAND_FRACTION}, since a mask's bands move with its view's slewed τ′ as a
+ * whole patch's do, by up to `BAND_SLEW_PER_STEP` (2%) a step, and at β = 0.002 such a step swept a
+ * mask's vertex from k = 1 to 0 in one frame: 4.85 px on high's seamless probe at τ′ near 80 px,
+ * against T3.c's 1 px. At 0.2 a step moves its k by at most 0.1 (a hand value, lean, 2026-11-05).
+ * A mask places no vertex alike with another instance, so its own β breaks no shared place.
+ */
+export const STRIDE_MASK_BAND_FRACTION = 0.2;
+
+/** β of an instance of sub-patch word `subWord`: a mask's {@link STRIDE_MASK_BAND_FRACTION}, else
+ * {@link STRIDE_BAND_FRACTION}. */
+export function strideBandFractionOf(subWord: number): number {
+  return (subWord & TERRAIN_SUB_PATCH_MASK) !== 0
+    ? STRIDE_MASK_BAND_FRACTION
+    : STRIDE_BAND_FRACTION;
+}
 
 /** A band no stride is taken at, and no vertex morphs by: any value at or below 0. */
 export const NO_STRIDE_BAND = -1;
@@ -564,19 +583,21 @@ export function clusterStrideBandsM(
 /**
  * The coarsest stride's level a camera pass draws a cluster at, 0 to `capLevel` (`clusterCull.wgsl`'s
  * `camera_stride_level`): the most l such that every band below it is taken, its nearest point
- * `distanceM` at least (1 + β) of the band towards 2^l, all in `f32` as the kernel forms them.
+ * `distanceM` at least (1 + β) of the band towards 2^l, all in `f32` as the kernel forms them; β
+ * `bandFraction`, a mask's its own ({@link strideBandFractionOf}).
  */
 export function cameraStrideLevel(
   bandsM: StrideBandsM,
   capLevel: number,
   distanceM: number,
+  bandFraction = STRIDE_BAND_FRACTION,
 ): number {
   const f = Math.fround;
   const d = f(distanceM);
   let level = 0;
   for (let l = 1; l <= Math.min(capLevel, STRIDE_MORPH_LEVELS); l += 1) {
     const band = f(bandsM[l - 1] ?? NO_STRIDE_BAND);
-    if (!(band > 0) || d < f(f(1 + STRIDE_BAND_FRACTION) * band)) {
+    if (!(band > 0) || d < f(f(1 + bandFraction) * band)) {
       break;
     }
     level = l;
@@ -615,13 +636,17 @@ export function strideParents(
 /**
  * The stride morph's k at a vertex of `band`, m, at its own distance `distanceM`: clamp((d − U) ÷
  * (β U), 0, 1), 0 for no band or one past `f32`'s reach, an edge's +∞ (`stride_factor`, before its
- * holds).
+ * holds); β `bandFraction`, a mask's its own ({@link strideBandFractionOf}).
  */
-export function strideMorphFactor(bandM: number, distanceM: number): number {
+export function strideMorphFactor(
+  bandM: number,
+  distanceM: number,
+  bandFraction = STRIDE_BAND_FRACTION,
+): number {
   if (!(bandM > 0 && bandM < 3.0e38)) {
     return 0;
   }
-  return Math.min(1, Math.max(0, (distanceM - bandM) / (STRIDE_BAND_FRACTION * bandM)));
+  return Math.min(1, Math.max(0, (distanceM - bandM) / (bandFraction * bandM)));
 }
 
 /**
@@ -665,22 +690,23 @@ export function strideFactor(
   holdFadesWord: number,
   bandM: number,
   distanceM: number,
+  bandFraction = STRIDE_BAND_FRACTION,
 ): number {
   const edges = (x === 0 ? 1 : 0) | (x === 64 ? 2 : 0) | (y === 0 ? 4 : 0) | (y === 64 ? 8 : 0);
   // A level-2 vertex lies on one edge at most.
   if (level === 2 && edges !== 0) {
     const share = ((holdFadesWord >>> (8 * Math.log2(edges & -edges))) & 0xff) / 255;
     if (((quadrantWord >>> 2) & edges) !== 0) {
-      return share > 0 ? strideMorphFactor(bandM, distanceM) * share : 0;
+      return share > 0 ? strideMorphFactor(bandM, distanceM, bandFraction) * share : 0;
     }
     if (share > 0) {
-      return strideMorphFactor(bandM, distanceM) * (1 - share);
+      return strideMorphFactor(bandM, distanceM, bandFraction) * (1 - share);
     }
   }
   if (level === 0 && ((quadrantWord >>> 10) & edges) !== 0) {
     return 1;
   }
-  return strideMorphFactor(bandM, distanceM);
+  return strideMorphFactor(bandM, distanceM, bandFraction);
 }
 
 /**

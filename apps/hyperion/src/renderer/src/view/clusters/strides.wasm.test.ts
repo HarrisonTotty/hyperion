@@ -41,6 +41,7 @@ import {
   heldEdgeBandsM,
   largestStrideErrorsM,
   patchStrideScale,
+  strideBandFractionOf,
   strideMorphFactor,
   stridePlace,
   vertexStrideBandM,
@@ -278,6 +279,7 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
               strideMorphFactor(
                 vertexStrideBandM(scale, clusterErrors, edgeBandsM, x, y, morphLevel, subWord),
                 distanceOf(values),
+                strideBandFractionOf(subWord),
               );
             const morphed = new Map<number, number[]>();
             const at = (x: number, y: number): number[] => {
@@ -315,7 +317,14 @@ describe("the camera's strides on the surface module's bakes (plan R14, R14.T3.c
                 ),
               );
               const bands = clusterStrideBandsM(scale, clusterErrors, edgeBandsM, block, subWord);
-              const s = 1 << cameraStrideLevel(bands, 3, Math.max(0, distanceOf(centre) - radius));
+              const s =
+                1 <<
+                cameraStrideLevel(
+                  bands,
+                  3,
+                  Math.max(0, distanceOf(centre) - radius),
+                  strideBandFractionOf(subWord),
+                );
               kind.strided += s > 1 ? 1 : 0;
               for (let ly = 0; ly <= 8; ly += 1) {
                 for (let lx = 0; lx <= 8; lx += 1) {

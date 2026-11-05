@@ -227,11 +227,11 @@ export interface GeometrySettings {
    * draws but for the CDLOD morph's k between its vertices (`clusters/strides.ts`'
    * `INSTANCE_SUB_GRID_STRIDES`). `all` strides the masks too, a stand-in one to three levels down
    * drawn by its ancestor's own blocks (Design note 19): at that ancestor's scale, as a patch whose
-   * edges are its set's sides (`clusters/strides.ts`' remarks). The triangle budget reckons both as
-   * T3.e does. `own-grids` on both settings, where its acceptance passed: on high, which draws its
-   * stand-ins as masks, `all` failed the seamless probe's moves (a mask's vertex moved 4.8 px in a
-   * frame as the slewed τ′'s scale swept its band, against 1 px), and low draws no mask. `off`, as before: every stand-in at stride 1. Read
-   * where the strides are on.
+   * edges are its set's sides (`clusters/strides.ts`' remarks), over a band of its own, wider
+   * (`STRIDE_MASK_BAND_FRACTION`), so that the slewed τ′'s scale moves its vertices a little a
+   * frame. The triangle budget reckons both as T3.e does. `all` on high, which draws its stand-ins
+   * as masks, where its acceptance passed; `own-grids` on low, which draws no mask (no cluster
+   * casters). `off`, as before: every stand-in at stride 1. Read where the strides are on.
    */
   readonly standInStrides: "off" | "own-grids" | "all";
 }
@@ -442,7 +442,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       occlusion: "off",
       shading: "forward",
       terrainBudget: "triangles",
-      standInStrides: "own-grids",
+      standInStrides: "all",
     },
     decoration: true,
     scatterDensity: 1,

@@ -39,6 +39,7 @@ import {
   NO_STRIDE_EDGE_BANDS,
   type StrideEdgeBandsM,
   strideFadingEdges,
+  strideBandFractionOf,
   strideNeedM,
   type StrideScale,
 } from "./strides";
@@ -539,7 +540,12 @@ export function cameraPassStrideLevel(
     cluster,
     instance.subWord ?? 0,
   );
-  return cameraStrideLevel(bands, cap, distance(centreM, record.radiusM));
+  return cameraStrideLevel(
+    bands,
+    cap,
+    distance(centreM, record.radiusM),
+    strideBandFractionOf(instance.subWord ?? 0),
+  );
 }
 
 /**

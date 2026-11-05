@@ -26,6 +26,8 @@ import {
   patchStrideScale,
   sharedStrideBandsM,
   STRIDE_BAND_FRACTION,
+  STRIDE_MASK_BAND_FRACTION,
+  strideBandFractionOf,
   STRIDE_MORPH_LEVELS,
   type StrideBandsM,
   type StrideEdgeBandsM,
@@ -658,6 +660,19 @@ describe("the cull's camera strides", () => {
     expect([checked > 10_000, short]).toEqual([true, []]);
   });
 
+  it("takes a mask's strides and its vertices' morph over its own wider band, a whole patch's over β (R14.T3.c's stand-ins)", () => {
+    const levels: StrideBandsM = [100, 200, 400];
+    expect([
+      cameraStrideLevel(levels, 3, 1_000),
+      cameraStrideLevel(levels, 3, 1_000, strideBandFractionOf(MASK)),
+      cameraStrideLevel(levels, 3, 450, strideBandFractionOf(MASK)),
+      cameraStrideLevel(levels, 3, 470, strideBandFractionOf(MASK)),
+      strideBandFractionOf(subPatchWord(1, 1, 0)),
+      strideMorphFactor(100, 110),
+      strideMorphFactor(100, 110, strideBandFractionOf(MASK)),
+    ]).toEqual([3, 3, 2, 2, STRIDE_BAND_FRACTION, 1, 0.5]);
+  });
+
   it("holds an edge's band in a half float of kilometres rounded up, none and +∞ as they are", () => {
     const random = seededRandom(0xed6e);
     for (let n = 0; n < 2_000; n += 1) {
@@ -884,5 +899,10 @@ describe("the strides' WGSL constants", () => {
     expect(terrainStridesWgsl).toContain(
       `const STRIDE_SUB_PATCH_MASK : u32 = 0x${TERRAIN_SUB_PATCH_MASK.toString(16)}u;`,
     );
+    for (const source of [terrainStridesWgsl, clusterCullWgsl]) {
+      expect(source).toContain(
+        `const STRIDE_MASK_BAND_FRACTION : f32 = ${String(STRIDE_MASK_BAND_FRACTION)};`,
+      );
+    }
   });
 });

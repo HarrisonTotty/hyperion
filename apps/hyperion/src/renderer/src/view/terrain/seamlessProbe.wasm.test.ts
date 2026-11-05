@@ -44,6 +44,7 @@ import {
   maskStripBlock,
   NO_STRIDE_BAND,
   STRIDE_BAND_FRACTION,
+  strideBandFractionOf,
   type StrideBandsM,
   type StrideErrorsM,
   strideFactor,
@@ -1255,6 +1256,7 @@ class StrideFrames {
             state.holdFadesWord,
             vertexStrideBandM(state.strideScale, own, state.edgeBandsM, x, y, level, inst.subWord),
             d,
+            strideBandFractionOf(inst.subWord),
           );
         };
       const nowFactor = factorBy(inst);

@@ -25,6 +25,8 @@
 
 // `strides.ts`' STRIDE_BAND_FRACTION, STRIDE_MORPH_LEVELS and STRIDE_NODES.
 const STRIDE_BAND_FRACTION : f32 = 0.002;
+// `strides.ts`' STRIDE_MASK_BAND_FRACTION: a stand-in's mask's β, its own.
+const STRIDE_MASK_BAND_FRACTION : f32 = 0.2;
 const STRIDE_MORPH_LEVELS : u32 = 3u;
 const STRIDE_NODES : u32 = 9u;
 const STRIDE_NO_NODE : u32 = 0xffffffffu;
@@ -259,7 +261,8 @@ fn stride_factor(inst : Instance, level : u32, x : u32, y : u32, at : vec3f) -> 
   if (!(band > 0.0 && band < 3.0e38)) {
     return 0.0;
   }
-  let k = clamp((length(at) - band) / (STRIDE_BAND_FRACTION * band), 0.0, 1.0) * share;
+  let fraction = select(STRIDE_BAND_FRACTION, STRIDE_MASK_BAND_FRACTION, (inst.sub.x & STRIDE_SUB_PATCH_MASK) != 0u);
+  let k = clamp((length(at) - band) / (fraction * band), 0.0, 1.0) * share;
   return min(k, stride_contact_hold(at));
 }
 
