@@ -2273,15 +2273,15 @@ mod tests {
 
     /// P11.T4's kept-core endings: under the unified arm a helium star whose core the integration
     /// brings to the Chandrasekhar mass has reached it, whatever its last bits
-    /// (`core_endings::CORE_ROUNDING`): every oxygen–neon helium star of 1.74–2.24 M☉ collapses an
-    /// iron core there, as plan 06's helium star does at the mass. Under the held arm those whose
-    /// core ends up to 10⁻¹⁴ short of it leave an oxygen–neon dwarf of it, and the rest collapse.
+    /// (`core_endings::CORE_ROUNDING`): every oxygen–neon helium star of 1.74–2.24 M☉ collapses
+    /// there by electron capture (research-leans-40). Under the held arm those whose core ends up
+    /// to 10⁻¹⁴ short of it leave an oxygen–neon dwarf of it, and the rest collapse an iron core.
     #[test]
     fn a_helium_star_s_core_at_the_chandrasekhar_mass_ends_one_way_from_29() {
         use crate::stellar::remnant::DeathKind;
 
         for endings in [CoreEndingRules::Held, CoreEndingRules::Unified] {
-            let collapses: Vec<bool> = (0..11)
+            let kinds: Vec<DeathKind> = (0..11)
                 .map(|k| {
                     let m = SolarMasses::new(1.74 + 0.05 * f64::from(k));
                     let star =
@@ -2292,16 +2292,79 @@ mod tests {
                         (core - CHANDRASEKHAR_MSUN).abs() < 1e-13,
                         "{m:?}: {death:?}"
                     );
-                    matches!(death.kind(), DeathKind::CoreCollapse { .. })
+                    death.kind()
                 })
                 .collect();
-            let all = collapses.iter().all(|&c| c);
-            assert_eq!(
-                all,
-                endings == CoreEndingRules::Unified,
-                "{endings:?}: {collapses:?}"
+            if endings == CoreEndingRules::Unified {
+                assert!(
+                    kinds.iter().all(|&k| k == DeathKind::ElectronCapture),
+                    "{endings:?}: {kinds:?}"
+                );
+            } else {
+                let iron = |k: &DeathKind| matches!(k, DeathKind::CoreCollapse { .. });
+                assert!(kinds.iter().any(iron), "{endings:?}: {kinds:?}");
+                assert!(
+                    kinds.contains(&DeathKind::EnvelopeLoss),
+                    "{endings:?}: {kinds:?}"
+                );
+                assert!(
+                    kinds
+                        .iter()
+                        .all(|k| iron(k) || *k == DeathKind::EnvelopeLoss),
+                    "{endings:?}: {kinds:?}"
+                );
+            }
+        }
+    }
+
+    /// P11.T4's kept-core endings (research-leans-40): under the unified arm a helium star of
+    /// 1.6–2.25 M☉, whose mass stands for `Mc,BAGB` (HPT section 6.1) in the range whose core HPT
+    /// section 6 types oxygen–neon, collapses at the Chandrasekhar mass by electron capture. A
+    /// 2.0 M☉ one under the default recipe leaves Mandel and Müller's 1.26 M☉ neutron star (MM20
+    /// section 3) with the low-mode kick. A 2.4 M☉ one, from 2.25 M☉, still collapses an iron core.
+    /// The held arm takes no electron capture: a 2.04 M☉ one collapses an iron core there, and the
+    /// 2.0 M☉ one, whose core ends 10⁻¹⁵ short of the mass, leaves an oxygen–neon dwarf.
+    #[test]
+    fn an_oxygen_neon_helium_star_collapses_by_electron_capture_from_29() {
+        use crate::stellar::remnant::collapse::electron_capture_remnant;
+        use crate::stellar::remnant::{
+            CollapseChannel, DeathKind, KickDraws, KickLaw, KickMode, StandardKickLaw,
+        };
+        use crate::stellar::rules::StellarRules;
+
+        let draws = StarDraws::median();
+        let end = |m: f64, endings: CoreEndingRules| {
+            let star =
+                Track::helium_star_under(SolarMasses::new(m), &solar(), &draws, None, endings);
+            let death = star.death().expect("a full track reaches its death");
+            (
+                death,
+                star.remnant().expect("a full track leaves a remnant"),
+            )
+        };
+        let (capture, remnant) = end(2.0, CoreEndingRules::Unified);
+        assert_eq!(capture.kind(), DeathKind::ElectronCapture, "{capture:?}");
+        assert_eq!(remnant, electron_capture_remnant());
+        let channel = CollapseChannel::of(capture.kind()).expect("a collapse");
+        let kick = StandardKickLaw::under(StellarRules::every_29_hold()).kick(
+            channel,
+            &capture.progenitor(),
+            &remnant,
+            &KickDraws::of(&draws),
+        );
+        assert_eq!(kick.mode(), KickMode::Low);
+        let (held, _) = end(2.0, CoreEndingRules::Held);
+        assert_eq!(held.kind(), DeathKind::EnvelopeLoss, "{held:?}");
+        for (m, endings) in [
+            (2.4, CoreEndingRules::Unified),
+            (2.04, CoreEndingRules::Held),
+        ] {
+            let (death, remnant) = end(m, endings);
+            assert!(
+                matches!(death.kind(), DeathKind::CoreCollapse { .. }),
+                "{m} M☉, {endings:?}: {death:?}"
             );
-            assert!(collapses.iter().any(|&c| c), "{endings:?}: {collapses:?}");
+            assert_ne!(remnant, electron_capture_remnant(), "{m} M☉, {endings:?}");
         }
     }
 

@@ -8241,8 +8241,9 @@ fn no_helium_star_leaves_an_oxygen_neon_dwarf_above_the_capture_mass_from_29() {
 }
 
 /// P11.T4's kept-core endings: under every 29 hold a merger's helium-giant product that no star
-/// holds ends by its mass (research-leans-38; HPT section 6.1, plan 06's `helium_star_end`): an iron
-/// core from 1.6 M☉, a thermonuclear disruption with no Type Ia candidate from 1.44 M☉, a
+/// holds ends by its mass, which stands for `Mc,BAGB` (research-leans-38 and 40; HPT sections 6 and
+/// 6.1, plan 06's `helium_star_end`): an iron core from 2.25 M☉, an oxygen–neon core's electron
+/// capture from 1.6 M☉, a thermonuclear disruption with no Type Ia candidate from 1.44 M☉, a
 /// carbon–oxygen dwarf below; a thermally pulsing AGB product keeps its iron core at a 1.438 M☉
 /// carbon–oxygen core. The disruption leaves nothing.
 #[test]
@@ -8260,12 +8261,30 @@ fn an_unplaced_helium_giant_ends_by_its_mass_from_29() {
     for (kind, m, core, unplaced) in [
         (
             Kind::HeliumGiant,
-            1.7,
+            2.3,
             1.0,
             Unplaced::IronCore {
                 co_core: msun(1.0),
-                helium_core: msun(1.7),
-                mass: msun(1.7),
+                helium_core: msun(2.3),
+                mass: msun(2.3),
+            },
+        ),
+        (
+            Kind::HeliumGiant,
+            2.0,
+            1.0,
+            Unplaced::ElectronCapture {
+                co_core: msun(1.0),
+                mass: msun(2.0),
+            },
+        ),
+        (
+            Kind::HeliumGiant,
+            1.6,
+            1.0,
+            Unplaced::ElectronCapture {
+                co_core: msun(1.0),
+                mass: msun(1.6),
             },
         ),
         (
@@ -8317,6 +8336,32 @@ fn an_unplaced_helium_giant_ends_by_its_mass_from_29() {
             .phase(),
         Phase::NoRemnant
     );
+}
+
+/// P11.T4's kept-core endings: under every 29 hold a merger's helium-giant product of 2.0 M☉ that
+/// no star holds, its oxygen–neon core of 1.0 M☉, collapses at once by electron capture
+/// (research-leans-40; `Engine::capture_collapse`): one death, Mandel and Müller's 1.26 M☉ neutron
+/// star with the low-mode kick, and no Type Ia candidate.
+#[test]
+fn an_unplaced_oxygen_neon_helium_giant_captures_electrons_from_29() {
+    use super::common_envelope::Product;
+    use crate::stellar::remnant::KickMode;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::rules::StellarRules;
+
+    let mut engine = fed_dwarf_engine(0.6, 0.02, StellarRules::every_29_hold());
+    engine.finish_merger_with(Product::ElectronCapture {
+        co_core: SolarMasses::new(1.0),
+        mass: SolarMasses::new(2.0),
+    });
+    let [death] = engine.supernovae.as_slice() else {
+        panic!("one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(death.remnant(), electron_capture_remnant());
+    assert_eq!(death.kick().map(|k| k.mode()), Some(KickMode::Low));
+    assert!(engine.pooled.is_none());
+    let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(left.phase(), Phase::NeutronStar, "{left:?}");
 }
 
 /// P11.T4's kept-core endings: under every 29 hold an oxygen–neon dwarf a companion's transfer

@@ -164,6 +164,15 @@ pub(super) enum Unplaced {
         /// Its mass.
         mass: SolarMasses,
     },
+    /// A helium star of `mass` whose carbon–oxygen core of `co_core` is an oxygen–neon one, which
+    /// collapses at once by electron capture (from version 29, P11.T4's `core_endings`; plan 06's
+    /// `helium_star_end`, HPT sections 6 and 6.1).
+    ElectronCapture {
+        /// Its carbon–oxygen core.
+        co_core: SolarMasses,
+        /// Its mass.
+        mass: SolarMasses,
+    },
     /// A helium star of `mass` whose carbon–oxygen core ignites carbon at the Chandrasekhar mass,
     /// which disrupts it and leaves nothing, with no Type Ia candidate (from version 29, P11.T4's
     /// `core_endings`; plan 06's `helium_star_end`).
@@ -192,6 +201,7 @@ impl Unplaced {
             Self::HeliumStar { .. } => 3,
             Self::IronCore { .. } => 4,
             Self::Disruption { .. } => 6,
+            Self::ElectronCapture { .. } => 7,
         };
         UNPLACED.with(|counts| {
             let mut c = counts.get();
@@ -204,16 +214,16 @@ impl Unplaced {
 #[cfg(test)]
 thread_local! {
     /// This thread's unplaced products since it started ([`unplaced_counts`]).
-    static UNPLACED: core::cell::Cell<[usize; 7]> = const { core::cell::Cell::new([0; 7]) };
+    static UNPLACED: core::cell::Cell<[usize; 8]> = const { core::cell::Cell::new([0; 8]) };
 }
 
 /// The merger products this thread's engines could not place since it started, by what they
 /// left: helium, carbon–oxygen and oxygen–neon dwarfs, naked helium stars, iron cores, pinned
-/// primaries' products left to their pin, and disruptions (a test build's counter, for the dwarf
-/// limit's census).
+/// primaries' products left to their pin, disruptions and electron captures (a test build's
+/// counter, for the dwarf limit's census).
 #[cfg(test)]
 #[must_use]
-pub(crate) fn unplaced_counts() -> [usize; 7] {
+pub(crate) fn unplaced_counts() -> [usize; 8] {
     UNPLACED.with(core::cell::Cell::get)
 }
 
@@ -326,9 +336,10 @@ impl DwarfLimitRules {
     /// What the product of `kind`, mass `m` and core `core` from `source` leaves where no star of
     /// its kind has such a core: see the module documentation; but under
     /// [`CoreEndingRules::Unified`] (`endings`, from version 29) a helium giant of no dwarf's ends
-    /// by its mass `m`, which stands for its helium star's (HPT section 6.1): an iron core from
-    /// 1.6 M☉, a disruption that leaves nothing from the Chandrasekhar mass, and a carbon–oxygen
-    /// dwarf of min(core, m) below.
+    /// by its mass `m`, which stands for its helium star's and so for `Mc,BAGB` (HPT section 6.1):
+    /// an iron core from 2.25 M☉, an oxygen–neon core's electron capture from 1.6 M☉ (HPT section
+    /// 6; research-leans-40), a disruption that leaves nothing from the Chandrasekhar mass, and a
+    /// carbon–oxygen dwarf of min(core, m) below.
     #[must_use]
     pub(super) fn unplaced(
         self,
@@ -345,9 +356,13 @@ impl DwarfLimitRules {
             && matches!(kind, Kind::HeliumGap | Kind::HeliumGiant)
             && source == CoreSource::Other;
         match self {
-            Self::Whole if by_mass && m >= OXYGEN_NEON_MC_BAGB => Unplaced::IronCore {
+            Self::Whole if by_mass && m >= IRON_CORE_MC_BAGB => Unplaced::IronCore {
                 co_core: mass,
                 helium_core: m,
+                mass: m,
+            },
+            Self::Whole if by_mass && m >= OXYGEN_NEON_MC_BAGB => Unplaced::ElectronCapture {
+                co_core: mass,
                 mass: m,
             },
             Self::Whole if by_mass && m >= CHANDRASEKHAR_MASS => Unplaced::Disruption { mass: m },

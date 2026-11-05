@@ -31,9 +31,13 @@
 //!   whose core is above the capture mass from the second dredge-up, still collapses at `Mc,SN`
 //!   (lean, 2026-11-03). [`RemnantRecipe::Hurley2000`] keeps the Chandrasekhar mass, as
 //!   carbon–oxygen and helium dwarfs do;
-//! - a merger's helium-giant product that no star holds ends by its mass, which stands for its
-//!   helium star's (HPT section 6.1), as plan 06's helium star ends with its core at the
-//!   Chandrasekhar mass (`helium_star_end`): an iron core from 1.6 M☉, a thermonuclear disruption
+//! - a helium star whose core reaches the Chandrasekhar mass collapses by its mass, which stands
+//!   for `Mc,BAGB` (HPT section 6.1; research-leans-40): an iron core from 2.25 M☉, and from
+//!   1.6 M☉, where HPT section 6 types the core oxygen–neon, an electron capture under the track's
+//!   recipe (plan 06's `helium_star_end`, which under the held arm collapses an iron core from
+//!   1.6 M☉; MM20 section 3's 1.26 M☉ neutron star by default);
+//! - a merger's helium-giant product that no star holds ends by its mass too, as that helium star
+//!   ends: an iron core from 2.25 M☉, an electron capture from 1.6 M☉, a thermonuclear disruption
 //!   that leaves nothing, with no Type Ia candidate, from 1.44 M☉, and a dwarf below
 //!   (`dwarf_limit::DwarfLimitRules::unplaced`); a thermally pulsing AGB product keeps the 1.438
 //!   M☉ carbon–oxygen core of its iron core;
@@ -55,9 +59,10 @@ use crate::units::SolarMasses;
 pub(crate) const CORE_ROUNDING: f64 = 1e-9;
 
 /// The generator version whose stellar rules end a kept white dwarf's core as its track does and
-/// collapse every oxygen–neon core at one mass (P11.T4's fix): `Engine::die`'s swollen death,
-/// `Engine::core_limit_age`, `Builder::pulses_cap`, plan 06's `helium_star_end`, the dwarfs'
-/// collapse masses and the unplaced helium giant take [`CoreEndingRules::Unified`].
+/// collapse every oxygen–neon core at one mass and by electron capture (P11.T4's fix):
+/// `Engine::die`'s swollen death, `Engine::core_limit_age`, `Builder::pulses_cap`, plan 06's
+/// `helium_star_end`, the dwarfs' collapse masses and the unplaced helium giant take
+/// [`CoreEndingRules::Unified`].
 ///
 /// Below it every pair and star takes the held arm, [`CoreEndingRules::Held`], the code of version
 /// 28 verbatim, so every generated value keeps its bits; the tests reach the new arm through

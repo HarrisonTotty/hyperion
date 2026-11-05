@@ -636,6 +636,20 @@ pub(crate) fn iron_core_fate(
     phases::iron_core_fate(recipe, age.value(), supernova, co_core, progenitor, draws)
 }
 
+/// The electron-capture supernova at `age` of an oxygen–neon core `co_core` from `progenitor`,
+/// under `recipe`: plan 06's ([`phases::oxygen_neon_capture_fate`]) for a star with no track of its
+/// own, a merger's helium-giant product that no star holds (from version 29, P11.T4's
+/// `core_endings`, `Engine::capture_collapse`).
+#[must_use]
+pub(crate) fn oxygen_neon_capture_fate(
+    recipe: RemnantRecipe,
+    age: Years,
+    co_core: SolarMasses,
+    progenitor: ProgenitorAtDeath,
+) -> Fate {
+    phases::oxygen_neon_capture_fate(recipe, age.value(), co_core.value(), progenitor)
+}
+
 impl Track {
     /// The star's track built until it covers `age_max`: every segment up to the one that holds
     /// that age, which are bit for bit the same segments as those of [`Track::full`] (design note

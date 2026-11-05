@@ -554,6 +554,40 @@ impl Engine {
             ProgenitorAtDeath::new(co_core, helium_core, envelope, Stripping::None),
             RemnantDraws::of(self.ctx.draws(i)),
         );
+        self.unplaced_collapse(i, &fate, mass);
+    }
+
+    /// Member `i`, a merger's helium-giant product of `mass` M☉ that no star can hold, whose
+    /// carbon–oxygen core of `co_core` is an oxygen–neon one, collapses now by electron capture.
+    ///
+    /// From version 29 (P11.T4's `core_endings`, [`Unplaced::ElectronCapture`]; research-leans-40)
+    /// the product's mass stands for its helium star's, and so for `Mc,BAGB` (HPT section 6.1),
+    /// and one of 1.6–2.25 M☉ has an oxygen–neon core (HPT section 6), as plan 06's helium star of
+    /// that mass collapses (`helium_star_end`). It takes plan 06's electron-capture supernova
+    /// under the pair's remnant recipe ([`sse::oxygen_neon_capture_fate`]: Mandel and Müller's
+    /// 1.26 M☉ neutron star, MM20 section 3, or HPT's equation 92 of the core at `Mc,SN`, which
+    /// their equation 75 puts at the Chandrasekhar mass at least, and so at it for such a star),
+    /// with no hydrogen, the low-mode kick of electron capture, and no Type Ia candidate. The
+    /// progenitor is taken unstripped, as for an iron core ([`Engine::iron_core_collapse`]); an
+    /// electron capture's kick does not read the stripping.
+    ///
+    /// [`Unplaced::ElectronCapture`]: super::dwarf_limit::Unplaced::ElectronCapture
+    pub(super) fn capture_collapse(&mut self, i: usize, co_core: SolarMasses, mass: SolarMasses) {
+        let progenitor = ProgenitorAtDeath::new(co_core, mass, SolarMasses::ZERO, Stripping::None);
+        let mc_sn = SolarMasses::new(co_core.value().max(CHANDRASEKHAR_MASS.value()));
+        let fate = sse::oxygen_neon_capture_fate(
+            self.ctx.track_options().remnant(),
+            Years::new(self.age),
+            mc_sn,
+            progenitor,
+        );
+        self.unplaced_collapse(i, &fate, mass);
+    }
+
+    /// Member `i`, a merger's product of `mass` M☉ that no star can hold, ends now in `fate`: its
+    /// remnant, with plan 06's kick for its death, the progenitor unstripped
+    /// ([`Engine::iron_core_collapse`], [`Engine::capture_collapse`]).
+    fn unplaced_collapse(&mut self, i: usize, fate: &sse::Fate, mass: SolarMasses) {
         let kick = own_kick(&self.ctx, i, &fate.death, &fate.remnant, Stripping::None);
         let member = if fate.remnant.kind() == RemnantKind::None {
             Member::Gone

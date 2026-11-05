@@ -7697,3 +7697,12 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   - Census under every 29: layer D's no-star pairs 400 → 22; ONe dwarfs above 1.37 M☉ 0 in every
     layer, pinned or not (225 and 89 in D and E under every 27 hold). Movers at 29 are listed in
     `core_endings_hold.rs`.
+- From fix-p11-helium-star-capture (2026-11-04), on the same hold (research-leans-40):
+  - A helium star of 1.6–2.25 M☉ whose core reaches M_Ch collapses by electron capture
+    (`oxygen_neon_capture_fate`: MM20's 1.26 M☉ neutron star, or HPT eq. 92 under Hurley2000), and
+    from 2.25 M☉ an iron core (HPT §§6 and 6.1). The held arm keeps the iron core from 1.6 M☉.
+  - An unplaced helium giant of 1.6–2.25 M☉ captures electrons too (`Unplaced::ElectronCapture`,
+    `Engine::capture_collapse`, with Mc,SN at least M_Ch under Hurley2000). None reaches it in the
+    census.
+  - Census under every 29: layer D's no-star pairs 22 → 56 (E 10 → 12): kept CO cores disrupting
+    at M_Ch, with no Ia, on those helium stars' tracks.

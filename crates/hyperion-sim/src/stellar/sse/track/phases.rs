@@ -936,6 +936,16 @@ impl Builder<'_> {
     /// 1.6 M☉ and oxygen–neon otherwise (HPT sections 6.1 and 6.2.1); from it, carbon ignition
     /// with no remnant below 1.6 M☉ and a core collapse from there up.
     ///
+    /// The collapse is an iron core's under the held arm. From version 29 (P11.T4's
+    /// `core_endings`; research-leans-40) it is an iron core's from 2.25 M☉ only: HPT section 6.1
+    /// puts the helium star's mass in place of `Mc,BAGB`, and section 6 types the core of an
+    /// `Mc,BAGB` of 1.6–2.25 M☉ oxygen–neon, which collapses by electron capture
+    /// ([`oxygen_neon_capture_fate`]), as the thermal pulses' oxygen–neon cores do
+    /// ([`Builder::oxygen_neon_core`]). COMPAS's `GiantBranch::ResolveSupernova` makes the same
+    /// cuts, an electron capture from its `MCBUR1`, 1.6 M☉ (Hurley's; 1.83 M☉ in Fryer et al.'s and
+    /// Belczynski et al.'s choice), and an iron core from its `MCBUR2`, 2.25 M☉ (recalled, as its
+    /// source could not be reached, 2026-11-04).
+    ///
     /// A carbon–oxygen white dwarf has the helium star's whole mass, and an oxygen–neon one the
     /// core's, as in the published SSE code (`hrdiag`, stellar types 8 and 9), since HPT say only
     /// that the star "becomes a CO WD" when its core reaches `Mc,max` (ruling 40 of 2026-09-22).
@@ -979,6 +989,11 @@ impl Builder<'_> {
             } else {
                 self.white_dwarf(age, kind, dwarf, progenitor)
             }
+        } else if oxygen_neon
+            && endings == CoreEndingRules::Unified
+            && helium_mass < IRON_CORE_MC_BAGB.value()
+        {
+            oxygen_neon_capture_fate(self.options.remnant(), age, mc, progenitor)
         } else if oxygen_neon {
             let supernova = SupernovaType::of_envelopes(
                 SolarMasses::ZERO,
@@ -1240,13 +1255,7 @@ impl Builder<'_> {
     fn oxygen_neon_core(&self, age: f64, m0: f64, mc: f64, progenitor: ProgenitorAtDeath) -> Fate {
         match self.options.remnant() {
             RemnantRecipe::Hurley2000 => {
-                let remnant = hurley_supernova_remnant(SolarMasses::new(mc));
-                Fate {
-                    death: Death::new(Years::new(age), DeathKind::ElectronCapture, progenitor),
-                    remnant,
-                    phase: collapse_phase(remnant.kind()),
-                    iron_core: None,
-                }
+                oxygen_neon_capture_fate(RemnantRecipe::Hurley2000, age, mc, progenitor)
             }
             RemnantRecipe::MandelMuller2020 => {
                 if self.captures_electrons(m0) {
@@ -1301,6 +1310,37 @@ fn electron_capture(age: f64, progenitor: ProgenitorAtDeath) -> Fate {
         remnant: electron_capture_remnant(),
         phase: Phase::NeutronStar,
         iron_core: None,
+    }
+}
+
+/// The electron-capture supernova at `age` of an oxygen–neon core of `mc` (M☉) from `progenitor`,
+/// under `recipe`: HPT's remnant of the core under [`RemnantRecipe::Hurley2000`] (their section 6
+/// and equation 92, as in the published SSE code), and Mandel and Müller's 1.26 M☉ neutron star
+/// under [`RemnantRecipe::MandelMuller2020`] (MM20 section 3, [`electron_capture_remnant`]). The
+/// collapse of [`Builder::oxygen_neon_core`] and, from version 29, of an oxygen–neon helium star
+/// ([`Builder::helium_star_end`]) and of a merger's product that no star holds
+/// (`Engine::capture_collapse`).
+///
+/// It is on the held arm's path too, `oxygen_neon_core`'s under `Hurley2000`: a rule of version 29
+/// alone belongs at its callers, as `Engine::capture_collapse`'s `Mc,SN` does.
+#[must_use]
+pub(super) fn oxygen_neon_capture_fate(
+    recipe: RemnantRecipe,
+    age: f64,
+    mc: f64,
+    progenitor: ProgenitorAtDeath,
+) -> Fate {
+    match recipe {
+        RemnantRecipe::Hurley2000 => {
+            let remnant = hurley_supernova_remnant(SolarMasses::new(mc));
+            Fate {
+                death: Death::new(Years::new(age), DeathKind::ElectronCapture, progenitor),
+                remnant,
+                phase: collapse_phase(remnant.kind()),
+                iron_core: None,
+            }
+        }
+        RemnantRecipe::MandelMuller2020 => electron_capture(age, progenitor),
     }
 }
 

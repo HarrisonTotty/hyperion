@@ -518,6 +518,39 @@ fn the_build_reads_the_companion_mark_only_where_the_windows_disagree() {
     }
 }
 
+/// P11.T4's kept-core endings (research-leans-40): an oxygen–neon core's electron capture
+/// ([`oxygen_neon_capture_fate`]) leaves Mandel and Müller's 1.26 M☉ neutron star under the default
+/// recipe (MM20 section 3) and, under `Hurley2000`, HPT's equation 92 of its core: 1.17 + 0.09 ×
+/// 1.44 = 1.2996 M☉ at the Chandrasekhar mass. Both are electron captures with no iron core.
+#[test]
+fn an_oxygen_neon_core_captures_electrons_under_either_recipe() {
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::{ProgenitorAtDeath, Stripping};
+
+    let core = SolarMasses::new(1.44);
+    let progenitor = ProgenitorAtDeath::new(
+        core,
+        SolarMasses::new(2.0),
+        SolarMasses::ZERO,
+        Stripping::Wind,
+    );
+    let mm20 = electron_capture_remnant().mass().value();
+    for (recipe, mass) in [
+        (RemnantRecipe::MandelMuller2020, mm20),
+        (RemnantRecipe::Hurley2000, 1.17 + 0.09 * 1.44),
+    ] {
+        let fate = oxygen_neon_capture_fate(recipe, Years::new(1.0e6), core, progenitor);
+        assert_eq!(fate.death.kind(), DeathKind::ElectronCapture, "{recipe:?}");
+        assert_eq!(fate.remnant.kind(), RemnantKind::NeutronStar, "{recipe:?}");
+        assert!(
+            (fate.remnant.mass().value() - mass).abs() < 1e-12,
+            "{recipe:?}: {fate:?}"
+        );
+        assert_eq!(fate.phase, Phase::NeutronStar, "{recipe:?}");
+        assert!(fate.iron_core.is_none(), "{recipe:?}");
+    }
+}
+
 /// P11.T4's kept-core endings (research-leans-38): under every 29 hold a window star's thermal
 /// pulses end in its collapse at the capture mass, 1.37 M☉ (`Builder::pulses_cap`). A
 /// companion-stripped 7.7 M☉ star at Z = 0.02, whose pulses start below the cap, collapses by

@@ -860,23 +860,17 @@ impl Engine {
     /// with the two stars' masses before the merger, and the dwarf collapses by accretion-induced
     /// collapse (P11.T4's fix, `dwarf_limit::collapses`); from 29 a pinned primary's product is
     /// left to its pin ([`Engine::pin_pending`], P11.T4's `dwarf_limit`), and an unplaced product's
-    /// iron core ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]),
-    /// pooling no candidate. From 29 a product whose core is a carbon–oxygen or oxygen–neon dwarf's
-    /// keeps that kind ([`Engine::dwarf_cores`]).
+    /// iron core ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]), as does
+    /// its oxygen–neon core by electron capture ([`Product::ElectronCapture`],
+    /// [`Engine::capture_collapse`]), and its disruption leaves nothing ([`Product::Disruption`]);
+    /// none pools a candidate. From 29 a product whose core is a carbon–oxygen or oxygen–neon
+    /// dwarf's keeps that kind ([`Engine::dwarf_cores`]).
     fn finish_merger(&mut self, product: Product) {
-        let (product, source, iron_core, disruption) = match product {
-            Product::Member(member, source) => (member, source, None, None),
-            Product::IronCore {
-                co_core,
-                helium_core,
-                mass,
-            } => (
-                Member::Gone,
-                CoreSource::Other,
-                Some((co_core, helium_core, mass)),
-                None,
-            ),
-            Product::Disruption { mass } => (Member::Gone, CoreSource::Other, None, Some(mass)),
+        let (product, source, ending) = match product {
+            Product::Member(member, source) => (member, source, None),
+            ending @ (Product::IronCore { .. }
+            | Product::ElectronCapture { .. }
+            | Product::Disruption { .. }) => (Member::Gone, CoreSource::Other, Some(ending)),
         };
         let pinned = self.ctx.rules().dwarf_limit.leaves_the_pin() && self.pin_pending(0);
         let dwarf = if let Member::Remnant { phase, mass, .. } = &product
@@ -902,12 +896,20 @@ impl Engine {
         self.kind = SegmentKind::Merged;
         self.stripped[1] = false;
         self.corotate(0);
-        if let Some((co_core, helium_core, mass)) = iron_core {
-            self.iron_core_collapse(0, co_core, helium_core, mass);
-        }
-        if let Some(mass) = disruption {
-            let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);
-            self.explode(0, mass.value(), nothing, None);
+        match ending {
+            Some(Product::IronCore {
+                co_core,
+                helium_core,
+                mass,
+            }) => self.iron_core_collapse(0, co_core, helium_core, mass),
+            Some(Product::ElectronCapture { co_core, mass }) => {
+                self.capture_collapse(0, co_core, mass);
+            }
+            Some(Product::Disruption { mass }) => {
+                let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);
+                self.explode(0, mass.value(), nothing, None);
+            }
+            Some(Product::Member(..)) | None => {}
         }
         if let (Some((phase, m)), Some(masses)) = (dwarf, masses) {
             if phase != Phase::OxygenNeonWhiteDwarf {
@@ -1448,6 +1450,9 @@ impl Engine {
                 helium_core,
                 mass,
             },
+            Unplaced::ElectronCapture { co_core, mass } => {
+                Product::ElectronCapture { co_core, mass }
+            }
             Unplaced::Disruption { mass } => Product::Disruption { mass },
         }
     }
@@ -1691,6 +1696,14 @@ pub(super) enum Product {
         co_core: SolarMasses,
         /// Its helium core, everything below its hydrogen envelope.
         helium_core: SolarMasses,
+        /// Its mass.
+        mass: SolarMasses,
+    },
+    /// A helium star of `mass` whose carbon–oxygen core of `co_core` is an oxygen–neon one, which
+    /// collapses by electron capture (from version 29, [`Unplaced::ElectronCapture`]).
+    ElectronCapture {
+        /// Its carbon–oxygen core.
+        co_core: SolarMasses,
         /// Its mass.
         mass: SolarMasses,
     },
