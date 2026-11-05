@@ -280,7 +280,7 @@ pub(crate) fn trace_reference_with(
 /// JSON that reads back to the bit.
 ///
 /// A job still being traced is also kept in part, every [`PARTIAL_CHECKPOINT_EVERY`] of the
-/// trace's time (R08.T16.a.2; LANE-RULES' long runs, a checkpoint at least every hour): its moments
+/// trace's time (R08.T16.a.2: a trace of hours keeps a checkpoint at least every hour): its moments
 /// merged so far, of its samples `0..k` for k in whole blocks, from which a rerun carries it on, as
 /// [`trace_spans`] carries a run on. A job's part is the fold of its first blocks in index order,
 /// the very value the whole job's fold passes through, so a job resumed from it is the same to the
