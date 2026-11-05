@@ -7635,3 +7635,6 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   q = 1.012). Open: the paper's cataclysmic variable
   (donor τ ≈ 0.75) falls inside its lobe at q = 1.36 after 10 kyr and transfers on its nuclear
   timescale while the heavier for 2.3 Gyr; its restated tests read it after the reversal.
+- **P11.T4's neutron-star accretion census re-pinned at 27** (lane `fix-p11-ns-accretion-census`,
+  2026-11-05; test only; lean, 2026-11-05: a real effect). The census is 413 → 1,816: the `radx` fix
+  above is +1,350 in landing order (its lane's 1,854 was lost). Causes: on `CENSUS_FIGURES`.

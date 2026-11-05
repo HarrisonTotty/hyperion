@@ -179,20 +179,43 @@ fn figures(census: &Census) -> CompactFigures {
     }
 }
 
-/// The census's figures under every 27 hold, as measured (2026-11-01, at generator version 25,
-/// and again at 26). Not re-pinned at 27: the census rose to 1,738 members, 12 black holes, 2
-/// grown, 1 by a dwarf and 1,722 neutron stars on round 11's tree, and to 1,815, 12, 2, 1 and
-/// 1,799 under the heavy donors' white dwarfs' wind (2026-11-04), more than the white dwarfs'
-/// limit (P11.T4's `dwarf_limit`, its lane's 399 neutron stars to 1,190) and the wind's 77
-/// explain: a finding, for research, and the test fails until it is ruled.
+/// The census's figures at generator version 27, as measured (2026-11-05), against the 413
+/// members and 402 neutron stars pinned at 25 and 26.
+///
+/// By cause, each step's members (neutron stars) on train 27's own trees, in the order they
+/// landed:
+///
+/// - the pin's tree is not in the clone this was measured in: train 27's tree before its folds,
+///   without the pinned white dwarfs, the wide pair's wind, the dwarf limit and the `radx` fix
+///   (the last two steps came after it), gives 251 (242), −162 (−160), left unsplit: the 27
+///   arms' revisions between the two trees are not held apart on any tree there;
+/// - P11.T4's pinned white dwarfs, +8 (+8);
+/// - P11.T12's wind onto a wide pair's star, 0;
+/// - P11.T4's dwarf limit, +129 (+129): carbon–oxygen dwarfs fed helium past the edge-lit mark,
+///   which the held arm let grow on, now collapse at the Chandrasekhar mass (a pooled Type Ia
+///   candidate, then the accretion-induced collapse) to 1.26 M☉ neutron stars beside their
+///   donors, now helium dwarfs ground to about 0.01 M☉ at orbital periods of about an hour. Its
+///   lane's 399 → 1,190 counted the swollen helium dwarf too, which is not on this tree (lane
+///   `p11-wd-union`, at 28);
+/// - P11.T10's kicks at version 25, the heavy donors' corotation at the donor's radius held to its
+///   lobe (BSE's `radx`), +1,350 (+1,343): neutron stars that a common envelope left beside a
+///   2.8–5.9 M☉ main-sequence star (its initial mass, 10–90%), whose thermal-rate transfer no
+///   longer drains their orbit to a merger through the overfilling donor's spin, and which live
+///   on as low-mass X-ray binaries (the intermediate-mass channel; Tauris, van den Heuvel and
+///   Savonije 2000, ApJ 530, L93; Pfahl, Rappaport and Podsiadlowski 2003, ApJ 597, 1036;
+///   recalled). Its lane's re-pin, 411 → 1,854, was lost at its landing;
+/// - P11.T4's heavy donors' white dwarfs' wind, +77 (+77);
+/// - the accreting white dwarfs' samplers refitted under the Chandrasekhar mass (P15.T10.b), +1
+///   (+1): a record the carve-out no longer takes;
+/// - the 27 folds, plan 08's displaced records among them, the bump and the segment cap of 256, 0.
 const CENSUS_FIGURES: CompactFigures = CompactFigures {
-    members: 413,
-    black_holes: 11,
-    grown: 0,
-    grown_by_dwarfs: 0,
-    median_black_hole: 3.514_700_978_122_044,
-    neutron_stars: 402,
-    most_gained: 0.166_682_517_111_517_38,
+    members: 1_816,
+    black_holes: 12,
+    grown: 2,
+    grown_by_dwarfs: 1,
+    median_black_hole: 3.053_147_766_835_219,
+    neutron_stars: 1_800,
+    most_gained: 0.175_378_456_071_606_3,
 };
 
 /// A census of 10⁷ slab records' X-ray binaries ([`slab_census`]) under every 27 hold. Under the
@@ -205,13 +228,16 @@ const CENSUS_FIGURES: CompactFigures = CompactFigures {
 ///   floor of 10⁻¹³ left. At generator version 25 before P11.T4's heavy donors one was a neutron
 ///   star born at 1.861 M☉ that a 1.46 M☉ main-sequence donor fed for 7 Gyr, grinding itself down
 ///   to 0.068 M☉: 0.139 M☉ gained at the arm's tenth carries it past `MAX_NEUTRON_STAR_MASS` (a
-///   lean of land-pod's, 2026-11-01, for research); at 26 there is none;
+///   lean of land-pod's, 2026-11-01, for research); at 26 there is none; at 27 two of 12 (a
+///   finding): neutron stars born at 1.85–1.86 M☉ of 13.3 M☉ primaries (initial masses here),
+///   carried past `MAX_NEUTRON_STAR_MASS` by 0.2–0.26 M☉ of a 4.8–6.3 M☉ donor's transfer, one
+///   donor now substellar;
 /// - no neutron star in a low-mass X-ray binary has gained more than [`MOST_GAINED`];
 /// - the black holes' median mass in the low-mass X-ray binaries is pinned as measured, under the
 ///   brief's 5 M☉ (a finding): most are fallback black holes of 2–4 M☉ (plan 06's Mandel and
 ///   Müller law, 0.8 `M_CO` ± 0.5 M☉ held above 2 M☉), not neutron stars grown.
 #[test]
-#[ignore = "slow: 2 × 10⁷ grid records' pairs run through the binary engine"]
+#[ignore = "slow: 10⁷ grid records' pairs run through the binary engine"]
 fn census_of_the_neutron_star_accretion() {
     let census = |rules: GalaxyRules| {
         let galaxy = Galaxy::from_params_with_rules(
