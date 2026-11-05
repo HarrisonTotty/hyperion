@@ -7,10 +7,13 @@
 //!
 //! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
 //!
-//! The movers, found by turning the hold on at the version (and back off) over the sim's tests
-//! with its `testing` feature and the fitting crate's (2026-11-04; nothing moves at 24–28, the
-//! held arm being version 28's code): the golden `sky/census_near_sun`
-//! (`sky::census::query::tests::the_census_near_the_sun_is_pinned`), the binary engine's pins
+//! The movers, found by turning the white-dwarf union's three holds at 29 on at the version
+//! together (and back off) over the sim's tests with its `testing` feature and the fitting crate's
+//! (2026-11-05, at version 27 and again at 28, the same movers; nothing moves at 24–28, the held
+//! arms being the version's code), the holds' own tests aside, not split by hold: the goldens
+//! `sky/census_near_sun` (`sky::census::query::tests::the_census_near_the_sun_is_pinned`) and
+//! `sky/band_face_row` (`sky::limits::tests::the_eye_cut_and_a_band_face_row_are_pinned`: one
+//! glaring star fewer within 100 ly, 1,488 listed → 1,487), the binary engine's pins
 //! `stellar::binary::tests::{a_thousand_timelines_are_pinned,
 //! the_last_capped_sample_ends_as_it_does_with_the_cap_raised,
 //! the_dwarf_limit_leaves_a_pinned_primary_to_its_pin}`, the sky's phase fit

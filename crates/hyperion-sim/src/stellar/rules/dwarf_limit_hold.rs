@@ -7,10 +7,10 @@
 //!
 //! - The version's rules keep the union's held arm, and the tripwire holds it only until the bump.
 //! - Slow: a census of 6 × 10⁴ pairs of layers C, D and E near the Sun, as the generator draws
-//!   them, run to 13.8 Gyr under every 27 hold and under every 29 hold: none shows a white dwarf
-//!   above the Chandrasekhar mass (under the held arm some did) but a pinned primary's (design
-//!   note 16), counted apart, which `Engine::held_product` takes as at 27. Every 29 hold adds
-//!   P11.T4's holds at 29; the merger products no star holds, by what they leave; and the
+//!   them, run to 13.8 Gyr under the version's rules and under every 29 hold: none shows a white
+//!   dwarf above the Chandrasekhar mass (under the held arm some did) but a pinned primary's
+//!   (design note 16), counted apart, which `Engine::held_product` takes as at 27. Every 29 hold
+//!   adds P11.T4's holds at 29; the merger products no star holds, by what they leave; and the
 //!   swollen dwarfs and placed products of dwarfs that come back the other kind, none under every
 //!   29 hold; and the deaths of giants whose cores are dwarfs', by ending.
 
@@ -204,14 +204,14 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
     figures
 }
 
-/// The census's figures under every 27 hold and under every 29 hold, as measured (2026-11-05, at
-/// generator version 27; the 27 pin before, run [5983, 15222, 18105] and massless [149, 18, 2],
-/// was stale at version 27's base; under the held arm of version 25, 94 of layer D's pairs and 157
-/// of E's showed a dwarf above the limit; the unplaced products: no iron core, every thermally
-/// pulsing product of layer E that no star holds being a pinned primary's; under every 29 hold no
-/// placed product changes kind, and the carbon–oxygen cores whose tracks would collapse disrupt and
-/// leave nothing, most at the Chandrasekhar mass on their early AGB, which leaves both members
-/// `NoRemnant`; from P11.T4's kept-core endings a kept core ends as its track does, its
+/// The census's figures under the version's rules and under every 29 hold, as measured (2026-11-05,
+/// at generator versions 27 and 28 alike; the 27 pin before, run [5983, 15222, 18105] and massless
+/// [149, 18, 2], was stale at version 27's base; under the held arm of version 25, 94 of layer D's
+/// pairs and 157 of E's showed a dwarf above the limit; the unplaced products: no iron core, every
+/// thermally pulsing product of layer E that no star holds being a pinned primary's; under every 29
+/// hold no placed product changes kind, and the carbon–oxygen cores whose tracks would collapse
+/// disrupt and leave nothing, most at the Chandrasekhar mass on their early AGB, which leaves both
+/// members `NoRemnant`; from P11.T4's kept-core endings a kept core ends as its track does, its
 /// carbon–oxygen core disrupting where its track captures electrons, most on the tracks of helium
 /// stars of 1.6–2.25 M☉ (research-leans-40), no oxygen–neon dwarf passes the capture mass, and no
 /// unplaced product captures electrons).
@@ -244,8 +244,8 @@ const CENSUS_FIGURES: [Figures; 2] = [
     },
 ];
 
-/// A census of 6 × 10⁴ generated pairs ([`census`]) under every 27 hold and under every 29 hold:
-/// none shows a white dwarf above the Chandrasekhar mass.
+/// A census of 6 × 10⁴ generated pairs ([`census`]) under the version's rules and under every 29
+/// hold: none shows a white dwarf above the Chandrasekhar mass.
 #[test]
 #[ignore = "slow: 6 × 10⁴ generated pairs run through the binary engine to 13.8 Gyr, twice"]
 fn no_white_dwarf_passes_the_chandrasekhar_mass_under_every_27_hold() {

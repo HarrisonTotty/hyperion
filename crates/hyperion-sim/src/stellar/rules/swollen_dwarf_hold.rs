@@ -31,7 +31,7 @@ fn the_swollen_dwarf_is_held_only_until_the_29_bump() {
     );
     assert_eq!(version().swollen_dwarf, SwollenDwarfRules::AtBase);
     let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).swollen_dwarf;
-    for v in [GENERATOR_VERSION.get(), 25, 26, 27] {
+    for v in [24, 25, 26, 27, 28] {
         assert_eq!(at(v), SwollenDwarfRules::AtBase, "version {v}");
     }
     assert_eq!(at(29), SwollenDwarfRules::Degenerate);

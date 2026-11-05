@@ -7712,3 +7712,13 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     swollen dwarf's record, as v27 read none there (review). As first ported, an ONe-typing helium
     giant coalescing with a CO dwarf could type its unplaced product ONe under every 27 hold; no
     census met one.
+  - Rebased onto land/next at v28 (85c7ba1c): train 28's helpers gone, the held arms and every pin
+    unchanged at 28.
+  - Movers, the three holds turned on at the version together (at 27, and the same at 28): the
+    goldens `sky/census_near_sun` and `sky/band_face_row` (one glaring star fewer within 100 ly),
+    the sky's phase fit, three engine pins and the kick tables (listed in `core_endings_hold.rs`),
+    beside the holds' own tests.
+  - `census_of_the_neutron_star_accretion_under_every_29_hold`: 1,816 → 1,834 members (neutron
+    stars 1,800 → 1,818). Added in turn (the galaxy's holds at 29, swollen dwarf, dwarf limit,
+    core endings), all but `core_endings` move it by 0, and it by +18. The black holes and the most
+    gained are unchanged.
