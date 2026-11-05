@@ -6145,7 +6145,8 @@ Acceptance: `pnpm test`.
   range since its floor's march, 2026-11-01; its march by piece depth built 2026-11-02_ (Risks,
   "Deviations in T16.a.2, as built", "The envelope's disc edge, as built" and "The march by piece
   depth, as built"). _A served giant's disc on its floor built 2026-11-02_ (Risks, "The disc's
-  ground, as built").
+  ground, as built"). _The hand Saturn's case, `saturn-envelope`, traced 2026-11-05_ (Risks,
+  "saturn-envelope, traced").
 
 - **R08.T16.b `DiscReflectanceTable`.** `discReflectance.ts` bakes it spectrally from the medium
   and tables, one layer a latitude band (Design note 17), reading R08.T14.f's thick table, the
@@ -25029,3 +25030,22 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     disc-p60). The served envelope's thin decks, green τ 3.7 above its floor against the hand
     Jupiter's 5.7, leave a CH₄ path whose lines take 59% of the centre's red (the hand Jupiter's
     28%). The route and the gates are unchanged; main rules on the brief.
+- **saturn-envelope, traced** (R08.T16.a.2, 2026-11-05; lane `trace-hand-saturn`;
+  research-leans-43 §2; the table and the lean in the lane's outbox). Nothing routes differently.
+  - _The case_: `test/saturnEnvelopeCase.ts`, the hand Saturn built as `jupiter-envelope` is,
+    through `jupiterEnvelopeCase.ts`'s new `handEnvelopeCase(name, detail)`. `JupiterEnvelopeCase`
+    is now `EnvelopeCase`. Seed 16; its counts in `sampleCounts.json` come from its own pilot at 27.
+    Above its floor: τ 6.35/10.35/23.01, τ (1 − ω̄) 0.025/0.064/0.187. Its file is the same at 27
+    and 28.
+  - _The reference_ was traced at 27 (102.6 thread-h). `refusals.json` holds its row: the vector
+    I is refused in blue at every geometry, mostly on heavy tails; the scalar is refused nowhere.
+  - _The tracer_ (`hyperion-fit`, `--work`) also keeps the job in flight in part every
+    `PARTIAL_CHECKPOINT_EVERY` (10 min), as `<job>.part.json`, and a rerun carries the job on from
+    it to the bit.
+  - _The envelope route's twin against it_ (the chromophore gate's reading, not recorded in
+    `vectorGate.json`): 13 of 27 pass, 2 miss (disc-p60 red 1.08, disc-p75 red 1.12; 1.34 and
+    1.62 edges) and 12 are refused. The closed path gets 8 passes and 7 misses, its worst 25 edges.
+    `ENVELOPE_ROUTE_RANGE` and the gate are unchanged.
+  - _Pending_: the generated Saturn's disc reads blue in its reference (reflectance R/B 0.42–0.66,
+    scalar), against Saturn's tan. That is plan 14's column, not the route (the lane's
+    `findings.txt`).
