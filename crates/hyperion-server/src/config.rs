@@ -227,7 +227,8 @@ pub const DEFAULT_CLASS_CELL_CACHE_MIB: usize = 32;
 pub const DEFAULT_SKY_CACHE_MIB: usize = 0;
 /// The sky tables' cache's budget when `--sky-tables` is not given, in MiB: two galaxies' luminosity
 /// tables, about 55 MiB each with their snapshots (rendering plan R06, R06.T11.c; decided
-/// 2026-10-03, `decision-r06-tables.md`, item B.2).
+/// 2026-10-03, `decision-r06-tables.md`, item B.2). With each galaxy's features' gas index beside
+/// its tables, some 52 MB more (P09.T40.a), it holds one galaxy's.
 pub const DEFAULT_SKY_TABLES_MIB: usize = 160;
 /// The surface service's cache budget when `--surface-cache` is not given, in MiB: the bodies'
 /// coarse fields (rendering plan R09: its Provides, "Server", gives 128 MiB, and Design note 19,
@@ -556,9 +557,12 @@ pub enum GlobalListWarmUp {
 ///
 /// Served, the range query registers the catalogue features' members as a source beside the grid
 /// (`FeatureMemberSource`, over the server's feature caches), every row carries its `origin`, and
-/// the sky's sightlines take the features' gas (`FeatureGas`). Held is the tests' and benches'
-/// door to the grid's answer alone, which no option or variable sets: with the field share on
-/// the record, a server that holds them back misses each feature's share of its population. The catalogue classes' hosts join the members from generator version 27
+/// every ray and star sightline of the sky takes the features' gas (`FeatureGas`), looked up in a
+/// `FeatureGasIndex` of the galaxy's nurseries and clouds that its sky tables are built with (some
+/// 52 MB for the Milky Way-like galaxy, and some 7 CPU-s on the pool). Held is the tests' and
+/// benches' door to the grid's answer alone, which no option or variable sets: with the field share
+/// on the record, a server that holds them back misses each feature's share of its population. The
+/// catalogue classes' hosts join the members from generator version 27
 /// (`CatalogueClassSource::registered_in`, P09.T37.a); the galactic centre's members wait on
 /// P09.T37.b.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -574,43 +578,6 @@ impl Default for FeatureMembers {
     /// [`FeatureMembers::Served`], every version's.
     fn default() -> Self {
         Self::Served
-    }
-}
-
-/// Whether the sky's sightlines march plan 09's features' gas beside the smooth field
-/// (P09.T40.a), where the feature members are served: from
-/// [`SKY_FEATURE_GAS_FROM`](crate::SKY_FEATURE_GAS_FROM).
-///
-/// Marched, a galaxy's sky tables are built with its nurseries and clouds in a `FeatureGasIndex`
-/// (some 52 MB for the Milky Way-like galaxy, and some 7 CPU-s on the pool), and every ray and star
-/// sightline of its skies takes the holes and clouds `FeatureGas` gives it, looked up in that
-/// index. Held, the default below that version, the sky marches the smooth field alone. Tests open
-/// it under its hold; no option or variable sets it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum SkyFeatureGas {
-    /// The smooth field alone.
-    Held,
-    /// The features' gas beside it, where the feature members are served.
-    Marched,
-}
-
-impl SkyFeatureGas {
-    /// The sky's features' gas at generator version `version`: marched from
-    /// [`SKY_FEATURE_GAS_FROM`](crate::SKY_FEATURE_GAS_FROM), held below it.
-    #[must_use]
-    pub fn of_version(version: hyperion_sim::GeneratorVersion) -> Self {
-        if version >= crate::SKY_FEATURE_GAS_FROM {
-            Self::Marched
-        } else {
-            Self::Held
-        }
-    }
-}
-
-impl Default for SkyFeatureGas {
-    /// [`SkyFeatureGas::of_version`] of the build's generator version.
-    fn default() -> Self {
-        Self::of_version(hyperion_sim::GENERATOR_VERSION)
     }
 }
 
@@ -793,7 +760,6 @@ pub struct ServerConfig {
     global_list_warm_up: GlobalListWarmUp,
     kept_envelopes_disk_bytes: usize,
     feature_members: FeatureMembers,
-    sky_feature_gas: SkyFeatureGas,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
     scene_knowledge: Arc<dyn SceneKnowledge>,
@@ -979,13 +945,6 @@ impl ServerConfig {
         self.feature_members
     }
 
-    /// Whether the sky's sightlines march plan 09's features' gas, where the feature members are
-    /// served (P09.T40.a).
-    #[must_use]
-    pub fn sky_feature_gas(&self) -> SkyFeatureGas {
-        self.sky_feature_gas
-    }
-
     /// Whether the end of standard input stops the server.
     ///
     /// The binary's `main` reads this, for [`StopRequests::listen`](crate::stop::StopRequests::listen);
@@ -1069,7 +1028,6 @@ impl Default for ServerConfigBuilder {
                 global_list_warm_up: GlobalListWarmUp::default(),
                 kept_envelopes_disk_bytes: DEFAULT_KEPT_ENVELOPES_DISK_MIB * BYTES_PER_MIB,
                 feature_members: FeatureMembers::default(),
-                sky_feature_gas: SkyFeatureGas::default(),
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
                 scene_knowledge: Arc::new(GrantAsked),
@@ -1288,16 +1246,6 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn feature_members(mut self, members: FeatureMembers) -> Self {
         self.config.feature_members = members;
-        self
-    }
-
-    /// Whether the sky's sightlines march plan 09's features' gas, where the feature members are
-    /// served; [`SkyFeatureGas::of_version`] of the build's version by default.
-    ///
-    /// Tests open it under its hold; no option or variable sets it (P09.T40.a).
-    #[must_use]
-    pub fn sky_feature_gas(mut self, gas: SkyFeatureGas) -> Self {
-        self.config.sky_feature_gas = gas;
         self
     }
 

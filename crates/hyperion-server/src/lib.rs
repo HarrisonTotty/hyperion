@@ -66,7 +66,7 @@ use crate::ws::ConnectionLimits;
 
 pub use config::{
     FeatureMembers, GlobalListWarmUp, HeldSkies, KeptSkies, ServerArgs, ServerConfig,
-    ServerConfigBuilder, SkyFeatureGas, SkyQos, SkyService,
+    ServerConfigBuilder, SkyQos, SkyService,
 };
 pub use requests::SkyFileCounters;
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
@@ -129,10 +129,8 @@ pub(crate) struct AppState {
     /// [`bodies`]: AppState::bodies
     pub(crate) viewer: compute::ViewerSystems,
     /// Plan 09's feature cells generated so far, in the configured byte budget: what the feature
-    /// requests, the range query's feature members and the sky's feature gas look features up in
-    /// (P09.T40.a).
-    ///
-    /// Shared with the [`SkyTablesService`], whose tables lend it to the sky's jobs.
+    /// requests, the range query's feature members and the extinction request's lines look
+    /// features up in (P09.T40.a). The sky's features' gas reads its tables' own index instead.
     pub(crate) feature_cells: Arc<SharedFeatureCellCache>,
     /// Plan 09's feature interiors built so far, in the configured byte budget: what the range
     /// query's feature members and a feature's detail read (P09.T40.a).
@@ -549,7 +547,6 @@ fn sky_files(config: &ServerConfig) -> SkyReplyFiles {
     let settings = SkySettings {
         caps: config.sky_caps(),
         members: config.feature_members(),
-        gas: config.sky_feature_gas(),
     };
     SkyReplyFiles::new(
         config.data_dir().join(SKY_FILES_DIR),
@@ -587,33 +584,18 @@ fn system_caches(
 }
 
 /// The sky tables' service `config` asks for, on `pool`: one whose tables are built with their
-/// galaxy's features' gas index, which their jobs march, where the feature members are served
-/// (P09.T40.a's gate) and the sky's features' gas is marched ([`SkyFeatureGas`]), so that no sky
-/// moves before its version.
+/// galaxy's features' gas index, which every ray and star sightline of their skies marches beside
+/// the smooth field, where the feature members are served (P09.T40.a's gate), and one whose skies
+/// march the smooth field alone where they are held.
 #[must_use]
 fn sky_tables_service(config: &ServerConfig, pool: Arc<CpuPool>) -> SkyTablesService {
     let service =
         SkyTablesService::new(pool, config.sky_caps().tables(), config.sky_tables_bytes());
-    match (config.feature_members(), config.sky_feature_gas()) {
-        (FeatureMembers::Served, SkyFeatureGas::Marched) => service.with_features(),
-        (FeatureMembers::Held, _) | (FeatureMembers::Served, SkyFeatureGas::Held) => service,
+    match config.feature_members() {
+        FeatureMembers::Served => service.with_features(),
+        FeatureMembers::Held => service,
     }
 }
-
-/// The generator version from which the server's sky marches its sightlines through plan 09's
-/// features' gas (`FeatureGas`, P09.T40.a) beside the smooth field: 29 (train 27's lean,
-/// 2026-11-04, at 28; retargeted by train 28, 2026-11-05, the gas's cost on a sky not yet cut to
-/// its limits).
-///
-/// P09.T40.a's gate opened at 27, with P09.T2.c's field share: the range query serves the features'
-/// members and every row its origin, the extinction lines take the features' gas, and the sky's
-/// census the members' stars. The features' gas on every sightline of a sky costs a shallow sky
-/// more than 20 minutes in the test profile, against 26 s without (train 26's measurement,
-/// `tests/sky.rs`' `a_shallow_sky_within_the_limit_is_served_as_r06s`), so the sky marches the
-/// smooth field alone until that cost is cut. Its tripwire,
-/// `the_sky_s_feature_gas_holds_until_its_version`, fails at the version.
-pub const SKY_FEATURE_GAS_FROM: hyperion_sim::GeneratorVersion =
-    hyperion_sim::GeneratorVersion::new(29);
 
 async fn healthz() -> &'static str {
     "ok"
@@ -885,28 +867,9 @@ mod tests {
         );
     }
 
-    /// The sky's features' gas holds until its version: below [`SKY_FEATURE_GAS_FROM`] every
-    /// server's sky marches the smooth field alone (train 27's lean), and the bump that reaches it
-    /// opens the gas.
-    #[test]
-    fn the_sky_s_feature_gas_holds_until_its_version() {
-        use hyperion_sim::GENERATOR_VERSION;
-        assert!(
-            GENERATOR_VERSION < SKY_FEATURE_GAS_FROM,
-            "generator version {} reaches the sky's features' gas's {}: if a sky with the \
-             features' gas on every sightline is served within its limits, open it (delete \
-             `SKY_FEATURE_GAS_FROM`, `SkyFeatureGas` and this test, give the sky tests' sim \
-             references the features' gas as `tests/sky.rs`' `under_its_hold_*` do, and \
-             re-bless the sky's goldens); otherwise raise the constant",
-            GENERATOR_VERSION.get(),
-            SKY_FEATURE_GAS_FROM.get()
-        );
-    }
-
-    /// The gate and the sky's own switch decide whether the sky's tables carry the features' gas:
-    /// with the members held, or the gas held ([`SkyFeatureGas::of_version`] below
-    /// [`SKY_FEATURE_GAS_FROM`]), a sky marches the smooth field alone; with both open, its jobs take
-    /// the features' gas, as the sim's lookup gives it (P09.T40.a).
+    /// The gate decides whether the sky's tables carry the features' gas: with the members held, a
+    /// sky marches the smooth field alone; served, as every server but a test's serves them, its
+    /// jobs take the features' gas, as the sim's lookup gives it (P09.T40.a).
     #[tokio::test]
     async fn the_sky_takes_the_features_gas_only_once_the_gate_serves_them() {
         use hyperion_sim::galaxy::gas::modifiers::GasModifierSource;
@@ -932,35 +895,28 @@ mod tests {
         let to = an_ageing_nursery(&galaxy, &from);
         let t = UniverseTime::from_julian_years(1_000).unwrap();
         assert_eq!(
-            SkyFeatureGas::default(),
-            SkyFeatureGas::of_version(GENERATOR_VERSION)
+            ServerConfig::builder().build().feature_members(),
+            FeatureMembers::Served
         );
         for members in [FeatureMembers::Held, FeatureMembers::Served] {
-            for gas in [SkyFeatureGas::Held, SkyFeatureGas::Marched] {
-                let config = ServerConfig::builder()
-                    .sky_caps(SkyCaps::forced(LightYears::new(10.0)).unwrap())
-                    .feature_members(members)
-                    .sky_feature_gas(gas)
-                    .build();
-                let service = sky_tables_service(&config, Arc::clone(&pool));
-                let tables = tokio::time::timeout(crate::testing::WAIT, service.get(key, &galaxy))
-                    .await
-                    .unwrap()
-                    .unwrap();
-                let mut found = Vec::new();
-                tables
-                    .gas(&galaxy, t)
-                    .modifiers_near_segment(&from, &to, &mut found);
-                let expected = match (members, gas) {
-                    (FeatureMembers::Served, SkyFeatureGas::Marched) => {
-                        feature_gas_at(&galaxy, 1_000.0, &from, &to)
-                    }
-                    (FeatureMembers::Held, _) | (FeatureMembers::Served, SkyFeatureGas::Held) => {
-                        Vec::new()
-                    }
-                };
-                assert_eq!(found, expected, "{members:?}, {gas:?}");
-            }
+            let config = ServerConfig::builder()
+                .sky_caps(SkyCaps::forced(LightYears::new(10.0)).unwrap())
+                .feature_members(members)
+                .build();
+            let service = sky_tables_service(&config, Arc::clone(&pool));
+            let tables = tokio::time::timeout(crate::testing::WAIT, service.get(key, &galaxy))
+                .await
+                .unwrap()
+                .unwrap();
+            let mut found = Vec::new();
+            tables
+                .gas(&galaxy, t)
+                .modifiers_near_segment(&from, &to, &mut found);
+            let expected = match members {
+                FeatureMembers::Served => feature_gas_at(&galaxy, 1_000.0, &from, &to),
+                FeatureMembers::Held => Vec::new(),
+            };
+            assert_eq!(found, expected, "{members:?}");
         }
         tokio::time::timeout(crate::testing::WAIT, pool.shutdown())
             .await

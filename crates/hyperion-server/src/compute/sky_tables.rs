@@ -5,10 +5,10 @@
 //! reference time +H, serves every query of the clock window, each reading its own light ages
 //! through [`LuminosityTables::age_for`]. So [`SkyTablesService`] keys them by [`GalaxyKey`] alone,
 //! never by a request's time or place, and keeps them in a [`SharedByteLru`] of their own budget,
-//! `HYPERION_SKY_TABLES_MB` (160 MiB by default: two galaxies), separate from the census cells'
-//! `HYPERION_SKY_CACHE_MB`. Callers that ask for one galaxy's tables at once share one build
-//! through a [`SingleFlight`], and if every one of them gives up, the build is given up too: its
-//! jobs still queued are skipped.
+//! `HYPERION_SKY_TABLES_MB` (160 MiB by default: one galaxy's with its features' gas index, two
+//! without), separate from the census cells' `HYPERION_SKY_CACHE_MB`. Callers that ask for one
+//! galaxy's tables at once share one build through a [`SingleFlight`], and if every one of them
+//! gives up, the build is given up too: its jobs still queued are skipped.
 //!
 //! The build runs as bulk jobs from [`LuminosityTables::plan`], which the sim splits so that the
 //! server's pool can run it (the sim spawns no threads): one job makes the plan, some 5 CPU-s for
@@ -29,9 +29,11 @@
 //! machine, is a per-galaxy cost under its own 30 CPU-s budget, not a sky's, and a sky asked
 //! meanwhile joins it. The open answers without waiting for it.
 //!
-//! Where the sky marches plan 09's features' gas (P09.T40.a), a galaxy's tables are built with its
+//! Where the feature members are served, as every server but a test's serves them, the sky marches
+//! plan 09's features' gas (P09.T40.a), and a galaxy's tables are built with its
 //! [`FeatureGasIndex`]: its nurseries and clouds, made one slab of feature cells to a bulk job,
-//! [`FeatureGasIndex::SLABS`]' 32, queued ahead of the tables' own jobs, and assembled in one more.
+//! [`FeatureGasIndex::SLABS`]' 32, queued ahead of the tables' own jobs, and assembled in one more,
+//! some 7 CPU-s and 52 MB for the Milky Way-like galaxy.
 //! Each slab makes its cells afresh, not through the server's feature cell cache, whose budget a
 //! galaxy's 32,768 cells would sweep. The index is a pure function of the galaxy, so where its
 //! jobs run changes no bit of it.
@@ -108,7 +110,7 @@ pub(crate) struct SkyTablesService {
     /// the service is dropped.
     prefetching: Mutex<JoinSet<()>>,
     /// Whether every table this service builds carries its galaxy's features' gas index, which
-    /// its jobs march (P09.T40.a): the smooth field alone until then.
+    /// its jobs march (P09.T40.a), or lends them the smooth field alone.
     features: TablesGas,
 }
 
@@ -141,8 +143,8 @@ impl SkyTablesService {
     }
 
     /// This service, whose tables are built with their galaxy's features' gas index, which their
-    /// jobs march ([`SkyTables::with_features`]): the server's, where the sky marches the features'
-    /// gas (P09.T40.a).
+    /// jobs march ([`SkyTables::with_features`]): the server's, where the feature members are
+    /// served (P09.T40.a).
     #[must_use]
     pub(crate) fn with_features(self) -> Self {
         Self {

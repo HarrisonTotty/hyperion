@@ -409,8 +409,8 @@ impl fmt::Display for ForceSkyCapsError {
 impl Error for ForceSkyCapsError {}
 
 /// What a sky's jobs read beside the galaxy: its luminosity tables, the brightness envelope and its
-/// cells' offset bounds (Design notes 7, 8 and 10), and, where the sky marches plan 09's features'
-/// gas, the galaxy's nurseries and clouds that its jobs' gas looks features up in (P09.T40.a).
+/// cells' offset bounds (Design notes 7, 8 and 10), and, where the feature members are served, the
+/// galaxy's nurseries and clouds that its jobs' gas looks features up in (P09.T40.a).
 ///
 /// Built once per galaxy and kept by the [`SkyTablesService`](super::SkyTablesService).
 #[derive(Debug)]
@@ -435,8 +435,8 @@ impl SkyTables {
     }
 
     /// These tables, whose jobs take plan 09's features' gas from `index`, their galaxy's
-    /// (P09.T40.a): what the [`SkyTablesService`](super::SkyTablesService) builds where the sky
-    /// marches the features' gas.
+    /// (P09.T40.a): what the [`SkyTablesService`](super::SkyTablesService) builds where the
+    /// feature members are served.
     #[must_use]
     pub(crate) fn with_features(self, index: FeatureGasIndex) -> Self {
         Self {
@@ -460,7 +460,7 @@ impl SkyTables {
 
     /// The gas a job at `t` marches through beside `galaxy`'s smooth field: plan 09's features' at
     /// `t` ([`FeatureGas`]), looked up in the tables' index, if they have one, and nothing
-    /// otherwise, the sky's gas below its version (P09.T40.a).
+    /// otherwise, where the feature members are held (P09.T40.a).
     ///
     /// # Panics
     ///
@@ -516,7 +516,7 @@ impl SkyTables {
 /// The gas a sky's job marches through beside the smooth field ([`SkyTables::gas`]).
 #[derive(Debug)]
 pub(crate) enum SkyGas<'a> {
-    /// None: plan 07's field alone, as every sky has had it until P09.T40.a.
+    /// None: plan 07's field alone, as a sky has it where the feature members are held.
     Smooth,
     /// Plan 09's features' superbubbles, clouds and embedded regions at the job's time.
     Features(FeatureGas<'a>),
@@ -2099,16 +2099,56 @@ pub(crate) mod tests {
             .collect()
     }
 
-    /// The sim's census of `plan`'s `shells`, serially in the shells' order with no cell cache,
-    /// merged to the completeness of those shells.
+    /// The features' gas index of `galaxy`, the galaxy of seed 0x4d2 at `version`, the build's or
+    /// 27, as the sky tables of a server that serves the feature members hold it (P09.T40.a): built
+    /// once for the binary a version, some 7 s in a test build.
+    fn gas_index(
+        galaxy: &Galaxy,
+        version: hyperion_sim::GeneratorVersion,
+    ) -> &'static FeatureGasIndex {
+        static AT_BUILD: std::sync::OnceLock<FeatureGasIndex> = std::sync::OnceLock::new();
+        static AT_27: std::sync::OnceLock<FeatureGasIndex> = std::sync::OnceLock::new();
+        let index = if version == GENERATOR_VERSION {
+            &AT_BUILD
+        } else {
+            assert_eq!(
+                version,
+                hyperion_sim::GeneratorVersion::new(27),
+                "an index kept for the build's version or 27"
+            );
+            &AT_27
+        };
+        index.get_or_init(|| {
+            FeatureGasIndex::build(
+                galaxy,
+                &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
+            )
+        })
+    }
+
+    /// `galaxy`'s tables of no star with its features' gas index ([`gas_index`]), as a server that
+    /// serves the feature members builds them for forced caps (P09.T40.a).
+    fn featured_tables(galaxy: &Galaxy, version: hyperion_sim::GeneratorVersion) -> SkyTables {
+        SkyTables::new(LuminosityTables::dark(galaxy), galaxy)
+            .with_features(gas_index(galaxy, version).clone())
+    }
+
+    /// `galaxy`'s features' gas at the epoch over [`gas_index`], as the sim marches it: the sim's
+    /// side of a job's gas over [`featured_tables`] (P09.T40.a).
+    fn epoch_gas(galaxy: &Galaxy, version: hyperion_sim::GeneratorVersion) -> FeatureGas<'_> {
+        FeatureGas::indexed(galaxy, gas_index(galaxy, version), Years::ZERO)
+    }
+
+    /// The sim's census of `plan`'s `shells` through `modifiers`, serially in the shells' order
+    /// with no cell cache, merged to the completeness of those shells.
     fn serial_census(
         galaxy: &Galaxy,
-        tables: &SkyTables,
+        (tables, modifiers): (&SkyTables, &dyn GasModifierSource),
         query: &SkyQuery,
         plan: &CensusPlan,
         shells: &[Shell],
     ) -> SkyCensus {
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &[], &NoModifiers);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &[], modifiers);
         let mut stars = Vec::new();
         let mut tallies = None;
         for &shell in shells {
@@ -2181,9 +2221,10 @@ pub(crate) mod tests {
     /// done, serially, star for star and tally for tally, cold and warm, and its last step's is
     /// the sim's one pass over the whole plan, merged to its whole completeness: the split into
     /// steps and jobs, the jobs' slices and their order, the joined parts and the cache change
-    /// nothing (R06.T11.d). The plan is served at RM3's synthetic ceiling (R13.T2.b), so C, D and
-    /// E list within their caps in the last step too, which `merge_shells` gives and
-    /// `merge_census`, the one-shot rule, would not.
+    /// nothing (R06.T11.d). The jobs and the sim march every star's sightline through the
+    /// features' gas, as a server that serves the feature members does (P09.T40.a). The plan is
+    /// served at RM3's synthetic ceiling (R13.T2.b), so C, D and E list within their caps in the
+    /// last step too, which `merge_shells` gives and `merge_census`, the one-shot rule, would not.
     ///
     /// The census to 30 ly is one shell a layer, so the steps here split its one rank three ways;
     /// a slice of nought hands each job's cells back after one, so that every cell is a job of its
@@ -2196,7 +2237,8 @@ pub(crate) mod tests {
     async fn each_step_of_the_jobs_census_is_the_sims_census_of_its_shells() {
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
         let caps = SkyCaps::forced(LightYears::new(30.0)).unwrap();
-        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let tables = Arc::new(featured_tables(&galaxy, GENERATOR_VERSION));
+        let gas = epoch_gas(&galaxy, GENERATOR_VERSION);
         let query = caps.on(SkyQuery::builder(sun(), Magnitudes::new(9.0))
             .build()
             .unwrap());
@@ -2270,7 +2312,7 @@ pub(crate) mod tests {
         let serials: Vec<(Vec<Shell>, SkyCensus)> = (0..steps.len())
             .map(|k| {
                 let done: Vec<Shell> = steps[..=k].concat();
-                let serial = serial_census(&galaxy, &tables, &query, &plan, &done);
+                let serial = serial_census(&galaxy, (&tables, &gas), &query, &plan, &done);
                 (done, serial)
             })
             .collect();
@@ -2284,7 +2326,7 @@ pub(crate) mod tests {
             }
         }
         // The last step's is the one pass over the plan's cells, merged to its whole completeness.
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &[], &NoModifiers);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &[], &gas);
         let mut stars = Vec::new();
         let mut tallies = None;
         for key in plan.cells() {
@@ -2323,12 +2365,12 @@ pub(crate) mod tests {
         )
     }
 
-    /// The sim's census of `plan`'s `shells` as [`serial_census`] takes it, and each shell's
-    /// members beyond the grid in one part through sources over `features` and `interiors`, over
-    /// `classes` if given and over `list` if given (R06.T16.a).
+    /// The sim's census of `plan`'s `shells` through `modifiers` as [`serial_census`] takes it, and
+    /// each shell's members beyond the grid in one part through sources over `features` and
+    /// `interiors`, over `classes` if given and over `list` if given (R06.T16.a).
     fn serial_census_with_members(
         galaxy: &Galaxy,
-        tables: &SkyTables,
+        (tables, modifiers): (&SkyTables, &dyn GasModifierSource),
         (query, key): (&SkyQuery, GalaxyKey),
         (features, interiors, classes): (
             &SharedFeatureCellCache,
@@ -2351,7 +2393,7 @@ pub(crate) mod tests {
         let mut sources: Vec<&dyn SkySource> = vec![&source];
         sources.extend(hosts.iter().map(|hosts| hosts as &dyn SkySource));
         sources.extend(listed.iter().map(|listed| listed as &dyn SkySource));
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &sources, &NoModifiers);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &sources, modifiers);
         let mut stars = Vec::new();
         let mut tallies = None;
         for &shell in shells {
@@ -2385,7 +2427,8 @@ pub(crate) mod tests {
     /// serially and in one part a shell, star for star, though the jobs take each shell's in one
     /// part a worker; every step says the members are in, and the last lists some. Without the
     /// member caches the same sky leaves them out. The place is inside an open cluster near the
-    /// Sun, to 12 ly, in shells to 4, 8 and 12 ly.
+    /// Sun, to 12 ly, in shells to 4, 8 and 12 ly, and every sightline takes the features' gas
+    /// (P09.T40.a).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_jobs_census_takes_the_feature_members_where_the_field_gives_them_up() {
         // φ is held to 27 at the latest, so a galaxy of 27 gives it up whichever train opens it.
@@ -2427,7 +2470,8 @@ pub(crate) mod tests {
         let at = GalacticPosition::from_light_years([x + 3.0, y, z]).unwrap();
         let observer = Observer::new(at, UniverseTime::EPOCH).unwrap();
         let caps = SkyCaps::forced(LightYears::new(12.0)).unwrap();
-        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let tables = Arc::new(featured_tables(&galaxy, version));
+        let gas = epoch_gas(&galaxy, version);
         let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(9.0))
             .build()
             .unwrap());
@@ -2457,7 +2501,7 @@ pub(crate) mod tests {
         for (k, (step, census)) in censused.iter().enumerate() {
             let serial = serial_census_with_members(
                 &galaxy,
-                &tables,
+                (&tables, &gas),
                 (&query, key),
                 (&features, &interiors, Some(&classes)),
                 None,
@@ -2532,7 +2576,8 @@ pub(crate) mod tests {
     /// Sun, A to 5 ly, B to 10 and C, D and E to 30 ly in shells to 20 and 30 ly at V 11, after
     /// each step the census is the sim's of the shells done with the features' and the classes'
     /// sources, serially and in one part a shell, star for star, and the last lists the variable;
-    /// without the member caches the same sky lists no class host.
+    /// without the member caches the same sky lists no class host. Every sightline takes the
+    /// features' gas (P09.T40.a).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn where_the_field_gives_up_the_class_hosts_the_jobs_census_takes_them() {
         let version = hyperion_sim::GeneratorVersion::new(27);
@@ -2570,7 +2615,8 @@ pub(crate) mod tests {
         let caps =
             SkyCaps::forced_per_layer([5.0, 10.0, 30.0, 30.0, 30.0, 0.0].map(LightYears::new))
                 .unwrap();
-        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let tables = Arc::new(featured_tables(&galaxy, version));
+        let gas = epoch_gas(&galaxy, version);
         let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(11.0))
             .build()
             .unwrap());
@@ -2599,7 +2645,7 @@ pub(crate) mod tests {
         for (k, (step, census)) in censused.iter().enumerate() {
             let serial = serial_census_with_members(
                 &galaxy,
-                &tables,
+                (&tables, &gas),
                 (&query, key),
                 (&features, &interiors, Some(&classes)),
                 None,
@@ -2777,7 +2823,7 @@ pub(crate) mod tests {
     /// C, D and E to 50 ly in shells to 20 and 50 ly at V 11, after each step the census is the
     /// sim's of the shells done with the features', the classes' and the list's sources, serially
     /// and in one part a shell, star for star, and the last lists the core's members; without the
-    /// list the same sky lists none of them.
+    /// list the same sky lists none of them. Every sightline takes the features' gas (P09.T40.a).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "slow: builds a Milky Way galaxy's list and the tables of the 158 streams that reach the core"]
     #[expect(
@@ -2839,7 +2885,8 @@ pub(crate) mod tests {
         let caps =
             SkyCaps::forced_per_layer([5.0, 10.0, 50.0, 50.0, 50.0, 0.0].map(LightYears::new))
                 .unwrap();
-        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let tables = Arc::new(featured_tables(&galaxy, version));
+        let gas = epoch_gas(&galaxy, version);
         let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(11.0))
             .build()
             .unwrap());
@@ -2893,7 +2940,7 @@ pub(crate) mod tests {
         for (k, (step, census)) in censused.iter().enumerate() {
             let serial = serial_census_with_members(
                 &galaxy,
-                &tables,
+                (&tables, &gas),
                 (&query, key),
                 (&features, &interiors, Some(&classes)),
                 Some((&listed, &orbits)),
@@ -3286,7 +3333,7 @@ pub(crate) mod tests {
     )]
     async fn the_caps_rays_measured_in_jobs_are_the_sims_caps() {
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
-        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let tables = Arc::new(featured_tables(&galaxy, GENERATOR_VERSION));
         let pool = pool(3);
         let token = CancelToken::new();
         let served = async |query: SkyQuery| {
@@ -3353,13 +3400,15 @@ pub(crate) mod tests {
 
         // An eye-only request capped by the eye's visibility (R06.T7.b) takes the sim's caps by
         // it, bit for bit, its cut and visibility from jobs, with the request's illumination, at
-        // RM3's ceiling.
+        // RM3's ceiling, the jobs and the sim marching their rays through the features' gas
+        // (P09.T40.a).
         let eye = EyeObserver::default();
         let light = timeout(WAIT, illumination(&pool, &galaxy, &tables, sun(), &token))
             .await
             .expect("timed out lighting")
             .unwrap();
-        let mut ctx = tables.march_context(&NoModifiers);
+        let gas = epoch_gas(&galaxy, GENERATOR_VERSION);
+        let mut ctx = tables.march_context(&gas);
         assert_eq!(
             *light,
             Illumination::march(&galaxy, &mut ctx, &sun()),
@@ -3696,7 +3745,7 @@ pub(crate) mod tests {
         let query = caps.on(SkyQuery::builder(sun(), cut).build().unwrap());
         let plan = census_plan_of(&query, query.forced_caps().unwrap().to_vec());
         let shells: Vec<Shell> = plan.shells().collect();
-        let census = serial_census(&galaxy, &tables, &query, &plan, &shells);
+        let census = serial_census(&galaxy, (&tables, &NoModifiers), &query, &plan, &shells);
         let (eye, spec) = (EyeObserver::default(), BandSpec::new(2, 12).unwrap());
         let glare = Glare::of_listed(query.observer(), census.listed(), &spec, cut);
         let mut texels = Vec::new();
@@ -3926,12 +3975,7 @@ pub(crate) mod tests {
         let from = *sun().position();
         let to = an_ageing_nursery(&galaxy, &from);
         let smooth = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
-        let index = FeatureGasIndex::build(
-            &galaxy,
-            &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
-        );
-        let featured =
-            SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy).with_features(index);
+        let featured = featured_tables(&galaxy, GENERATOR_VERSION);
         assert!(featured.heap_bytes() > smooth.heap_bytes() + (40 << 20));
         let mut found = Vec::new();
         for years in [0_i32, 1_000] {

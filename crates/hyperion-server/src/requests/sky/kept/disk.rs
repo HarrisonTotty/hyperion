@@ -49,7 +49,7 @@ use super::{HeldSky, SkyArrival, SkyHold, SkyReplyKey};
 use crate::bulk::{Answer, BulkPayload};
 use crate::cache::fnv1a;
 use crate::compute::SkyCaps;
-use crate::config::{FeatureMembers, SkyFeatureGas};
+use crate::config::FeatureMembers;
 use crate::limits::SKY_FILE_QUEUE;
 
 /// The directory under the data directory that holds the kept skies' files.
@@ -72,10 +72,9 @@ const TEMP_EXTENSION: &str = "tmp";
 pub(crate) struct SkySettings {
     /// How far the census looks.
     pub(crate) caps: SkyCaps,
-    /// Whether the census takes plan 09's feature members.
+    /// Whether the census takes plan 09's feature members, and the sightlines march the features'
+    /// gas.
     pub(crate) members: FeatureMembers,
-    /// Whether the sightlines march the features' gas.
-    pub(crate) gas: SkyFeatureGas,
 }
 
 impl SkySettings {
@@ -913,7 +912,6 @@ mod tests {
         SkySettings {
             caps: SkyCaps::DERIVED,
             members: FeatureMembers::Served,
-            gas: SkyFeatureGas::Held,
         }
     }
 
@@ -1026,13 +1024,6 @@ mod tests {
                 "members",
                 SkySettings {
                     members: FeatureMembers::Held,
-                    ..settings()
-                },
-            ),
-            (
-                "gas",
-                SkySettings {
-                    gas: SkyFeatureGas::Marched,
                     ..settings()
                 },
             ),
