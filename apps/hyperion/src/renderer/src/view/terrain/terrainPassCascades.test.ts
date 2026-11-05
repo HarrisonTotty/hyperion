@@ -59,6 +59,11 @@ import {
 } from "../clusters/record";
 import {
   TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_INPUT_COLUMN_RUN_SHARED,
+  TERRAIN_INPUT_EDGE_MASK,
+  TERRAIN_INPUT_ROW_RUN_SHARED,
+  TERRAIN_INPUT_STAND_IN_BITS,
+  TERRAIN_INPUT_SURVEYED,
   TERRAIN_MASK_LEVELS,
   TERRAIN_PAGE_CLUSTERS,
   TERRAIN_SUB_PATCH_MASK,
@@ -1117,6 +1122,9 @@ describe("each view's caster passes (R10.T9.b; D1 and D4)", () => {
     made.pass.setGeometry(GEOMETRY_BEFORE_R14);
     const back = made.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     const edge = await streamedAt(NEAR);
+    // Its patches are edge bakes' stand-ins, which the edge stand-ins' lever takes onto the path
+    // where their blocks are opaque (R14.T3.c's edge stand-ins): its way back keeps them off.
+    edge.pass.setGeometry({ ...SETTINGS.high.geometry, edgeStandIns: "off" });
     const edgeFrame = edge.pass.drawFor(PRIMARY, frameOf(NEAR, true));
     expect([
       made.engine.dispatched.filter((d) => d.kernel === LIT_CULL).length,
@@ -1636,6 +1644,12 @@ function standInsOf(made: Made): number {
     .filter((entry) => entry.standIn).length;
 }
 
+/** Whether a sub-patch word's area lies on the half x < 32 of its slot's patch. */
+function onSurveyedHalf(subWord: number): boolean {
+  const quads = 64 / 2 ** (subWord & 31);
+  return ((subWord >>> 5) & 0x1fff) * quads + quads <= 32;
+}
+
 describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
   /**
    * A body's layers surveyed on the patch's half x < 32 alone, of a field 20 levels deep: its patches
@@ -1649,12 +1663,32 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     return { ...layers(), surveyMask, fieldLevel: 20 };
   }
 
+  /**
+   * A body's layers surveyed left of x = 40 alone, of a field 20 levels deep: each patch's blocks of
+   * the columns 0 to 3 opaque at every cell code but 6's, so that a stand-in one level down lies on
+   * opaque blocks over x < 32 and across the survey's edge over x > 32 (R14.T3.c's edge stand-ins).
+   */
+  function surveyedLeftOf40(): TerrainLayers {
+    const surveyMask = new Uint8Array(65 * 65);
+    for (let y = 0; y <= 64; y += 1) {
+      surveyMask.fill(255, 65 * y, 65 * y + 40);
+    }
+    return { ...layers(), surveyMask, fieldLevel: 20 };
+  }
+
   /** A streamed pass at {@link NEAR} over {@link halfSurveyed}'s layers, its fades cut. */
-  async function edgePass(given?: CountingRenderEngine, reducedMotion = true): Promise<Made> {
-    const made = await litPass("high", given);
-    made.pass.setGeometry(HIGH_AT_STRIDE_1);
+  async function edgePass(
+    given?: CountingRenderEngine,
+    reducedMotion = true,
+    setting: "high" | "low" = "high",
+    layersFor: () => TerrainLayers = halfSurveyed,
+  ): Promise<Made> {
+    const made = await litPass(setting, given);
+    made.pass.setGeometry(
+      setting === "high" ? HIGH_AT_STRIDE_1 : { ...SETTINGS.low.geometry, strides: "off" },
+    );
     made.pass.setReducedMotion(reducedMotion);
-    made.lane().layers = halfSurveyed();
+    made.lane().layers = layersFor();
     // Until nothing more is asked for, so that no patch is drawn by a stand-in.
     stream(made, [passView(PRIMARY, NEAR)], 24);
     return made;
@@ -1681,7 +1715,7 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     // Counted as edge patches on the cluster path, their drawn triangles their lit mesh's.
     const counts = made.pass.counts(PRIMARY);
     expect([counts?.patches, counts?.drawnTriangles]).toEqual([
-      { interior: 0, edge: frame.patches.edge, fins: frame.patches.edge },
+      { interior: 0, edge: frame.patches.edge, fins: frame.patches.edge, edgeStandIns: 0 },
       (frame.patches.edge * LIT_PATCH_INDICES) / 3,
     ]);
     // Their records in the interior patches' buffer, none in the lit mesh's.
@@ -1787,13 +1821,118 @@ describe("the edge patches on the cluster path (plan R14, R14.T1.g)", () => {
     ]).toEqual([true, true]);
   });
 
-  it("draws a stand-in of an edge bake by the lit mesh", async () => {
+  it("draws a stand-in of an edge bake by the lit mesh where the edge stand-ins are off, the way back, its cull inputs without their bits", async () => {
     const made = await edgePass();
+    made.pass.setGeometry({ ...HIGH_AT_STRIDE_1, edgeStandIns: "off" });
     nearerUnbaked(made);
     const standIns = standInsOf(made);
-    expect([standIns > 0, recordsIn(made.engine, `terrain instances (${PRIMARY})`).length]).toEqual(
-      [true, standIns],
+    const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    expect([
+      standIns > 0,
+      recordsIn(made.engine, `terrain instances (${PRIMARY})`).length,
+      inputs.filter((word, k) => k % 2 === 0 && (word & TERRAIN_INPUT_STAND_IN_BITS) !== 0),
+      made.pass.counts(PRIMARY)?.patches.edgeStandIns,
+    ]).toEqual([true, standIns, [], 0]);
+  });
+
+  /** Each interior record's sub-patch word, cull input and error unit, of `made`'s last frame. */
+  function interiorInputsOf(made: Made): Array<{
+    readonly subWord: number;
+    readonly bits: number;
+    readonly unitM: number;
+  }> {
+    const per = INSTANCE_RECORD_BYTES / 4;
+    const records = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    return Array.from({ length: records.length / per }, (_, k) => ({
+      subWord: records[k * per + INSTANCE_SUB_PATCH_WORD] ?? 0,
+      bits: (inputs[2 * k] ?? 0) & TERRAIN_INPUT_STAND_IN_BITS,
+      unitM: f32Of(inputs[2 * k + 1] ?? 0),
+    }));
+  }
+
+  it("draws an edge bake's stand-ins on the cluster path where they are masks: on opaque blocks as an interior bake's, one level down across the survey's edge as an edge mask, the rest by the lit mesh, counted apart from the fins (R14.T3.c's edge stand-ins)", async () => {
+    const made = await edgePass(undefined, true, "high", surveyedLeftOf40);
+    nearerUnbaked(made);
+    const frame = made.pass.drawFor(PRIMARY, frameOf(viewOver(10), true));
+    const subs = interiorInputsOf(made).filter(({ subWord }) => subWord !== 0);
+    const surveyed = subs.filter(({ bits }) => (bits & TERRAIN_INPUT_SURVEYED) !== 0);
+    const masks = subs.filter(({ bits }) => (bits & TERRAIN_INPUT_EDGE_MASK) !== 0);
+    const litMesh = recordsIn(made.engine, `terrain instances (${PRIMARY})`).length;
+    expect([
+      surveyed.length > 0,
+      masks.length > 0,
+      surveyed.every(({ subWord }) => onSurveyedHalf(subWord)),
+      masks.every(
+        ({ subWord }) => (subWord & 31) === 1 && (subWord & TERRAIN_SUB_PATCH_MASK) !== 0,
+      ),
+      subs.every(({ bits }) => bits !== 0),
+      frame.patches.edgeStandIns,
+      frame.patches.fins + frame.patches.edgeStandIns + litMesh,
+      frame.patches.edge,
+    ]).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      subs.length,
+      frame.patches.edge,
+      (made.pass.lastStep?.drawSet.count ?? -1) - frame.patches.interior,
+    ]);
+    // Of one slot's sibling edge masks, the one of x 1 leaves the column's side run to the one of
+    // x 0, and the one of y 1 the row's to the one of y 0.
+    const shared = masks.filter(
+      ({ subWord }) => ((subWord >>> 5) & 1) === 0 && ((subWord >>> 18) & 1) === 0,
     );
+    expect(
+      masks.every(
+        ({ subWord, bits }) =>
+          ((subWord >>> 5) & 1) === 1 || (bits & TERRAIN_INPUT_COLUMN_RUN_SHARED) === 0,
+      ),
+    ).toBe(true);
+    expect(
+      shared.every(
+        ({ bits }) =>
+          (bits & (TERRAIN_INPUT_COLUMN_RUN_SHARED | TERRAIN_INPUT_ROW_RUN_SHARED)) === 0,
+      ),
+    ).toBe(true);
+  });
+
+  it("casts an edge bake's stand-in on opaque blocks as an interior bake's, by its level's spacing, and an edge mask at stride 1, as an edge patch (R14.T3.c's edge stand-ins)", async () => {
+    const made = await edgePass(undefined, true, "high", surveyedLeftOf40);
+    nearerUnbaked(made);
+    const units = interiorInputsOf(made)
+      .filter(({ subWord }) => subWord !== 0)
+      .map(({ bits, unitM }) => [
+        (bits & TERRAIN_INPUT_SURVEYED) !== 0,
+        unitM === Math.fround(1e30),
+      ]);
+    expect([...new Set(units.map((pair) => pair.join()))].toSorted()).toEqual([
+      "false,true",
+      "true,false",
+    ]);
+  });
+
+  it("draws low's edge stand-ins on opaque blocks on their own grids, kept whole, and no mask, where they are surveyed (R14.T3.c's edge stand-ins)", async () => {
+    const made = await edgePass(undefined, true, "low", surveyedLeftOf40);
+    nearerUnbaked(made);
+    const subs = interiorInputsOf(made).filter(({ subWord }) => subWord !== 0);
+    const inputs = wordsIn(made.engine, `terrain clusters (${PRIMARY}) cull inputs`);
+    const whole = keptWhole(inputs);
+    const per = INSTANCE_RECORD_BYTES / 4;
+    const records = wordsIn(made.engine, `terrain interior instances (${PRIMARY})`);
+    const onPath = Array.from({ length: records.length / per }, (_, k) => k).filter(
+      (k) => (records[k * per + INSTANCE_SUB_PATCH_WORD] ?? 0) !== 0,
+    );
+    expect([
+      subs.length > 0,
+      subs.every(({ bits }) => bits === TERRAIN_INPUT_SURVEYED),
+      subs.every(
+        ({ subWord }) => (subWord & TERRAIN_SUB_PATCH_MASK) === 0 && onSurveyedHalf(subWord),
+      ),
+      onPath.every((k) => whole[k] === true),
+    ]).toEqual([true, true, true, true]);
   });
 
   it("reuses their casters, the fin caster's among them, on a still camera, and renders them once again where the fins' lever turns (R14.T6.a)", async () => {
@@ -3737,14 +3876,19 @@ describe("the cascades re-rendered only when they change (plan R14, R14.T6.a)", 
     made.pass.setGeometry(EVERY_FRAME);
     const rendered = Array.from({ length: 60 }, (_, n) => {
       const frame = made.pass.drawFor(PRIMARY, frameOf(NEAR, true, 100 * n));
-      const data = made.engine.writes.findLast(
-        (w) => w.buffer === `terrain instances (${PRIMARY})`,
-      )?.data;
-      const words = new Uint32Array(data?.slice().buffer ?? new ArrayBuffer(0));
       let fading = false;
-      for (let at = INSTANCE_FADES_WORD; at < words.length; at += INSTANCE_RECORD_BYTES / 4) {
-        const own = (words[at] ?? 0) & 0xff;
-        fading ||= own > 0 && own < 255;
+      // The lit mesh's records and the cluster path's, an edge bake's stand-ins among them
+      // (R14.T3.c's edge stand-ins).
+      for (const buffer of [
+        `terrain instances (${PRIMARY})`,
+        `terrain interior instances (${PRIMARY})`,
+      ]) {
+        const data = made.engine.writes.findLast((w) => w.buffer === buffer)?.data;
+        const words = new Uint32Array(data?.slice().buffer ?? new ArrayBuffer(0));
+        for (let at = INSTANCE_FADES_WORD; at < words.length; at += INSTANCE_RECORD_BYTES / 4) {
+          const own = (words[at] ?? 0) & 0xff;
+          fading ||= own > 0 && own < 255;
+        }
       }
       return { layers: layersOf(frame).length, fading };
     });

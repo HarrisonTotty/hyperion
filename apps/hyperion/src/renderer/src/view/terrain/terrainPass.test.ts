@@ -2065,7 +2065,12 @@ describe("the interior patches (plan R14, R14.T1.a)", () => {
     pool.layersOf.set(patchKeyString(edge.key), edgeLayers());
     pool.deliver(pass, edge.key);
     const view0 = pass.drawFor(DEFAULT_TERRAIN_VIEW, { ...inputAt(view), lighting: LIGHTING });
-    expect(view0.patches).toEqual({ interior: first.drawSet.count - 1, edge: 1, fins: 0 });
+    expect(view0.patches).toEqual({
+      interior: first.drawSet.count - 1,
+      edge: 1,
+      fins: 0,
+      edgeStandIns: 0,
+    });
   });
 
   it("draws as before the split by the way back, from the same records, and splits again on the cluster path", async () => {

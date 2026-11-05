@@ -2716,6 +2716,7 @@ describe("the schema check", () => {
         terrainBudget: "triangles",
         standInStrides: "all",
         hiddenMarks: "culled",
+        edgeStandIns: "masks",
       },
       segments: [
         {
@@ -2763,7 +2764,7 @@ describe("the schema check", () => {
     const markdown = summaryMarkdown(results);
     expect(markdown).toContain("## Geometry (plan R14)");
     expect(markdown).toContain(
-      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders, the lit pass's edge patches by clusters, the camera's strides by measured error, occlusion two-pass against the depth pyramid, the lit pass's interior patches shaded by the visibility buffer, the lit selection's budget its patches and lit triangles, the stand-ins strided, on their own grids at the camera's cap and their masks by their bands, the overlay's marks the ground hides culled.",
+      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders, the lit pass's edge patches by clusters, the camera's strides by measured error, occlusion two-pass against the depth pyramid, the lit pass's interior patches shaded by the visibility buffer, the lit selection's budget its patches and lit triangles, the stand-ins strided, on their own grids at the camera's cap and their masks by their bands, the overlay's marks the ground hides culled, the edge bakes' stand-ins on the cluster path where exact, and as level-1 masks across the survey's edge.",
     );
     expect(markdown).toContain(
       "| orbit coast | 59 (61) | 33 (33) | 20 (30) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
@@ -2783,8 +2784,23 @@ describe("the schema check", () => {
         }),
       ),
     ).toContain(
-      "the stand-ins on their own grids at the camera's stride cap, their masks at stride 1, the overlay's marks the ground hides culled.",
+      "the stand-ins on their own grids at the camera's stride cap, their masks at stride 1, the overlay's marks the ground hides culled, the edge bakes' stand-ins on the cluster path where exact, and as level-1 masks across the survey's edge.",
     );
+    // The edge bakes' stand-ins where exact alone (R14.T3.c's edge stand-ins).
+    const surveyed = {
+      ...geometry,
+      settings: { ...geometry.settings, edgeStandIns: "surveyed" as const },
+    };
+    expect(
+      summaryMarkdown(
+        buildResults({
+          run: runOf(),
+          report: { ...reportOf(), geometry: surveyed },
+          trace: traceOf(),
+          memory: MEMORY,
+        }),
+      ),
+    ).toContain("the edge bakes' stand-ins on the cluster path where exact.");
   });
 
   it("reads a version 7 file's geometry, its five settings, and refuses five settings in a version 8 file or six in a version 7 (plan R14, R14.T6.b)", () => {
@@ -2827,6 +2843,7 @@ describe("the schema check", () => {
             terrainBudget: "patches",
             standInStrides: "off",
             hiddenMarks: "drawn",
+            edgeStandIns: "off",
           },
           segments,
         },
@@ -2882,6 +2899,10 @@ describe("the schema check", () => {
       // The overlay's hidden marks (R10.T16.c): `drawn` or `culled` where the file holds them.
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, hiddenMarks: "culled" })),
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, hiddenMarks: "kept" })),
+      // The edge bakes' stand-ins (R14.T3.c's edge stand-ins): `off`, `surveyed` or `masks` where
+      // the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, edgeStandIns: "surveyed" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, edgeStandIns: "all" })),
       validateResults(
         JSON.parse(
           JSON.stringify({
@@ -2919,9 +2940,11 @@ describe("the schema check", () => {
       [],
       malformed,
       [],
+      malformed,
+      [],
     ]);
     expect(summaryMarkdown(results)).toContain(
-      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh, the camera's strides off, occlusion off, the lit pass's interior patches shaded forward, the lit selection's budget its patches, the stand-ins at stride 1, the overlay's marks the ground hides drawn.",
+      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh, the camera's strides off, occlusion off, the lit pass's interior patches shaded forward, the lit selection's budget its patches, the stand-ins at stride 1, the overlay's marks the ground hides drawn, the edge bakes' stand-ins by the lit mesh.",
     );
   });
 

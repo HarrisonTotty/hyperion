@@ -271,7 +271,7 @@ describe("the spike's metrics", () => {
     ): SpikeGeometrySample => ({
       settings,
       counts: {
-        patches: { interior, edge: 2, fins: 0 },
+        patches: { interior, edge: 2, fins: 0, edgeStandIns: 0 },
         drawnTriangles,
         litClusterTriangles: drawnTriangles - 1,
         casterTriangles: null,

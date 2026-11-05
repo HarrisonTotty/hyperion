@@ -123,7 +123,18 @@ import {
 import { resolveUniforms } from "../clusters/resolve";
 import { ClusterOverCounts } from "../clusters/overCount";
 import { type ClusterPassStats, ClusterStats } from "../clusters/stats";
-import { TERRAIN_PAGE_CLUSTERS, TERRAIN_SUB_PATCH_MASK } from "../clusters/terrain";
+import {
+  type EdgeMaskRecord,
+  type EdgeStandInForm,
+  edgeStandInForm,
+  shareMaskRuns,
+  TERRAIN_INPUT_EDGE_MASK,
+  TERRAIN_INPUT_STAND_IN_BITS,
+  TERRAIN_INPUT_SURVEYED,
+  type TerrainOpaqueBlocks,
+  TERRAIN_PAGE_CLUSTERS,
+  TERRAIN_SUB_PATCH_MASK,
+} from "../clusters/terrain";
 import { type Stride, TERRAIN_DISCARD_TEMPLATES } from "../clusters/templates";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
@@ -579,17 +590,26 @@ export interface TerrainFrame {
 export interface TerrainDrawnPatches {
   /** The interior patches, drawn by the lit pass's interior mesh. */
   readonly interior: number;
-  /** The others, drawn by the shading's own mesh, or {@link TerrainDrawnPatches.fins}. */
+  /**
+   * The others, drawn by the shading's own mesh, or {@link TerrainDrawnPatches.fins} and
+   * {@link TerrainDrawnPatches.edgeStandIns}.
+   */
   readonly edge: number;
   /**
-   * Of the others, those drawn through the lit pass's cluster path beside the interior patches
-   * (plan R14, R14.T1.g; `GeometrySettings.finClusters`), in every pass.
+   * Of the others, the edge patches drawn through the lit pass's cluster path beside the interior
+   * patches (plan R14, R14.T1.g; `GeometrySettings.finClusters`), in every pass; not the stand-ins.
    */
   readonly fins: number;
+  /**
+   * Of the others, the edge bakes' stand-ins drawn through the cluster path (plan R14, R14.T3.c's
+   * edge stand-ins; `GeometrySettings.edgeStandIns`), whole, on opaque blocks or as edge masks,
+   * counted apart from {@link TerrainDrawnPatches.fins}.
+   */
+  readonly edgeStandIns: number;
 }
 
 /** No patches drawn. */
-const NO_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0 };
+const NO_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0, edgeStandIns: 0 };
 
 /**
  * The error unit an edge patch's record takes on the cluster path (plan R14, R14.T1.g), m: past any
@@ -922,6 +942,12 @@ interface Resident {
    * again.
    */
   readonly interior: boolean;
+  /**
+   * Its slot's opaque blocks as its cluster records class them (plan R14, R14.T3.c's edge stand-ins;
+   * `writeTerrainClusterRecords`), by which an edge bake's stand-in on blocks all opaque draws as an
+   * interior bake's (`standInOnOpaqueBlocks`); `null` on a layout without clusters.
+   */
+  readonly opaqueBlocks: TerrainOpaqueBlocks | null;
   /** Its bake's sizes, which the time morph's spans read (R10.T16.i). */
   readonly sizes: BakeSizes;
   /**
@@ -1327,6 +1353,15 @@ interface ViewState {
    * (Design note 19), not whole.
    */
   readonly interiorWhole: boolean[];
+  /**
+   * Of the interior records, each one's cull input's bits of an edge bake's stand-in (plan R14,
+   * R14.T3.c's edge stand-ins; `clusters/terrain.ts`' `TERRAIN_INPUT_STAND_IN_BITS`): on blocks all
+   * opaque, an interior bake's classes; an edge mask, its strips and runs and the side runs its
+   * siblings draw; 0 for any other record.
+   */
+  readonly interiorStandIns: number[];
+  /** This frame's edge masks by their areas, for the side runs their siblings draw (`shareMaskRuns`). */
+  readonly edgeMasks: Map<string, EdgeMaskRecord>;
   /**
    * The ground it drew at its last frame (plan R10, R10.T16.c after R10.T16.i), its instances as
    * the shader mixes their heights, which the survey edge's rim and ticks read.
@@ -2211,7 +2246,7 @@ export class TerrainPass {
     if (state === undefined) {
       return null;
     }
-    const { interior, edge, fins } = state.lastPatches;
+    const { interior, edge, fins, edgeStandIns } = state.lastPatches;
     const edgeIndices = TERRAIN_SHADING_TRAITS[this.#shading].litMesh
       ? LIT_PATCH_INDICES
       : PATCH_INDICES;
@@ -2225,8 +2260,9 @@ export class TerrainPass {
       casterTriangles = [a ?? 0, b ?? 0, c ?? 0, d ?? 0];
     }
     const drawnTriangles = (interior * LIT_INTERIOR_INDICES + edge * edgeIndices) / 3;
-    // The edge patches the lit mesh draws: those on the cluster path are its counts' (R14.T1.g).
-    const edgeTriangles = ((edge - fins) * edgeIndices) / 3;
+    // The edge patches the lit mesh draws: those on the cluster path are its counts' (R14.T1.g),
+    // the edge bakes' stand-ins there among them (R14.T3.c's edge stand-ins).
+    const edgeTriangles = ((edge - fins - edgeStandIns) * edgeIndices) / 3;
     // With the two-pass occlusion the lit pass's triangles are its early and late passes' (R14.T3.d).
     const lateTriangles = state.lastLate ? (stats?.[CLUSTER_LIT_LATE_PASS]?.triangles ?? null) : 0;
     let overlayTriangles: number | null = drawnTriangles;
@@ -3786,6 +3822,7 @@ export class TerrainPass {
         surveyCellCode(bake.key.level, layers.fieldLevel) === 0,
       originHeightM: Math.fround(bake.originHeightM),
       interior: isInteriorBake(layers),
+      opaqueBlocks: upload.opaqueBlocks,
       sizes,
       strideErrors:
         bake.clusterErrors === undefined
@@ -4003,6 +4040,8 @@ export class TerrainPass {
       interiorDrawn: [],
       interiorFins: [],
       interiorWhole: [],
+      interiorStandIns: [],
+      edgeMasks: new Map(),
       drawnGround: new DrawnGround(this.#heights, this.#planet.figure),
       interiorDraw: null,
       interiorBeside: null,
@@ -4598,7 +4637,14 @@ export class TerrainPass {
    * Design note 19; `clusterSubPatchOf`); else it draws its own grid on its ancestor's triangles
    * (`terrainPatch.wgsl`'s `sourceGridOf`), which its slot's cluster records do not bound, so that
    * the cull keeps it whole ({@link ViewState.interiorWhole}), as the lit mesh drew it. A stand-in
-   * of an edge bake takes the edge path in every pass.
+   * of an edge bake takes the edge path in every pass, but where `GeometrySettings.edgeStandIns`
+   * takes it onto the cluster path with the edge patches (R14.T3.c's edge stand-ins;
+   * `edgeStandInForm`): a whole one as its edge patch, a sub-patch on blocks all opaque in its
+   * slot's records as an interior bake's, its records' classes overridden by its cull input
+   * (`TERRAIN_INPUT_SURVEYED`, {@link ViewState.interiorStandIns}), and under `masks` one a level
+   * down across the survey's edge as an edge mask (`TERRAIN_INPUT_EDGE_MASK`), a side run its
+   * sibling draws left to it (`shareMaskRuns`); there an edge bake's part held by the time morph
+   * (R10.T16.i) takes the same forms, and its whole patch is an edge patch.
    *
    * On the lit pass's cluster path (plan R14, R14.T2.a; `GeometrySettings.litClusters`), the
    * interior patches draw from the lit pass's buckets at stride 1 in their interior draw's place,
@@ -4652,6 +4698,9 @@ export class TerrainPass {
     const fades = this.#fadesAt(device, input.nowMs);
     // The edge patches join the interior patches' records only where every pass draws them there.
     const fins = lit && split && this.#finsDrawn(device, state, forms);
+    // And an edge bake's stand-ins with them, in the forms `edgeStandIns` takes (R14.T3.c's edge
+    // stand-ins): read only where the edge patches draw there.
+    const edgeStandIns = fins ? this.#geometry.edgeStandIns : "off";
     // A stand-in's mask only where every pass that draws the interior records draws them from the
     // buckets, as `#finsDrawn` holds for the fins: today's instanced draws would place its slot's
     // patch whole (Design note 19).
@@ -4682,7 +4731,13 @@ export class TerrainPass {
     state.interiorDrawn.length = 0;
     state.interiorFins.length = 0;
     state.interiorWhole.length = 0;
+    state.interiorStandIns.length = 0;
     let finCount = 0;
+    let edgeStandInCount = 0;
+    // This frame's edge masks by their areas, for the side runs their siblings draw (R14.T3.c's
+    // edge stand-ins; `shareMaskRuns`).
+    const edgeMasks = state.edgeMasks;
+    edgeMasks.clear();
     // Whether an instance drawn mixes its heights towards another surface (R10.T16.i): a frame
     // where none does draws its materials' still forms (`stillMaterialSpec`).
     let mixes = false;
@@ -4702,10 +4757,30 @@ export class TerrainPass {
         const level = patch.key.level;
         // Every patch of an interior bake, a stand-in whole or a sub-patch of its slot among them, is
         // an interior patch; an edge patch joins them where `fins` draws it by its records
-        // (R14.T1.g), but a stand-in of an edge bake draws by the edge path in every pass.
+        // (R14.T1.g), but a stand-in of an edge bake draws by the edge path in every pass. Where
+        // `edgeStandIns` takes them (R14.T3.c's edge stand-ins), an edge bake's patch drawn whole
+        // joins them, a stand-in or not, as its edge patch, and one drawn over a part of it, a
+        // stand-in or the time morph's held patch (R10.T16.i), where its form is exact.
         const resident = residents.get(drawn.keyString);
         const interiorBake = resident?.interior === true;
-        const inner = split && (interiorBake || (!drawn.standIn && fins && resident !== undefined));
+        const edgeBake = resident !== undefined && !interiorBake;
+        const edgeForm: EdgeStandInForm =
+          edgeBake && (drawn.standIn || within !== null)
+            ? edgeStandInForm(
+                edgeStandIns,
+                within === null ? 0 : subPatchOf(patch.key, within),
+                resident.opaqueBlocks,
+                masks,
+              )
+            : "lit-mesh";
+        const inner =
+          split &&
+          (interiorBake ||
+            (fins &&
+              edgeBake &&
+              (edgeStandIns === "off"
+                ? !drawn.standIn
+                : within === null || edgeForm !== "lit-mesh")));
         const heights = device.morph.heightWords[n] ?? 0;
         const parentSlot = this.#parentSlotOf(device, patch.key);
         const fadesWord = fadeWordOf(fades.own[n] ?? 0, heights);
@@ -4750,13 +4825,32 @@ export class TerrainPass {
         const holdFades = at < 0 ? 0 : (state.strideHoldWords[n] ?? 0);
         const finest = strides && this.#nearContact(patch, contacts, patchM);
         if (inner) {
-          state.interiorFins.push(!interiorBake);
+          // An edge bake's stand-in on opaque blocks casts as an interior bake's (R14.T3.c's edge
+          // stand-ins), its every other record at stride 1, as an edge patch.
+          state.interiorFins.push(!interiorBake && edgeForm !== "surveyed");
           // A deeper sub-patch's grid, over its finer area, is not its slot's records'
           // (`sourceGridOf`).
           state.interiorWhole.push(
             ((heights >>> 8) & MIX_STEPS) !== 0 || (within !== null && !masked),
           );
-          finCount += interiorBake ? 0 : 1;
+          state.interiorStandIns.push(
+            edgeForm === "surveyed"
+              ? TERRAIN_INPUT_SURVEYED
+              : edgeForm === "edge-mask"
+                ? TERRAIN_INPUT_EDGE_MASK
+                : 0,
+          );
+          if (edgeForm === "edge-mask" && within !== null) {
+            edgeMasks.set(patchKeyString(within), {
+              area: within,
+              record: state.interiorStandIns.length - 1,
+            });
+          }
+          // An edge bake's patch drawn whole, not a stand-in, is a fin record (R14.T1.g); the rest of
+          // its records are its stand-ins and held parts, counted apart (R14.T3.c's edge stand-ins).
+          const apart = edgeForm !== "lit-mesh";
+          finCount += interiorBake || apart ? 0 : 1;
+          edgeStandInCount += apart ? 1 : 0;
         }
         const target = inner ? interior : instances;
         target.pushXyz(
@@ -4808,6 +4902,7 @@ export class TerrainPass {
       }
     }
     drawnGround.end(cameraM, input.view.rotation.rows);
+    shareMaskRuns(edgeMasks, state.interiorStandIns);
     const records = state.contacts;
     records.clear();
     for (const contact of contacts) {
@@ -5001,9 +5096,10 @@ export class TerrainPass {
     const patches =
       draws.length > 0
         ? {
-            interior: interior.count - finCount,
-            edge: instances.count + finCount,
+            interior: interior.count - finCount - edgeStandInCount,
+            edge: instances.count + finCount + edgeStandInCount,
             fins: finCount,
+            edgeStandIns: edgeStandInCount,
           }
         : NO_PATCHES;
     state.lateStill = !mixes && device.stills.size > 0;
@@ -5708,6 +5804,9 @@ export class TerrainPass {
         reuse.word(record);
         appendCasterRecord(reuse, words, record, versions);
         reuse.word(clusters.inputs[2 * record + 1] ?? 0);
+        // An edge bake's stand-in's classes, a side run left to its sibling among them (R14.T3.c's
+        // edge stand-ins), which its words do not hold.
+        reuse.word((clusters.inputs[2 * record] ?? 0) & TERRAIN_INPUT_STAND_IN_BITS);
       }
     }
   }
@@ -5895,10 +5994,12 @@ export class TerrainPass {
       // A record whose patch the draw set no longer holds enters no pass; one whose heights fade,
       // or a sub-patch, is kept whole by each it enters (R10.T16.i).
       const whole = state.interiorWhole[record] === true ? CULL_INPUT_WHOLE : 0;
+      // An edge bake's stand-in's classes (R14.T3.c's edge stand-ins).
+      const standIn = state.interiorStandIns[record] ?? 0;
       clusters.inputs[2 * record] =
         patch === undefined
           ? 0
-          : ((overlay ? OVERLAY_PASS_BIT : 0) | (lit ? LIT_PASS_BIT : 0) | whole) >>> 0;
+          : ((overlay ? OVERLAY_PASS_BIT : 0) | (lit ? LIT_PASS_BIT : 0) | whole | standIn) >>> 0;
       clusters.inputs[2 * record + 1] = f32Bits(
         patch === undefined
           ? 0

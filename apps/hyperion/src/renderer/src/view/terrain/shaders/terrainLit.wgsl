@@ -260,6 +260,10 @@ struct LitVertexOut {
   // Its instance's class sets (lane fix-coast-class-map; `terrainPatch.wgsl`'s `Instance.cells`):
   // its ancestor of the field's cells' level and its place there, the fade to it, and its flags.
   @location(14) @interpolate(flat) cells : vec4u,
+  // Its instance's sub-patch word (`terrainPatch.wgsl`'s `Instance.sub.x`), by which a stand-in's
+  // mask's foot strips read the survey inside their set (`terrainSurvey.wgsl`'s `survey_kept_in`;
+  // plan R14, R14.T3.c's edge stand-ins).
+  @location(15) @interpolate(flat) sub : u32,
 }
 
 // The depth below its edge to which a skirt's foot strip of the patch of slot record `rec` stands
@@ -279,9 +283,9 @@ fn skirt_lip(in : LitVertexOut) -> bool {
   return in.kind == LIT_SKIRT_FOOT && in.gridHeightM - in.heightM <= in.lipM;
 }
 
-// Whether the fragment `in` is drawn at the survey's edge (`terrainSurvey.wgsl`'s `survey_kept_at`).
+// Whether the fragment `in` is drawn at the survey's edge (`terrainSurvey.wgsl`'s `survey_kept_in`).
 fn survey_kept(in : LitVertexOut) -> bool {
-  return survey_kept_at(in.slot, in.patchUv, in.kind);
+  return survey_kept_in(in.slot, in.patchUv, in.kind, in.sub);
 }
 
 @vertex
@@ -314,6 +318,7 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
   out.rebakeSlot = v.rebakeSlot;
   out.rebakeFade = v.rebakeFade;
   out.cells = inst.cells;
+  out.sub = inst.sub.x;
   return out;
 }
 

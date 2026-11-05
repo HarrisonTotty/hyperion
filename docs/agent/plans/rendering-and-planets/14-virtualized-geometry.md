@@ -1474,7 +1474,9 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
     fps (pending).
   - _Built_ (`r14-t3c-strides`; behind `strides`, `measured` on both): records at the end of
     Risks. Its stand-ins' strides (`r14-t3e-triangle-budget`; behind `standInStrides`, `all` on
-    high and `own-grids` on low): records at the end of Risks.
+    high and `own-grids` on low): records at the end of Risks. Its edge bakes' stand-ins
+    (`r14-edge-stand-ins`; behind `edgeStandIns`, `masks` on high and `surveyed` on low): records at
+    the end of Risks.
 - **R14.T3.d Two-pass occlusion.** Size M.
   - `DepthPyramid` and the two-pass cull of Design note 4 per view, in both the forward and the
     visibility paths. `occlusion: "hzb"`.
@@ -2729,11 +2731,36 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Probe knob `SEAM_STAND_INS`; `BudgetFrame.atStride1By` gains `ownGrid` and `litMeshStandIns`.
   - Not built: an edge bake's stand-ins on the cluster path, the lit mesh's whole grids, most of
     what still draws at stride 1 on both: their masks need fins and heads cut to the set (T1.g's).
+    Built since (`r14-edge-stand-ins`, below).
   - Pending: the owner's Mac (`views-check --terrain --hidden --setting high|low`, with and
     without `--geometry standInStrides=off`) and RTX runs; Windows NOT RUN.
 - **R14.T3.c's shared bands, their cost** (research-next-work-40; the figures in the lane's
   outbox): `StrideEdges.update` forms each patch's edge needs once an update, and a frame of the
   last's inputs takes its bands back as it left them (`StrideEdges.reused`), bit for bit.
+- **R14.T3.c's edge stand-ins** (`r14-edge-stand-ins`, 2026-11-05; the counts and the acceptance in
+  the lane's outbox):
+  - `GeometrySettings.edgeStandIns` (`off` | `surveyed` | `masks`; `--geometry edgeStandIns=`;
+    results files without it read `off`), read only where `#finsDrawn` holds: `masks` on high,
+    `surveyed` on low; `off` the way back, bit for bit.
+  - Routing is `edgeStandInForm` (`clusters/terrain.ts`): an edge bake's patch drawn whole is its
+    edge patch (`!drawn.standIn` became `drawn.within === null`); any part of it, a stand-in or the
+    time morph's held part (R10.T16.i, `standIn` false), joins only in a form below, else the lit mesh.
+  - `surveyed`: a part on blocks all opaque (`standInOnOpaqueBlocks`, the 64-bit
+    `TerrainOpaqueBlocks` that `writeTerrainClusterRecords` returns, on `Resident.opaqueBlocks`) draws
+    as an interior bake's mask or own grid; cull-input bit 30 (`TERRAIN_INPUT_SURVEYED`) takes its
+    blocks and strips opaque and real and no fin cluster; it casts at its spacing, not `FIN_ERROR_UNIT_M`.
+  - `masks`: a level-1 part across the survey's edge (bit 29, `TERRAIN_INPUT_EDGE_MASK`) draws its
+    blocks by class, its 16 strips real by the may-discard template and its quadrant's six runs
+    (`terrainMaskRuns`); bits 28 and 27 leave a side run to the sibling of x or y 0 (`shareMaskRuns`).
+  - A mask's foot reads the survey half a quad inside its set (`survey_kept_in`; twin
+    `maskFootSurveyPlace`), through `LitVertexOut.sub`, location 15, the last of 16.
+  - `TerrainDrawnPatches.edgeStandIns` counts them apart from `fins`; the cascade reuse key holds
+    the bits. Probe knob `SEAM_EDGE_STAND_INS`; `BudgetFrame.litMeshStandInsBy`, `edgeStandInsBy`.
+  - (lean, 2026-11-05) Step 0's gate (level-1 mixed under a tenth of `litMeshStandIns`: 0.4% on
+    high) said skip the masks; they were built first, and they take level-1 no-cluster areas (39%).
+  - Not built: levels 2–3 and low's no-cluster parts across the edge stay on the lit mesh.
+  - Pending: the owner's Mac (`views-check --terrain --hidden --setting high|low`, with and without
+    `--geometry edgeStandIns=off`), the RTX lit pass, TERRAIN TEST mid-survey; Windows NOT RUN.
 - **R14.T2.e, the Mac batch's passes** (`tool-mac-batch-passes`, 2026-11-05; built):
   - `--count-gpu-calls` counts each render pass's attachments too (`GpuCallCounter.take()` gives
     `{ calls, attachments }`): by pass label, slot, view (format, size, samples), load and store,

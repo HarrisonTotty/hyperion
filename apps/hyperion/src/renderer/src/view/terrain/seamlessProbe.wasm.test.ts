@@ -35,8 +35,12 @@ import {
 } from "../clusters/record";
 import {
   TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_INPUT_EDGE_MASK,
+  TERRAIN_INPUT_STAND_IN_BITS,
+  TERRAIN_INPUT_SURVEYED,
   TERRAIN_SUB_PATCH_MASK,
   terrainMaskCluster,
+  terrainRecordClass,
 } from "../clusters/terrain";
 import {
   clusterStrideBandsM,
@@ -202,6 +206,9 @@ import type { WorkerLike } from "./workers/pool";
  *   `GeometrySettings.standInStrides`, the setting's unset. Where the masks stride, the strides'
  *   measure takes each stand-in's mask's blocks as a whole patch's, its slot's patch's grid, by the
  *   mask's bands.
+ * - `SEAM_EDGE_STAND_INS` (`off`, `surveyed` or `masks`; R14.T3.c's edge stand-ins): the passes'
+ *   `GeometrySettings.edgeStandIns`, the setting's unset. The counts and the strides' measure take
+ *   each record's classes as the cull does, an edge bake's stand-in's by its cull input's bits.
  */
 const SLOW = import.meta.env["HYPERION_SLOW_TESTS"] === "1";
 
@@ -268,6 +275,13 @@ const COUNT_STRIDE = Math.max(1, Math.round(numberKnob("SEAM_COUNT_STRIDE", 4)))
 const CACHE_SCALE = Math.max(0.1, numberKnob("SEAM_CACHE_SCALE", 1));
 const BUDGET_KNOB = knob("SEAM_BUDGET");
 const BUDGET = BUDGET_KNOB === "patches" || BUDGET_KNOB === "triangles" ? BUDGET_KNOB : null;
+const EDGE_STAND_INS_KNOB = knob("SEAM_EDGE_STAND_INS");
+const EDGE_STAND_INS =
+  EDGE_STAND_INS_KNOB === "off" ||
+  EDGE_STAND_INS_KNOB === "surveyed" ||
+  EDGE_STAND_INS_KNOB === "masks"
+    ? EDGE_STAND_INS_KNOB
+    : null;
 const STAND_INS_KNOB = knob("SEAM_STAND_INS");
 const STAND_INS =
   STAND_INS_KNOB === "off" || STAND_INS_KNOB === "own-grids" || STAND_INS_KNOB === "all"
@@ -639,6 +653,11 @@ interface DrawnInstance {
   readonly quadrantWord: number;
   /** Its holds' onsets' shares of the stride morph, a byte an edge (word 14). */
   readonly holdFadesWord: number;
+  /**
+   * Its cull input's bits of an edge bake's stand-in (R14.T3.c's edge stand-ins;
+   * `TERRAIN_INPUT_STAND_IN_BITS`), as the frame's cull inputs hold them; 0 off the path.
+   */
+  readonly standInBits: number;
 }
 
 /** The edges' shared bands of the instance record at word `base` of `u`, m (words 20 to 67). */
@@ -656,6 +675,14 @@ function instancesOf(
   slots: ReadonlyMap<number, Held>,
 ): Map<string, DrawnInstance> {
   const drawn = new Map<string, DrawnInstance>();
+  // The cluster path's cull inputs, two words a record of the interior instances in their order.
+  const inputs = engine.writes.findLast(
+    (w) => w.buffer === `terrain clusters (${PRIMARY_VIEW_ID}) cull inputs`,
+  )?.data;
+  const inputWords =
+    inputs === undefined
+      ? null
+      : new Uint32Array(inputs.buffer, inputs.byteOffset, inputs.byteLength / 4);
   for (const name of [
     `terrain instances (${PRIMARY_VIEW_ID})`,
     `terrain interior instances (${PRIMARY_VIEW_ID})`,
@@ -712,6 +739,9 @@ function instancesOf(
         edgeBandsM: edgeBandsAt(u, base),
         quadrantWord: word(7),
         holdFadesWord: word(14),
+        standInBits: name.includes("interior")
+          ? (inputWords?.[2 * (base / WORDS)] ?? 0) & TERRAIN_INPUT_STAND_IN_BITS
+          : 0,
       });
     }
   }
@@ -931,18 +961,25 @@ class SlotRecords {
    * Cluster `cluster`'s class in `slot`'s records, as the cull reads it (`clusterCull.wgsl`'s `real`
    * and `template_of`): `none` for a negative radius, no cluster; `edge` for one that may discard
    * (`CLUSTER_FLAG_MAY_DISCARD`), drawn at stride 1 by its may-discard template; `opaque` else.
-   * `null` for a slot with no records written.
+   * `null` for a slot with no records written. `standInBits`, an edge bake's stand-in's cull
+   * input's, class it as the cull does (`terrainRecordClass`).
    */
-  classOf(slot: number, cluster: number): RecordClass | null {
+  classOf(slot: number, cluster: number, standInBits = 0): RecordClass | null {
     const view = this.#bySlot.get(slot);
     if (view === undefined) {
       return null;
     }
     const at = cluster * CLUSTER_RECORD_BYTES;
-    if (!(view.getFloat32(at + 12, true) >= 0)) {
-      return "none";
-    }
-    return (view.getUint32(at + 28, true) & CLUSTER_FLAG_MAY_DISCARD) !== 0 ? "edge" : "opaque";
+    // As the cull takes it, an edge bake's stand-in's by its bits (`terrainRecordClass`).
+    const taken = terrainRecordClass(
+      {
+        real: view.getFloat32(at + 12, true) >= 0,
+        mayDiscard: (view.getUint32(at + 28, true) & CLUSTER_FLAG_MAY_DISCARD) !== 0,
+      },
+      cluster,
+      standInBits,
+    );
+    return !taken.real ? "none" : taken.mayDiscard ? "edge" : "opaque";
   }
 }
 
@@ -1159,7 +1196,7 @@ class StrideFrames {
       const drawnBlocks = new Uint8Array(64);
       for (let block = 0; block < 64; block += 1) {
         const sphere = records.sphere(slot, block);
-        const cls = records.classOf(slot, block) ?? "opaque";
+        const cls = records.classOf(slot, block, inst.standInBits) ?? "opaque";
         if (
           sphere === null ||
           cls === "none" ||
@@ -1628,6 +1665,12 @@ interface BudgetFrame {
    */
   readonly litMeshStandInsBy: Readonly<Record<StandInSplit, number>>;
   /**
+   * The lit triangles of the edge bakes' stand-ins on the cluster path (R14.T3.c's edge stand-ins),
+   * at their strides, by their form: on blocks all opaque (`TERRAIN_INPUT_SURVEYED`), and edge
+   * masks (`TERRAIN_INPUT_EDGE_MASK`). A whole one is its edge patch, counted with them.
+   */
+  readonly edgeStandInsBy: Readonly<Record<"surveyed" | "masks", number>>;
+  /**
    * The primary view's lit triangles as the triangle budget reckoned its last selection
    * (`Selection.litTriangles`), `NaN` without a budget.
    */
@@ -1740,6 +1783,7 @@ class BudgetFrames {
       | "litAtStride1Only"
       | "atStride1By"
       | "litMeshStandInsBy"
+      | "edgeStandInsBy"
     >,
   ): void {
     const { figure } = planet;
@@ -1767,6 +1811,7 @@ class BudgetFrames {
       "4+/none": 0,
       "4+/mixed": 0,
     };
+    const edgeStandIns = { surveyed: 0, masks: 0 };
     for (const inst of drawn.values()) {
       const { slot } = inst;
       const origin = inst.held.bake.originM;
@@ -1851,7 +1896,10 @@ class BudgetFrames {
         // The cull's class of a cluster on the path, but an own grid's, kept whole: no cluster is
         // refused, and one that may discard draws at stride 1 by its may-discard template; a mask's
         // strip by its own record, its slot's edge strip's (`clusterCull.wgsl`'s `real`).
-        const cls = inst.onPath && !ownGrid ? (records.classOf(slot, c) ?? "opaque") : "opaque";
+        const cls =
+          inst.onPath && !ownGrid
+            ? (records.classOf(slot, c, inst.standInBits) ?? "opaque")
+            : "opaque";
         if (cls === "none") {
           continue;
         }
@@ -1919,6 +1967,11 @@ class BudgetFrames {
       }
       litTriangles += instanceTriangles;
       litTrianglesAtStride1 += instanceAtStride1;
+      if ((inst.standInBits & TERRAIN_INPUT_SURVEYED) !== 0) {
+        edgeStandIns.surveyed += instanceTriangles;
+      } else if ((inst.standInBits & TERRAIN_INPUT_EDGE_MASK) !== 0) {
+        edgeStandIns.masks += instanceTriangles;
+      }
       if ((!strided && ownGridLevel === 0) || (inst.quadrantWord & INSTANCE_FINEST) !== 0) {
         litAtStride1Only += instanceTriangles;
         const cause: keyof StrideOneCauses =
@@ -1954,6 +2007,7 @@ class BudgetFrames {
       litAtStride1Only,
       atStride1By: causes,
       litMeshStandInsBy: standIns,
+      edgeStandInsBy: edgeStandIns,
     });
   }
 }
@@ -2033,6 +2087,10 @@ function budgetSummaryOf(frames: ReadonlyArray<BudgetFrame>): Record<string, unk
             litMeshStandInsBy: Object.fromEntries(
               STAND_IN_SPLITS.map((split) => [split, pick((f) => f.litMeshStandInsBy[split])]),
             ),
+            edgeStandInsBy: {
+              surveyed: pick((f) => f.edgeStandInsBy.surveyed),
+              masks: pick((f) => f.edgeStandInsBy.masks),
+            },
             litShare: at1 > 0 ? lit / at1 : null,
             reckonedTriangles: reckoned.length === 0 ? null : pick((f) => f.reckonedTriangles),
             // The most the drawn passed the reckoned in a frame, and the frames it did.
@@ -2725,7 +2783,7 @@ async function play(options: ProbeOptions): Promise<Played> {
     ...(LOOKAHEAD ? { lookaheadClockMs: () => Date.now() } : {}),
     morphInMs: MORPH_MS,
     ...budgetHoldKnob(),
-    ...(strideWindow === null && BUDGET === null && STAND_INS === null
+    ...(strideWindow === null && BUDGET === null && STAND_INS === null && EDGE_STAND_INS === null
       ? {}
       : {
           geometry: {
@@ -2733,6 +2791,7 @@ async function play(options: ProbeOptions): Promise<Played> {
             ...(strideWindow === null ? {} : { strides: "measured" }),
             ...(BUDGET === null ? {} : { terrainBudget: BUDGET }),
             ...(STAND_INS === null ? {} : { standInStrides: STAND_INS }),
+            ...(EDGE_STAND_INS === null ? {} : { edgeStandIns: EDGE_STAND_INS }),
           },
         }),
     ...(CACHE_SCALE === 1
@@ -3433,6 +3492,7 @@ const PLAY_KNOBS = JSON.stringify({
   draftShare: DRAFT_SHARE,
   lookahead: LOOKAHEAD,
   standIns: STAND_INS,
+  edgeStandIns: EDGE_STAND_INS,
 });
 
 /** A segment's figures as `scripts/seamSegments.mjs` keeps them. */

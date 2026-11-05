@@ -4,9 +4,11 @@
  * `terrain_cluster_grid`, which every cluster pass's vertex stage calls, dispatched on the device
  * over every cluster of a terrain page an instance draws (a mask's cull drops the rest) at template
  * vertices of every kind, for a whole patch, a
- * sub-patch of its own grid and stand-ins' masks one to three levels down at several parts, its grid
- * places read back and held to its twins' (`clusters/terrain.ts`' `terrainClusterGrid`, and
- * `terrainFinGrid` for the fin and head runs) exactly.
+ * sub-patch of its own grid and stand-ins' masks one to three levels down at several parts, the
+ * level-1 masks with an edge mask's quadrant's fin and head runs too (plan R14, R14.T3.c's edge
+ * stand-ins; `terrainMaskRuns`), its grid places read back and held to its twins'
+ * (`clusters/terrain.ts`' `terrainClusterGrid`, and `terrainFinGrid` for the fin and head runs)
+ * exactly.
  *
  * @remarks
  * The kernel is the stage's decode as the wireframe composes it (its source before its vertex entry
@@ -17,6 +19,7 @@
 
 import {
   TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_INPUT_EDGE_MASK,
   TERRAIN_PAGE_CLUSTERS,
   TERRAIN_SUB_PATCH_MASK,
   terrainClusterGrid,
@@ -109,8 +112,9 @@ export async function checkClusterGrid(engine: RenderEngine, checks: Checks): Pr
   const inputs: Array<readonly [number, number, number, number]> = [];
   for (const sub of subWords()) {
     for (let cluster = 0; cluster < TERRAIN_PAGE_CLUSTERS; cluster += 1) {
-      // Only the clusters the instance draws: a mask's cull drops the rest.
-      if (terrainMaskCluster(sub, cluster) === "none") {
+      // Only the clusters the instance draws: a mask's cull drops the rest, but a level-1 mask's
+      // runs, which it draws as an edge mask (R14.T3.c's edge stand-ins).
+      if (terrainMaskCluster(sub, cluster, TERRAIN_INPUT_EDGE_MASK) === "none") {
         continue;
       }
       for (const [lx, ly, code] of cluster < TERRAIN_CLUSTERS_PER_PAGE ? LOCALS : RUN_LOCALS) {
@@ -149,6 +153,7 @@ export async function checkClusterGrid(engine: RenderEngine, checks: Checks): Pr
     const device = new Float32Array(await engine.readBuffer(gridOutputs));
     let differing = 0;
     let masked = 0;
+    let runs = 0;
     let first = "";
     inputs.forEach(([cluster, packedLocal, sub, code], n) => {
       const local = [packedLocal & 0xffff, packedLocal >>> 16, code] as const;
@@ -158,6 +163,7 @@ export async function checkClusterGrid(engine: RenderEngine, checks: Checks): Pr
           : terrainFinGrid(cluster, local);
       const got = [device[4 * n], device[4 * n + 1], device[4 * n + 2]];
       masked += (sub & TERRAIN_SUB_PATCH_MASK) !== 0 && cluster >= 64 && cluster < 96 ? 1 : 0;
+      runs += (sub & TERRAIN_SUB_PATCH_MASK) !== 0 && cluster >= TERRAIN_CLUSTERS_PER_PAGE ? 1 : 0;
       if (got.some((v, k) => v !== twin[k])) {
         differing += 1;
         if (first === "") {
@@ -166,9 +172,9 @@ export async function checkClusterGrid(engine: RenderEngine, checks: Checks): Pr
       }
     });
     checks.check(
-      "R14.T2.a the cluster vertex stages' decode on the device is its twin's, a stand-in's mask's strips along its set's sides among them (Design note 19)",
-      differing === 0 && masked > 0,
-      `${String(inputs.length)} template vertices of ${String(TERRAIN_PAGE_CLUSTERS)} clusters under ${String(subWords().length)} sub-patch words, ${String(masked)} of them a mask's strips; ${String(differing)} differing${first}`,
+      "R14.T2.a the cluster vertex stages' decode on the device is its twin's, a stand-in's mask's strips along its set's sides among them (Design note 19), and an edge mask's runs (R14.T3.c's edge stand-ins)",
+      differing === 0 && masked > 0 && runs > 0,
+      `${String(inputs.length)} template vertices of ${String(TERRAIN_PAGE_CLUSTERS)} clusters under ${String(subWords().length)} sub-patch words, ${String(masked)} of them a mask's strips, ${String(runs)} an edge mask's runs; ${String(differing)} differing${first}`,
     );
   } finally {
     for (const handle of made) {

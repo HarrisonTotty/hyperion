@@ -139,7 +139,7 @@ describe("the quality settings", () => {
 });
 
 describe("the geometry's settings (plan R14)", () => {
-  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, its camera strides measured, their acceptance passed, occlusion off until its acceptance (R14.T3.c, T3.d), the shading forward (R14.T2), the hidden marks culled (R10.T16.c), the triangle budget on both (R14.T3.e) and the stand-ins strided, as masks on high and on their own grids on low (R14.T3.c's stand-ins), and keeps the way back", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, its camera strides measured, their acceptance passed, occlusion off until its acceptance (R14.T3.c, T3.d), the shading forward (R14.T2), the hidden marks culled (R10.T16.c), triangle budget on both (R14.T3.e), the stand-ins strided, as masks on high and on their own grids on low (R14.T3.c's stand-ins), and the edge bakes' stand-ins on the path, as masks on high and where exact on low (R14.T3.c's edge stand-ins), and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
       const {
         pageBytes: _pageBytes,
@@ -163,6 +163,7 @@ describe("the geometry's settings (plan R14)", () => {
         terrainBudget: "triangles",
         standInStrides: setting === "high" ? "all" : "own-grids",
         hiddenMarks: "culled",
+        edgeStandIns: setting === "high" ? "masks" : "surveyed",
       });
     }
     expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
@@ -187,6 +188,7 @@ describe("the geometry's settings (plan R14)", () => {
       terrainBudget: "patches",
       standInStrides: "off",
       hiddenMarks: "drawn",
+      edgeStandIns: "off",
     });
   });
 
@@ -211,6 +213,7 @@ describe("the geometry's settings (plan R14)", () => {
       geometryOf("high", { strides: "measured" }),
       geometryOf("low", { terrainBudget: "patches" }),
       geometryOf("high", { standInStrides: "off" }),
+      geometryOf("high", { edgeStandIns: "off" }),
     ]).toEqual([
       { ...SETTINGS.low.geometry, clusterPath: false },
       { ...SETTINGS.high.geometry, casterStrideCap: 1, overlayDepth: "redraw" },
@@ -221,6 +224,7 @@ describe("the geometry's settings (plan R14)", () => {
       { ...SETTINGS.high.geometry, strides: "measured" },
       { ...SETTINGS.low.geometry, terrainBudget: "patches" },
       { ...SETTINGS.high.geometry, standInStrides: "off" },
+      { ...SETTINGS.high.geometry, edgeStandIns: "off" },
     ]);
   });
 });

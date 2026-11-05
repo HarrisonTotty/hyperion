@@ -890,7 +890,7 @@ describe("what a view's frame gives its label block and list (the batch review's
       drawTerrain: () => ({
         draws: [],
         opaqueDraws: 0,
-        patches: { interior: 0, edge: 0, fins: 0 },
+        patches: { interior: 0, edge: 0, fins: 0, edgeStandIns: 0 },
         conditions: { streaming: true, detailLimited: false },
         annunciation: "TERRAIN: STREAMING",
         fault: null,
@@ -1042,7 +1042,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
           return {
             draws: [WIRE_DRAW],
             opaqueDraws: 0,
-            patches: { interior: 0, edge: 1, fins: 0 },
+            patches: { interior: 0, edge: 1, fins: 0, edgeStandIns: 0 },
             conditions: { streaming: true, detailLimited: false },
             annunciation: "TERRAIN: STREAMING",
             fault: null,
@@ -1183,7 +1183,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
           ? {
               draws: [WIRE_DRAW],
               opaqueDraws: 0,
-              patches: { interior: 0, edge: 1, fins: 0 },
+              patches: { interior: 0, edge: 1, fins: 0, edgeStandIns: 0 },
               conditions: { streaming: false, detailLimited: false },
               annunciation: null,
               fault: null,

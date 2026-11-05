@@ -244,6 +244,19 @@ export interface GeometrySettings {
    * depth is left: the same canvas, bit for bit. `culled` on both settings.
    */
   readonly hiddenMarks: "drawn" | "culled";
+  /**
+   * R14.T3.c's edge stand-ins: an edge bake's stand-ins (a bake the survey's edge crosses) on the
+   * cluster path, which otherwise draw by the lit mesh at stride 1 in every pass. `surveyed` takes
+   * the exact forms: a whole stand-in as its edge patch, and a sub-patch whose area lies on blocks
+   * all opaque in its slot's records as an interior bake's (a mask or an own grid), its blocks and
+   * strips opaque and real and no fin cluster (`clusters/cull.ts`' `CULL_INPUT_SURVEYED`). `masks`
+   * adds a level-1 mask across the survey's edge: its blocks by its slot's classes, its 16 strips by
+   * the may-discard template, each foot's survey read half a quad inside its set, and its quadrant's
+   * six fin and head runs, a run on the set's side drawn once (`CULL_INPUT_EDGE_MASK`). Read only
+   * with `finClusters` and `litClusters`. `masks` on high, `surveyed` on low (no masks); `off`, as
+   * before, bit for bit.
+   */
+  readonly edgeStandIns: "off" | "surveyed" | "masks";
 }
 
 /**
@@ -274,6 +287,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   terrainBudget: "patches",
   standInStrides: "off",
   hiddenMarks: "drawn",
+  edgeStandIns: "off",
 };
 
 /**
@@ -455,6 +469,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       terrainBudget: "triangles",
       standInStrides: "all",
       hiddenMarks: "culled",
+      edgeStandIns: "masks",
     },
     decoration: true,
     scatterDensity: 1,
@@ -507,6 +522,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       terrainBudget: "triangles",
       standInStrides: "own-grids",
       hiddenMarks: "culled",
+      edgeStandIns: "surveyed",
     },
     decoration: false,
     scatterDensity: 0,

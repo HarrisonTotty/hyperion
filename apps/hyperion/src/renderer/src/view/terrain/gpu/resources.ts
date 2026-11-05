@@ -51,6 +51,7 @@ import {
   TERRAIN_FIN_CLUSTERS,
   TERRAIN_HEAD_CLUSTERS,
   TERRAIN_PAGE_CLUSTERS,
+  type TerrainOpaqueBlocks,
   writeTerrainClusterRecords,
 } from "../../clusters/terrain";
 import { terrainClusterMesh } from "../../clusters/templates";
@@ -915,7 +916,15 @@ export const NO_HORIZON_WORD = 0x8001_8001;
 
 /** What {@link TerrainResources.upload} did. */
 export type SlotUploadResult =
-  | { readonly kind: "uploaded" }
+  | {
+      readonly kind: "uploaded";
+      /**
+       * The slot's opaque blocks as its cluster records class them (plan R14, R14.T3.c's edge
+       * stand-ins; `writeTerrainClusterRecords`), every block's for a bake with no survey mask;
+       * `null` where no record was written: a layout without clusters, or normals alone.
+       */
+      readonly opaqueBlocks: TerrainOpaqueBlocks | null;
+    }
   /**
    * Nothing was written: the bake predates the layout, or a lit layout was given a bake without
    * R10's layers (see {@link TerrainResources.upload}).
@@ -925,7 +934,7 @@ export type SlotUploadResult =
       readonly reason: "slot-outside-layout" | "vertex-path-mismatch" | "layers-missing";
     };
 
-const UPLOADED: SlotUploadResult = { kind: "uploaded" };
+const UPLOADED: SlotUploadResult = { kind: "uploaded", opaqueBlocks: null };
 
 /** A lit layout's phase table (R10.T10.b), which every view's draw binds. */
 interface LitMade {
@@ -1711,12 +1720,13 @@ export class TerrainResources {
       this.#writeField("survey-mask", slot, surveyMask);
     }
     const clusterRecords = this.#made.clusterRecords;
+    let opaqueBlocks: TerrainOpaqueBlocks | null = null;
     if (
       clusterRecords !== null &&
       patch.originM !== undefined &&
       patch.heightRangeM !== undefined
     ) {
-      writeTerrainClusterRecords(
+      opaqueBlocks = writeTerrainClusterRecords(
         this.#planet,
         {
           key: patch.key,
@@ -1739,7 +1749,7 @@ export class TerrainResources {
         this.#engine.writeBuffer(buffers.history, slot * CLUSTER_HISTORY_SLOT_BYTES, NO_HISTORY);
       }
     }
-    return UPLOADED;
+    return opaqueBlocks === null ? UPLOADED : { kind: "uploaded", opaqueBlocks };
   }
 
   /**

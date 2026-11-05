@@ -38,6 +38,16 @@
  * own tolerances, and the dispatch counts their strides drawn past it (plan R14, R14.T3.e): each
  * pass's count, read back from its word past the buckets, held between its twin's
  * (`cullOverTwin`) over the exact and the doubly widened tests' clusters, the seventh's above 0.
+ *
+ * A second dispatch (plan R14, R14.T3.c's edge stand-ins) culls an edge bake's stand-ins over pages
+ * of terrain's own layout, 116 clusters with their fin and head runs, each record's class random
+ * (opaque, may-discard or none): the four quadrants' edge masks of one page, their side runs
+ * shared as `shareMaskRuns` leaves them, one alone, which draws its six; masks one to three levels
+ * down and an own grid on opaque blocks (`TERRAIN_INPUT_SURVEYED`), and an interior bake's mask and a
+ * whole patch beside them. Its buckets are held to the twin's as a set, entry by entry; each edge
+ * mask's to exactly its blocks of a cluster, its 16 strips in the strips' may-discard bucket and its
+ * quadrant's runs of a cluster, each side run drawn once; and each surveyed one's to its blocks and
+ * strips alone, opaque, none of a fin run.
  */
 
 import type { Vec3 } from "../geometry/vec3";
@@ -87,7 +97,21 @@ import {
   type StrideScale,
 } from "../view/clusters/strides";
 import { TERRAIN_DISCARD_TEMPLATES, terrainClusterMesh } from "../view/clusters/templates";
-import { TERRAIN_SUB_PATCH_MASK } from "../view/clusters/terrain";
+import {
+  TERRAIN_BLOCKS,
+  TERRAIN_CLUSTERS_PER_PAGE,
+  TERRAIN_HEAD_CLUSTERS,
+  TERRAIN_INPUT_COLUMN_RUN_SHARED,
+  TERRAIN_INPUT_EDGE_MASK,
+  TERRAIN_INPUT_ROW_RUN_SHARED,
+  TERRAIN_INPUT_SURVEYED,
+  TERRAIN_PAGE_CLUSTERS,
+  TERRAIN_SUB_PATCH_MASK,
+  terrainFinTemplateRef,
+  terrainMaskCluster,
+  terrainMaskRuns,
+  terrainTemplateRef,
+} from "../view/clusters/terrain";
 import { subPatchWord } from "../view/terrain/gpu/uniforms";
 import { quaternionFromRows } from "../view/camera/quaternion";
 import { frustumOf } from "../view/terrain/cull";
@@ -655,6 +679,7 @@ export async function checkClusterCull(engine: RenderEngine, checks: Checks): Pr
       pastHeld && (past[STRIDING] ?? 0) > 0 && past.slice(0, ORDERED).every((count) => count === 0),
       `by pass ${past.join(", ")}; the exact twin's ${passes.map((_, pass) => String(pastExact.get(pass) ?? 0)).join(", ")}, the widened twin's ${passes.map((_, pass) => String(pastWidened.get(pass) ?? 0)).join(", ")}`,
     );
+    await edgeStandInCheck(engine, kernel, checks);
     checks.check(
       "R14.T2.a the lit pass's marks on the device are its twin's, its horizon refusing some, and the stable compaction writes its twin's lists byte for byte, in the draw set's order",
       ordered.missing === 0 &&
@@ -847,6 +872,309 @@ async function manyCheck(
     return listsDiffer(await deviceLists(engine, buckets, 0), twin.lists);
   } finally {
     engine.releaseBuffer(marks);
+    buckets.dispose();
+  }
+}
+
+/** The edge stand-ins' check's pages, of terrain's own layout (R14.T3.c's edge stand-ins). */
+const EDGE_PAGES = 2;
+
+/** The shape of cluster `c` of a terrain page: its blocks, strips, head runs, then fin runs. */
+function terrainShapeOf(c: number): ClusterRecord["shape"] {
+  return c < TERRAIN_BLOCKS
+    ? "terrain-block"
+    : c < TERRAIN_CLUSTERS_PER_PAGE
+      ? "terrain-skirt"
+      : c < TERRAIN_CLUSTERS_PER_PAGE + TERRAIN_HEAD_CLUSTERS
+        ? "terrain-head"
+        : "terrain-fin";
+}
+
+/** One of the edge stand-ins' check's instances: its page, sub-patch word and cull input's bits. */
+interface EdgeStandInInstance {
+  readonly page: number;
+  readonly subWord: number;
+  readonly bits: number;
+  readonly whole: boolean;
+}
+
+/** A stand-in's mask's sub-patch word, `levels` down at part (i, j). */
+function mask(levels: number, i: number, j: number): number {
+  return (TERRAIN_SUB_PATCH_MASK | subPatchWord(levels, i, j)) >>> 0;
+}
+
+/**
+ * The edge stand-ins' check's instances: page 0's four edge masks, their side runs shared; page 1's
+ * edge mask alone, its masks on opaque blocks one to three levels down, its own grid on opaque blocks,
+ * kept whole, an interior bake's mask and its whole patch.
+ */
+function edgeStandIns(): EdgeStandInInstance[] {
+  const out: EdgeStandInInstance[] = [];
+  for (const [qx, qy] of [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+  ] as const) {
+    out.push({
+      page: 0,
+      subWord: mask(1, qx, qy),
+      bits:
+        TERRAIN_INPUT_EDGE_MASK |
+        (qx === 1 ? TERRAIN_INPUT_COLUMN_RUN_SHARED : 0) |
+        (qy === 1 ? TERRAIN_INPUT_ROW_RUN_SHARED : 0),
+      whole: false,
+    });
+  }
+  out.push(
+    { page: 1, subWord: mask(1, 1, 1), bits: TERRAIN_INPUT_EDGE_MASK, whole: false },
+    { page: 1, subWord: mask(1, 0, 1), bits: TERRAIN_INPUT_SURVEYED, whole: false },
+    { page: 1, subWord: mask(2, 3, 0), bits: TERRAIN_INPUT_SURVEYED, whole: false },
+    { page: 1, subWord: mask(3, 5, 6), bits: TERRAIN_INPUT_SURVEYED, whole: false },
+    { page: 1, subWord: subPatchWord(4, 9, 2), bits: TERRAIN_INPUT_SURVEYED, whole: true },
+    { page: 1, subWord: mask(2, 1, 2), bits: 0, whole: false },
+    { page: 0, subWord: 0, bits: 0, whole: false },
+  );
+  return out;
+}
+
+/** The edge stand-ins on the device against their twin (R14.T3.c): see the module's remarks. */
+async function edgeStandInCheck(
+  engine: RenderEngine,
+  kernel: ComputeHandle,
+  checks: Checks,
+): Promise<void> {
+  const next = random(0x5eed_e5);
+  const { templates } = terrainClusterMesh();
+  const records: ClusterRecord[] = [];
+  for (let n = 0; n < EDGE_PAGES * TERRAIN_PAGE_CLUSTERS; n += 1) {
+    const c = n % TERRAIN_PAGE_CLUSTERS;
+    const roll = next();
+    const run = c >= TERRAIN_CLUSTERS_PER_PAGE;
+    records.push({
+      centreM: { x: 2_000 * (next() - 0.5), y: 2_000 * (next() - 0.5), z: 2_000 * (next() - 0.5) },
+      // A sixth no cluster, a third of the blocks and strips may discard, every run may.
+      radiusM: roll < 1 / 6 ? -1 : 1 + 300 * next(),
+      mode: "strided",
+      strideErrorBits: null,
+      templateRef: run ? terrainFinTemplateRef(c) : terrainTemplateRef(c),
+      shape: terrainShapeOf(c),
+      mayDiscard: run || roll > 2 / 3,
+      material: 0,
+    });
+  }
+  const standIns = edgeStandIns();
+  const instances = standIns.map((standIn, n) => ({
+    originM: { x: Math.fround(100 * n), y: 0, z: Math.fround(-50 * n) },
+    page: standIn.page,
+    passMask: 1,
+    unitM: 1,
+    subWord: standIn.subWord,
+    standInBits: standIn.bits,
+    whole: standIn.whole,
+  }));
+  // One camera pass of no planes at stride 1, which keeps every cluster of every instance.
+  const pass: CameraCullPass = {
+    kind: "camera",
+    planes: [],
+    toleranceRad: 0,
+    strideCap: 1,
+    horizon: null,
+    order: "appended",
+  };
+  const buckets = new ClusterBuckets(
+    engine,
+    "smoke edge stand-ins",
+    1,
+    templates,
+    templates.map(() => instances.length * TERRAIN_PAGE_CLUSTERS),
+  );
+  const made: BufferHandle[] = [];
+  const buffer = (name: string, data: ArrayBufferView): BufferHandle => {
+    const handle = engine.createBuffer({
+      name,
+      bytes: data.byteLength,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "geometry-clusters",
+    });
+    made.push(handle);
+    engine.writeBuffer(handle, 0, data);
+    return handle;
+  };
+  try {
+    const recordBytes = new DataView(new ArrayBuffer(records.length * CLUSTER_RECORD_BYTES));
+    records.forEach((record, n) => {
+      packClusterRecord(recordBytes, n * CLUSTER_RECORD_BYTES, record);
+    });
+    const bytes = 4 * INSTANCE_WORDS;
+    const words = new DataView(new ArrayBuffer(instances.length * bytes));
+    const inputs = new Uint32Array(2 * instances.length);
+    instances.forEach((instance, n) => {
+      words.setFloat32(bytes * n, instance.originM.x, true);
+      words.setFloat32(bytes * n + 4, instance.originM.y, true);
+      words.setFloat32(bytes * n + 8, instance.originM.z, true);
+      words.setUint32(bytes * n + 12, instance.page, true);
+      words.setUint32(bytes * n + 32, instance.subWord, true);
+      for (let h = 0; h < EDGE_BANDS; h += 1) {
+        words.setUint16(bytes * n + 80 + 2 * h, edgeBandHalf(-1), true);
+      }
+      inputs[2 * n] =
+        (instance.passMask | instance.standInBits | (instance.whole ? CULL_INPUT_WHOLE : 0)) >>> 0;
+      inputs[2 * n + 1] = new Uint32Array(Float32Array.of(instance.unitM).buffer)[0] ?? 0;
+    });
+    const passBytes = new ArrayBuffer(MAX_CULL_PASSES * CULL_PASS_BYTES);
+    const places = [buckets.place(0)];
+    packCullPasses([pass], places, passBytes);
+    const identity: readonly [Vec3, Vec3, Vec3] = [
+      { x: 1, y: 0, z: 0 },
+      { x: 0, y: 1, z: 0 },
+      { x: 0, y: 0, z: 1 },
+    ];
+    const paramBytes = new ArrayBuffer(CULL_PARAMS_BYTES);
+    packCullParams(
+      {
+        rotationColumns: identity,
+        instances: instances.length,
+        instanceWords: INSTANCE_WORDS,
+        clustersPerPage: TERRAIN_PAGE_CLUSTERS,
+        passes: 1,
+        templateOffsets: buckets.templateOffsets,
+        templateCapacities: buckets.capacities,
+        viewAxis: { x: 0, y: 0, z: 1 },
+        firstShape: 0,
+        discardTemplates: TERRAIN_DISCARD_TEMPLATES,
+      },
+      paramBytes,
+    );
+    const marks = engine.createBuffer({
+      name: "smoke edge stand-ins marks",
+      bytes: instances.length * TERRAIN_PAGE_CLUSTERS * 4,
+      usage: BUFFER_USAGE.STORAGE,
+      category: "geometry-clusters",
+    });
+    made.push(marks);
+    buckets.clear();
+    engine.dispatch(
+      kernel,
+      {
+        uniforms: { params: new Uint32Array(paramBytes), passes: new Uint32Array(passBytes) },
+        buffers: {
+          instance_words: buffer("smoke edge stand-ins instances", words),
+          cull_inputs: buffer("smoke edge stand-ins inputs", inputs),
+          records: buffer("smoke edge stand-ins records", recordBytes),
+          lists: buckets.lists,
+          args: buckets.args,
+          marks,
+          lods: buffer("smoke edge stand-ins lods", new Float32Array(4)),
+        },
+        sampled: {},
+        storage: {},
+      },
+      [instances.length, 1, 1],
+      "smoke edge stand-ins cull",
+    );
+    const lists = await deviceLists(engine, buckets, 0);
+    const twin = cullTwin(
+      {
+        instances,
+        records: (page, cluster) => {
+          const record = records[page * TERRAIN_PAGE_CLUSTERS + cluster];
+          if (record === undefined) {
+            throw new Error(`the check has no record ${String(cluster)} of page ${String(page)}`);
+          }
+          const at = (page * TERRAIN_PAGE_CLUSTERS + cluster) * CLUSTER_RECORD_BYTES;
+          return {
+            ...record,
+            centreM: {
+              x: recordBytes.getFloat32(at, true),
+              y: recordBytes.getFloat32(at + 4, true),
+              z: recordBytes.getFloat32(at + 8, true),
+            },
+            radiusM: recordBytes.getFloat32(at + 12, true),
+          };
+        },
+        clustersPerPage: TERRAIN_PAGE_CLUSTERS,
+        rotationColumns: identity,
+        passes: [pass],
+        places,
+        templates: templates.length,
+        viewAxis: { x: 0, y: 0, z: 1 },
+        discardTemplates: TERRAIN_DISCARD_TEMPLATES,
+      },
+      0,
+    );
+    // The device's buckets against the twin's, as sets: the kernel appends in any order.
+    let differing = 0;
+    lists.forEach((list, t) => {
+      const want = new Set(twin.get((places[0]?.bucketBase ?? 0) + t) ?? []);
+      const got = new Set(list);
+      differing += [...got].filter((e) => !want.has(e)).length;
+      differing += [...want].filter((e) => !got.has(e)).length;
+    });
+    // What each instance drew on the device, cluster by cluster, and whether in a may-discard bucket.
+    const drawn = standIns.map(() => new Map<number, boolean>());
+    lists.forEach((list, t) => {
+      for (const entry of list) {
+        drawn[Math.floor(entry / 256)]?.set(entry % 256, templates[t]?.mayDiscard === true);
+      }
+    });
+    const real = (page: number, c: number): boolean =>
+      (records[page * TERRAIN_PAGE_CLUSTERS + c]?.radiusM ?? -1) >= 0;
+    let wrong = 0;
+    const sideRuns = new Map<number, number>();
+    standIns.forEach((standIn, n) => {
+      const got = drawn[n] ?? new Map<number, boolean>();
+      const want = new Map<number, boolean>();
+      const runs = terrainMaskRuns(standIn.subWord, standIn.bits);
+      for (let c = 0; c < TERRAIN_PAGE_CLUSTERS; c += 1) {
+        const record = records[standIn.page * TERRAIN_PAGE_CLUSTERS + c];
+        const masked = terrainMaskCluster(standIn.subWord, c, standIn.bits);
+        if (masked === "none") {
+          continue;
+        }
+        if ((standIn.bits & TERRAIN_INPUT_SURVEYED) !== 0) {
+          // Its blocks and strips, every one opaque; no run.
+          if (c < TERRAIN_CLUSTERS_PER_PAGE) {
+            want.set(c, false);
+          }
+        } else if ((standIn.bits & TERRAIN_INPUT_EDGE_MASK) !== 0) {
+          // Its blocks of a cluster by their classes, its strips always may-discard, its runs.
+          if (c >= TERRAIN_BLOCKS && c < TERRAIN_CLUSTERS_PER_PAGE) {
+            want.set(c, true);
+          } else if ((c < TERRAIN_BLOCKS || runs.includes(c)) && real(standIn.page, c)) {
+            want.set(c, record?.mayDiscard === true);
+          }
+        } else if (real(standIn.page, c)) {
+          want.set(c, record?.mayDiscard === true);
+        }
+      }
+      wrong += [...want].filter(([c, discards]) => got.get(c) !== discards).length;
+      wrong += [...got.keys()].filter((c) => !want.has(c)).length;
+      if (standIn.page === 0 && (standIn.bits & TERRAIN_INPUT_EDGE_MASK) !== 0) {
+        for (const c of [106, 107, 112, 113]) {
+          sideRuns.set(c, (sideRuns.get(c) ?? 0) + (got.has(c) ? 1 : 0));
+        }
+      }
+    });
+    // Each of page 0's side runs of a cluster drawn by exactly one of its masks.
+    const twice = [...sideRuns].filter(([c, times]) => times !== (real(0, c) ? 1 : 0)).length;
+    const edgeRuns = standIns.reduce(
+      (sum, standIn, n) =>
+        sum +
+        [...(drawn[n]?.keys() ?? [])].filter(
+          (c) => c >= TERRAIN_CLUSTERS_PER_PAGE && (standIn.bits & TERRAIN_INPUT_EDGE_MASK) !== 0,
+        ).length,
+      0,
+    );
+    checks.check(
+      "R14.T3.c's edge stand-ins: the cull on the device draws an edge mask's blocks of a cluster, its 16 strips by the may-discard template and its quadrant's runs, a shared side run once, and a stand-in on opaque blocks as an interior bake's, as its twin does",
+      differing === 0 && wrong === 0 && twice === 0 && edgeRuns > 0,
+      `${String(lists.reduce((sum, list) => sum + list.length, 0))} entries of ${String(standIns.length)} instances, ${String(edgeRuns)} of them edge masks' runs; ${String(differing)} differing from the twin's, ${String(wrong)} from each form's own, ${String(twice)} side runs not drawn once`,
+    );
+  } finally {
+    for (const handle of made) {
+      engine.releaseBuffer(handle);
+    }
     buckets.dispose();
   }
 }

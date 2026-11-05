@@ -164,6 +164,7 @@ describe("the spike report's check", () => {
         terrainBudget: "patches",
         standInStrides: "off",
         hiddenMarks: "drawn",
+        edgeStandIns: "off",
       },
       segments: [
         {
@@ -183,7 +184,8 @@ describe("the spike report's check", () => {
     // pool's bytes (T5.b), which read as 0, the meshes' tolerance (T5.f), 0 px, the edge patches'
     // lever (T1.g), off, the camera's strides (T3.c), off, the occlusion (T3.d), off, the lit
     // selection's budget (T3.e), its patches, the stand-ins' strides (T3.c's stand-ins), off, and
-    // the overlay's hidden marks (R10.T16.c), drawn.
+    // the overlay's hidden marks (R10.T16.c), drawn, and the edge bakes' stand-ins (T3.c's edge
+    // stand-ins), off.
     const {
       figureClusters: _figureClusters,
       hullClusters: _hullClusters,
@@ -196,6 +198,7 @@ describe("the spike report's check", () => {
       terrainBudget: _terrainBudget,
       standInStrides: _standInStrides,
       hiddenMarks: _hiddenMarks,
+      edgeStandIns: _edgeStandIns,
       ...beforeT4
     } = geometry.settings;
     expect([

@@ -436,7 +436,7 @@ function litOf(stats: ReadonlyArray<ClusterPassStats> | null, pass: number): num
 }
 
 /** No patches drawn, where a frame gave no counts. */
-const NO_DRAWN_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0 };
+const NO_DRAWN_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0, edgeStandIns: 0 };
 
 /**
  * Steps `pass` from `pose`, with `grounded`'s contacts, and makes the frame, as `VIEW`'s loop and
@@ -1545,7 +1545,7 @@ export async function checkTerrainFrame(
         finTies.pixels === 0 &&
         edgeAfter !== null &&
         edgeAfter < edgeBefore,
-      `${String(finPatches.interior)} interior and ${String(finPatches.edge)} edge patches, ${String(finPatches.fins)} of them on the cluster path; lit triangles ${String(beforeTriangles)} with the edge patches by the lit mesh, ${String(afterTriangles)} by clusters; the edge patches' ${String(edgeBefore)} by the lit mesh, ${String(edgeAfter)} by clusters, ${edgeAfter === null ? "—" : (edgeAfter / edgeBefore).toFixed(4)} of them; digests ${bytesDigest(byLitMesh.texels)} by the lit mesh, ${bytesDigest(byFins.texels)} by clusters; tie pixels ${String(finTies.pixels)}, the largest difference ${finTies.largest.toExponential(3)}`,
+      `${String(finPatches.interior)} interior and ${String(finPatches.edge)} edge patches, ${String(finPatches.fins)} of them on the cluster path and ${String(finPatches.edgeStandIns)} edge bakes' stand-ins there (R14.T3.c's edge stand-ins); lit triangles ${String(beforeTriangles)} with the edge patches by the lit mesh, ${String(afterTriangles)} by clusters; the edge patches' ${String(edgeBefore)} by the lit mesh, ${String(edgeAfter)} by clusters, ${edgeAfter === null ? "—" : (edgeAfter / edgeBefore).toFixed(4)} of them; digests ${bytesDigest(byLitMesh.texels)} by the lit mesh, ${bytesDigest(byFins.texels)} by clusters; tie pixels ${String(finTies.pixels)}, the largest difference ${finTies.largest.toExponential(3)}`,
     );
 
     // R14.T3.c: the lit pass's camera strides, every cluster at the coarsest stride its level's

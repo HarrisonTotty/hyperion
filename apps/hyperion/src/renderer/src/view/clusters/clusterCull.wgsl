@@ -60,6 +60,15 @@
 //   patch's own blocks over its area keeps those alone, by their spheres, and its strips along the
 //   set's sides whatever theirs, which do not bound them (`mask_cluster`; `clusters/terrain.ts`'
 //   `terrainMaskCluster`).
+// - _An edge bake's stand-in_ (R14.T3.c's edge stand-ins; its cull input's bits 27 to 30,
+//   `clusters/terrain.ts`' TERRAIN_INPUT_STAND_IN_BITS): one whose area lies on blocks all opaque
+//   in its slot's records (INPUT_SURVEYED) takes its blocks and strips opaque and real, whatever
+//   their records say, and none of its fin clusters, as an interior bake's stand-in; a mask one level
+//   down across the survey's edge (INPUT_EDGE_MASK) its blocks by their records, its strips real and
+//   may-discard, whose records, its slot's edge strips', do not class them, and its quadrant's six
+//   runs by their records and spheres, a side run left to its sibling where its bit says so
+//   (INPUT_COLUMN_RUN_SHARED, INPUT_ROW_RUN_SHARED) (`record_class`, `mask_run`;
+//   `terrainRecordClass`, `terrainMaskRuns`).
 // - _The DAG cut_ (R14.T4.b, a record with the flags' bit 4): kept only where its own error, `f32`
 //   in its error bytes' first word, is within the pass's tolerance at its group's sphere, the
 //   record's own, and its parent's, in the second, is not at its parent group's, its `lods` entry
@@ -160,6 +169,12 @@ const PASS_CAMERA_LATE : u32 = 5u;
 const NO_MARK : u32 = 0xffffffffu;
 // The cull input's bit of an instance each pass it enters keeps whole (`cull.ts`' CULL_INPUT_WHOLE).
 const INPUT_WHOLE : u32 = 0x80000000u;
+// Its bits of an edge bake's stand-in (`clusters/terrain.ts`' TERRAIN_INPUT_SURVEYED,
+// TERRAIN_INPUT_EDGE_MASK, TERRAIN_INPUT_COLUMN_RUN_SHARED and TERRAIN_INPUT_ROW_RUN_SHARED).
+const INPUT_SURVEYED : u32 = 0x40000000u;
+const INPUT_EDGE_MASK : u32 = 0x20000000u;
+const INPUT_COLUMN_RUN_SHARED : u32 = 0x10000000u;
+const INPUT_ROW_RUN_SHARED : u32 = 0x08000000u;
 // The flags' DAG-cut and may-discard bits (`record.ts`' CLUSTER_FLAG_DAG and
 // CLUSTER_FLAG_MAY_DISCARD), and a shape with no may-discard template (`cullPass.ts`').
 const CLUSTER_FLAG_DAG : u32 = 16u;
@@ -485,10 +500,11 @@ fn cluster_bands(scale : vec2f, page : u32, c : u32, base : u32, sub : u32) -> v
 // `clusters/terrain.ts`' TERRAIN_SUB_PATCH_MASK: a sub-patch word's bit of a stand-in's mask.
 const SUB_PATCH_MASK : u32 = 0x80000000u;
 
-// How an instance of sub-patch word `sub` draws its page's cluster `c` (`clusters/terrain.ts`'
-// `terrainMaskCluster`): 1 by its sphere, for every cluster of one that is not a mask and a mask's
-// own blocks; 2 whatever its sphere, for a mask's strips along its set's sides; 0 for any other.
-fn mask_cluster(sub : u32, c : u32) -> u32 {
+// How an instance of sub-patch word `sub` and cull input `bits` draws its page's cluster `c`
+// (`clusters/terrain.ts`' `terrainMaskCluster`): 1 by its sphere, for every cluster of one that is
+// not a mask, a mask's own blocks and an edge mask's runs (`mask_run`); 2 whatever its sphere, for
+// a mask's strips along its set's sides; 0 for any other.
+fn mask_cluster(sub : u32, c : u32, bits : u32) -> u32 {
   if ((sub & SUB_PATCH_MASK) == 0u) {
     return 1u;
   }
@@ -501,7 +517,46 @@ fn mask_cluster(sub : u32, c : u32) -> u32 {
   if (c < 96u) {
     return select(0u, 2u, (c - 64u) % 8u < side);
   }
-  return 0u;
+  return select(0u, 1u, mask_run(sub, c, bits));
+}
+
+// Whether fin cluster `c` (96 up) is one of the six runs of its quadrant (i, j) that an edge mask one
+// level down of sub-patch word `sub` and cull input `bits` draws (`clusters/terrain.ts`'
+// `terrainMaskRuns`): its two interior fins, its two side fins on column and row 32 but where its
+// bit leaves one to its sibling, and its two heads on its slot's patch's edges.
+fn mask_run(sub : u32, c : u32, bits : u32) -> bool {
+  if ((bits & INPUT_EDGE_MASK) == 0u || (sub & 31u) != 1u) {
+    return false;
+  }
+  let q = vec2u((sub >> 5u) & 1u, (sub >> 18u) & 1u);
+  if (c == 106u + q.y) {
+    return (bits & INPUT_COLUMN_RUN_SHARED) == 0u;
+  }
+  if (c == 112u + q.x) {
+    return (bits & INPUT_ROW_RUN_SHARED) == 0u;
+  }
+  let head0 = select(100u + (1u - q.x), 96u + q.x, q.y == 0u);
+  let head1 = select(102u + (1u - q.y), 98u + q.y, q.x == 1u);
+  return c == 104u + 4u * q.x + q.y || c == 110u + 4u * q.y + q.x || c == head0 || c == head1;
+}
+
+// Whether record `record` of cluster `c` is a cluster at all, and its flags as the cull takes them,
+// of an instance of cull input `bits` (`clusters/terrain.ts`' `terrainRecordClass`): an edge bake's
+// stand-in on opaque blocks its blocks and strips real and opaque and no fin cluster; an edge
+// mask's strip real and may-discard; else the record's own.
+struct RecordClass {
+  real : bool,
+  flags : u32,
+}
+
+fn record_class(record : ClusterRecord, c : u32, bits : u32) -> RecordClass {
+  if ((bits & INPUT_SURVEYED) != 0u) {
+    return RecordClass(c < 96u, record.flags & ~CLUSTER_FLAG_MAY_DISCARD);
+  }
+  if ((bits & INPUT_EDGE_MASK) != 0u && c >= 64u && c < 96u) {
+    return RecordClass(true, record.flags | CLUSTER_FLAG_MAY_DISCARD);
+  }
+  return RecordClass(record.radius >= 0.0, record.flags);
 }
 
 // The block of its set a stand-in's mask's strip `c` (64 to 95) of sub-patch word `sub` hangs
@@ -708,8 +763,9 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
     let record = records[at];
     let centre = origin + page_to_instance(record.centre);
     let shape = record.flags & 0xfu;
-    let real = record.radius >= 0.0;
-    let masked = mask_cluster(sub_word, c);
+    let taken = record_class(record, c, input.x);
+    let real = taken.real;
+    let masked = mask_cluster(sub_word, c, input.x);
     let dag = (record.flags & CLUSTER_FLAG_DAG) != 0u;
     var parent_centre = centre;
     var parent_radius = record.radius;
@@ -752,7 +808,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
         level = camera_stride_level(cull_pass, stride_record, bands, quadrant, hold_fades, distance, fraction);
         over = drawn_over(cull_pass, stride_record, scale, level, distance);
       }
-      let t = template_of(cull_pass, shape, record.flags, level);
+      let t = template_of(cull_pass, shape, taken.flags, level);
       let mark = instance * clusters + c;
       if (cull_pass.header.x == PASS_CAMERA_ORDERED) {
         let drawn = keeps && t < params.templates;

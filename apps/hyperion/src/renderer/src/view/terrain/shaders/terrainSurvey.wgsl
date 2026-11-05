@@ -121,6 +121,20 @@ fn survey_kept_at(slot : u32, patch_uv : vec2f, kind : u32) -> bool {
   }
 }
 
+// `survey_kept_at` for a fragment of an instance of sub-patch word `sub` (plan R14, R14.T3.c's edge
+// stand-ins; `clusters/terrain.ts`' `maskFootSurveyPlace`): a stand-in's mask's foot strip (`sub`'s
+// bit 31, `clusters/terrain.ts`' TERRAIN_SUB_PATCH_MASK), along its set's side, reads its state half
+// a quad inside the set, the set taken as a patch, so that a strip on the set's far sides reads its
+// own cell, not its neighbour's; any other fragment as `survey_kept_at`, bit for bit.
+fn survey_kept_in(slot : u32, patch_uv : vec2f, kind : u32, sub : u32) -> bool {
+  if (kind != LIT_SKIRT_FOOT || (sub & 0x80000000u) == 0u) {
+    return survey_kept_at(slot, patch_uv, kind);
+  }
+  let quads = 64.0 / f32(1u << (sub & 31u));
+  let lo = vec2f(f32((sub >> 5u) & 0x1fffu), f32((sub >> 18u) & 0x1fffu)) * quads;
+  return survey_surveyed(slot, clamp(patch_uv * 64.0, lo + vec2f(0.5), lo + vec2f(quads - 0.5)));
+}
+
 // The older bake's own and morph heights at the place `at` of its slot's grid for a rebake's fade
 // (`terrainPatch.wgsl`'s `rebakeOf`; R10.T16.i): the datum's 0 for a rise from the reference
 // surface, and where the older bake's survey mask held the place unsurveyed, so that newly

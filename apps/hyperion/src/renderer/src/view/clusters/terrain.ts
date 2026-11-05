@@ -43,9 +43,17 @@
  * side of it agree along it; else it may discard. The survey alone decides, never the heights,
  * which a rebake's or a rise's fade mixes from another surface (plan R10, R10.T16.i). An interior
  * patch's records are its blocks and strips, opaque, and no fin cluster.
+ *
+ * **An edge bake's stand-ins** (plan R14, R14.T3.c's edge stand-ins; `GeometrySettings.edgeStandIns`,
+ * {@link edgeStandInForm}): the records are written with the slot's opaque blocks
+ * ({@link TerrainOpaqueBlocks}). A stand-in whose area lies on blocks all opaque draws as an interior
+ * bake's, its records' classes taken so by its cull input ({@link TERRAIN_INPUT_SURVEYED}); one a
+ * level down across the survey's edge draws as an edge mask ({@link TERRAIN_INPUT_EDGE_MASK}): its
+ * blocks by their classes, its strips by the may-discard template, each foot's survey read inside
+ * its set ({@link maskFootSurveyPlace}), and its quadrant's runs ({@link terrainMaskRuns}).
  */
 
-import { type PatchKey } from "../terrain/patchKey";
+import { type PatchKey, patchKeyString } from "../terrain/patchKey";
 import { patchBounds } from "../terrain/bounds";
 import type { PlanetGeometry } from "../terrain/planet";
 import type { Vec3 } from "../../geometry/vec3";
@@ -279,13 +287,19 @@ export const TERRAIN_MASK_LEVELS = 3;
 export type TerrainMaskDraw = "sphere" | "whole" | "none";
 
 /**
- * How a terrain instance of sub-patch word `subWord` draws its page's cluster `cluster`
+ * How a terrain instance of sub-patch word `subWord` and stand-in bits `inputBits` (its cull
+ * input's {@link TERRAIN_INPUT_STAND_IN_BITS}) draws its page's cluster `cluster`
  * (`clusterCull.wgsl`'s `mask_cluster`): `sphere` for every cluster of an instance that is not a
- * mask ({@link TERRAIN_SUB_PATCH_MASK}) and for a mask's own blocks; `whole` for one of a mask's
- * strips, the first (8 ÷ 2^levels) of each side's, which its sphere, an edge strip's, does not
- * bound; `none` for any other.
+ * mask ({@link TERRAIN_SUB_PATCH_MASK}), for a mask's own blocks, and for an edge mask's runs
+ * ({@link TERRAIN_INPUT_EDGE_MASK}, {@link terrainMaskRuns}); `whole` for one of a mask's strips,
+ * the first (8 ÷ 2^levels) of each side's, which its sphere, an edge strip's, does not bound; `none`
+ * for any other.
  */
-export function terrainMaskCluster(subWord: number, cluster: number): TerrainMaskDraw {
+export function terrainMaskCluster(
+  subWord: number,
+  cluster: number,
+  inputBits = 0,
+): TerrainMaskDraw {
   if ((subWord & TERRAIN_SUB_PATCH_MASK) === 0) {
     return "sphere";
   }
@@ -300,7 +314,251 @@ export function terrainMaskCluster(subWord: number, cluster: number): TerrainMas
   if (cluster < TERRAIN_CLUSTERS_PER_PAGE) {
     return (cluster - TERRAIN_BLOCKS) % BLOCKS_PER_SIDE < side ? "whole" : "none";
   }
-  return "none";
+  return terrainMaskRuns(subWord, inputBits).includes(cluster) ? "sphere" : "none";
+}
+
+/**
+ * A terrain instance's cull-input bit (plan R14, R14.T3.c's edge stand-ins; `clusterCull.wgsl`'s
+ * INPUT_SURVEYED) of an edge bake's stand-in whose area lies on blocks all opaque in its slot's
+ * records ({@link standInOnOpaqueBlocks}): its page's blocks and strips draw opaque and real,
+ * whatever their records say, and none of its fin clusters, as an interior bake's stand-in does
+ * ({@link terrainRecordClass}). Its area, every fragment of it surveyed, draws no head or fin; and an
+ * own grid's records are its slot's blocks', not its own area's, which they would mis-class.
+ */
+export const TERRAIN_INPUT_SURVEYED = 0x4000_0000;
+
+/**
+ * A terrain instance's cull-input bit (R14.T3.c's edge stand-ins; the kernel's INPUT_EDGE_MASK) of an
+ * edge bake's stand-in drawn as a mask one level down, across the survey's edge: its blocks by its
+ * slot's classes, its 16 strips always, by the may-discard template ({@link terrainRecordClass}),
+ * and its quadrant's six fin and head runs by their classes ({@link terrainMaskRuns}).
+ */
+export const TERRAIN_INPUT_EDGE_MASK = 0x2000_0000;
+
+/**
+ * An edge mask's cull-input bit (the kernel's INPUT_COLUMN_RUN_SHARED): the side fin on column 32
+ * of its quadrant is its sibling's across it, a level-1 edge mask of the same slot this frame of
+ * quadrant x 0, which draws it, so that the run is drawn once.
+ */
+export const TERRAIN_INPUT_COLUMN_RUN_SHARED = 0x1000_0000;
+
+/** As {@link TERRAIN_INPUT_COLUMN_RUN_SHARED}, for the side fin on row 32, drawn by quadrant y 0. */
+export const TERRAIN_INPUT_ROW_RUN_SHARED = 0x0800_0000;
+
+/** The cull input's bits of an edge bake's stand-in, all four. */
+export const TERRAIN_INPUT_STAND_IN_BITS =
+  TERRAIN_INPUT_SURVEYED |
+  TERRAIN_INPUT_EDGE_MASK |
+  TERRAIN_INPUT_COLUMN_RUN_SHARED |
+  TERRAIN_INPUT_ROW_RUN_SHARED;
+
+/**
+ * The fin clusters an edge mask of sub-patch word `subWord` draws by their classes (plan R14,
+ * R14.T3.c's edge stand-ins; `clusterCull.wgsl`'s `mask_run`), where `inputBits` holds
+ * {@link TERRAIN_INPUT_EDGE_MASK} and the mask lies one level down: of its quadrant (qx, qy), the
+ * part (i, j), the two interior fins (column 16 + 32 qx, half qy; row 16 + 32 qy, half qx), the two
+ * side fins on column and row 32 (half qy, half qx), each but where its bit says its sibling draws it
+ * ({@link TERRAIN_INPUT_COLUMN_RUN_SHARED}, {@link TERRAIN_INPUT_ROW_RUN_SHARED}), and the two heads
+ * on A's edges that bound it. Each run lies inside the quadrant or along its side, so that its
+ * slot's class is exact for it: a fin is the wall from the ground to the datum where the cells either
+ * side of its line differ, and on an interior side the side fin is the only piece that builds it.
+ * None for any other instance.
+ */
+export function terrainMaskRuns(subWord: number, inputBits: number): readonly number[] {
+  if (
+    (subWord & TERRAIN_SUB_PATCH_MASK) === 0 ||
+    (subWord & 31) !== 1 ||
+    (inputBits & TERRAIN_INPUT_EDGE_MASK) === 0
+  ) {
+    return [];
+  }
+  const qx = (subWord >>> 5) & 1;
+  const qy = (subWord >>> 18) & 1;
+  const fins = TERRAIN_CLUSTERS_PER_PAGE + TERRAIN_HEAD_CLUSTERS;
+  const runs = [
+    // The interior fins: column 16 + 32 qx (line 2 qx) and row 16 + 32 qy (line 3 + 2 qy).
+    fins + 4 * qx + qy,
+    fins + 6 + 4 * qy + qx,
+    // The heads on A's edges: edge 0 where qy = 0, 1 where qx = 1, 2 where qy = 1, 3 where qx = 0,
+    // each edge's halves from its first vertex, anticlockwise.
+    TERRAIN_CLUSTERS_PER_PAGE + (qy === 0 ? qx : 4 + (1 - qx)),
+    TERRAIN_CLUSTERS_PER_PAGE + (qx === 1 ? 2 + qy : 6 + (1 - qy)),
+  ];
+  if ((inputBits & TERRAIN_INPUT_COLUMN_RUN_SHARED) === 0) {
+    runs.push(fins + 2 + qy);
+  }
+  if ((inputBits & TERRAIN_INPUT_ROW_RUN_SHARED) === 0) {
+    runs.push(fins + 8 + qx);
+  }
+  return runs.toSorted((a, b) => a - b);
+}
+
+/** A cluster record's class as the cull takes it: a cluster at all, and drawn by its may-discard form. */
+export interface TerrainRecordClass {
+  readonly real: boolean;
+  readonly mayDiscard: boolean;
+}
+
+/**
+ * How the cull takes the record of cluster `cluster`, of class `record`, for a terrain instance of
+ * stand-in bits `inputBits` (plan R14, R14.T3.c's edge stand-ins; `clusterCull.wgsl`'s
+ * `record_class`): under {@link TERRAIN_INPUT_SURVEYED} a block or strip real and opaque and a fin
+ * cluster none; under {@link TERRAIN_INPUT_EDGE_MASK} a strip real and may-discard, its foot's
+ * survey read half a quad inside its set (`terrainSurvey.wgsl`'s `survey_kept_in`,
+ * {@link maskFootSurveyPlace}), which its record, its slot's edge strip's, does not class; else
+ * its record's.
+ */
+export function terrainRecordClass(
+  record: TerrainRecordClass,
+  cluster: number,
+  inputBits: number,
+): TerrainRecordClass {
+  if ((inputBits & TERRAIN_INPUT_SURVEYED) !== 0) {
+    return { real: cluster < TERRAIN_CLUSTERS_PER_PAGE, mayDiscard: false };
+  }
+  if (
+    (inputBits & TERRAIN_INPUT_EDGE_MASK) !== 0 &&
+    cluster >= TERRAIN_BLOCKS &&
+    cluster < TERRAIN_CLUSTERS_PER_PAGE
+  ) {
+    return { real: true, mayDiscard: true };
+  }
+  return record;
+}
+
+/**
+ * The place the survey is read at for a foot strip's fragment at (x, y) of its slot's patch, quads,
+ * of an instance of sub-patch word `subWord` (plan R14, R14.T3.c's edge stand-ins;
+ * `terrainSurvey.wgsl`'s `survey_kept_in`): half a quad inside its patch, as a skirt's state is
+ * the cell inside the patch at its place along the edge; a stand-in's mask's half a quad inside its
+ * set, the set taken as a patch, so that a strip on the set's far sides reads its own cell, not its
+ * neighbour's.
+ */
+export function maskFootSurveyPlace(
+  subWord: number,
+  x: number,
+  y: number,
+): readonly [number, number] {
+  let lo: readonly [number, number] = [0, 0];
+  let quads = PATCH_QUADS;
+  if ((subWord & TERRAIN_SUB_PATCH_MASK) !== 0) {
+    quads = PATCH_QUADS / 2 ** (subWord & 31);
+    lo = [((subWord >>> 5) & 0x1fff) * quads, ((subWord >>> 18) & 0x1fff) * quads];
+  }
+  const m = SURVEY_MARGIN_QUADS;
+  return [
+    Math.min(lo[0] + quads - m, Math.max(lo[0] + m, x)),
+    Math.min(lo[1] + quads - m, Math.max(lo[1] + m, y)),
+  ];
+}
+
+/**
+ * How an edge bake's stand-in draws (plan R14, R14.T3.c's edge stand-ins; {@link edgeStandInForm}):
+ * by the lit mesh, as before; as its slot's edge patch, whole; as an interior bake's stand-in, a
+ * mask or an own grid on blocks all opaque ({@link TERRAIN_INPUT_SURVEYED}); or as an edge mask one
+ * level down across the survey's edge ({@link TERRAIN_INPUT_EDGE_MASK}).
+ */
+export type EdgeStandInForm = "lit-mesh" | "edge-patch" | "surveyed" | "edge-mask";
+
+/**
+ * The form an edge bake's stand-in of sub-patch word `subWord` (`gpu/uniforms.ts`' `subPatchOf`, 0
+ * for one drawn whole) takes under `GeometrySettings.edgeStandIns` `setting` (R14.T3.c's edge
+ * stand-ins), its slot's opaque blocks `opaque` (`null` with no records) and `masks`, whether the
+ * frame draws stand-ins as masks: none where `off`; a whole one as its slot's edge patch, exactly,
+ * in every word; a sub-patch on blocks all opaque ({@link standInOnOpaqueBlocks}) as an interior
+ * bake's; under `masks`, one a level down across the survey's edge as an edge mask; any other by
+ * the lit mesh (levels 2 to 3 across the edge among them, whose runs would overhang the set).
+ */
+export function edgeStandInForm(
+  setting: "off" | "surveyed" | "masks",
+  subWord: number,
+  opaque: TerrainOpaqueBlocks | null,
+  masks: boolean,
+): EdgeStandInForm {
+  const levels = subWord & 31;
+  if (setting === "off") {
+    return "lit-mesh";
+  }
+  if (levels === 0) {
+    return "edge-patch";
+  }
+  if (opaque !== null && standInOnOpaqueBlocks(opaque, subWord)) {
+    return "surveyed";
+  }
+  return setting === "masks" && masks && levels === 1 && opaque !== null ? "edge-mask" : "lit-mesh";
+}
+
+/** An edge mask's record this frame (R14.T3.c's edge stand-ins; {@link shareMaskRuns}). */
+export interface EdgeMaskRecord {
+  /** The area it draws, one level below its slot's patch. */
+  readonly area: PatchKey;
+  /** Its interior record's index. */
+  readonly record: number;
+}
+
+/**
+ * Sets each edge mask's side-run bits in `bits` (its records' cull inputs' stand-in bits) from this
+ * frame's edge masks `masks`, keyed by their areas' `patchKeyString` (R14.T3.c's edge stand-ins):
+ * where both sibling quadrants across column 32 of one slot's patch are edge masks, the one of
+ * quadrant x 1 leaves the run to the one of x 0 ({@link TERRAIN_INPUT_COLUMN_RUN_SHARED}), and
+ * across row 32 the one of y 1 to y 0 ({@link TERRAIN_INPUT_ROW_RUN_SHARED}), so that each run is
+ * drawn once: the two masks' strides place their sides apart, and two walls drawn there would
+ * z-fight. Siblings one level down share their slot, the patch above both.
+ */
+export function shareMaskRuns(masks: ReadonlyMap<string, EdgeMaskRecord>, bits: number[]): void {
+  for (const { area, record } of masks.values()) {
+    let shared = 0;
+    if ((area.i & 1) === 1 && masks.has(patchKeyString({ ...area, i: area.i - 1 }))) {
+      shared |= TERRAIN_INPUT_COLUMN_RUN_SHARED;
+    }
+    if ((area.j & 1) === 1 && masks.has(patchKeyString({ ...area, j: area.j - 1 }))) {
+      shared |= TERRAIN_INPUT_ROW_RUN_SHARED;
+    }
+    bits[record] = ((bits[record] ?? 0) | shared) >>> 0;
+  }
+}
+
+/**
+ * A slot's opaque blocks (plan R14, R14.T3.c's edge stand-ins), written with its records
+ * ({@link writeTerrainClusterRecords}): bit n % 32 of word ⌊n ÷ 32⌋ set for block n (8 by + bx)
+ * whose every fragment the survey keeps, its record opaque; both words all set for an interior
+ * patch's.
+ */
+export type TerrainOpaqueBlocks = readonly [low: number, high: number];
+
+/** An interior patch's {@link TerrainOpaqueBlocks}: every block opaque. */
+export const ALL_BLOCKS_OPAQUE: TerrainOpaqueBlocks = [0xffff_ffff, 0xffff_ffff];
+
+/** Whether block `block` (0 to 63) is opaque in `opaque`. */
+export function blockOpaque(opaque: TerrainOpaqueBlocks, block: number): boolean {
+  const word = block < 32 ? opaque[0] : opaque[1];
+  return ((word >>> (block % 32)) & 1) === 1;
+}
+
+/**
+ * Whether a stand-in of sub-patch word `subWord` (`gpu/uniforms.ts`' `subPatchWord`: its levels
+ * below its slot's patch and its part there) lies on blocks all opaque in `opaque` (R14.T3.c's edge
+ * stand-ins): its area's blocks, the 4 × 4, 2 × 2 or 1 × 1 set one to three levels down, or the one
+ * block that holds a deeper area. Such an edge bake's stand-in is wholly surveyed, T1.g's half-quad
+ * margin with it, and draws as an interior bake's ({@link TERRAIN_INPUT_SURVEYED}). The whole patch
+ * (levels 0) asks every block.
+ */
+export function standInOnOpaqueBlocks(opaque: TerrainOpaqueBlocks, subWord: number): boolean {
+  const levels = subWord & 31;
+  const i = (subWord >>> 5) & 0x1fff;
+  const j = (subWord >>> 18) & 0x1fff;
+  const deep = Math.max(0, levels - TERRAIN_MASK_LEVELS);
+  const side = BLOCKS_PER_SIDE >> Math.min(levels, TERRAIN_MASK_LEVELS);
+  const bx0 = (i >>> deep) * side;
+  const by0 = (j >>> deep) * side;
+  for (let by = by0; by < by0 + side; by += 1) {
+    for (let bx = bx0; bx < bx0 + side; bx += 1) {
+      if (!blockOpaque(opaque, BLOCKS_PER_SIDE * by + bx)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /**
@@ -500,6 +758,7 @@ export function terrainClusterSurvey(packed: Uint8Array, cluster: number): Clust
  * body-fixed axes, strided, with the bake's measured errors where it has them, opaque, may-discard
  * or no cluster by the slot's survey (plan R14, R14.T1.g).
  *
+ * @returns The slot's opaque blocks, as its records class them (R14.T3.c's edge stand-ins).
  * @throws RangeError for measured errors that are not four a cluster of
  *   {@link TERRAIN_CLUSTERS_PER_PAGE}.
  */
@@ -508,7 +767,7 @@ export function writeTerrainClusterRecords(
   source: TerrainClusterSource,
   out: DataView,
   offsetBytes: number,
-): void {
+): TerrainOpaqueBlocks {
   const { key, originM, heightRangeM, skirtDepthM, clusterErrors, surveyMask } = source;
   if (clusterErrors !== undefined && clusterErrors.length !== 4 * TERRAIN_CLUSTERS_PER_PAGE) {
     throw new RangeError(
@@ -535,6 +794,7 @@ export function writeTerrainClusterRecords(
       ),
     );
   }
+  const opaque = [0, 0];
   for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
     const place = terrainClusterPlace(cluster);
     let sphere: { readonly centreM: Vec3; readonly radiusM: number };
@@ -549,6 +809,9 @@ export function writeTerrainClusterRecords(
     }
     const at = 4 * cluster;
     const survey = surveyMask === undefined ? "whole" : terrainClusterSurvey(surveyMask, cluster);
+    if (survey === "whole" && cluster < TERRAIN_BLOCKS) {
+      opaque[cluster >> 5] = ((opaque[cluster >> 5] ?? 0) | (1 << (cluster % 32))) >>> 0;
+    }
     packClusterRecord(out, offsetBytes + cluster * CLUSTER_RECORD_BYTES, {
       centreM: sphere.centreM,
       radiusM: survey === "none" ? -1 : sphere.radiusM,
@@ -601,6 +864,7 @@ export function writeTerrainClusterRecords(
       material: 0,
     });
   }
+  return [opaque[0] ?? 0, opaque[1] ?? 0];
 }
 
 /** The quarter of its patch, (qi, qj), that holds fin place `place`'s run, its line on its side. */

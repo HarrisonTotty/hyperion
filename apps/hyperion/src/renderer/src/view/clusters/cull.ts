@@ -44,7 +44,7 @@ import {
   type StrideScale,
 } from "./strides";
 import { STRIDES } from "./templates";
-import { terrainMaskCluster } from "./terrain";
+import { terrainMaskCluster, terrainRecordClass } from "./terrain";
 
 /**
  * The plain cull's DAG LOD spheres (binding 8; R14.T4.b), and its stand-ins for the two-pass
@@ -156,6 +156,13 @@ export interface CullInstance {
    * page's own blocks (plan R14, Design note 19; `terrain.ts`' `terrainMaskCluster`).
    */
   readonly subWord?: number;
+  /**
+   * Its cull input's bits of an edge bake's stand-in (plan R14, R14.T3.c's edge stand-ins;
+   * `terrain.ts`' `TERRAIN_INPUT_STAND_IN_BITS`): its records' classes taken as an interior bake's
+   * (`TERRAIN_INPUT_SURVEYED`), or as an edge mask's, with its quadrant's runs
+   * (`TERRAIN_INPUT_EDGE_MASK`, `terrainRecordClass`, `terrainMaskCluster`); absent, 0.
+   */
+  readonly standInBits?: number;
 }
 
 /** What the two-pass occlusion's twin reads of a dispatch (T3.d; `clusterCull.wgsl`'s head). */
@@ -681,7 +688,8 @@ function templateOf(
   centreM: Vec3,
 ): number {
   const code = CLUSTER_SHAPE_CODE[record.shape];
-  const discarding = record.mayDiscard ? input.discardTemplates?.[code] : undefined;
+  const { mayDiscard } = recordClassOf(record, cluster, instance);
+  const discarding = mayDiscard ? input.discardTemplates?.[code] : undefined;
   if (discarding !== undefined && discarding !== NO_DISCARD_TEMPLATE) {
     return discarding;
   }
@@ -694,6 +702,23 @@ function templateOf(
         ? cameraPassStrideLevel(pass, at.record, cluster, instance, input, at.centreM)
         : strideLevel(pass, instance.unitM);
   return shape < 0 ? Infinity : shape * STRIDES.length + level;
+}
+
+/**
+ * How the cull takes `record` of cluster `cluster` for `instance` (`clusterCull.wgsl`'s
+ * `record_class`): a cluster at all (a radius of 0 or more) and may discard, as its record says,
+ * but as an edge bake's stand-in's bits class it (`terrain.ts`' `terrainRecordClass`).
+ */
+function recordClassOf(
+  record: ClusterRecord,
+  cluster: number,
+  instance: CullInstance,
+): { readonly real: boolean; readonly mayDiscard: boolean } {
+  return terrainRecordClass(
+    { real: record.radiusM >= 0, mayDiscard: record.mayDiscard },
+    cluster,
+    instance.standInBits ?? 0,
+  );
 }
 
 /**
@@ -711,9 +736,9 @@ function recordKept(
   centreM: Vec3,
   slackScale: number,
 ): boolean {
-  const masked = terrainMaskCluster(instance.subWord ?? 0, cluster);
+  const masked = terrainMaskCluster(instance.subWord ?? 0, cluster, instance.standInBits ?? 0);
   if (
-    !(record.radiusM >= 0) ||
+    !recordClassOf(record, cluster, instance).real ||
     (instance.passMask & (1 << p)) === 0 ||
     masked === "none" ||
     (instance.whole !== true &&
@@ -773,7 +798,7 @@ function lateSees(
 ): boolean {
   return (
     instance.whole === true ||
-    terrainMaskCluster(instance.subWord ?? 0, cluster) === "whole" ||
+    terrainMaskCluster(instance.subWord ?? 0, cluster, instance.standInBits ?? 0) === "whole" ||
     occlusion.refuses === null ||
     !occlusion.refuses(centreM, radiusM)
   );

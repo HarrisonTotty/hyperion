@@ -274,6 +274,11 @@ export interface GeometryOverride {
   readonly standInStrides?: "off" | "own-grids" | "all";
   /** R10.T16.c: the overlay's marks a body's ground hides drawn, or culled with the ground's depth. */
   readonly hiddenMarks?: "drawn" | "culled";
+  /**
+   * R14.T3.c's edge stand-ins: an edge bake's stand-ins by the lit mesh, the exact forms on the
+   * cluster path, or level-1 masks across the survey's edge too.
+   */
+  readonly edgeStandIns?: "off" | "surveyed" | "masks";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */
