@@ -343,9 +343,10 @@ fn camera_black_sky_record(
 /// same field at version 21).
 const RANGE_EXPECTED: (f64, f64) = (29_545.0, 8_170.0);
 
-/// The systems `range_500ly_floor_d` realises within 500 ly at version 21, which the bench asserts:
-/// 29,412 of D and 8,256 of E (R06.T17's re-measure; 37,675 at version 15).
-const RANGE_REALISED: f64 = 37_668.0;
+/// The systems `range_500ly_floor_d` realises within 500 ly at version 27, which the bench asserts:
+/// 28,299 of D and 5,088 of E (P12.T13's re-measure; 37,668 at version 21, R06.T17's, and 37,675 at
+/// version 15).
+const RANGE_REALISED: f64 = 33_387.0;
 
 /// Prints R06.T17's check of the per-layer counts against the range query's `range_500ly_floor_d`.
 ///

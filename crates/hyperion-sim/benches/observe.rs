@@ -13,6 +13,12 @@
 //!   tube in a galaxy whose systems keep their epoch positions.
 //! - `lens_cells_26kly`: generating the bulge walk's cells alone, the cold walk's floor.
 //! - `lens_walk_disc_5kly`: a cold walk of a 5,000 ly disc sightline in the moving galaxy, ≤ 1 s.
+//!
+//! Measured at generator version 27 (P12.T13; pod, 48 vCPU, loaded; criterion's medians):
+//! - `retarded` 314 ns, `retarded_later` 327 ns and `retarded_from` 267 ns: within their targets.
+//! - `lens_walk_26kly` 34.5 s, over its 15 s: `lens_cells_26kly`, its 310,894 cells, takes 32.3 s.
+//! - `lens_walk_26kly_pool` 20.4 s wall on 47 workers, over its 5 s; `lens_walk_26kly_still` 2.1 s.
+//! - `lens_renew_26kly` 2.79 µs and `lens_walk_disc_5kly` 203 ms: within their targets.
 
 use std::hint::black_box;
 use std::sync::atomic::{AtomicUsize, Ordering};

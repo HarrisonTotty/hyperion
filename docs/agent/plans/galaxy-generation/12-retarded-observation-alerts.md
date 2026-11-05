@@ -878,7 +878,7 @@ geometry at the six named directions; reduced motion has nothing to reduce. Acce
 Run every slow test and bench below, record the figures in the doc comments that own them, and add
 the golden files: retarded observations of six pinned systems from two observers, and the detections
 of a pinned observer over a pinned century. Acceptance: `just ci`, `just test-slow` and `just bench`
-complete.
+complete. _Built 2026-11-05 (Risks, "P12.T13 as built")._
 
 ## Verification
 
@@ -3071,3 +3071,14 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   the guide's Overflow, `****`, the accessible name keeping it whole (lean, 2026-11-01: the wire
   bounds no subscription's contacts). While another list shows, a hidden `output` of the panel's
   says the newest unacknowledged alert, as `AlertList`'s does while it shows.
+- **P12.T13 as built (lane `p12-t13-verification`, 2026-11-05, at 27; no output moves).**
+  - _Goldens, blessed by name._ `observe/retarded` (six systems picked by rule, two observers),
+    `alerts/century` (the Sun-like point over [0, 100) yr: 13 fast novae) and `observe/sightline`
+    (the disc bench's lens events at 30,000 Einstein radii, segment keys, bearings).
+  - _Names._ `LensEvent::{closest_seconds, closest_impact}`; the bench `alerts_interactive`.
+  - _Re-pinned at 27, hold-off path (the field's walk reads no feature's deaths; P09.T36's hold at
+    29 moves them)._ Four slow tests' host searches widened; the Type Ia watch skips a Iax; whole
+    cube's supernovae 4 → 1, novae (91, 11, 1) → (63, 7, 0) and 98 → 94; `awd_scan_cold` 63.
+  - _Also re-pinned, since it stopped plan 12's benches:_ `range_500ly_floor_d` 37,668 → 33,387
+    (with `sky_caps`' `RANGE_REALISED`).
+  - _Pending: the owner's quiet bench run._ The benches' figures are "pod, loaded".

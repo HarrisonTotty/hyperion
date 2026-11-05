@@ -308,6 +308,20 @@ impl LensEvent {
         self.peak_magnification
     }
 
+    /// The observer time of the closest approach, t₀, in seconds since the epoch, unclamped: it
+    /// may lie outside the window, where [`peak`](Self::peak) does not.
+    #[must_use]
+    pub const fn closest_seconds(&self) -> f64 {
+        self.closest_s
+    }
+
+    /// The impact at the closest approach, u₀, in Einstein radii, unclamped: at most
+    /// [`impact`](Self::impact), which is the least within the window.
+    #[must_use]
+    pub const fn closest_impact(&self) -> f64 {
+        self.closest_impact
+    }
+
     /// The magnification of the source at observer time `t`.
     #[must_use]
     pub fn magnification_at(&self, t: UniverseTime) -> f64 {

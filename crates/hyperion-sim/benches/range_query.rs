@@ -103,6 +103,10 @@
 //! same field by the trapezoid in ln r, gives 1.1% more (R06's Risks, "Deviations in T17, as
 //! built").
 //!
+//! At generator version 27 (P12.T13, whose benches share this binary, so the stale pin stopped
+//! them): **33,387 systems (28,299 in D, 5,088 in E) over the same 3,008 cells**; the features hold
+//! most young stars from 27 (P09.T2.c), and layer E falls by 38%.
+//!
 //! # Observed mode (plan 12, P12.T3)
 //!
 //! `range_observed_50ly` is the 50 ly query observed from its own centre with its cells and its
@@ -110,7 +114,8 @@
 //! 4.19–4.79 ms against 1.13 ms on 2026-09-30 at load 9–11, about 4 µs a system, of which the
 //! brief at the emitted time is 44%, the stated curvature error 27% and the retarded step 18%.
 //! `range_observed_50ly_cold` builds every system's stars as well: 240 ms against
-//! `range_50ly_cold`'s 9.45 ms. Plan 12's Risks record the figures for ruling 143.4.
+//! `range_50ly_cold`'s 9.45 ms. Plan 12's Risks record the figures for ruling 143.4. At 27
+//! (P12.T13; pod, 48 vCPU, loaded): 4.04 ms warm over 910 systems, and 296 ms cold.
 //!
 //! `local_events_50ly_day` and `local_events_50ly_year` are plan 12's local events (P12.T5.e) over
 //! the same observed rows, warm, for a sensor with V, K and radio bands, over a day and a year from
@@ -122,6 +127,12 @@
 //! supernova classes reach the whole Galaxy, so they wait for the background, uncounted), the
 //! centre's flares and disruptions, and the local events, warm. The galaxy has its kinematic
 //! tables, which the global list needs.
+//!
+//! `alerts_interactive` is plan 12's bench of that name (P12.T13): every class galaxy-wide for the
+//! Sun-like observer over the alert service's year of lookahead, through the client's stand-in
+//! sensor, with the global list and no local rows, as the service's interactive scan asks it.
+//! Its target is under 200 ms; a miss is a finding. At 27 (P12.T13; pod, 48 vCPU, loaded): 106 ms,
+//! no detections in the year, beside `alerts_in_sun_day`'s 120 ms.
 use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::num::NonZeroU32;
@@ -292,7 +303,7 @@ fn long_range(c: &mut Criterion) {
     assert_eq!(walked.census().complete_down_to(), Some(Layer::D));
     // The sky's caps test holds the same count, `tests/sky_caps.rs`' `RANGE_REALISED`: a re-pin
     // moves both.
-    assert_eq!(walked.systems().len(), 37_668);
+    assert_eq!(walked.systems().len(), 33_387);
     assert_eq!(walked.stats().cells_visited(), 3_008);
     let mut group = c.benchmark_group("query");
     group.sample_size(20);
@@ -484,6 +495,76 @@ fn alerts_in_sun_day(c: &mut Criterion) {
     group.finish();
 }
 
+/// Plan 12's `alerts_interactive` (P12.T13; plan 12's Verification): the interactive part of
+/// "what went off?" galaxy-wide, as the alert service's interactive scan asks it (P12.T8.b): every
+/// class, for the Sun-like observer over the service's year of lookahead, through the client's
+/// stand-in sensor (V detecting at magnitude 17 and resolving at 12, X-rays at 10 mCrab and 1 Crab;
+/// `lib/useAlerts.ts`), with the global list lent and no local rows. The classes whose walks
+/// reach past the census's cells wait for the background, uncounted; the rest, the centre among
+/// them, are walked.
+fn alerts_interactive(c: &mut Criterion) {
+    let galaxy = galaxy().with_full_potential();
+    let list = GlobalList::build(&galaxy);
+    let w = WattsPerSquareMetre::new;
+    // V's zero point through Bessell's 840 Å top hat, and the Crab's 2–10 keV flux (Kirsch et al.
+    // 2005), as the client's stand-in sensor reads them.
+    let v = |magnitude: f64| 3.631e-11 * 84.0 * hyperion_sim::math::exp10(-0.4 * magnitude);
+    let crab = 2.4e-11;
+    let sensor = SensorHorizon::new([
+        (
+            AlertBand::Photometric(Band::V),
+            BandLimits::new(w(v(17.0)), w(v(12.0))).expect("limits in order"),
+        ),
+        (
+            AlertBand::XRay,
+            BandLimits::new(w(0.01 * crab), w(crab)).expect("limits in order"),
+        ),
+    ])
+    .expect("two bands");
+    let year = UniverseTime::EPOCH
+        .checked_add(Span::from_seconds(31_557_600))
+        .expect("a year after the epoch is on the clock");
+    let window = TimeWindow::new(UniverseTime::EPOCH, year).expect("a window");
+    let alerts = AlertQuery::builder(sunlike_point(), window, sensor)
+        .build()
+        .expect("the window lies in the clock window");
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let mut ctx = AlertContext::new(&mut noise, &NoModifiers).with_global_list(&list);
+    let mut cache = LocalEventsCache::with_capacity(4_096);
+    let result = alerts_in(
+        &galaxy,
+        &mut ctx,
+        &alerts,
+        &[],
+        &mut NoStarsCache,
+        &mut cache,
+    );
+    eprintln!(
+        "alerts_interactive: {} detections; census {:?}; sources {:?}",
+        result.detections().len(),
+        result
+            .census()
+            .iter()
+            .map(|c| (c.class().name(), c.status(), c.expected_hosts()))
+            .collect::<Vec<_>>(),
+        result.sources(),
+    );
+    let mut group = c.benchmark_group("alerts");
+    group.bench_function("alerts_interactive", |b| {
+        b.iter(|| {
+            alerts_in(
+                black_box(&galaxy),
+                &mut ctx,
+                black_box(&alerts),
+                &[],
+                &mut NoStarsCache,
+                &mut cache,
+            )
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     query,
     expected,
@@ -491,6 +572,7 @@ criterion_group!(
     long_range,
     observed,
     local_events_50ly,
-    alerts_in_sun_day
+    alerts_in_sun_day,
+    alerts_interactive
 );
 criterion_main!(query);
