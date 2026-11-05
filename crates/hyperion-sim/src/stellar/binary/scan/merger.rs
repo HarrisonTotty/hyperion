@@ -443,7 +443,7 @@ fn contact_pair(
 
 /// The phases of an evolved donor at its merger: past its main sequence and living, from the
 /// Hertzsprung gap to the thermally pulsing asymptotic giant branch.
-const EVOLVED_PHASES: [Phase; 5] = [
+pub(crate) const EVOLVED_PHASES: [Phase; 5] = [
     Phase::HertzsprungGap,
     Phase::FirstGiantBranch,
     Phase::CoreHeliumBurning,
@@ -556,7 +556,7 @@ fn evolved_pair(
 /// the donor's phase at T (the giant branch's [`MergerMark::EvolvedMassRatio`] itself, version 26's
 /// for every donor).
 #[must_use]
-const fn companion_ratio_mark(donor: Phase) -> MergerMark {
+pub(crate) const fn companion_ratio_mark(donor: Phase) -> MergerMark {
     match donor {
         Phase::HertzsprungGap => MergerMark::GapMassRatio,
         Phase::CoreHeliumBurning => MergerMark::HeliumBurningMassRatio,
@@ -682,7 +682,7 @@ fn lobe_input(
 /// [`LIVING_BRACKET_DEX`] steps and bisected [`LIVING_BISECTIONS`] times: the bracket's dead side,
 /// so that the range it ends misses no living mass.
 #[must_use]
-fn heaviest_living(
+pub(crate) fn heaviest_living(
     composition: &Composition,
     draws: &StarDraws,
     options: TrackOptions,

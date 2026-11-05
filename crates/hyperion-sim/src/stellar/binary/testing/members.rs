@@ -612,29 +612,13 @@ pub(super) fn for_census_records(
     mut visit: impl FnMut(&SystemRecord),
 ) -> [u64; 7] {
     assert!(band.is_stellar(), "a census runs a stellar layer");
-    let layer = Layer::from(band);
-    let (first, [nx, ny, nz]) = site.cells(layer);
-    // The product cannot overflow: `cells` checks it.
-    let n = nx * ny * nz;
-    let stride = coprime_stride(n);
     let mut scanned = [0_u64; 7];
     let mut cell = Vec::new();
     let mut ran = 0_u64;
-    let mut position = part.index;
-    while ran < records && position < n {
-        let linear = u64::try_from(u128::from(position) * u128::from(stride) % u128::from(n))
-            .expect("a residue below a u64 count");
-        let offset = |value: u64| i32::try_from(value).expect("a site's cell offset fits an i32");
-        let key = CellKey::new(
-            layer,
-            [
-                first[0] + offset(linear % nx),
-                first[1] + offset(linear / nx % ny),
-                first[2] + offset(linear / (nx * ny)),
-            ],
-        )
-        .expect("a census site's cells lie inside the root cube");
-        position += part.count;
+    for key in census_cells(site, Layer::from(band), part) {
+        if ran >= records {
+            break;
+        }
         generate_cell(galaxy, key, &mut cell);
         for record in &cell {
             if ran == records {
@@ -649,6 +633,46 @@ pub(super) fn for_census_records(
         }
     }
     scanned
+}
+
+/// The cells of `site`'s `layer` that `part` takes, in a census's order ([`class_census_in`]): of
+/// the site's N cells, taken by the stride ⌊φ⁻¹ N⌋ (lowered to the nearest number prime to N)
+/// through their linear indices, x fastest, those at positions `part.index`, `part.index +
+/// part.count`, ….
+///
+/// # Panics
+///
+/// If the site's cells leave the root cube.
+pub(super) fn census_cells(
+    site: CensusSite,
+    layer: Layer,
+    part: CensusPart,
+) -> impl Iterator<Item = CellKey> {
+    let (first, [nx, ny, nz]) = site.cells(layer);
+    // The product cannot overflow: `cells` checks it.
+    let n = nx * ny * nz;
+    let stride = coprime_stride(n);
+    let mut position = part.index;
+    core::iter::from_fn(move || {
+        if position >= n {
+            return None;
+        }
+        let linear = u64::try_from(u128::from(position) * u128::from(stride) % u128::from(n))
+            .expect("a residue below a u64 count");
+        let offset = |value: u64| i32::try_from(value).expect("a site's cell offset fits an i32");
+        position += part.count;
+        Some(
+            CellKey::new(
+                layer,
+                [
+                    first[0] + offset(linear % nx),
+                    first[1] + offset(linear / nx % ny),
+                    first[2] + offset(linear / (nx * ny)),
+                ],
+            )
+            .expect("a census site's cells lie inside the root cube"),
+        )
+    })
 }
 
 /// The stride a census walks `n` cells by: ⌊φ⁻¹ n⌋, lowered until it is prime to `n`, so that it

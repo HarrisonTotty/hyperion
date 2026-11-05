@@ -61,6 +61,8 @@ mod nsm;
 pub(crate) use merger::donor_product;
 pub(crate) use merger::merger_marks_at;
 pub(crate) use merger::scan_merger_cell_in;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use merger::{EVOLVED_PHASES, companion_ratio_mark, heaviest_living};
 pub use merger::{MergerScanMarks, horizon_time, merger_scan_marks, scan_merger_cell};
 pub(crate) use nsm::nsm_marks_at;
 #[cfg(test)]
