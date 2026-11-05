@@ -22,11 +22,13 @@
 //!   core (BSE section 2.7.4).
 
 use crate::math;
+use crate::stellar::binary::core_endings::CoreEndingRules;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::{IRON_CORE_MC_BAGB, RemnantDraws};
 use crate::stellar::remnant::structure::{OXYGEN_NEON_MC_BAGB, white_dwarf_radius};
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
+use crate::stellar::rules::StellarRules;
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
 use crate::units::{
     Megayears, MetalFraction, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
@@ -143,17 +145,7 @@ impl Track {
         draws: &StarDraws,
         age_max: Years,
     ) -> Self {
-        debug_assert!(
-            age_max.value().is_finite() && age_max.value() >= 0.0,
-            "a track is built to a finite, non-negative age: {age_max:?}"
-        );
-        Self::helium_star_from(
-            checked_helium_mass(m),
-            0.0,
-            comp,
-            draws,
-            Some(age_max.value().max(0.0)),
-        )
+        Self::helium_star_under(m, comp, draws, Some(age_max), version_endings())
     }
 
     /// [`Track::helium_star`] built in full, to its death and remnant.
@@ -163,12 +155,42 @@ impl Track {
     /// In debug builds, as [`Track::helium_star`].
     #[must_use]
     pub fn helium_star_full(m: SolarMasses, comp: &Composition, draws: &StarDraws) -> Self {
-        Self::helium_star_from(checked_helium_mass(m), 0.0, comp, draws, None)
+        Self::helium_star_under(m, comp, draws, None, version_endings())
+    }
+
+    /// [`Track::helium_star`] built until it covers `age_max`, or in full with `None`, its
+    /// oxygen–neon core's ending under `endings` (the binary engine's pair's, P11.T4's
+    /// `core_endings`).
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`Track::helium_star`].
+    #[must_use]
+    pub(crate) fn helium_star_under(
+        m: SolarMasses,
+        comp: &Composition,
+        draws: &StarDraws,
+        age_max: Option<Years>,
+        endings: CoreEndingRules,
+    ) -> Self {
+        debug_assert!(
+            age_max.is_none_or(|age| age.value().is_finite() && age.value() >= 0.0),
+            "a track is built to a finite, non-negative age: {age_max:?}"
+        );
+        Self::helium_star_from(
+            checked_helium_mass(m),
+            0.0,
+            comp,
+            draws,
+            age_max.map(|age| age.value().max(0.0)),
+            endings,
+        )
     }
 
     /// A naked helium star of mass `m` entering its helium main sequence at fractional age
     /// `tau0` (HPT equation 76: the helium star core helium burning leaves), built until it covers
-    /// `age_max` years from then, or in full with `None`.
+    /// `age_max` years from then, or in full with `None`, its oxygen–neon core's ending under
+    /// `endings`.
     #[must_use]
     pub(crate) fn helium_star_from(
         m: SolarMasses,
@@ -176,6 +198,7 @@ impl Track {
         comp: &Composition,
         draws: &StarDraws,
         age_max: Option<f64>,
+        endings: CoreEndingRules,
     ) -> Self {
         Self::build_from_entry(
             Entry::HeliumMainSequence {
@@ -186,6 +209,7 @@ impl Track {
             comp,
             draws,
             age_max,
+            endings,
         )
     }
 
@@ -193,9 +217,10 @@ impl Track {
     /// reported as `initial_mass`, under the generator's options. A star built so has lost its
     /// envelope to a companion, which its electron-capture window reads (plan 06, design note 11).
     ///
-    /// Its rules are the version's, whatever the engine's: a naked helium star has no hydrogen
-    /// main sequence, gap, giant branch or horizontal branch, so no helium table reaches it
-    /// (P15.T7.b's hold, `stellar::rules`).
+    /// Its rules are the version's, whatever the engine's, but for its oxygen–neon core's ending,
+    /// `endings` (P11.T4's `core_endings`, which a naked helium star's core meets): a naked
+    /// helium star has no hydrogen main sequence, gap, giant branch or horizontal branch, so no
+    /// helium table reaches it (P15.T7.b's hold, `stellar::rules`).
     #[must_use]
     fn build_from_entry(
         entry: Entry,
@@ -203,8 +228,13 @@ impl Track {
         comp: &Composition,
         draws: &StarDraws,
         age_max: Option<f64>,
+        endings: CoreEndingRules,
     ) -> Self {
         let options = TrackOptions::default();
+        let options = options.with_rules(StellarRules {
+            core_endings: endings,
+            ..options.rules()
+        });
         let coeffs = ZCoeffs::new(comp.z_fit());
         let eta = reimers_eta(draws.eta().value());
         let outcome = Builder::new(
@@ -560,7 +590,7 @@ impl Track {
             // No white dwarf is born at or above the Chandrasekhar mass (ruling 129.4c): the bare
             // core collapses at once, companion-stripped, on a helium-star track of its own
             // entered where this one is, whose death and remnant are plan 06's.
-            Model::HeliumShellBurning { star, span } if mc >= CHANDRASEKHAR_MSUN => {
+            Model::HeliumShellBurning { star, span } if self.bare_core_collapses(star, mc) => {
                 let entry = Entry::HeliumShellBurning {
                     star: Box::new(star.clone()),
                     clock0: span.at(coord),
@@ -669,6 +699,19 @@ impl Track {
         })
     }
 
+    /// Whether a helium giant of `star` stripped to its core of `mc` M☉ is no white dwarf but
+    /// collapses at once: at or above the Chandrasekhar mass (ruling 129.4c), and from version 29
+    /// an oxygen–neon one at its capture mass under the default recipe (P11.T4's `core_endings`).
+    #[must_use]
+    fn bare_core_collapses(&self, star: &HeliumStar, mc: f64) -> bool {
+        let capture = self
+            .options
+            .rules()
+            .core_endings
+            .collapse_mass(Phase::OxygenNeonWhiteDwarf, self.options.remnant());
+        mc >= CHANDRASEKHAR_MSUN || (star.mass() >= OXYGEN_NEON_MC_BAGB && mc >= capture.value())
+    }
+
     /// The bare core of `mc` M☉ that [`Track::remains_at`] leaves at `age` when it is no white
     /// dwarf (ruling 129.4c): the helium-star track of `entry`, which dies at its start with plan
     /// 06's remnant, and the core's state at `age`, its last living one.
@@ -687,6 +730,7 @@ impl Track {
             &self.composition,
             draws,
             age_max,
+            self.options.rules().core_endings,
         );
         let core = self.structure_at(age, mc);
         Remains::Ended {
@@ -711,7 +755,15 @@ impl Track {
         draws: &StarDraws,
         age_max: Option<f64>,
     ) -> Remains {
-        let track = Self::build_from_entry(entry, initial_mass, &self.composition, draws, age_max);
+        let endings = self.options.rules().core_endings;
+        let track = Self::build_from_entry(
+            entry,
+            initial_mass,
+            &self.composition,
+            draws,
+            age_max,
+            endings,
+        );
         if !track.is_remnant_from_its_start() {
             return Remains::HeliumStar(Box::new(track));
         }
@@ -1571,6 +1623,13 @@ fn checked_helium_mass(m: SolarMasses) -> SolarMasses {
     SolarMasses::new(value.clamp(1e-3, MAX_INITIAL_MASS.value()))
 }
 
+/// The version's ending of a white dwarf's core (P11.T4's `core_endings`), which a track built
+/// outside the binary engine takes.
+#[must_use]
+fn version_endings() -> CoreEndingRules {
+    TrackOptions::default().rules().core_endings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2167,6 +2226,107 @@ mod tests {
                 main_sequence_structure(&c, &solar(), &draws, false, own.mass().value(), tau, age);
             assert_eq!(structure.state.luminosity(), own.luminosity(), "at {age}");
             assert_eq!(structure.state.radius(), own.radius(), "at {age}");
+        }
+    }
+
+    /// P11.T4's kept-core endings (research-leans-38): a helium giant of an oxygen–neon core
+    /// stripped to its core between the capture mass, 1.37 M☉, and the Chandrasekhar mass leaves
+    /// an oxygen–neon dwarf of it under the held arm and, under the unified arm, collapses at once
+    /// by electron capture into the 1.26 M☉ neutron star. A 1.8 M☉ helium star's core is 1.403 M☉
+    /// at 0.999 of its life.
+    #[test]
+    fn a_stripped_oxygen_neon_giant_collapses_at_the_capture_mass_from_29() {
+        use crate::stellar::remnant::DeathKind;
+        use crate::stellar::remnant::collapse::{
+            OXYGEN_NEON_CAPTURE_MASS, electron_capture_remnant,
+        };
+
+        let draws = StarDraws::median();
+        for endings in [CoreEndingRules::Held, CoreEndingRules::Unified] {
+            let star =
+                Track::helium_star_under(SolarMasses::new(1.8), &solar(), &draws, None, endings);
+            let death = star.death().expect("a full track reaches its death").age();
+            let age = 0.999 * death.value();
+            let state = star.state_at(Years::new(age));
+            let core = state.core_mass();
+            assert!(
+                core > OXYGEN_NEON_CAPTURE_MASS && core.value() < CHANDRASEKHAR_MSUN,
+                "{endings:?}: {state:?}"
+            );
+            match (
+                endings,
+                star.remains_at(age, state.mass().value(), &draws, None),
+            ) {
+                (CoreEndingRules::Held, Remains::WhiteDwarf { phase, mass, .. }) => {
+                    assert_eq!(phase, Phase::OxygenNeonWhiteDwarf);
+                    assert!((mass.value() - core.value()).abs() < 1e-9, "{mass:?}");
+                }
+                (CoreEndingRules::Unified, Remains::Ended { track, .. }) => {
+                    let death = track.death().expect("the bare core's track ends");
+                    assert_eq!(death.kind(), DeathKind::ElectronCapture, "{death:?}");
+                    assert_eq!(track.remnant(), Some(electron_capture_remnant()));
+                }
+                (endings, other) => panic!("{endings:?}: {other:?}"),
+            }
+        }
+    }
+
+    /// P11.T4's kept-core endings: under the unified arm a helium star whose core the integration
+    /// brings to the Chandrasekhar mass has reached it, whatever its last bits
+    /// (`core_endings::CORE_ROUNDING`): every oxygen–neon helium star of 1.74–2.24 M☉ collapses an
+    /// iron core there, as plan 06's helium star does at the mass. Under the held arm those whose
+    /// core ends up to 10⁻¹⁴ short of it leave an oxygen–neon dwarf of it, and the rest collapse.
+    #[test]
+    fn a_helium_star_s_core_at_the_chandrasekhar_mass_ends_one_way_from_29() {
+        use crate::stellar::remnant::DeathKind;
+
+        for endings in [CoreEndingRules::Held, CoreEndingRules::Unified] {
+            let collapses: Vec<bool> = (0..11)
+                .map(|k| {
+                    let m = SolarMasses::new(1.74 + 0.05 * f64::from(k));
+                    let star =
+                        Track::helium_star_under(m, &solar(), &StarDraws::median(), None, endings);
+                    let death = star.death().expect("a full track reaches its death");
+                    let core = death.progenitor().co_core_mass().value();
+                    assert!(
+                        (core - CHANDRASEKHAR_MSUN).abs() < 1e-13,
+                        "{m:?}: {death:?}"
+                    );
+                    matches!(death.kind(), DeathKind::CoreCollapse { .. })
+                })
+                .collect();
+            let all = collapses.iter().all(|&c| c);
+            assert_eq!(
+                all,
+                endings == CoreEndingRules::Unified,
+                "{endings:?}: {collapses:?}"
+            );
+            assert!(collapses.iter().any(|&c| c), "{endings:?}: {collapses:?}");
+        }
+    }
+
+    /// P11.T4's kept-core endings: a helium star built under the held arm, every version's from 24
+    /// to 27, takes the generator's own options, so the hold leaves every helium-star track's bits
+    /// and `Debug` as they were.
+    #[test]
+    fn a_helium_star_under_the_held_endings_takes_the_generators_options() {
+        use crate::stellar::rules::StellarRules;
+
+        for v in 24..=27 {
+            let endings = StellarRules::of_version(crate::GeneratorVersion::new(v)).core_endings;
+            let star = Track::helium_star_under(
+                SolarMasses::new(1.8),
+                &solar(),
+                &StarDraws::median(),
+                None,
+                endings,
+            );
+            assert_eq!(star.options(), TrackOptions::default(), "version {v}");
+            assert_eq!(
+                format!("{:?}", star.options()),
+                format!("{:?}", TrackOptions::default()),
+                "version {v}"
+            );
         }
     }
 }

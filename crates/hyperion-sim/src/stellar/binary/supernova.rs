@@ -67,6 +67,7 @@ use crate::time::{Span, UniverseTime};
 use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M};
 use crate::units::{GravitationalParameter, Megayears, Radians, SolarMasses, Years};
 
+use super::core_endings::CoreEndingRules;
 use super::detached::last_living;
 use super::dwarf_limit::CoreSource;
 use super::evolve::{Engine, LiveOrbit, OwnMainSequenceEnd, Pin, PreTest, clock_resolution_years};
@@ -123,9 +124,15 @@ pub(super) fn first_age_at(
 /// at the Chandrasekhar mass under [`RemnantRecipe::Hurley2000`], which caps none; `None` for a
 /// core that is no dwarf's.
 #[must_use]
-fn core_limit(source: CoreSource, recipe: RemnantRecipe) -> Option<SolarMasses> {
+fn core_limit(
+    source: CoreSource,
+    recipe: RemnantRecipe,
+    endings: CoreEndingRules,
+) -> Option<SolarMasses> {
     match (source, recipe) {
         (CoreSource::Other, _) => None,
+        // From 29 a kept carbon–oxygen core ends as its track does (P11.T4's `core_endings`).
+        (CoreSource::CarbonOxygenDwarf, _) if endings == CoreEndingRules::Unified => None,
         (CoreSource::OxygenNeonDwarf, RemnantRecipe::MandelMuller2020) => Some(capture_mass()),
         (CoreSource::CarbonOxygenDwarf, _)
         | (CoreSource::OxygenNeonDwarf, RemnantRecipe::Hurley2000) => Some(CHANDRASEKHAR_MASS),
@@ -223,7 +230,9 @@ impl Engine {
         let phase = track
             .remnant_clock()
             .map_or(Phase::NoRemnant, |(phase, ..)| phase);
-        let ending = SwollenDeath::of(self.dwarf_cores[i], death.kind(), phase);
+        let endings = self.ctx.rules().core_endings;
+        let core = death.progenitor().co_core_mass();
+        let ending = SwollenDeath::of(self.dwarf_cores[i], death.kind(), core, phase, endings);
         #[cfg(test)]
         if self.dwarf_cores[i] != CoreSource::Other {
             ending.count();
@@ -234,7 +243,12 @@ impl Engine {
                 offset,
             },
             SwollenDeath::WhiteDwarf(phase) => {
-                let mass = remnant.mass().value();
+                // A collapse the kept core does not take leaves the dwarf of its core.
+                let mass = if death.kind().is_sudden() {
+                    core.value().min(before)
+                } else {
+                    remnant.mass().value()
+                };
                 let last = track.state_at(Years::new(last_living(death.age().value())));
                 Member::Remnant {
                     phase,
@@ -254,14 +268,15 @@ impl Engine {
                 return;
             }
         };
+        let left = self.members_mass_left_msun(&member, &remnant);
         self.set_member(i, member);
-        if !death.kind().is_sudden() {
+        if !death.kind().is_sudden() || matches!(ending, SwollenDeath::WhiteDwarf(_)) {
             // A white dwarf born as the envelope goes: continuous, and whatever envelope a companion
             // left on the star goes with it, without a kick.
-            let lost = before - remnant.mass().value();
+            let lost = before - left;
             let bound = self.orbit.is_some();
             if lost > 1e-9 && bound {
-                self.lose_mass(i, before, remnant.mass().value(), None);
+                self.lose_mass(i, before, left, None);
             }
             // An orbit the loss unbinds leaves both stars: the pair is disrupted, not merged
             // (finding F1 of ruling p11-channels, 2026-10-06, the label only).
@@ -287,6 +302,21 @@ impl Engine {
             && self.pin.is_some_and(|p| {
                 p.death.age().value() >= self.age - clock_resolution_years(self.age)
             })
+    }
+
+    /// The mass, M☉, a death leaves in `member`, its own track's `remnant` or a white dwarf the
+    /// engine makes of it ([`SwollenDeath::WhiteDwarf`]).
+    #[must_use]
+    fn members_mass_left_msun(&self, member: &Member, remnant: &CompactRemnant) -> f64 {
+        match member {
+            Member::Remnant { mass, .. } => mass.at(self.age),
+            Member::Track { .. }
+            | Member::Shaped { .. }
+            | Member::MainSequence { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Gone => remnant.mass().value(),
+        }
     }
 
     /// Member `i`, a giant of `before` M☉ whose core of `core` is an oxygen–neon dwarf's
@@ -359,7 +389,9 @@ impl Engine {
         let phase = track
             .remnant_clock()
             .map_or(Phase::NoRemnant, |(phase, ..)| phase);
-        if SwollenDeath::of(source, death.kind(), phase) == SwollenDeath::Own {
+        let endings = self.ctx.rules().core_endings;
+        let core = death.progenitor().co_core_mass();
+        if SwollenDeath::of(source, death.kind(), core, phase, endings) == SwollenDeath::Own {
             return None;
         }
         // The phase the engine's age is in or about to enter, as the step's own limits read it.
@@ -370,7 +402,7 @@ impl Engine {
                 .carbon_oxygen_core_at(age)
                 .map_or(0.0, SolarMasses::value)
         };
-        let limit = core_limit(source, self.ctx.track_options().remnant())?;
+        let limit = core_limit(source, self.ctx.track_options().remnant(), endings)?;
         let at = first_age_at(core, now, to, limit.value())?;
         Some(self.age.max(offset + at))
     }
@@ -389,7 +421,11 @@ impl Engine {
                 super::swollen_dwarf::count_dwarf_core_death(
                     super::swollen_dwarf::Ending::CaptureAtLimit,
                 );
-                let limit = core_limit(source, self.ctx.track_options().remnant());
+                let limit = core_limit(
+                    source,
+                    self.ctx.track_options().remnant(),
+                    self.ctx.rules().core_endings,
+                );
                 self.electron_capture_collapse(i, limit.unwrap_or(CHANDRASEKHAR_MASS), m);
             }
             // A core that is no dwarf's has no limit (`core_limit_age`).
@@ -979,11 +1015,12 @@ impl Engine {
             let options = self.ctx.track_options();
             let build = |reach: f64| {
                 if helium {
-                    sse::Track::helium_star(
+                    sse::Track::helium_star_under(
                         SolarMasses::new(m.min(sse::MAX_INITIAL_MASS.value())),
                         composition,
                         draws,
-                        Years::new(reach),
+                        Some(Years::new(reach)),
+                        options.rules().core_endings,
                     )
                 } else {
                     sse::Track::to_age_with(

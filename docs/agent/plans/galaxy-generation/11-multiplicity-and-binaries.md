@@ -7679,3 +7679,21 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     stops at its limit (`detached::Stop::CoreLimit`, `Engine::core_limit_age`,
     `Track::carbon_oxygen_core_at`): ONe at `OXYGEN_NEON_CAPTURE_MASS` under MandelMuller2020,
     M_Ch under Hurley2000, CO at M_Ch.
+- From fix-p11-kept-core-endings (2026-11-03; rebased onto v27 2026-11-05), held at
+  `CORE_ENDINGS_VERSION` 29 (`stellar/binary/core_endings.rs`, `StellarRules::core_endings`):
+  - A kept core ends as its track does: the track's iron collapse, the kept kind setting only what
+    is left. `SwollenDeath::of` takes the core's mass; a CO core below M_Ch at an electron capture
+    is left as its dwarf. No core limit for CO cores.
+  - Under MandelMuller2020 every ONe core collapses at `OXYGEN_NEON_CAPTURE_MASS`
+    (`CoreEndingRules::collapse_mass`): fed (wind, RLOF), merged and stripped ONe dwarfs, helium
+    stars (`helium_star_end`, `remains_at`) and the window's pulses (`Builder::pulses_cap`).
+  - The window keeps its early-AGB cap (lean): single stars at Z = 5 × 10⁻⁴–0.02 are unchanged;
+    a companion-stripped 7.7 M☉ star now collapses at 1.37 M☉, not 1.378.
+  - Mid-engine helium-star tracks take the pair's `core_endings` (`Track::helium_star_under`).
+  - A core within 10⁻⁹ of M_Ch has reached it (`CoreEndingRules::below_the_chandrasekhar_mass`,
+    `CORE_ROUNDING`): the ONe helium stars of 1.74–2.24 M☉ all collapse an iron core, where the held
+    arm alternates with a dwarf at 1.44 M☉ by the core's last bits (science check).
+  - An unplaced helium giant ends by its mass: `Unplaced::Disruption`, `Product::Disruption`.
+  - Census under every 29: layer D's no-star pairs 400 → 22; ONe dwarfs above 1.37 M☉ 0 in every
+    layer, pinned or not (225 and 89 in D and E under every 27 hold). Movers at 29 are listed in
+    `core_endings_hold.rs`.

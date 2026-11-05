@@ -6548,6 +6548,7 @@ fn an_unplaced_carbon_oxygen_core_collapses_at_the_chandrasekhar_mass() {
             core_mass,
             core_mass,
             CoreSource::Other,
+            super::core_endings::CoreEndingRules::Held,
         ) else {
             panic!("{name}: a carbon–oxygen core leaves a dwarf");
         };
@@ -6629,7 +6630,8 @@ fn an_unplaced_helium_core_is_its_helium_star() {
                 kind,
                 SolarMasses::new(1.626),
                 SolarMasses::new(0.457_2),
-                super::dwarf_limit::CoreSource::Other
+                super::dwarf_limit::CoreSource::Other,
+                super::core_endings::CoreEndingRules::Held
             ),
             super::dwarf_limit::Unplaced::WhiteDwarf {
                 phase: Phase::CarbonOxygenWhiteDwarf,
@@ -6934,9 +6936,10 @@ fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
     ] {
         let case = format!("{kind:?} of {m} M☉ around {core} M☉ from {source:?}");
         let (m, core) = (SolarMasses::new(m), SolarMasses::new(core));
-        let whole_unplaced = DwarfLimitRules::Whole.unplaced(kind, m, core, source);
+        let endings = super::core_endings::CoreEndingRules::Held;
+        let whole_unplaced = DwarfLimitRules::Whole.unplaced(kind, m, core, source, endings);
         assert_eq!(whole_unplaced, whole, "{case}");
-        let held_unplaced = DwarfLimitRules::Held.unplaced(kind, m, core, source);
+        let held_unplaced = DwarfLimitRules::Held.unplaced(kind, m, core, source, endings);
         assert_eq!(held_unplaced, held, "{case}");
     }
 }
@@ -7952,6 +7955,7 @@ fn a_core_limit_stop_lands_where_the_core_reaches_the_capture_mass() {
 /// [`SwollenDeath::of`]: super::swollen_dwarf::SwollenDeath::of
 #[test]
 fn a_swollen_dwarf_s_giant_dies_as_its_dwarf_would() {
+    use super::core_endings::CoreEndingRules;
     use super::dwarf_limit::CoreSource;
     use super::swollen_dwarf::SwollenDeath;
     use crate::stellar::remnant::{DeathKind, SupernovaType};
@@ -8019,9 +8023,512 @@ fn a_swollen_dwarf_s_giant_dies_as_its_dwarf_would() {
         ),
     ] {
         assert_eq!(
-            SwollenDeath::of(source, death, phase),
+            SwollenDeath::of(
+                source,
+                death,
+                crate::stellar::remnant::structure::CHANDRASEKHAR_MASS,
+                phase,
+                CoreEndingRules::Held,
+            ),
             outcome,
             "{source:?}, {death:?}, {phase:?}"
         );
+    }
+}
+
+// --- P11.T4: the kept core's endings (held at 29) ---------------------------------------------
+
+/// Runs `engine`'s detached phases until a death is recorded, at most twenty.
+fn until_a_death(engine: &mut super::evolve::Engine) {
+    for _ in 0..20 {
+        if !engine.supernovae.is_empty() || engine.age >= engine.until {
+            return;
+        }
+        engine.detached_phase();
+    }
+}
+
+/// P11.T4's kept-core endings: under every 29 hold a placed product's kept core ends as its track
+/// does, the kept kind setting only what is left (research-leans-38).
+///
+/// - A carbon–oxygen dwarf of 1.36 M☉ placed with a 2.5 M☉ main-sequence star (BSE table 2,
+///   11 + 1 → 6) on a track whose `Mc,BAGB`, 1.85 M☉, lies outside the capture window, which caps
+///   its pulses at the capture mass, ends as a carbon–oxygen dwarf of the capture mass. The
+///   brief's 1.2 M☉ dwarf's track loses its envelope at 1.22 M☉, below the cap, and leaves that.
+/// - One of 1.43 M☉ at Z = 0.004, placed on a track inside the window that collapses by electron
+///   capture at `Mc,SN`, the Chandrasekhar mass, ends in a thermonuclear disruption that leaves
+///   nothing, with no Type Ia candidate pooled.
+/// - An early-AGB product of 4.5 M☉ around a 2.4 M☉ helium core of a carbon–oxygen dwarf's, whose
+///   track collapses an iron core, collapses as the track does under every 29 hold; under every 29
+///   hold with the kept-core endings held it disrupts at the Chandrasekhar mass on the way (the
+///   placed product's kind and its core's limit without their ending), and under every 27 hold,
+///   which keeps no dwarf's core, it collapses as its track does too.
+#[test]
+fn a_kept_core_ends_as_its_track_does_from_29() {
+    use super::common_envelope::CoalescedProduct;
+    use super::dwarf_limit::CoreSource;
+    use super::star::{Kind, Member};
+    use crate::stellar::remnant::RemnantKind;
+    use crate::stellar::remnant::collapse::OXYGEN_NEON_CAPTURE_MASS;
+    use crate::stellar::rules::StellarRules;
+
+    let every_29 = StellarRules::every_29_hold();
+    let co = Phase::CarbonOxygenWhiteDwarf;
+    for (dwarf, z, phase) in [(1.36, 0.02, co), (1.43, 0.004, Phase::NoRemnant)] {
+        let case = format!("{dwarf} M☉ at Z = {z}");
+        let mut engine = placed_product_engine(co, dwarf, z, every_29);
+        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+            panic!("{case}: a placed giant");
+        };
+        let death = track.death().expect("a track built in full");
+        engine.age = offset + death.age().value();
+        engine.die(0);
+        let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        assert_eq!(dead.phase(), phase, "{case}: {dead:?}");
+        if phase == co {
+            let capture = OXYGEN_NEON_CAPTURE_MASS.value();
+            assert!(
+                (dead.mass().value() - capture).abs() < 1e-9 * capture,
+                "{case}: {dead:?}"
+            );
+        } else {
+            let [death] = engine.supernovae.as_slice() else {
+                panic!("{case}: one death, not {:?}", engine.supernovae);
+            };
+            assert_eq!(death.remnant().kind(), RemnantKind::None, "{case}");
+        }
+        assert!(engine.pooled.is_none(), "{case}");
+    }
+    let held_endings = StellarRules {
+        core_endings: super::core_endings::CoreEndingRules::Held,
+        ..every_29
+    };
+    for (rules, remnant) in [
+        (
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+            RemnantKind::NeutronStar,
+        ),
+        (held_endings, RemnantKind::None),
+        (every_29, RemnantKind::NeutronStar),
+    ] {
+        let case = format!("{:?}, {:?}", rules.dwarf_limit, rules.core_endings);
+        let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+        let product = engine.product_member(
+            CoalescedProduct::Star {
+                kind: Kind::EarlyAgb,
+                mass: 4.5,
+                core: 2.4,
+                burnt: 0.7,
+                fraction: 0.0,
+            },
+            CoreSource::CarbonOxygenDwarf,
+        );
+        engine.finish_merger_with(product);
+        let Member::Shaped { track, .. } = &engine.members[0] else {
+            panic!("{case}: a placed early-AGB star");
+        };
+        assert!(
+            matches!(
+                track.death().map(|d| d.kind()),
+                Some(crate::stellar::remnant::DeathKind::CoreCollapse { .. })
+            ),
+            "{case}: an iron core's track"
+        );
+        until_a_death(&mut engine);
+        let [death] = engine.supernovae.as_slice() else {
+            panic!("{case}: one death, not {:?}", engine.supernovae);
+        };
+        assert_eq!(death.remnant().kind(), remnant, "{case}");
+    }
+}
+
+/// P11.T4's kept-core endings: under every 29 hold an oxygen–neon dwarf collapses at the capture
+/// mass, 1.37 M☉ (research-leans-38; Miyaji et al. 1980, Nomoto 1984): one of 1.369 M☉ a 3 M☉
+/// star's AGB wind feeds stops there and collapses by accretion-induced collapse, with no Type Ia
+/// candidate, earlier than under every 27 hold, where it grows to the Chandrasekhar mass first;
+/// and a merger of a 0.8 M☉ oxygen–neon dwarf with a 0.6 M☉ carbon–oxygen one, 1.40 M☉, collapses
+/// at once, where under every 27 hold it stays an oxygen–neon dwarf.
+#[test]
+fn an_oxygen_neon_dwarf_collapses_at_the_capture_mass_from_29() {
+    use super::star::{Member, Path};
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::rules::StellarRules;
+
+    let one = Phase::OxygenNeonWhiteDwarf;
+    let mut collapse_ages = Vec::new();
+    for (rules, collapses) in [
+        (StellarRules::of_version(crate::GENERATOR_VERSION), false),
+        (StellarRules::every_29_hold(), true),
+    ] {
+        let case = format!("{:?}", rules.core_endings);
+        let mut engine = wind_fed_dwarf_engine(1.369, rules);
+        let age = engine.age;
+        engine.members[0] = Member::Remnant {
+            phase: one,
+            birth: 0.5 * age,
+            origin: crate::units::Megayears::ZERO,
+            mass: Path::starting(age, 1.369),
+        };
+        engine.detached_phase();
+        let [collapse] = engine.supernovae.as_slice() else {
+            panic!("{case}: one collapse, not {:?}", engine.supernovae);
+        };
+        assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
+        assert!(engine.pooled.is_none(), "{case}");
+        collapse_ages.push(collapse.age().value());
+        let mut engine = fed_dwarf_engine(0.8, 0.02, rules);
+        let age = engine.age;
+        engine.members = [0.8, 0.6].map(|m| Member::Remnant {
+            phase: if m > 0.7 {
+                one
+            } else {
+                Phase::CarbonOxygenWhiteDwarf
+            },
+            birth: 0.5 * age,
+            origin: crate::units::Megayears::ZERO,
+            mass: Path::starting(age, m),
+        });
+        engine.mix();
+        let product = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        if collapses {
+            assert_eq!(product.phase(), Phase::NeutronStar, "{case}: {product:?}");
+        } else {
+            assert_eq!(product.phase(), one, "{case}: {product:?}");
+        }
+        assert!(engine.pooled.is_some(), "{case}: the merger's candidate");
+    }
+    assert!(
+        collapse_ages[1] < collapse_ages[0],
+        "the capture mass first: {collapse_ages:?}"
+    );
+}
+
+/// P11.T4's kept-core endings: under every 29 hold a helium star of 1.6–2.25 M☉ leaves no
+/// oxygen–neon dwarf above the capture mass, 1.37 M☉, collapsing by electron capture where its core
+/// reaches it; under the held arm such stars leave oxygen–neon dwarfs of up to 1.44 M☉.
+#[test]
+fn no_helium_star_leaves_an_oxygen_neon_dwarf_above_the_capture_mass_from_29() {
+    use super::core_endings::CoreEndingRules;
+    use crate::stellar::remnant::collapse::OXYGEN_NEON_CAPTURE_MASS;
+    use crate::stellar::sse::Track;
+
+    for (endings, above) in [
+        (CoreEndingRules::Held, true),
+        (CoreEndingRules::Unified, false),
+    ] {
+        let mut heaviest = 0.0_f64;
+        for k in 0..33 {
+            let m = SolarMasses::new(1.6 + 0.02 * f64::from(k));
+            let track = Track::helium_star_under(
+                m,
+                &Composition::SOLAR,
+                &StarDraws::median(),
+                None,
+                endings,
+            );
+            if let (Some((Phase::OxygenNeonWhiteDwarf, ..)), Some(remnant)) =
+                (track.remnant_clock(), track.remnant())
+            {
+                heaviest = heaviest.max(remnant.mass().value());
+            }
+        }
+        assert_eq!(
+            heaviest > OXYGEN_NEON_CAPTURE_MASS.value(),
+            above,
+            "{endings:?}: the heaviest oxygen–neon dwarf {heaviest} M☉"
+        );
+    }
+}
+
+/// P11.T4's kept-core endings: under every 29 hold a merger's helium-giant product that no star
+/// holds ends by its mass (research-leans-38; HPT section 6.1, plan 06's `helium_star_end`): an iron
+/// core from 1.6 M☉, a thermonuclear disruption with no Type Ia candidate from 1.44 M☉, a
+/// carbon–oxygen dwarf below; a thermally pulsing AGB product keeps its iron core at a 1.438 M☉
+/// carbon–oxygen core. The disruption leaves nothing.
+#[test]
+fn an_unplaced_helium_giant_ends_by_its_mass_from_29() {
+    use super::common_envelope::Product;
+    use super::core_endings::CoreEndingRules;
+    use super::dwarf_limit::{CoreSource, DwarfLimitRules, Unplaced};
+    use super::star::Kind;
+    use crate::stellar::remnant::RemnantKind;
+
+    let arm = DwarfLimitRules::Whole;
+    let unified = CoreEndingRules::Unified;
+    let other = CoreSource::Other;
+    let msun = SolarMasses::new;
+    for (kind, m, core, unplaced) in [
+        (
+            Kind::HeliumGiant,
+            1.7,
+            1.0,
+            Unplaced::IronCore {
+                co_core: msun(1.0),
+                helium_core: msun(1.7),
+                mass: msun(1.7),
+            },
+        ),
+        (
+            Kind::HeliumGiant,
+            1.5,
+            1.0,
+            Unplaced::Disruption { mass: msun(1.5) },
+        ),
+        (
+            Kind::HeliumGiant,
+            1.4,
+            1.2,
+            Unplaced::WhiteDwarf {
+                phase: Phase::CarbonOxygenWhiteDwarf,
+                mass: msun(1.2),
+            },
+        ),
+        (
+            Kind::PulsingAgb,
+            5.0,
+            1.5,
+            Unplaced::IronCore {
+                co_core: msun(1.5),
+                helium_core: msun(1.5),
+                mass: msun(5.0),
+            },
+        ),
+    ] {
+        assert_eq!(
+            arm.unplaced(kind, msun(m), msun(core), other, unified),
+            unplaced,
+            "{kind:?} of {m} M☉ around {core} M☉"
+        );
+    }
+    let mut engine = fed_dwarf_engine(
+        0.6,
+        0.02,
+        crate::stellar::rules::StellarRules::every_29_hold(),
+    );
+    engine.finish_merger_with(Product::Disruption { mass: msun(1.5) });
+    let [death] = engine.supernovae.as_slice() else {
+        panic!("one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(death.remnant().kind(), RemnantKind::None);
+    assert!(engine.pooled.is_none());
+    assert_eq!(
+        engine.members[0]
+            .state_at(&engine.ctx, 0, engine.age)
+            .phase(),
+        Phase::NoRemnant
+    );
+}
+
+/// P11.T4's kept-core endings: under every 29 hold an oxygen–neon dwarf a companion's transfer
+/// feeds collapses at the capture mass, 1.37 M☉ (research-leans-38): one of 1.375 M☉ fed by
+/// `fed_dwarf_engine`'s main-sequence donor collapses by accretion-induced collapse into the
+/// 1.26 M☉ neutron star, with no Type Ia candidate, and the transfer ends; under every 27 hold it
+/// is fed on towards the Chandrasekhar mass.
+#[test]
+fn a_dwarf_fed_by_transfer_collapses_at_the_capture_mass_from_29() {
+    use super::rlof::{Accretion, Fed};
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::rules::StellarRules;
+
+    let dwarf = 1.375;
+    for (rules, collapses) in [
+        (StellarRules::of_version(crate::GENERATOR_VERSION), false),
+        (StellarRules::every_29_hold(), true),
+    ] {
+        let case = format!("{:?}", rules.core_endings);
+        let mut engine = fed_dwarf_engine(dwarf, 0.02, rules);
+        let age = engine.age;
+        engine.members[0] = Member::Remnant {
+            phase: Phase::OxygenNeonWhiteDwarf,
+            birth: 0.5 * age,
+            origin: crate::units::Megayears::ZERO,
+            mass: Path::starting(age, dwarf),
+        };
+        let fed = Fed {
+            kind: Kind::OxygenNeonWhiteDwarf,
+            before: dwarf - 1.0e-3,
+            core_before: dwarf - 1.0e-3,
+            gained: 1.0e-3,
+            dt: 1.0e3,
+        };
+        let accretion = Accretion {
+            share: 1.0,
+            from_accretor: false,
+            swells: false,
+        };
+        assert_eq!(
+            engine.accretor_events(1, 1.0e-6, fed, accretion),
+            collapses,
+            "{case}: the transfer ends"
+        );
+        let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        if collapses {
+            let [collapse] = engine.supernovae.as_slice() else {
+                panic!("{case}: one collapse, not {:?}", engine.supernovae);
+            };
+            assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
+            assert_eq!(left.phase(), Phase::NeutronStar, "{case}: {left:?}");
+        } else {
+            assert!(
+                engine.supernovae.is_empty(),
+                "{case}: {:?}",
+                engine.supernovae
+            );
+            assert_eq!(
+                left.phase(),
+                Phase::OxygenNeonWhiteDwarf,
+                "{case}: {left:?}"
+            );
+        }
+        assert!(engine.pooled.is_none(), "{case}");
+    }
+}
+
+/// A single 8.25 M☉ star at Z = 0.02 under `rules`, inside the electron-capture window, whose
+/// core is above the capture mass from the second dredge-up, in `fed_dwarf_engine`'s place halfway
+/// along its thermal pulses, with its core's mass there.
+fn window_giant_engine(
+    rules: crate::stellar::rules::StellarRules,
+) -> (super::evolve::Engine, SolarMasses) {
+    use std::sync::Arc;
+
+    use super::star::Member;
+    use crate::stellar::sse::{Track, TrackOptions};
+
+    let options = TrackOptions::default().with_rules(rules);
+    let track = Track::full_with(
+        SolarMasses::new(8.25),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+        options,
+    );
+    let death = track.death().expect("a track built in full").age().value();
+    let pulses: Vec<f64> = (0..2000)
+        .map(|k| death * f64::from(k) / 2000.0)
+        .filter(|&age| track.state_at(Years::new(age)).phase() == Phase::ThermallyPulsingAgb)
+        .collect();
+    let at = pulses[pulses.len() / 2];
+    let core = track.state_at(Years::new(at)).core_mass();
+    let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+    engine.members[0] = Member::Track {
+        track: Arc::new(track),
+        offset: engine.age - at,
+    };
+    (engine, core)
+}
+
+/// P11.T4's kept-core endings: under every 29 hold a strip that leaves an oxygen–neon dwarf at or
+/// above the capture mass, 1.37 M☉, collapses it at once (research-leans-38). A window's single
+/// star keeps its thermal pulses with its core above the cap (`window_giant_engine`'s); stripped
+/// there, at a core of 1.434 M☉, it leaves an oxygen–neon dwarf of that mass under every 27 hold,
+/// and under every 29 hold the 1.26 M☉ neutron star of an accretion-induced collapse, with no Type
+/// Ia candidate.
+#[test]
+fn a_window_giant_stripped_past_the_capture_mass_collapses_from_29() {
+    use crate::stellar::remnant::collapse::{OXYGEN_NEON_CAPTURE_MASS, electron_capture_remnant};
+    use crate::stellar::rules::StellarRules;
+
+    for (rules, collapses) in [
+        (StellarRules::of_version(crate::GENERATOR_VERSION), false),
+        (StellarRules::every_29_hold(), true),
+    ] {
+        let case = format!("{:?}", rules.core_endings);
+        let (mut engine, core) = window_giant_engine(rules);
+        assert!(core > OXYGEN_NEON_CAPTURE_MASS, "{case}: {core:?}");
+        engine.strip(0);
+        let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        if collapses {
+            let [collapse] = engine.supernovae.as_slice() else {
+                panic!("{case}: one collapse, not {:?}", engine.supernovae);
+            };
+            assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
+            assert_eq!(left.phase(), Phase::NeutronStar, "{case}: {left:?}");
+        } else {
+            assert!(
+                engine.supernovae.is_empty(),
+                "{case}: {:?}",
+                engine.supernovae
+            );
+            assert_eq!(
+                left.phase(),
+                Phase::OxygenNeonWhiteDwarf,
+                "{case}: {left:?}"
+            );
+            assert!(
+                (left.mass().value() - core.value()).abs() < 1e-9 * core.value(),
+                "{case}: {left:?}"
+            );
+        }
+        assert!(engine.pooled.is_none(), "{case}");
+    }
+}
+
+/// P11.T4's kept-core endings: the unified arm is deterministic. The same engine, track or pair
+/// twice under every 29 hold gives the same outcome: a carbon–oxygen dwarf's early-AGB product
+/// whose iron core collapses, the oxygen–neon dwarf a wind feeds to the capture mass, an unplaced
+/// helium giant's disruption, a window giant's strip, a 1.8 M☉ helium star's collapse at its end,
+/// and pinned pair 0080 and a swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d, Z = 0.004).
+#[test]
+fn the_core_endings_arm_is_deterministic() {
+    use super::common_envelope::{CoalescedProduct, Product};
+    use super::core_endings::CoreEndingRules;
+    use super::dwarf_limit::CoreSource;
+    use super::star::Kind;
+    use crate::stellar::rules::StellarRules;
+    use crate::stellar::sse::Track;
+
+    let every_29 = StellarRules::every_29_hold();
+    let iron_core = || {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, every_29);
+        let product = engine.product_member(
+            CoalescedProduct::Star {
+                kind: Kind::EarlyAgb,
+                mass: 4.5,
+                core: 2.4,
+                burnt: 0.7,
+                fraction: 0.0,
+            },
+            CoreSource::CarbonOxygenDwarf,
+        );
+        engine.finish_merger_with(product);
+        until_a_death(&mut engine);
+        (engine.age, engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(iron_core(), iron_core());
+    let wind = || {
+        let mut engine = wind_fed_dwarf_engine(1.369, every_29);
+        engine.detached_phase();
+        (engine.age, engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(wind(), wind());
+    let disruption = || {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, every_29);
+        engine.finish_merger_with(Product::Disruption {
+            mass: SolarMasses::new(1.5),
+        });
+        (engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(disruption(), disruption());
+    let strip = || {
+        let (mut engine, _) = window_giant_engine(every_29);
+        engine.strip(0);
+        (engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(strip(), strip());
+    let helium_star = || {
+        Track::helium_star_under(
+            SolarMasses::new(1.8),
+            &Composition::SOLAR,
+            &StarDraws::median(),
+            None,
+            CoreEndingRules::Unified,
+        )
+    };
+    assert_eq!(helium_star(), helium_star());
+    let until = Years::new(1.2e10);
+    for input in [pinned_pair_number(80), pair(1.1, 0.9, 100.0, 0.0, 0.004)] {
+        let input = input.with_rules(every_29);
+        assert_eq!(evolve(&input, until), evolve(&input, until));
     }
 }

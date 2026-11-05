@@ -787,8 +787,9 @@ fn gate(
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
     let stars = attempt.stars();
     let stellar = galaxy.rules().stellar;
-    let tables_hold =
-        stellar.dwarf_limit.fitted_tables_hold() && stellar.swollen_dwarf.fitted_tables_hold();
+    let tables_hold = stellar.dwarf_limit.fitted_tables_hold()
+        && stellar.swollen_dwarf.fitted_tables_hold()
+        && stellar.core_endings.fitted_tables_hold();
     // A supernova that unbinds any pair changes what the system shows (P11.T10), so every pair is
     // checked, as for a system the grid redraws.
     let certified = attempt.pairs().iter().all(|pair| {

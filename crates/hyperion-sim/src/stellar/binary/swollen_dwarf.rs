@@ -37,6 +37,9 @@ use crate::stellar::Phase;
 use crate::stellar::remnant::DeathKind;
 use crate::stellar::rules::StellarRules;
 
+use crate::units::SolarMasses;
+
+use super::core_endings::CoreEndingRules;
 use super::dwarf_limit::CoreSource;
 
 /// The generator version whose stellar rules swell a helium white dwarf fed hydrogen into a giant
@@ -104,14 +107,41 @@ pub(super) enum SwollenDeath {
 }
 
 impl SwollenDeath {
-    /// How a giant whose core came from `source` ends where its own track's death is `death`,
-    /// leaving a remnant of `phase`.
+    /// How a giant whose core came from `source` ends where its own track's death is `death`, with
+    /// its carbon–oxygen core at `core`, leaving a remnant of `phase`, under `endings`.
+    ///
+    /// From version 29 ([`CoreEndingRules::Unified`]) a track that collapses an iron core collapses
+    /// the kept core too, a modelling choice after BSE, whose merger product takes the type of the
+    /// giant it makes (BSE table 2; research-leans-38): the kept kind sets only what is left where
+    /// the track leaves a white dwarf or collapses an oxygen–neon core by electron capture, there a
+    /// carbon–oxygen core below the Chandrasekhar mass
+    /// ([`CoreEndingRules::below_the_chandrasekhar_mass`]) being left as its dwarf.
     #[must_use]
-    pub(super) fn of(source: CoreSource, death: DeathKind, phase: Phase) -> Self {
+    pub(super) fn of(
+        source: CoreSource,
+        death: DeathKind,
+        core: SolarMasses,
+        phase: Phase,
+        endings: CoreEndingRules,
+    ) -> Self {
         let Some(kind) = source.dwarf() else {
             return Self::Own;
         };
         match death {
+            DeathKind::ElectronCapture
+                if endings == CoreEndingRules::Unified
+                    && kind == Phase::CarbonOxygenWhiteDwarf
+                    && endings.below_the_chandrasekhar_mass(core) =>
+            {
+                Self::WhiteDwarf(kind)
+            }
+            DeathKind::CoreCollapse { .. }
+            | DeathKind::DirectCollapse
+            | DeathKind::PairInstability
+                if endings == CoreEndingRules::Unified =>
+            {
+                Self::Own
+            }
             DeathKind::EnvelopeLoss if source.dwarf_phase(phase) == phase => Self::Own,
             DeathKind::EnvelopeLoss => Self::WhiteDwarf(kind),
             DeathKind::ElectronCapture if kind == Phase::OxygenNeonWhiteDwarf => Self::Own,

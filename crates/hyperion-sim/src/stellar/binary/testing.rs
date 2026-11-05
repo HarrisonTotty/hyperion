@@ -223,8 +223,43 @@ pub(crate) fn dwarfs_above_the_limit(
     until: f64,
 ) -> [bool; 2] {
     use crate::stellar::Phase;
-    use crate::stellar::binary::star::Member;
     use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+
+    members_showing(timeline, until, |s| {
+        matches!(
+            s.phase(),
+            Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+        ) && s.mass() > CHANDRASEKHAR_MASS
+    })
+}
+
+/// Whether each member of `timeline`, primary first, shows an oxygen–neon white dwarf above the
+/// capture mass, 1.37 M☉, at a segment's edge or at a knot of a remnant's mass, at or before
+/// `until` years (P11.T4's kept-core endings, `core_endings`).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn oxygen_neon_dwarfs_above_the_capture_mass(
+    timeline: &crate::stellar::binary::BinaryTimeline,
+    until: f64,
+) -> [bool; 2] {
+    use crate::stellar::Phase;
+    use crate::stellar::remnant::collapse::OXYGEN_NEON_CAPTURE_MASS;
+
+    members_showing(timeline, until, |s| {
+        s.phase() == Phase::OxygenNeonWhiteDwarf && s.mass() > OXYGEN_NEON_CAPTURE_MASS
+    })
+}
+
+/// Whether each member of `timeline`, primary first, shows a state that `shows` holds of at a
+/// segment's edge or at a knot of a remnant's mass, at or before `until` years.
+#[cfg(test)]
+#[must_use]
+fn members_showing(
+    timeline: &crate::stellar::binary::BinaryTimeline,
+    until: f64,
+    shows: impl Fn(&crate::stellar::StarState) -> bool,
+) -> [bool; 2] {
+    use crate::stellar::binary::star::Member;
 
     let mut above = [false; 2];
     let ages = timeline
@@ -252,12 +287,7 @@ pub(crate) fn dwarfs_above_the_limit(
             .iter()
             .enumerate()
         {
-            above[k] |= matches!(
-                s.phase(),
-                Phase::HeliumWhiteDwarf
-                    | Phase::CarbonOxygenWhiteDwarf
-                    | Phase::OxygenNeonWhiteDwarf
-            ) && s.mass() > CHANDRASEKHAR_MASS;
+            above[k] |= shows(s);
         }
     }
     above

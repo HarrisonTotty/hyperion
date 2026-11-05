@@ -2,6 +2,7 @@
 //! with the rules of section 7.1 for the initial mass), and how each ends.
 
 use crate::stellar::Phase;
+use crate::stellar::binary::core_endings::CoreEndingRules;
 use crate::stellar::premain::{self, Contraction, PROTOSTAR_YEARS, Protostar};
 use crate::stellar::remnant::collapse::{
     CoreCollapse, ElectronCaptureWindows, IRON_CORE_MC_BAGB, OXYGEN_NEON_CAPTURE_MASS,
@@ -18,7 +19,7 @@ use crate::units::{Megayears, SolarMasses, Years};
 
 use super::super::PhasePoint;
 
-use super::super::agb::{self, CoreEnd, EarlyAgb, EarlyAgbEnd, ThermallyPulsingAgb};
+use super::super::agb::{CoreEnd, EarlyAgb, EarlyAgbEnd, ThermallyPulsingAgb};
 use super::super::cheb::CoreHeliumBurning;
 use super::super::gb::FirstGiantBranch;
 use super::super::helium::{self, HeliumStar};
@@ -673,11 +674,14 @@ impl Builder<'_> {
         previous: Option<[f64; 3]>,
     ) -> Result<Step, IntegrateEnvelopeError> {
         let mc_du = phase.mc_du().value();
+        // From 29 every oxygen–neon core's pulses end at the cap where its core reaches it with
+        // the envelope on (P11.T4's `core_endings`).
+        let unified = self.options.rules().core_endings == CoreEndingRules::Unified;
         // An oxygen–neon core ends the pulses at the white dwarf's cap if it reaches it before
         // `Mc,SN` ([`Builder::oxygen_neon_cap`]).
         let cap = self
-            .oxygen_neon_cap(m0, mc_bagb)
-            .filter(|&cap| phase.end() == CoreEnd::Supernova && cap > mc_du);
+            .pulses_cap(m0, mc_bagb)
+            .filter(|&cap| (unified || phase.end() == CoreEnd::Supernova) && cap > mc_du);
         let span = Span::new(
             phase.t_start(),
             cap.map_or(phase.t_end(), |cap| {
@@ -719,21 +723,27 @@ impl Builder<'_> {
         let end = built.end;
         let mc = core_mass(end);
         Ok(match (built.ending, phase.end()) {
-            (Ending::Nominal, CoreEnd::Supernova) if let Some(cap) = cap => {
+            (Ending::Nominal, ending)
+                if let Some(cap) = cap
+                    && (ending == CoreEnd::Supernova
+                        || phase.time_of_core_mass(SolarMasses::new(cap)) < phase.t_end()) =>
+            {
                 // The core reaches the cap at the span's end, to rounding.
                 let core = cap.min(built.end_mass);
-                let white_dwarf = self.white_dwarf(
-                    end,
-                    Phase::OxygenNeonWhiteDwarf,
-                    core,
-                    ProgenitorAtDeath::new(
-                        SolarMasses::new(core),
-                        SolarMasses::new(core),
-                        SolarMasses::new((built.end_mass - mc).max(0.0)),
-                        Stripping::None,
-                    ),
+                let progenitor = ProgenitorAtDeath::new(
+                    SolarMasses::new(core),
+                    SolarMasses::new(core),
+                    SolarMasses::new((built.end_mass - mc).max(0.0)),
+                    Stripping::None,
                 );
-                self.agb_end(built.segment, end, white_dwarf, previous)
+                // From 29 the window's oxygen–neon core collapses there, as every other one is
+                // capped there (P11.T4's `core_endings`).
+                let fate = if unified && self.captures_electrons(m0) {
+                    self.oxygen_neon_core(end, m0, core, progenitor)
+                } else {
+                    self.white_dwarf(end, Phase::OxygenNeonWhiteDwarf, core, progenitor)
+                };
+                self.agb_end(built.segment, end, fate, previous)
             }
             (Ending::Nominal, CoreEnd::Supernova) => self.pulsing_agb_end(
                 end,
@@ -957,9 +967,18 @@ impl Builder<'_> {
             SolarMasses::ZERO,
             Stripping::Wind,
         );
-        let fate = if mc < agb::CHANDRASEKHAR_MSUN {
+        // From 29 a core within rounding of the Chandrasekhar mass has reached it (P11.T4's
+        // `core_endings`).
+        let endings = self.options.rules().core_endings;
+        let fate = if endings.below_the_chandrasekhar_mass(SolarMasses::new(mc)) {
             let dwarf = if oxygen_neon { mc.min(mass) } else { mass };
-            self.white_dwarf(age, kind, dwarf, progenitor)
+            // From 29 an oxygen–neon core collapses by electron capture at the capture mass
+            // (P11.T4's `core_endings`), here at the star's end.
+            if kind == Phase::OxygenNeonWhiteDwarf && dwarf >= self.oxygen_neon_collapse_msun() {
+                electron_capture(age, progenitor)
+            } else {
+                self.white_dwarf(age, kind, dwarf, progenitor)
+            }
         } else if oxygen_neon {
             let supernova = SupernovaType::of_envelopes(
                 SolarMasses::ZERO,
@@ -1141,6 +1160,19 @@ impl Builder<'_> {
         }
     }
 
+    /// The mass, M☉, at which an oxygen–neon core collapses by electron capture rather than leaving
+    /// its dwarf: from version 29 under [`RemnantRecipe::MandelMuller2020`] the capture mass,
+    /// [`OXYGEN_NEON_CAPTURE_MASS`] (P11.T4's `core_endings`), and the Chandrasekhar mass
+    /// otherwise, which no white dwarf of the track reaches.
+    #[must_use]
+    fn oxygen_neon_collapse_msun(&self) -> f64 {
+        self.options
+            .rules()
+            .core_endings
+            .collapse_mass(Phase::OxygenNeonWhiteDwarf, self.options.remnant())
+            .value()
+    }
+
     /// The largest core, M☉, an oxygen–neon white dwarf of a star whose early AGB had the initial
     /// mass `m0` and a core at the base of the AGB of `mc_bagb` can have, if the track caps it:
     /// under [`RemnantRecipe::MandelMuller2020`], for an oxygen–neon core (`mc_bagb` of 1.6–2.25
@@ -1164,6 +1196,31 @@ impl Builder<'_> {
                 Some(OXYGEN_NEON_CAPTURE_MASS.value())
             }
             RemnantRecipe::MandelMuller2020 | RemnantRecipe::Hurley2000 => None,
+        }
+    }
+
+    /// The cap on an oxygen–neon core's thermal pulses ([`Builder::oxygen_neon_cap`]'s), and from
+    /// version 29 (P11.T4's `core_endings`) the window's too, where the pulses end in its collapse
+    /// ([`Builder::oxygen_neon_core`]): under [`RemnantRecipe::MandelMuller2020`] every oxygen–neon
+    /// core then collapses or is left at the capture mass, where electron captures on ²⁴Mg and
+    /// ²⁰Ne collapse it (Miyaji et al. 1980, PASJ 32, 303; Nomoto 1984, ApJ 277, 791). The early
+    /// AGB keeps the held cap: a window's star whose core at the second dredge-up, `Mc,DU`, is
+    /// already above the cap (every single star in the window at Z = 5 × 10⁻⁴–0.02, measured
+    /// 2026-11-03) keeps its pulses and collapses at `Mc,SN` (lean, 2026-11-03: capping it on the
+    /// early AGB would end it without pulses, on which a merger's product is placed).
+    #[must_use]
+    fn pulses_cap(&self, m0: f64, mc_bagb: f64) -> Option<f64> {
+        let oxygen_neon =
+            (OXYGEN_NEON_MC_BAGB.value()..IRON_CORE_MC_BAGB.value()).contains(&mc_bagb);
+        match self.options.remnant() {
+            RemnantRecipe::MandelMuller2020
+                if oxygen_neon && self.options.rules().core_endings == CoreEndingRules::Unified =>
+            {
+                Some(OXYGEN_NEON_CAPTURE_MASS.value())
+            }
+            RemnantRecipe::MandelMuller2020 | RemnantRecipe::Hurley2000 => {
+                self.oxygen_neon_cap(m0, mc_bagb)
+            }
         }
     }
 

@@ -96,6 +96,7 @@ use crate::stellar::rules::StellarRules;
 use crate::stellar::sse;
 use crate::units::SolarMasses;
 
+use super::core_endings::CoreEndingRules;
 use super::star::Kind;
 
 /// The generator version whose stellar rules take the white-dwarf union's fixes to the dwarf limit
@@ -163,6 +164,13 @@ pub(super) enum Unplaced {
         /// Its mass.
         mass: SolarMasses,
     },
+    /// A helium star of `mass` whose carbon–oxygen core ignites carbon at the Chandrasekhar mass,
+    /// which disrupts it and leaves nothing, with no Type Ia candidate (from version 29, P11.T4's
+    /// `core_endings`; plan 06's `helium_star_end`).
+    Disruption {
+        /// Its mass.
+        mass: SolarMasses,
+    },
 }
 
 impl Unplaced {
@@ -183,6 +191,7 @@ impl Unplaced {
             Self::WhiteDwarf { .. } => 1,
             Self::HeliumStar { .. } => 3,
             Self::IronCore { .. } => 4,
+            Self::Disruption { .. } => 6,
         };
         UNPLACED.with(|counts| {
             let mut c = counts.get();
@@ -195,15 +204,16 @@ impl Unplaced {
 #[cfg(test)]
 thread_local! {
     /// This thread's unplaced products since it started ([`unplaced_counts`]).
-    static UNPLACED: core::cell::Cell<[usize; 6]> = const { core::cell::Cell::new([0; 6]) };
+    static UNPLACED: core::cell::Cell<[usize; 7]> = const { core::cell::Cell::new([0; 7]) };
 }
 
 /// The merger products this thread's engines could not place since it started, by what they
-/// left: helium, carbon–oxygen and oxygen–neon dwarfs, naked helium stars, iron cores, and pinned
-/// primaries' products left to their pin (a test build's counter, for the dwarf limit's census).
+/// left: helium, carbon–oxygen and oxygen–neon dwarfs, naked helium stars, iron cores, pinned
+/// primaries' products left to their pin, and disruptions (a test build's counter, for the dwarf
+/// limit's census).
 #[cfg(test)]
 #[must_use]
-pub(crate) fn unplaced_counts() -> [usize; 6] {
+pub(crate) fn unplaced_counts() -> [usize; 7] {
     UNPLACED.with(core::cell::Cell::get)
 }
 
@@ -314,7 +324,11 @@ impl DwarfLimitRules {
     }
 
     /// What the product of `kind`, mass `m` and core `core` from `source` leaves where no star of
-    /// its kind has such a core: see the module documentation.
+    /// its kind has such a core: see the module documentation; but under
+    /// [`CoreEndingRules::Unified`] (`endings`, from version 29) a helium giant of no dwarf's ends
+    /// by its mass `m`, which stands for its helium star's (HPT section 6.1): an iron core from
+    /// 1.6 M☉, a disruption that leaves nothing from the Chandrasekhar mass, and a carbon–oxygen
+    /// dwarf of min(core, m) below.
     #[must_use]
     pub(super) fn unplaced(
         self,
@@ -322,9 +336,25 @@ impl DwarfLimitRules {
         m: SolarMasses,
         core: SolarMasses,
         source: CoreSource,
+        endings: CoreEndingRules,
     ) -> Unplaced {
         let mass = SolarMasses::new(core.value().max(1e-3).min(m.value()));
+        // From 29 a helium giant of no dwarf ends by its mass, as plan 06's helium star does with
+        // its core at the Chandrasekhar mass (P11.T4's `core_endings`).
+        let by_mass = endings == CoreEndingRules::Unified
+            && matches!(kind, Kind::HeliumGap | Kind::HeliumGiant)
+            && source == CoreSource::Other;
         match self {
+            Self::Whole if by_mass && m >= OXYGEN_NEON_MC_BAGB => Unplaced::IronCore {
+                co_core: mass,
+                helium_core: m,
+                mass: m,
+            },
+            Self::Whole if by_mass && m >= CHANDRASEKHAR_MASS => Unplaced::Disruption { mass: m },
+            Self::Whole if by_mass => Unplaced::WhiteDwarf {
+                phase: Phase::CarbonOxygenWhiteDwarf,
+                mass,
+            },
             Self::Whole
                 if carbon_oxygen_core(kind) && source == CoreSource::Other && iron_core(core) =>
             {
@@ -398,7 +428,15 @@ impl DwarfLimitRules {
 /// Whether a white dwarf of `mass` M☉ collapses now: at or above the Chandrasekhar mass.
 #[must_use]
 pub(super) fn collapses(mass: f64) -> bool {
-    mass >= CHANDRASEKHAR_MASS.value()
+    collapses_at(mass, CHANDRASEKHAR_MASS)
+}
+
+/// [`collapses`] for a dwarf whose collapse mass is `at` (`core_endings::CoreEndingRules::
+/// collapse_mass`: the Chandrasekhar mass, and from version 29 an oxygen–neon dwarf's capture mass
+/// under the default recipe).
+#[must_use]
+pub(super) fn collapses_at(mass: f64, at: SolarMasses) -> bool {
+    mass >= at.value()
 }
 
 /// Whether a carbon–oxygen core of `core` is an iron core: one of 1.438 M☉ or more, from which

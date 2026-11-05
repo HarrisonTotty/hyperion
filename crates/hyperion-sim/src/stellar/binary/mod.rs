@@ -36,6 +36,7 @@ pub(crate) mod class_merger;
 mod classify;
 pub(crate) mod collapses;
 mod common_envelope;
+pub(crate) mod core_endings;
 mod detached;
 pub(crate) mod dwarf_limit;
 pub mod events;

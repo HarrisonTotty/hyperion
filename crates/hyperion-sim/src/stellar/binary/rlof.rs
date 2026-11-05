@@ -81,7 +81,6 @@ use std::sync::Arc;
 
 use crate::stellar::Phase;
 use crate::stellar::remnant::collapse::{MAX_NEUTRON_STAR_MASS, electron_capture_remnant};
-use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 use crate::stellar::remnant::{
     CollapseChannel, KickDraws, KickLaw, ProgenitorAtDeath, StandardKickLaw, Stripping,
 };
@@ -1182,7 +1181,13 @@ impl Engine {
     /// `fed` and its `accretion` (see the module documentation): whether it ended the phase. A
     /// swell ([`Engine::swell`]) reads the accretor's type, mass and core at the step's start,
     /// what it gained and the step's length (ruling p11-c2-swell of 2026-10-06, §3.3 A.1).
-    fn accretor_events(&mut self, d: usize, rate: f64, fed: Fed, accretion: Accretion) -> bool {
+    pub(super) fn accretor_events(
+        &mut self,
+        d: usize,
+        rate: f64,
+        fed: Fed,
+        accretion: Accretion,
+    ) -> bool {
         let a_idx = 1 - d;
         let (ma, ta) = self.current(a_idx);
         let (md, td) = self.current(d);
@@ -1222,6 +1227,7 @@ impl Engine {
                     self.ctx.composition(),
                     self.ctx.draws(a_idx),
                     Some(self.reach_span_years(self.age)),
+                    self.ctx.rules().core_endings,
                 );
                 self.set_member(
                     a_idx,
@@ -1249,8 +1255,10 @@ impl Engine {
                 ));
                 false
             }
+            // From 29 an oxygen–neon dwarf collapses at its capture mass (P11.T4's `core_endings`).
             Kind::HeliumWhiteDwarf | Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf
-                if ma >= CHANDRASEKHAR_MASS.value() =>
+                if white_dwarf_phase(ka)
+                    .is_some_and(|phase| ma >= self.collapse_mass(phase).value()) =>
             {
                 if ka != Kind::OxygenNeonWhiteDwarf {
                     let masses = masses_now(self);
@@ -1634,4 +1642,27 @@ fn overflow_rate_scale(kind: Kind, m: f64, r: f64) -> f64 {
 #[must_use]
 fn gravitational_wave_rate(m0: f64, m1: f64, a: f64) -> f64 {
     super::detached::GRAVITATIONAL_WAVE_RATE * m0 * m1 * (m0 + m1) / (a * a * a * a)
+}
+
+/// The phase of a white dwarf of type `kind`; `None` for any other type.
+#[must_use]
+fn white_dwarf_phase(kind: Kind) -> Option<Phase> {
+    match kind {
+        Kind::HeliumWhiteDwarf => Some(Phase::HeliumWhiteDwarf),
+        Kind::CarbonOxygenWhiteDwarf => Some(Phase::CarbonOxygenWhiteDwarf),
+        Kind::OxygenNeonWhiteDwarf => Some(Phase::OxygenNeonWhiteDwarf),
+        Kind::LowMassMainSequence
+        | Kind::MainSequence
+        | Kind::HertzsprungGap
+        | Kind::GiantBranch
+        | Kind::CoreHeliumBurning
+        | Kind::EarlyAgb
+        | Kind::PulsingAgb
+        | Kind::HeliumMainSequence
+        | Kind::HeliumGap
+        | Kind::HeliumGiant
+        | Kind::NeutronStar
+        | Kind::BlackHole
+        | Kind::Massless => None,
+    }
 }

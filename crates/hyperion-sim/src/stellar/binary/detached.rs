@@ -32,7 +32,6 @@
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::stellar::Phase;
-use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 use crate::stellar::sse::{CORE_GYRATION, ENVELOPE_GYRATION, Structure, Track};
 use crate::units::consts::{GM_SUN, SECONDS_PER_JULIAN_YEAR, SOLAR_RADIUS_M, SPEED_OF_LIGHT};
 use crate::units::{SolarMasses, Years};
@@ -724,13 +723,13 @@ impl Engine {
     }
 
     /// The time, years, in which member `i`, a white dwarf a wind feeds at `rates` from `s`,
-    /// reaches the Chandrasekhar mass, at which it stops (P11.T4's `dwarf_limit`,
+    /// reaches its collapse mass ([`Engine::collapse_mass`]: the Chandrasekhar mass, and from
+    /// version 29 an oxygen–neon dwarf's capture mass), at which it stops (P11.T4's `dwarf_limit`,
     /// [`Stop::Chandrasekhar`]); `None` for any other member. From 29 a carbon–oxygen or
     /// oxygen–neon dwarf only, and none for a pinned primary whose pin is pending
     /// (`Engine::pin_pending`).
     #[must_use]
     fn to_the_dwarf_limit(&self, i: usize, s: &Snapshot, rates: &Rates) -> Option<f64> {
-        let limit = CHANDRASEKHAR_MASS.value();
         let whole = self.ctx.rules().dwarf_limit.leaves_the_pin();
         if whole && self.pin_pending(i) {
             return None;
@@ -738,6 +737,8 @@ impl Engine {
         let Member::Remnant { phase, .. } = &self.members[i] else {
             return None;
         };
+        // From 29 an oxygen–neon dwarf's is the capture mass (P11.T4's `core_endings`).
+        let limit = self.collapse_mass(*phase).value();
         // From 29 a helium dwarf is left out: it ignites at 0.7 M☉ (BSE section 2.6.6), far below
         // the limit.
         let dwarf = matches!(

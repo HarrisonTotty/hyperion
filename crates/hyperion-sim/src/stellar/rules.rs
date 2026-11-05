@@ -41,6 +41,12 @@
 //!   heavier star's giant branch below it, on a degenerate branch from it, read by `Engine::swell`
 //!   through the engine's input's rules. The fitted tables keep the version's rules until the bump
 //!   refits them (`stellar/rules/swollen_dwarf_hold.rs`).
+//! - [`core_endings`](StellarRules::core_endings), at [`CORE_ENDINGS_VERSION`] (plan 11, P11.T4's
+//!   fix): how a white dwarf's core that a giant keeps ends, as its track does but for what is
+//!   left, and one collapse mass for every oxygen–neon core under the default recipe, read by the
+//!   binary engine through its input's rules and by the track's builder through its options. The
+//!   fitted tables keep the version's rules until the bump refits them
+//!   (`stellar/rules/core_endings_hold.rs` lists the movers).
 //!
 //! The 27 folds put P11's 27 holds on the record; the holds above but `kick_rank` are at 29.
 //!
@@ -49,6 +55,7 @@
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
 
 use crate::GeneratorVersion;
+use crate::stellar::binary::core_endings::{CORE_ENDINGS_VERSION, CoreEndingRules};
 use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules};
 use crate::stellar::binary::swollen_dwarf::{SWOLLEN_DWARF_VERSION, SwollenDwarfRules};
 use crate::stellar::remnant::KickRankRules;
@@ -67,6 +74,9 @@ pub(crate) struct StellarRules {
     /// Where a helium white dwarf fed hydrogen is placed as a giant, the hold of
     /// [`SWOLLEN_DWARF_VERSION`].
     pub(crate) swollen_dwarf: SwollenDwarfRules,
+    /// How a white dwarf's core that a giant keeps ends, and where an oxygen–neon core collapses,
+    /// the hold of [`CORE_ENDINGS_VERSION`].
+    pub(crate) core_endings: CoreEndingRules,
 }
 
 impl StellarRules {
@@ -87,11 +97,18 @@ impl StellarRules {
             } else {
                 SwollenDwarfRules::AtBase
             },
+            core_endings: if version.get() >= CORE_ENDINGS_VERSION.get() {
+                CoreEndingRules::Unified
+            } else {
+                CoreEndingRules::Held
+            },
         }
     }
 
     /// Every stellar hold at 29 in force, for a test that asserts a 29 figure without a galaxy:
-    /// P11.T4's `dwarf_limit` and `swollen_dwarf`. The stellar part of
+    /// P11.T4's `dwarf_limit`, `swollen_dwarf` and `core_endings`. The stellar part of
+    /// `GalaxyRules::every_29_hold()`, so a later hold at 29 joins both with nothing to edit; the
+    /// 29 bump deletes it with it.
     /// `GalaxyRules::every_29_hold()`, so a later hold at 29 joins both with nothing to edit; the
     /// 29 bump deletes it with it.
     #[cfg(test)]
@@ -121,6 +138,8 @@ mod binary_kicks_hold;
 mod classes_hold;
 #[cfg(test)]
 mod collapses_hold;
+#[cfg(test)]
+mod core_endings_hold;
 #[cfg(test)]
 mod dwarf_limit_hold;
 #[cfg(test)]

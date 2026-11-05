@@ -518,6 +518,55 @@ fn the_build_reads_the_companion_mark_only_where_the_windows_disagree() {
     }
 }
 
+/// P11.T4's kept-core endings (research-leans-38): under every 29 hold a window star's thermal
+/// pulses end in its collapse at the capture mass, 1.37 M☉ (`Builder::pulses_cap`). A
+/// companion-stripped 7.7 M☉ star at Z = 0.02, whose pulses start below the cap, collapses by
+/// electron capture into the 1.26 M☉ neutron star with its core at the capture mass, earlier than
+/// under every 27 hold, where its core reaches 1.378 M☉. A window star whose core is above the cap
+/// from the second dredge-up, 8.25 M☉ or 8.1 M☉ companion-stripped, dies as under every 27 hold.
+#[test]
+fn a_window_star_s_pulses_end_at_the_capture_mass_from_29() {
+    use crate::rng::Mark;
+    use crate::stellar::remnant::collapse::{OXYGEN_NEON_CAPTURE_MASS, electron_capture_remnant};
+    use crate::stellar::rules::StellarRules;
+
+    let marked = StarDraws::from_parts(StarDrawsParts {
+        stripped: Mark::from_word(0),
+        ..StarDrawsParts::MEDIAN
+    });
+    let death = |m: f64, draws: &StarDraws, rules: StellarRules| {
+        let options = TrackOptions::default().with_rules(rules);
+        let track = Track::full_with(SolarMasses::new(m), &composition(0.02), draws, options);
+        assert_eq!(track.remnant(), Some(electron_capture_remnant()), "{m} M☉");
+        let death = track.death().expect("a full track dies");
+        assert_eq!(death.kind(), DeathKind::ElectronCapture, "{m} M☉");
+        death
+    };
+    let (every_27, every_29) = (
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+        StellarRules::every_29_hold(),
+    );
+    let (held, unified) = (death(7.7, &marked, every_27), death(7.7, &marked, every_29));
+    let capture = OXYGEN_NEON_CAPTURE_MASS.value();
+    let core = |death: &crate::stellar::remnant::Death| death.progenitor().co_core_mass().value();
+    assert!(
+        (core(&unified) - capture).abs() < 1e-9 * capture,
+        "{unified:?}"
+    );
+    assert!(core(&held) > capture + 5e-3, "{held:?}");
+    assert!(
+        unified.age().value() < held.age().value(),
+        "{unified:?} {held:?}"
+    );
+    for (m, draws) in [(8.25, StarDraws::median()), (8.1, marked)] {
+        assert_eq!(
+            death(m, &draws, every_27),
+            death(m, &draws, every_29),
+            "{m} M☉"
+        );
+    }
+}
+
 /// Ruling 57: under the generator's recipes no white dwarf is heavier than the electron-capture
 /// mass of an oxygen–neon core, 1.37 M☉, and none sits at the neutron star's radius, over 5–9 M☉
 /// (where the heaviest dwarfs come from) at five metallicities; under `Hurley2000`, as in SSE,
