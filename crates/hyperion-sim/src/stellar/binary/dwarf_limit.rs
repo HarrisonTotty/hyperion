@@ -228,11 +228,59 @@ pub(crate) fn unplaced_counts() -> [usize; 8] {
     UNPLACED.with(core::cell::Cell::get)
 }
 
+/// How a giant whose core is a dwarf's ended ([`dwarf_core_deaths`]'s columns, in order).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ending {
+    /// Its track's own death.
+    Own,
+    /// A white dwarf of the dwarf's kind at its track's death.
+    WhiteDwarf,
+    /// An electron capture at its track's death.
+    ElectronCapture,
+    /// A disruption at its track's death.
+    Disruption,
+    /// An electron capture at its core's limit (`Engine::reach_core_limit`).
+    CaptureAtLimit,
+    /// A disruption at its core's limit (`Engine::reach_core_limit`).
+    DisruptionAtLimit,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// This thread's deaths of giants whose cores are dwarfs' since it started
+    /// ([`dwarf_core_deaths`]).
+    static DWARF_CORE_DEATHS: core::cell::Cell<[usize; 6]> =
+        const { core::cell::Cell::new([0; 6]) };
+}
+
+/// Counts a death of `ending` ([`dwarf_core_deaths`]) on this thread.
+#[cfg(test)]
+pub(super) fn count_dwarf_core_death(ending: Ending) {
+    DWARF_CORE_DEATHS.with(|counts| {
+        let mut c = counts.get();
+        c[ending as usize] += 1;
+        counts.set(c);
+    });
+}
+
+/// The deaths of giants whose cores are carbon–oxygen or oxygen–neon dwarfs'
+/// (`Engine::dwarf_cores`) this thread's engines have acted on since it started, by ending: their
+/// tracks' own, a white dwarf of the dwarf's kind, an electron capture and a disruption at their
+/// tracks' deaths (`supernova::SwollenDeath`), and an electron capture and a disruption at their
+/// cores' limits (`Engine::reach_core_limit`), a test build's counter for the dwarf limit's census
+/// ([`Ending`]'s order).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn dwarf_core_deaths() -> [usize; 6] {
+    DWARF_CORE_DEATHS.with(core::cell::Cell::get)
+}
+
 /// What a merger's product's core was ([`DwarfLimitRules::unplaced`]): a carbon–oxygen or
 /// oxygen–neon white dwarf, whose product's dwarf is of its kind whatever its mass, since gaining
 /// and losing a hydrogen envelope does not change a core's composition, or anything else. The
 /// engine keeps it too for the giant each dwarf swells into, whose every exit takes it
-/// (`Engine::dwarf_cores`; P11.T4's swollen dwarf from `SWOLLEN_DWARF_VERSION`).
+/// (`Engine::dwarf_cores`; P11.T4's swollen dwarf).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CoreSource {
     /// A carbon–oxygen white dwarf.

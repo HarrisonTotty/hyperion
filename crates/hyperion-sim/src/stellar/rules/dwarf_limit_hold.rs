@@ -23,8 +23,9 @@ use crate::galaxy::params::GalaxyParams;
 use crate::id::Layer;
 use crate::rng::Seed;
 use crate::stellar::Phase;
-use crate::stellar::binary::dwarf_limit::{DWARF_LIMIT_VERSION, DwarfLimitRules, unplaced_counts};
-use crate::stellar::binary::swollen_dwarf::dwarf_core_deaths;
+use crate::stellar::binary::dwarf_limit::{
+    DWARF_LIMIT_VERSION, DwarfLimitRules, dwarf_core_deaths, unplaced_counts,
+};
 use crate::stellar::binary::testing::{
     dwarfs_above_the_limit, generated_pairs, oxygen_neon_dwarfs_above_the_capture_mass,
     pinned_primary, swollen_dwarf_kinds,
@@ -115,7 +116,7 @@ struct Figures {
     /// rule does not reach.
     merged: [[usize; 2]; 3],
     /// The deaths of giants whose cores are carbon–oxygen or oxygen–neon dwarfs', by ending
-    /// (`swollen_dwarf::dwarf_core_deaths`): their tracks' own, a white dwarf of the dwarf's kind,
+    /// (`dwarf_limit::dwarf_core_deaths`): their tracks' own, a white dwarf of the dwarf's kind,
     /// an electron capture and a disruption at their tracks' deaths, and an electron capture and
     /// a disruption at their cores' limits.
     endings: [[usize; 6]; 3],

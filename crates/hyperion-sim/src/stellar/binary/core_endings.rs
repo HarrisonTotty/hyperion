@@ -20,7 +20,7 @@
 //!   kind sets only what is left where the track leaves a white dwarf (a dwarf of that kind) or
 //!   collapses an oxygen–neon core in its window (a carbon–oxygen core there disrupts, with no
 //!   Type Ia candidate); and a kept carbon–oxygen core has no limit of its own
-//!   (`swollen_dwarf::SwollenDeath::of`, `Engine::core_limit_age`);
+//!   (`supernova::SwollenDeath::of`, `Engine::core_limit_age`);
 //! - under [`RemnantRecipe::MandelMuller2020`] every oxygen–neon core collapses at the capture
 //!   mass, where electron captures on ²⁴Mg and ²⁰Ne collapse it (Miyaji et al. 1980, PASJ 32, 303;
 //!   Nomoto 1984, ApJ 277, 791; ruling 57's [`OXYGEN_NEON_CAPTURE_MASS`]): a window's star whose

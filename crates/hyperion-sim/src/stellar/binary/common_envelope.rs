@@ -1603,10 +1603,10 @@ impl Engine {
     }
 
     /// The giant a helium white dwarf of `core` M☉ fed hydrogen swells into with its core still
-    /// degenerate ([`Engine::swell`] under P11.T4's `swollen_dwarf` from version 29): a star of mass
-    /// `m` M☉ in member `i`'s slot on the track of [`sse::degenerate_giant_mass`], a star below
-    /// `M_HeF`, placed on its first giant branch where its core, read at `m`, is `core` to
-    /// [`SWELL_CORE_TOLERANCE`] of it; or `None` where no such track's branch holds the core.
+    /// degenerate ([`Engine::swell`], P11.T4's swollen dwarf): a star of mass `m` M☉ in member
+    /// `i`'s slot on the track of [`sse::degenerate_giant_mass`], a star below `M_HeF`, placed on
+    /// its first giant branch where its core, read at `m`, is `core` to [`SWELL_CORE_TOLERANCE`] of
+    /// it; or `None` where no such track's branch holds the core.
     ///
     /// The branch's core grows with its fraction, so the fraction is found by bisection, in at most
     /// [`DEGENERATE_GIANT_BISECTIONS`] reads of the one track.

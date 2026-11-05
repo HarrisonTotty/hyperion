@@ -1212,7 +1212,7 @@ pub(crate) fn new_star_mass(
 const DEGENERATE_GIANT_SHARE: f64 = 0.7;
 
 /// The initial mass, M☉, of the track a helium white dwarf of `mc` M☉ fed hydrogen swells onto with
-/// its core still degenerate (plan 11, P11.T4's fix, the stellar rules' `swollen_dwarf`):
+/// its core still degenerate (plan 11, P11.T4's swollen dwarf, `Engine::swell`):
 /// [`DEGENERATE_GIANT_SHARE`] of `M_HeF`, whose first giant branch has a degenerate core and reaches
 /// a low-mass giant's helium flash; or `None` where `mc` is at or below `Mc,BGB`(`M_HeF`), whose
 /// giant [`new_star_mass`] already places on a degenerate branch, or not below that track's flash

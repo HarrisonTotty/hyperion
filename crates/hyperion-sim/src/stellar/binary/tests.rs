@@ -6959,14 +6959,7 @@ fn the_dwarf_limit_leaves_a_pinned_primary_to_its_pin() {
     let mut moved = Vec::new();
     for i in 0..1000 {
         let input = pinned_pair(&mut mix, i);
-        let endings = super::swollen_dwarf::dwarf_core_deaths();
         let held = evolve(&input.clone().with_rules(held_rules), Years::new(until));
-        // Under the held arms no star's core is ever a dwarf's.
-        assert_eq!(
-            super::swollen_dwarf::dwarf_core_deaths(),
-            endings,
-            "pair {i:04}"
-        );
         let arm = evolve(
             &input.clone().with_rules(dwarf_limit_rules()),
             Years::new(until),
@@ -7076,17 +7069,16 @@ fn a_dwarf_a_wind_feeds_stops_at_the_chandrasekhar_mass() {
 /// 25, and the same at 27).
 const WIND_FED_COLLAPSE_AGE: f64 = 480_515_539.091_214_66;
 
-/// P11.T4's dwarf limit and swollen dwarf: each arm of 29 is deterministic. The same pair, engine
-/// or swell twice under it gives the same timeline or member: an edge-lit dwarf's pair (5.43 +
-/// 1.69 M☉ at 7 d), an unplaced product's iron core and the wind-fed dwarf under the dwarf limit's
-/// arm alone, a fed helium dwarf's swell and a carbon–oxygen and an oxygen–neon dwarf's giant with
-/// its kind under the swollen dwarf's alone, and a swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d,
-/// Z = 0.004), pinned pair 0080 and an oxygen–neon dwarf's placed product under every 29 hold.
+/// P11.T4's dwarf limit and swollen dwarf: each is deterministic. The same pair, engine or swell
+/// twice gives the same timeline or member: an edge-lit dwarf's pair (5.43 + 1.69 M☉ at 7 d), an
+/// unplaced product's iron core and the wind-fed dwarf under the dwarf limit's arm of 29 alone, a
+/// fed helium dwarf's swell and a carbon–oxygen and an oxygen–neon dwarf's giant with its kind
+/// under the version's rules, and a swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d, Z = 0.004),
+/// pinned pair 0080 and an oxygen–neon dwarf's placed product under every 29 hold.
 #[test]
 fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
     use super::rlof::Fed;
     use super::star::{Kind, Member, Path};
-    use super::swollen_dwarf::SwollenDwarfRules;
     use crate::stellar::rules::StellarRules;
 
     let until = Years::new(1.2e10);
@@ -7109,10 +7101,7 @@ fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
         (engine.age, engine.members, engine.supernovae, engine.pooled)
     };
     assert_eq!(wind(), wind());
-    let swollen = StellarRules {
-        swollen_dwarf: SwollenDwarfRules::Degenerate,
-        ..StellarRules::of_version(crate::GENERATOR_VERSION)
-    };
+    let swollen = StellarRules::of_version(crate::GENERATOR_VERSION);
     let swell = || {
         let mut engine = fed_dwarf_engine(0.38, 0.004, swollen);
         let (age, m) = (engine.age, 0.381);
@@ -7233,7 +7222,7 @@ fn same_outcome(a: &BinaryTimeline, b: &BinaryTimeline) -> bool {
         })
 }
 
-// --- P11.T4: the swollen helium dwarf (held at 29) ----------------------------------------------
+// --- P11.T4: the swollen helium dwarf ------------------------------------------------------------
 
 /// A helium white dwarf of `dwarf` M☉ fed by a 2.5 M☉ main-sequence donor at τ = 0.5 in
 /// transfer, at metallicity `z` and 5 Gyr, with no pin, under `rules` (`fed_engine`'s pair, under
@@ -7280,13 +7269,12 @@ fn fed_dwarf_engine(
 }
 
 /// P11.T4's swollen dwarf: a 0.38 M☉ helium white dwarf, above `Mc,BGB`(`M_HeF`), fed hydrogen
-/// faster than its core grows by a 0.3 M☉ main-sequence donor, held to no thermal rate, swells
-/// under every 27 hold onto the base of the giant branch of a star heavier than `M_HeF`, whose
-/// strip leaves a helium main-sequence star; under every 29 hold onto the first giant branch of a
-/// 0.7 `M_HeF` star, its core the dwarf's to 10⁻⁹, whose strip leaves a helium white dwarf again.
-/// Fed by `fed_dwarf_engine`'s 2.5 M☉ donor, heavier than its dwarf and so held to its thermal rate,
-/// the swell is refused under every 29 hold: the giant would be fed at a nuclear rate and stripped
-/// back at once.
+/// faster than its core grows by a 0.3 M☉ main-sequence donor, held to no thermal rate, swells onto
+/// the first giant branch of a 0.7 `M_HeF` star, its core the dwarf's to 10⁻⁹, whose strip leaves a
+/// helium white dwarf again (BSE's placement, at the base of the giant branch of a star heavier
+/// than `M_HeF`, left a helium main-sequence star). Fed by `fed_dwarf_engine`'s 2.5 M☉ donor,
+/// heavier than its dwarf and so held to its thermal rate, the swell is refused: the giant would be
+/// fed at a nuclear rate and stripped back at once.
 #[test]
 fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
     use super::rlof::Fed;
@@ -7294,10 +7282,7 @@ fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
     use crate::stellar::rules::StellarRules;
 
     let (dwarf, dt, gained) = (0.38, 1.0e3, 1.0e-3);
-    let (every_27, every_29) = (
-        StellarRules::of_version(crate::GENERATOR_VERSION),
-        StellarRules::every_29_hold(),
-    );
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
     let m = dwarf + gained;
     let fed = Fed {
         kind: Kind::HeliumWhiteDwarf,
@@ -7306,7 +7291,7 @@ fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
         gained,
         dt,
     };
-    let swollen = |rules, donor: f64| {
+    let swollen = |donor: f64| {
         let mut engine = fed_dwarf_engine(dwarf, 0.004, rules);
         let age = engine.age;
         engine.members[1] = Member::MainSequence {
@@ -7318,57 +7303,46 @@ fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
         let swells = engine.swell(0, Kind::HeliumWhiteDwarf, m, &s, fed);
         (engine, swells)
     };
-    let m_hef = {
-        let (engine, _) = swollen(every_27, 0.3);
-        engine.ctx.coeffs().m_hef().value()
-    };
-    for (rules, degenerate) in [(every_27, false), (every_29, true)] {
-        let (engine, swells) = swollen(rules, 0.3);
-        assert!(swells, "{:?}", rules.swollen_dwarf);
-        let Member::Shaped { track, .. } = &engine.members[0] else {
-            panic!(
-                "a swollen giant the binary carries: {:?}",
-                engine.members[0]
-            );
-        };
-        let m0 = track.initial_mass().value();
-        let giant = engine.members[0].state_at(&engine.ctx, 0, engine.age);
-        assert_eq!(giant.phase(), Phase::FirstGiantBranch);
-        let (stripped, _) = engine.stripped_member(0);
-        let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
-        println!(
-            "{:?}: M0 {m0} (M_HeF {m_hef}), core {:?}, stripped to {left:?}",
-            rules.swollen_dwarf,
-            giant.core_mass()
+    let (engine, swells) = swollen(0.3);
+    assert!(swells);
+    let m_hef = engine.ctx.coeffs().m_hef().value();
+    let Member::Shaped { track, .. } = &engine.members[0] else {
+        panic!(
+            "a swollen giant the binary carries: {:?}",
+            engine.members[0]
         );
-        if degenerate {
-            assert!((m0 / m_hef - 0.7).abs() < 1e-12, "{m0} against {m_hef}");
-            let pinned = SWOLLEN_GIANT;
-            assert!(
-                m0.total_cmp(&pinned[0]).is_eq(),
-                "{m0} against {}",
-                pinned[0]
-            );
-            let core = giant.core_mass().value();
-            assert!((core - dwarf).abs() <= 1e-9 * dwarf, "{core}");
-            assert!(
-                core.total_cmp(&pinned[1]).is_eq(),
-                "{core} against {}",
-                pinned[1]
-            );
-            assert_eq!(left, Phase::HeliumWhiteDwarf);
-        } else {
-            assert!(m0 > m_hef, "{m0} against {m_hef}");
-            assert_eq!(left, Phase::HeliumMainSequence);
-        }
-    }
-    let (engine, swells) = swollen(every_29, 2.5);
+    };
+    let m0 = track.initial_mass().value();
+    let giant = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(giant.phase(), Phase::FirstGiantBranch);
+    let (stripped, _) = engine.stripped_member(0);
+    let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
+    println!(
+        "M0 {m0} (M_HeF {m_hef}), core {:?}, stripped to {left:?}",
+        giant.core_mass()
+    );
+    assert!((m0 / m_hef - 0.7).abs() < 1e-12, "{m0} against {m_hef}");
+    let pinned = SWOLLEN_GIANT;
+    assert!(
+        m0.total_cmp(&pinned[0]).is_eq(),
+        "{m0} against {}",
+        pinned[0]
+    );
+    let core = giant.core_mass().value();
+    assert!((core - dwarf).abs() <= 1e-9 * dwarf, "{core}");
+    assert!(
+        core.total_cmp(&pinned[1]).is_eq(),
+        "{core} against {}",
+        pinned[1]
+    );
+    assert_eq!(left, Phase::HeliumWhiteDwarf);
+    let (engine, swells) = swollen(2.5);
     assert!(!swells);
     assert!(engine.segments.is_empty(), "a refusal closes no segment");
 }
 
-/// The swollen giant's track's initial mass and its core at the placement, M☉, under every 29 hold
-/// (2026-11-02, at generator version 25, and the same at 27).
+/// The swollen giant's track's initial mass and its core at the placement, M☉ (2026-11-02, under
+/// every 29 hold at generator version 25, and the same at 27).
 const SWOLLEN_GIANT: [f64; 2] = [1.303_933_496_419_151_8, 0.379_999_999_812_082_2];
 
 /// P11.T4's swollen dwarf: two pairs whose primary leaves a helium white dwarf after a common
@@ -7397,8 +7371,7 @@ fn a_heavy_donor_s_helium_dwarf_becomes_no_helium_star() {
             });
             assert!(
                 !helium_star,
-                "{m1} + {m2}, {:?}: {}",
-                rules.swollen_dwarf,
+                "{m1} + {m2}, {rules:?}: {}",
                 describe(&timeline)
             );
             assert!(!timeline.hit_segment_cap(), "{m1} + {m2}");
@@ -7406,94 +7379,31 @@ fn a_heavy_donor_s_helium_dwarf_becomes_no_helium_star() {
     }
 }
 
-/// P11.T4's swollen dwarf: over the pinned thousand the arm alone moves only pairs in which, under
-/// the held arm, a helium white dwarf swells into a giant, at a segment's edge or inside its
-/// transfer, or a carbon–oxygen or oxygen–neon one's giant comes back the other kind, which are
-/// listed (the arm's own cases are `a_swollen_helium_dwarf_keeps_its_degenerate_core`'s,
-/// `a_heavy_donor_s_helium_dwarf_becomes_no_helium_star`'s and
-/// `a_swollen_oxygen_neon_dwarf_strips_back_to_its_kind`'s).
-#[test]
-fn the_swollen_dwarf_moves_only_pairs_whose_dwarf_swells() {
-    use super::swollen_dwarf::SwollenDwarfRules;
-    use super::testing::swollen_dwarf_kinds;
-
-    let held_rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
-    let arm_rules = crate::stellar::rules::StellarRules {
-        swollen_dwarf: SwollenDwarfRules::Degenerate,
-        ..held_rules
-    };
-    let until = Years::new(1.2e10);
-    let mut mix = Mix(0x0b1e_0001);
-    let mut moved = Vec::new();
-    for i in 0..1000 {
-        let input = pinned_pair(&mut mix, i);
-        let held = evolve(&input.clone().with_rules(held_rules), until);
-        let arm = evolve(&input.with_rules(arm_rules), until);
-        if same_outcome(&held, &arm) {
-            continue;
-        }
-        moved.push(i);
-        let edges: Vec<Years> = held
-            .segments()
-            .iter()
-            .flat_map(|s| [s.start(), Years::new(s.end().value() * (1.0 - 1e-12))])
-            .collect();
-        let swells = edges.windows(2).any(|w| {
-            (0..2).any(|k| {
-                held.state_at(w[0]).stars()[k].phase() == Phase::HeliumWhiteDwarf
-                    && held.state_at(w[1]).stars()[k].phase() == Phase::FirstGiantBranch
-            })
-        });
-        let changes_kind = swollen_dwarf_kinds(&held)
-            .iter()
-            .any(|(before, after, merged)| before != after && !merged);
-        assert!(
-            swells || changes_kind,
-            "pair {i:04} moves with no swollen dwarf: {}",
-            describe(&held)
-        );
-    }
-    assert_eq!(moved, SWOLLEN_DWARF_MOVERS);
-}
-
-/// The pinned pairs the swollen dwarf moves, as measured (2026-11-05, at generator version 27):
-/// 0080's oxygen–neon dwarf comes back of its kind, and 0168's and 0762's helium dwarfs swell inside
-/// a spell of transfer from a gap or giant donor.
-const SWOLLEN_DWARF_MOVERS: [u32; 3] = [80, 168, 762];
-
-// --- P11.T4: the swollen dwarf's kind (held at 29) ---------------------------------------------
+// --- P11.T4: the swollen dwarf's kind -----------------------------------------------------------
 
 /// P11.T4's swollen dwarf: pinned pair 0080's primary leaves an oxygen–neon white dwarf of
 /// 1.070 M☉ (a helium giant of 1.669 M☉ stripped by a common envelope, HPT section 6.1), which its
 /// Hertzsprung-gap companion's transfer swells at 220 Myr into a giant on a thermally pulsing AGB
 /// track whose core at the base of the AGB is below 1.6 M☉, and a common envelope strips back.
-/// Under the version's rules the dwarf comes back carbon–oxygen, the track's kind; under every 29
-/// hold oxygen–neon, the kind it swelled from, since gaining and losing a hydrogen envelope
-/// changes no core's composition.
+/// The dwarf comes back oxygen–neon, the kind it swelled from, not carbon–oxygen, the track's
+/// kind, since gaining and losing a hydrogen envelope changes no core's composition; under the
+/// version's rules and under every 29 hold alike.
 #[test]
 fn a_swollen_oxygen_neon_dwarf_strips_back_to_its_kind() {
-    use super::swollen_dwarf::SwollenDwarfRules;
     use super::testing::swollen_dwarf_kinds;
     use crate::stellar::rules::StellarRules;
 
     let input = pinned_pair_number(80);
-    let version = StellarRules::of_version(crate::GENERATOR_VERSION);
-    let arm = StellarRules {
-        swollen_dwarf: SwollenDwarfRules::Degenerate,
-        ..version
-    };
-    let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
-    for (rules, kinds) in [
-        (version, [(one, co, false)]),
-        (arm, [(one, one, false)]),
-        (StellarRules::every_29_hold(), [(one, one, false)]),
+    let one = Phase::OxygenNeonWhiteDwarf;
+    for rules in [
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+        StellarRules::every_29_hold(),
     ] {
         let timeline = evolve(&input.clone().with_rules(rules), Years::new(1.2e10));
         assert_eq!(
             swollen_dwarf_kinds(&timeline),
-            kinds,
-            "{:?}: {}",
-            rules.swollen_dwarf,
+            [(one, one, false)],
+            "{rules:?}: {}",
             describe(&timeline)
         );
     }
@@ -7545,85 +7455,67 @@ fn swollen_dwarf_engine(
 /// P11.T4's swollen dwarf: an oxygen–neon dwarf of 1.07 M☉ and a carbon–oxygen one of 1.25 M☉
 /// swell into giants on thermally pulsing AGB tracks whose cores at the base of the AGB, solved
 /// back from the dwarfs' (`sse::pulsing_agb_helium_core`: 1.41 and 1.82 M☉), are of the other kind
-/// (HPT section 6). Under the arm the giant's strip, its strip after a merger it survives as
-/// itself and its own track's death leave the dwarf's kind; under the held arm the track's.
+/// (HPT section 6). The giant's strip, its strip after a merger it survives as itself and its own
+/// track's death leave the dwarf's kind, not the track's.
 #[test]
 fn a_swollen_dwarf_s_giant_leaves_the_dwarf_s_kind() {
     use super::star::Member;
-    use super::swollen_dwarf::SwollenDwarfRules;
     use crate::stellar::rules::StellarRules;
 
-    let version = StellarRules::of_version(crate::GENERATOR_VERSION);
-    let arm = StellarRules {
-        swollen_dwarf: SwollenDwarfRules::Degenerate,
-        ..version
-    };
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
     let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
-    for (phase, dwarf, other) in [(one, 1.07, co), (co, 1.25, one)] {
-        for (rules, kind) in [(version, other), (arm, phase)] {
-            let case = format!("{phase:?} of {dwarf} M☉ under {:?}", rules.swollen_dwarf);
-            let mut engine = swollen_dwarf_engine(phase, dwarf, 0.02, rules);
-            let (stripped, _) = engine.stripped_member(0);
-            let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
-            assert_eq!(left, kind, "{case}: stripped");
-            let mut merged = swollen_dwarf_engine(phase, dwarf, 0.02, rules);
-            merged.members[1] = Member::Gone;
-            merged.mix();
-            let (stripped, _) = merged.stripped_member(0);
-            let left = stripped.state_at(&merged.ctx, 0, merged.age).phase();
-            assert_eq!(left, kind, "{case}: merged as itself, then stripped");
-            let Member::Shaped { track, offset, .. } = &engine.members[0] else {
-                panic!("{case}: a giant the binary carries");
-            };
-            let death = track.death().expect("a track built in full");
-            let at = offset + death.age().value();
-            println!("{case}: the track dies by {:?} at {at} yr", death.kind());
-            engine.age = at;
-            engine.die(0);
-            let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
-            assert_eq!(dead.phase(), kind, "{case}: dead, {dead:?}");
-        }
+    for (phase, dwarf) in [(one, 1.07), (co, 1.25)] {
+        let case = format!("{phase:?} of {dwarf} M☉");
+        let mut engine = swollen_dwarf_engine(phase, dwarf, 0.02, rules);
+        let (stripped, _) = engine.stripped_member(0);
+        let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
+        assert_eq!(left, phase, "{case}: stripped");
+        let mut merged = swollen_dwarf_engine(phase, dwarf, 0.02, rules);
+        merged.members[1] = Member::Gone;
+        merged.mix();
+        let (stripped, _) = merged.stripped_member(0);
+        let left = stripped.state_at(&merged.ctx, 0, merged.age).phase();
+        assert_eq!(left, phase, "{case}: merged as itself, then stripped");
+        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+            panic!("{case}: a giant the binary carries");
+        };
+        let death = track.death().expect("a track built in full");
+        let at = offset + death.age().value();
+        println!("{case}: the track dies by {:?} at {at} yr", death.kind());
+        engine.age = at;
+        engine.die(0);
+        let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        assert_eq!(dead.phase(), phase, "{case}: dead, {dead:?}");
     }
 }
 
 /// P11.T4's swollen dwarf: a carbon–oxygen dwarf of 1.43 M☉ at Z = 0.004 swells onto the thermally
 /// pulsing AGB track of a 7.41 M☉ star, whose oxygen–neon core collapses by electron capture at
-/// its death. Under the held arm the giant does, to the 1.26 M☉ neutron star; under the arm its
-/// carbon–oxygen core ignites carbon there and nothing is left (HPT section 6). Neither pools a
-/// Type Ia candidate.
+/// its death. The giant's carbon–oxygen core ignites carbon there and nothing is left (HPT section
+/// 6), where BSE's giant, of the track's kind, collapsed to the 1.26 M☉ neutron star; no Type Ia
+/// candidate is pooled.
 #[test]
 fn a_swollen_carbon_oxygen_dwarf_s_giant_disrupts_where_its_track_captures_electrons() {
     use super::star::Member;
-    use super::swollen_dwarf::SwollenDwarfRules;
     use crate::stellar::remnant::{DeathKind, RemnantKind};
     use crate::stellar::rules::StellarRules;
 
-    let version = StellarRules::of_version(crate::GENERATOR_VERSION);
-    let arm = StellarRules {
-        swollen_dwarf: SwollenDwarfRules::Degenerate,
-        ..version
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let mut engine = swollen_dwarf_engine(Phase::CarbonOxygenWhiteDwarf, 1.43, 0.004, rules);
+    let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+        panic!("a giant the binary carries");
     };
-    for (rules, phase, remnant) in [
-        (version, Phase::NeutronStar, RemnantKind::NeutronStar),
-        (arm, Phase::NoRemnant, RemnantKind::None),
-    ] {
-        let case = format!("{:?}", rules.swollen_dwarf);
-        let mut engine = swollen_dwarf_engine(Phase::CarbonOxygenWhiteDwarf, 1.43, 0.004, rules);
-        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
-            panic!("{case}: a giant the binary carries");
-        };
-        let death = track.death().expect("a track built in full");
-        assert_eq!(death.kind(), DeathKind::ElectronCapture, "{case}");
-        engine.age = offset + death.age().value();
-        engine.die(0);
-        let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
-        assert_eq!(dead.phase(), phase, "{case}: {dead:?}");
-        let [collapse] = engine.supernovae.as_slice() else {
-            panic!("{case}: one death, not {:?}", engine.supernovae);
-        };
-        assert_eq!(collapse.remnant().kind(), remnant, "{case}");
-        assert!(engine.pooled.is_none(), "{case}");
-    }
+    let death = track.death().expect("a track built in full");
+    assert_eq!(death.kind(), DeathKind::ElectronCapture);
+    engine.age = offset + death.age().value();
+    engine.die(0);
+    let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(dead.phase(), Phase::NoRemnant, "{dead:?}");
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(collapse.remnant().kind(), RemnantKind::None);
+    assert!(engine.pooled.is_none());
 }
 
 /// P11.T4's swollen dwarf under every 29 hold: a thermally pulsing AGB product of 4.33 M☉ around a
@@ -7959,9 +7851,9 @@ fn a_strip_keeps_a_dwarf_core_where_it_leaves_a_star() {
 /// time, in the 1.26 M☉ neutron star with the low-mode kick.
 #[test]
 fn a_core_limit_stop_lands_where_the_core_reaches_the_capture_mass() {
+    use super::dwarf_limit::{Ending, dwarf_core_deaths};
     use super::star::Member;
     use super::supernova::with_capture_mass;
-    use super::swollen_dwarf::{Ending, dwarf_core_deaths};
     use crate::stellar::remnant::KickMode;
     use crate::stellar::remnant::collapse::electron_capture_remnant;
     use crate::stellar::rules::StellarRules;
@@ -8017,12 +7909,12 @@ fn a_core_limit_stop_lands_where_the_core_reaches_the_capture_mass() {
 /// P11.T4's swollen dwarf: how a swollen dwarf's giant ends where its own track dies
 /// ([`SwollenDeath::of`]), by the dwarf it came from, the track's death and the remnant's phase.
 ///
-/// [`SwollenDeath::of`]: super::swollen_dwarf::SwollenDeath::of
+/// [`SwollenDeath::of`]: super::supernova::SwollenDeath::of
 #[test]
 fn a_swollen_dwarf_s_giant_dies_as_its_dwarf_would() {
     use super::core_endings::CoreEndingRules;
     use super::dwarf_limit::CoreSource;
-    use super::swollen_dwarf::SwollenDeath;
+    use super::supernova::SwollenDeath;
     use crate::stellar::remnant::{DeathKind, SupernovaType};
 
     let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);

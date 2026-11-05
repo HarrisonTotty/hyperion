@@ -62,9 +62,10 @@
 //!   (`Engine::swelled_star`); its mass is the mass after the step, so its envelope is the step's
 //!   net gain. Otherwise the accretor keeps its type and the step's mass, burning the hydrogen to
 //!   helium as it lands or losing it to its wind, as BSE below its gate and COMPAS always do for a
-//!   helium star; a swell refused closes no segment. From generator version 29 a helium dwarf
-//!   above `Mc,BGB`(`M_HeF`) swells onto a degenerate branch instead
-//!   ([`swollen_dwarf`](super::swollen_dwarf), P11.T4's fix).
+//!   helium star; a swell refused closes no segment. A helium dwarf above `Mc,BGB`(`M_HeF`)
+//!   swells onto a degenerate branch instead (`Engine::degenerate_giant`, P11.T4's swollen dwarf),
+//!   and a carbon–oxygen or oxygen–neon dwarf's giant keeps the dwarf's kind
+//!   (`Engine::dwarf_cores`).
 //! - **White dwarfs fed** (section 2.6.6): a helium dwarf that reaches 0.7 M☉ on helium, a
 //!   carbon–oxygen dwarf that has taken 0.15 M☉ of helium, and a dwarf at the Chandrasekhar mass
 //!   are plan 11's pooled Type Ia candidates (`pooled_ia`); the engine continues as if they did
@@ -96,7 +97,6 @@ use super::star::{
     G, Kind, Member, MemberRadiusAt, Path, Surface, cooling_origin, moment_of_inertia,
     moment_of_inertia_within, positive,
 };
-use super::swollen_dwarf::SwollenDwarfRules;
 use super::timeline::{Component, IaPoolChannel, PooledIaEvent, SegmentKind};
 
 /// The critical mass ratio of a low-mass main-sequence donor (BSE section 2.6.4).
@@ -1368,8 +1368,7 @@ impl Engine {
     ///    inside the mass to the step's end, so that the next step does not strip the giant again
     ///    (`hrdiag.f` 357–367, P11.T4.g's strip);
     /// 4. the segment is closed and the member set, a carbon–oxygen or oxygen–neon dwarf's giant
-    ///    keeping the dwarf's kind from version 29 ([`Engine::dwarf_cores`], P11.T4's
-    ///    `swollen_dwarf`).
+    ///    keeping the dwarf's kind ([`Engine::dwarf_cores`], P11.T4's swollen dwarf).
     ///
     /// A refusal at any step leaves the member as it is, with the step's mass (for a helium star,
     /// BSE below its gate and COMPAS always), and closes no segment. A step over which the
@@ -1404,11 +1403,10 @@ impl Engine {
         if !(fed.gained - SWELL_WIND_FACTOR * wind > 0.0 && m > core) {
             return false;
         }
-        // From 29 a helium dwarf's core stays degenerate where the held placement would put it on
-        // a heavier star's branch (`swollen_dwarf`, P11.T4's fix). The refusal is decided before
-        // the track is built, which every refused step would build.
+        // A helium dwarf's core stays degenerate where BSE's placement would put it on a heavier
+        // star's branch (P11.T4's swollen dwarf). The refusal is decided before the track is
+        // built, which every refused step would build.
         let degenerate = kind == Kind::HeliumWhiteDwarf
-            && self.ctx.rules().swollen_dwarf == SwollenDwarfRules::Degenerate
             && sse::degenerate_giant_mass(SolarMasses::new(core), self.ctx.coeffs()).is_some();
         if degenerate && !self.feeds_a_swollen_dwarf(i, m) {
             return false;
@@ -1439,16 +1437,14 @@ impl Engine {
         let source = self.dwarf_core(i, kind);
         self.close_segment();
         self.set_member(i, member);
-        // From 29 the giant keeps the kind of the carbon–oxygen or oxygen–neon dwarf its core is
-        // (`swollen_dwarf`, P11.T4's fix).
-        if self.ctx.rules().swollen_dwarf == SwollenDwarfRules::Degenerate {
-            self.dwarf_cores[i] = source;
-        }
+        // The giant keeps the kind of the carbon–oxygen or oxygen–neon dwarf its core is (P11.T4's
+        // swollen dwarf).
+        self.dwarf_cores[i] = source;
         true
     }
 
     /// Whether member `i`, a helium white dwarf of `m` M☉ that would swell onto a degenerate branch
-    /// (P11.T4's `swollen_dwarf` from version 29), would go on being fed as that giant: its donor's
+    /// (P11.T4's swollen dwarf), would go on being fed as that giant: its donor's
     /// transfer is not the heavy donor's thermal rate, which holds onto a compact accretor alone
     /// ([`heavy_donor::thermal_rate`]).
     ///

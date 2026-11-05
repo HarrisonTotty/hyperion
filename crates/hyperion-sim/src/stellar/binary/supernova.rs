@@ -46,6 +46,12 @@
 //!   Chandrasekhar mass, ruling 129.4c, or a stripped core whose helium star's own clock has
 //!   already ended, P11.T4.k) dies at once through [`Engine::die`], on the orbit its stripping
 //!   left, or is the pinned primary's hold until its pin (`common_envelope.rs`).
+//! - **A giant whose core is a white dwarf's** ([`Engine::dwarf_cores`]: one a carbon–oxygen or
+//!   oxygen–neon dwarf fed hydrogen swelled into, `Engine::swell`, or a merger product placed around
+//!   one; P11.T4's swollen dwarf and dwarf limit) ends where its own track dies as the dwarf's core
+//!   would ([`SwollenDeath`]), since gaining and losing a hydrogen envelope does not change a
+//!   core's composition (fix-p11-swollen-dwarf-kind): the swell places the giant on a track by its
+//!   core alone, which types its death by its own core at the base of the AGB (HPT section 6).
 //!
 //! [`Remains::Ended`]: crate::stellar::sse::Remains::Ended
 
@@ -72,11 +78,106 @@ use super::detached::last_living;
 use super::dwarf_limit::CoreSource;
 use super::evolve::{Engine, LiveOrbit, OwnMainSequenceEnd, Pin, PreTest, clock_resolution_years};
 use super::star::{Member, Path, cooling_origin, positive};
-use super::swollen_dwarf::SwollenDeath;
 use super::timeline::{
     BinaryInput, BinaryTimeline, Component, Context, FixedOrbit, MAX_REPORTED_ECCENTRICITY,
     OrbitPath, Segment, SegmentKind, SupernovaRecord,
 };
+
+/// How the giant a dwarf swelled into ends where its own track dies: as the dwarf's core would.
+///
+/// Read by [`Engine::die`] and [`Engine::core_limit_age`]: the swell places the giant on a track
+/// by its core alone, and the track types its death by its own core at the base of the AGB (HPT
+/// section 6), which need not be the dwarf's kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SwollenDeath {
+    /// The track's own death, which the dwarf's kind agrees with, or no dwarf's.
+    Own,
+    /// The white dwarf of `phase`, the dwarf's kind, where the track leaves the other kind.
+    WhiteDwarf(Phase),
+    /// An oxygen–neon core that dies with its envelope on where the track's would not collapse by
+    /// electron capture: it does, an electron-capture supernova (Nomoto 1984, ApJ 277, 791) with
+    /// no Type Ia candidate (`Engine::electron_capture_collapse`; lean, 2026-11-03, where the
+    /// ruling has the accretion-induced collapse of a bare dwarf, whose remnant and kick are the
+    /// same).
+    ElectronCapture,
+    /// A carbon–oxygen core that dies with its envelope on where the track's would not ignite
+    /// carbon: carbon ignites in the degenerate core at `Mc,SN` and nothing is left (HPT section 6,
+    /// [`DeathKind::ThermonuclearDisruption`]).
+    Disruption,
+}
+
+impl SwollenDeath {
+    /// How a giant whose core came from `source` ends where its own track's death is `death`, with
+    /// its carbon–oxygen core at `core`, leaving a remnant of `phase`, under `endings`.
+    ///
+    /// From version 29 ([`CoreEndingRules::Unified`]) a track that collapses an iron core collapses
+    /// the kept core too, a modelling choice after BSE, whose merger product takes the type of the
+    /// giant it makes (BSE table 2; research-leans-38): the kept kind sets only what is left where
+    /// the track leaves a white dwarf or collapses an oxygen–neon core by electron capture, there a
+    /// carbon–oxygen core below the Chandrasekhar mass
+    /// ([`CoreEndingRules::below_the_chandrasekhar_mass`]) being left as its dwarf.
+    #[must_use]
+    pub(super) fn of(
+        source: CoreSource,
+        death: DeathKind,
+        core: SolarMasses,
+        phase: Phase,
+        endings: CoreEndingRules,
+    ) -> Self {
+        let Some(kind) = source.dwarf() else {
+            return Self::Own;
+        };
+        match death {
+            DeathKind::ElectronCapture
+                if endings == CoreEndingRules::Unified
+                    && kind == Phase::CarbonOxygenWhiteDwarf
+                    && endings.below_the_chandrasekhar_mass(core) =>
+            {
+                Self::WhiteDwarf(kind)
+            }
+            DeathKind::CoreCollapse { .. }
+            | DeathKind::DirectCollapse
+            | DeathKind::PairInstability
+                if endings == CoreEndingRules::Unified =>
+            {
+                Self::Own
+            }
+            DeathKind::EnvelopeLoss if source.dwarf_phase(phase) == phase => Self::Own,
+            DeathKind::EnvelopeLoss => Self::WhiteDwarf(kind),
+            DeathKind::ElectronCapture if kind == Phase::OxygenNeonWhiteDwarf => Self::Own,
+            DeathKind::ThermonuclearDisruption if kind == Phase::CarbonOxygenWhiteDwarf => {
+                Self::Own
+            }
+            DeathKind::ElectronCapture
+            | DeathKind::ThermonuclearDisruption
+            | DeathKind::CoreCollapse { .. }
+            | DeathKind::DirectCollapse
+            | DeathKind::PairInstability => {
+                if kind == Phase::OxygenNeonWhiteDwarf {
+                    Self::ElectronCapture
+                } else {
+                    Self::Disruption
+                }
+            }
+        }
+    }
+}
+
+impl SwollenDeath {
+    /// Counts the death of a giant whose core is a dwarf's on this thread
+    /// ([`dwarf_core_deaths`](super::dwarf_limit::dwarf_core_deaths)).
+    #[cfg(test)]
+    pub(super) fn count(self) {
+        use super::dwarf_limit::Ending;
+
+        super::dwarf_limit::count_dwarf_core_death(match self {
+            Self::Own => Ending::Own,
+            Self::WhiteDwarf(_) => Ending::WhiteDwarf,
+            Self::ElectronCapture => Ending::ElectronCapture,
+            Self::Disruption => Ending::Disruption,
+        });
+    }
+}
 
 /// The bisections of a core's limit on a phase's span ([`Engine::core_limit_age`]):
 /// 64 halve a span of a million years far below a step's length (the engine's clock resolution,
@@ -226,7 +327,7 @@ impl Engine {
         } else {
             super::evolve::offset_for(self.age, death.age().value())
         };
-        // A swollen dwarf's giant dies as the dwarf's core would (`swollen_dwarf`, P11.T4's fix).
+        // A giant whose core is a dwarf's dies as the dwarf's core would (P11.T4's swollen dwarf).
         let phase = track
             .remnant_clock()
             .map_or(Phase::NoRemnant, |(phase, ..)| phase);
@@ -418,8 +519,8 @@ impl Engine {
         match source {
             CoreSource::OxygenNeonDwarf => {
                 #[cfg(test)]
-                super::swollen_dwarf::count_dwarf_core_death(
-                    super::swollen_dwarf::Ending::CaptureAtLimit,
+                super::dwarf_limit::count_dwarf_core_death(
+                    super::dwarf_limit::Ending::CaptureAtLimit,
                 );
                 let limit = core_limit(
                     source,
@@ -432,8 +533,8 @@ impl Engine {
             CoreSource::Other => {}
             CoreSource::CarbonOxygenDwarf => {
                 #[cfg(test)]
-                super::swollen_dwarf::count_dwarf_core_death(
-                    super::swollen_dwarf::Ending::DisruptionAtLimit,
+                super::dwarf_limit::count_dwarf_core_death(
+                    super::dwarf_limit::Ending::DisruptionAtLimit,
                 );
                 self.set_member(i, Member::Gone);
                 let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);

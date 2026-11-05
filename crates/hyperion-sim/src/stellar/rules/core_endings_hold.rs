@@ -45,7 +45,7 @@ fn the_core_endings_are_held_only_until_the_29_bump() {
         GENERATOR_VERSION < CORE_ENDINGS_VERSION,
         "the bump to 29 deletes P11.T4's kept-core endings' hold, not its rule: \
          `CORE_ENDINGS_VERSION`, `CoreEndingRules` with its `Held` arm, \
-         `StellarRules::core_endings` and its reads (`swollen_dwarf::SwollenDeath::of`, \
+         `StellarRules::core_endings` and its reads (`SwollenDeath::of`, \
          `Engine::core_limit_age`, `Builder::pulses_cap`, `helium_star_end`, the dwarfs' \
          collapse masses and `DwarfLimitRules::unplaced`'s helium giant), the brief's read of \
          `CoreEndingRules::fitted_tables_hold`, this module and its line in `stellar/rules.rs`; \
