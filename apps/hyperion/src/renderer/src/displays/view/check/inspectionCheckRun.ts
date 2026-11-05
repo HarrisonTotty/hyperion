@@ -75,7 +75,7 @@ import type {
 } from "../../../../../preload/api";
 import { vec3 } from "../../../geometry/vec3";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
-import { MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
+import { freeRateMPerS, MAX_FREE_STEP_S } from "../../../view/camera/freeCamera";
 import type { FrameSubmission } from "../../../view/engine/types";
 import { LIGHTING_NOT_RECEIVED, LIGHTING_PENDING } from "../../../view/lighting/hostLights";
 import { PHOTOREAL_PASS_LABELS } from "../../../view/photoreal/passes";
@@ -95,7 +95,7 @@ import {
   rateStepOfCameraLine,
 } from "./atmosphereCheckRun";
 import type { InspectionProfiler, ProfiledPlate } from "./inspectionProfile";
-import { viewDriver } from "./viewsCheckRun";
+import { STOPPED, viewDriver } from "./viewsCheckRun";
 import { type SubmissionWatcher, viewOf, type ViewsProbe } from "./viewsProbe";
 
 /** How long each part of the inspection run may take. */
@@ -322,6 +322,266 @@ export function slantRangeM(lines: ReadonlyArray<string>): number | null {
   return null;
 }
 
+/** How the run's `closeIn` holds its keys. */
+interface CloseInHolds {
+  /** The share of what is left its first hold's rate is chosen for ({@link nextHoldShare}); 1. */
+  readonly share?: number;
+  /** The draws each hold coasts before what is left is read again; the timing's own. */
+  readonly coastFrames?: number;
+  /** Told each hold's flight toward the goal, m, negative away from it. */
+  readonly flew?: (flownM: number) => void;
+}
+
+/** What {@link holdForStep} watches: the views probe's submissions and the primary's draws. */
+export interface HeldStepDeps {
+  readonly views: Pick<ViewsProbe, "drawTimes" | "watch">;
+}
+
+/** A key held by {@link holdForStep}. */
+export interface HeldStep {
+  /** Whether the key is up again. */
+  readonly released: () => boolean;
+  /** Lets the key up now, where it is still down (a wait that gave up). */
+  readonly release: () => void;
+  /**
+   * The camera's time the primary's frames integrated with the key down, s: the hold's flight is
+   * this times the rate, its coast included, the camera's damping being linear.
+   */
+  readonly integratedS: () => number;
+}
+
+/**
+ * Holds `key` down on `target` for one camera step: until the primary's frames since it went down
+ * have integrated {@link MAX_FREE_STEP_S} of the camera's time, each frame at most that, and lets
+ * it up in the very submission that completes it.
+ *
+ * @remarks
+ * The camera is flown once a primary frame, by the time since the last, at most
+ * {@link MAX_FREE_STEP_S} (`stepRun`). A hold let up once a wait saw a draw spanned as many frames
+ * as were drawn between its looks: on SwiftShader at the high setting, under load, five, flying
+ * five camera steps and twice what was left, so that the close step overshot its goal by 82 km
+ * and the low one went into the ground (perf-frame-encoding, 2026-11-05). Let up in the
+ * submission, a slow renderer's hold is one frame, and a fast one's the frames of a step's time.
+ */
+export function holdForStep(deps: HeldStepDeps, target: EventTarget, key: string): HeldStep {
+  let lastMs =
+    deps.views
+      .drawTimes(PRIMARY_VIEW_NAME, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY)
+      .at(-1) ?? null;
+  let integratedS = 0;
+  let done = false;
+  let unwatch: (() => void) | null = null;
+  const release = (): void => {
+    if (done) {
+      return;
+    }
+    done = true;
+    unwatch?.();
+    target.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
+  };
+  unwatch = deps.views.watch({
+    submitted: (owner, _frame, frameMs) => {
+      if (done || owner !== PRIMARY_VIEW_NAME || frameMs === null) {
+        return;
+      }
+      integratedS +=
+        lastMs === null ? MAX_FREE_STEP_S : Math.min((frameMs - lastMs) / 1000, MAX_FREE_STEP_S);
+      lastMs = frameMs;
+      // The allowance keeps a step of frames that sum to it from waiting one more for rounding.
+      if (integratedS >= MAX_FREE_STEP_S - 1e-9) {
+        release();
+      }
+    },
+    madeTarget: () => undefined,
+  });
+  target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  return { released: () => done, release, integratedS: () => integratedS };
+}
+
+/**
+ * The share of what is left that the next hold's rate is chosen for (`closeRateStep` of the share
+ * of it), after a hold that took what was left from `beforeM` to `afterM`, signed as the goal's
+ * side: halved, to 1/64 at least, where the hold flew more than three quarters of it or past the
+ * goal, else kept.
+ *
+ * @remarks
+ * A hold flies about one camera step a frame it spans, its coast included, and on SwiftShader at
+ * the high setting a hold of one draw can span four frames or more, flying twice what was left:
+ * the low window's step drove the camera hundreds of kilometres into the ground, from which its
+ * holds sized for 4 km could not climb back (perf-frame-encoding, 2026-11-04). The share never
+ * grows again, so that a renderer whose holds alternate short and long does not swing.
+ */
+export function nextHoldShare(share: number, beforeM: number, afterM: number): number {
+  const flown = (beforeM - afterM) / beforeM;
+  return flown > 0.75 ? Math.max(share / 2, MIN_HOLD_SHARE) : share;
+}
+
+/** The least share of what is left a hold's rate is chosen for ({@link nextHoldShare}). */
+export const MIN_HOLD_SHARE = 1 / 64;
+
+/**
+ * A slant range at or under which the camera reads as at or in the ground, m: the readout's to the
+ * ground at the line of sight is 0 once the camera stands on it or inside it.
+ */
+export const GROUNDED_SLANT_M = 1;
+
+/**
+ * What is left of the low window's step, m, signed as the goal's side: the slant range to the
+ * ground less {@link LOW_HEIGHT_M}; where it reads the camera at or in the ground
+ * ({@link GROUNDED_SLANT_M}), `groundedReadings` readings in a row, {@link LOW_HEIGHT_M} doubled as
+ * many times below the goal, so that the camera backs out of the ground however deep it went, the
+ * slant range not seeing how deep.
+ */
+export function lowRemainingM(slantM: number, groundedReadings: number): number {
+  return slantM > GROUNDED_SLANT_M ? slantM - LOW_HEIGHT_M : -LOW_HEIGHT_M * 2 ** groundedReadings;
+}
+
+/**
+ * How far above the ground the low window's step flies down to by the `POSITION` range, before the
+ * slant range takes it on, m: 25 km, above what the range's three figures (10 km apart near a body
+ * of this size) and its ground's place put in doubt ({@link LOW_APPROACH_TOLERANCE_M}).
+ */
+export const LOW_APPROACH_M = 25_000;
+
+/** How near to its range the approach by the `POSITION` range stops, m: past its 10 km figures. */
+export const LOW_APPROACH_TOLERANCE_M = 7_000;
+
+/**
+ * The `POSITION` range the low window's step first flies down to, m: the ground's at the line of
+ * sight, `slantM` below the camera at `rangeM` as the close window rested (the inspection's camera
+ * looks at the body's centre, so that its line of sight is the local vertical and a hold flies
+ * down it), and {@link LOW_APPROACH_M} above it.
+ *
+ * @remarks
+ * The `POSITION` range is the camera's own at each draw, where the slant range is the readout's
+ * answer, a query that lands a hold or more late on SwiftShader at the high setting: the step
+ * steered by it from 357 km read 328, 285 and 172 km where the range had fallen 290 km, and flew
+ * into the ground (perf-frame-encoding, 2026-11-04).
+ */
+export function lowApproachRangeM(slantM: number, rangeM: number): number {
+  return rangeM - slantM + LOW_APPROACH_M;
+}
+
+/**
+ * The share of what is left the low window's holds start from ({@link nextHoldShare}): the whole,
+ * since a hold is one camera step ({@link holdForStep}), at most half of what is left by
+ * `closeRateStep`'s rule; halved after a hold that flies most of it all the same.
+ */
+export const LOW_HOLD_SHARE = 1;
+
+/**
+ * The draws the camera rests before its slant range is read, each of at least
+ * {@link MAX_FREE_STEP_S}: its speed falls to e⁻⁴ of a hold's, under 2%, two coast draws having left
+ * 13.5%, some 10 km at 316 km/s.
+ */
+export const LOW_REST_DRAWS = 4;
+
+/** The draws in a row the readout repeats a slant range for it to be read as the rest's. */
+export const LOW_FRESH_REPEATS = 3;
+
+/** The most draws a rested slant range is waited for, the last read taken past them. */
+export const LOW_FRESH_MAX_DRAWS = 12;
+
+/**
+ * The low window's last stretch by dead reckoning: what is left from the last slant range read at
+ * rest ({@link restedSlantM}) less the holds flown since, read at rest again only where the
+ * reckoning puts the camera within its tolerance of the goal, or where there is no reading to
+ * reckon from.
+ *
+ * @remarks
+ * The free camera's damping is linear, so that a hold flies its rate times the time its frames
+ * integrated with the key down, its coast included whatever is held after (`stepFreeCamera`, which
+ * lets a coast go only under 10⁻⁶ of the rate): the readout's answers, a hold or more late on
+ * SwiftShader at the high setting, are waited for only where they decide. Resting and reading at
+ * every hold took some 15 minutes a hold there (perf-frame-encoding, 2026-11-05). A camera read at
+ * or in the ground ({@link GROUNDED_SLANT_M}) gives nothing to reckon from: it backs out by
+ * {@link lowRemainingM}'s doubles, read at rest after each.
+ */
+export class ReckonedSlant {
+  readonly #rested: () => Promise<number>;
+  /** The last rested reading above the ground, m, or `null` for none. */
+  #baseM: number | null = null;
+  /** The distance flown toward the ground since it, m. */
+  #flownM = 0;
+  #groundedReadings = 0;
+
+  /** @param rested - A slant range read at rest, m ({@link restedSlantM}). */
+  constructor(rested: () => Promise<number>) {
+    this.#rested = rested;
+  }
+
+  /** What is left, m, signed as the goal's side, as {@link lowRemainingM} reads it. */
+  async remainingM(toleranceM: number): Promise<number> {
+    if (this.#baseM !== null) {
+      const reckonedM = this.#baseM - this.#flownM - LOW_HEIGHT_M;
+      if (Math.abs(reckonedM) > toleranceM) {
+        return reckonedM;
+      }
+    }
+    const slantM = await this.#rested();
+    this.#flownM = 0;
+    this.#groundedReadings = slantM > GROUNDED_SLANT_M ? 0 : this.#groundedReadings + 1;
+    this.#baseM = slantM > GROUNDED_SLANT_M ? slantM : null;
+    return lowRemainingM(slantM, this.#groundedReadings);
+  }
+
+  /** A hold flew `flownM` toward the ground, m, negative away from it. */
+  flew(flownM: number): void {
+    this.#flownM += flownM;
+  }
+}
+
+/**
+ * Whether `wait` ended, `false` where it gave up, as a step's wait does past its time: the stop of
+ * the run (`STOPPED`) still ends the run.
+ */
+export async function awaitedOrNot(wait: Promise<void>): Promise<boolean> {
+  try {
+    await wait;
+    return true;
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === STOPPED) {
+      throw error;
+    }
+    return false;
+  }
+}
+
+/** What {@link restedSlantM} reads with. */
+export interface RestedSlantDeps {
+  /** Waits for `count` of the primary's draws, each of at least {@link MAX_FREE_STEP_S}. */
+  readonly framesDrawn: (count: number) => Promise<unknown>;
+  /** The lower plate's slant range now, m, or `null` while it reads none. */
+  readonly slantM: () => number | null;
+}
+
+/**
+ * The slant range once the camera rests: after {@link LOW_REST_DRAWS} draws, the first reading the
+ * readout repeats over {@link LOW_FRESH_REPEATS} draws in a row, its answers asked at rest, or the
+ * last read once {@link LOW_FRESH_MAX_DRAWS} draws have passed.
+ *
+ * @throws Error where the lower plate read no slant range in all those draws.
+ */
+export async function restedSlantM(deps: RestedSlantDeps): Promise<number> {
+  await deps.framesDrawn(LOW_REST_DRAWS);
+  const read = async (left: number, last: number | null, repeats: number): Promise<number> => {
+    const now = deps.slantM();
+    const seen = now !== null && now === last ? repeats + 1 : 1;
+    if (now !== null && seen >= LOW_FRESH_REPEATS) {
+      return now;
+    }
+    if (left === 0) {
+      if (now === null) {
+        throw new Error("views check: the lower plate read no slant range at rest");
+      }
+      return now;
+    }
+    await deps.framesDrawn(1);
+    return read(left - 1, now, seen);
+  };
+  return read(LOW_FRESH_MAX_DRAWS, null, 0);
+}
+
 /**
  * The free camera's rate step for a hold that closes `remainingM`: the fastest whose one camera
  * step, at most {@link MAX_FREE_STEP_S} of its rate, flies no more than half of it, so that a hold
@@ -368,6 +628,22 @@ export function cameraRateStep(document: Document, cameraLine: string | null): n
     ?.textContent.replaceAll(/\s+/gu, " ")
     .trim();
   return reading === undefined ? null : rateStepOfCameraLine(`FREE · ${reading}`);
+}
+
+/**
+ * The camera's range from the body's centre, m, as the display reads it: its `POSITION` line's, or
+ * where no such line stands, as under `MAXIMIZE VIEW`, the camera panel's position reading, which
+ * the hidden side column still holds, as {@link cameraRateStep} reads the rate.
+ */
+export function cameraRangeM(document: Document, positionLine: string | null): number | null {
+  if (positionLine !== null) {
+    return positionRangeM(positionLine);
+  }
+  const reading = document
+    .querySelector('output[aria-label="Camera position"]')
+    ?.textContent.replaceAll(/\s+/gu, " ")
+    .trim();
+  return reading === undefined ? null : positionRangeM(reading);
 }
 
 /** The capture's label for `body`: `inspection-<system>-<index in hexadecimal>`. */
@@ -726,9 +1002,11 @@ async function inspect(
   };
   const range = (): number => {
     const line = plate().line("POSITION");
-    const rangeM = positionRangeM(line);
+    const rangeM = cameraRangeM(document, line);
     if (rangeM === null) {
-      throw new Error(`views check: the POSITION line reads no range (${line ?? "none"})`);
+      throw new Error(
+        `views check: neither the POSITION line nor the camera panel reads a range (${line ?? "none"})`,
+      );
     }
     return rangeM;
   };
@@ -753,34 +1031,41 @@ async function inspect(
   };
   /**
    * Closes in by holds of `W`, or of `S` past the goal, until what `remaining` reads of the goal is
-   * within `toleranceM`, at most `left` holds; `missed` says where it stood when it gave up.
+   * within `toleranceM`, at most `left` holds; `missed` says where it stood when it gave up. Each
+   * hold's rate is chosen for a `share` of what is left, halved after a hold that flew most of it
+   * ({@link nextHoldShare}), what was left before it being `beforeM`; `holds` says how it holds.
    */
   const closeIn = async (
-    remaining: () => number,
+    remaining: () => number | Promise<number>,
     toleranceM: number,
     missed: () => string,
     left: number,
+    holds: CloseInHolds = {},
+    beforeM: number | null = null,
   ): Promise<void> => {
-    const remainingM = remaining();
+    const share = holds.share ?? 1;
+    const coastFrames = holds.coastFrames ?? timing.coastFrames;
+    const remainingM = await remaining();
     if (Math.abs(remainingM) <= toleranceM) {
       return;
     }
     if (left === 0) {
       throw new Error(`views check: ${missed()} in ${String(timing.closeHolds)} holds`);
     }
-    await setRate(closeRateStep(Math.abs(remainingM)));
-    const key = remainingM > 0 ? "w" : "s";
-    const target = canvas();
+    const held = beforeM === null ? share : nextHoldShare(share, beforeM, remainingM);
+    const rateStep = closeRateStep(held * Math.abs(remainingM));
+    await setRate(rateStep);
     stopped();
-    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    // One camera step of the primary's frames, let up in the submission that completes it.
+    const hold = holdForStep(deps, canvas(), remainingM > 0 ? "w" : "s");
     try {
-      // A step's most of the camera's time, a draw or more, on a slow renderer or a fast one.
-      await framesDrawn(1, 1000 * MAX_FREE_STEP_S);
+      await until("the primary drew no held step", hold.released);
     } finally {
-      target.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }));
+      hold.release();
     }
-    await framesDrawn(timing.coastFrames, 1000 * timing.coastFrames * MAX_FREE_STEP_S);
-    await closeIn(remaining, toleranceM, missed, left - 1);
+    holds.flew?.(Math.sign(remainingM) * freeRateMPerS(rateStep) * hold.integratedS());
+    await framesDrawn(coastFrames, 1000 * coastFrames * MAX_FREE_STEP_S);
+    await closeIn(remaining, toleranceM, missed, left - 1, { ...holds, share: held }, remainingM);
   };
   await closeIn(
     () => range() - goalM,
@@ -821,34 +1106,64 @@ async function inspect(
   }
   // 6. With the frame profile, low over the same ground, where the cascades draw (main's ask).
   if (deps.profile !== null) {
-    const aboveGround = (): number => {
-      const lines = ground();
-      const heightM = slantRangeM(lines);
-      if (heightM === null) {
-        throw new Error(`views check: the lower plate reads no slant range (${lines.join("; ")})`);
-      }
-      return heightM;
-    };
     // The slant range is the readout's: read under MAXIMIZE VIEW where the room holds it back.
     const heldLow = readoutHeldBack(ground());
     if (heldLow) {
       await setMaximized(true, "on the way down");
       await groundMaximized("on the way down");
     }
+    // The camera has rested since the close window, so that the readout's slant range is its own.
+    const restedM = slantRangeM(ground());
+    if (restedM === null) {
+      throw new Error(`views check: the lower plate reads no slant range (${ground().join("; ")})`);
+    }
+    const approachM = lowApproachRangeM(restedM, range());
+    // Each hold's reading, the first the start's, for the step's failure to name.
+    const rangesM: number[] = [];
     await closeIn(
-      () => aboveGround() - LOW_HEIGHT_M,
-      CLOSE_TOLERANCE * LOW_HEIGHT_M,
+      async () => {
+        const rangeM = range();
+        rangesM.push(rangeM);
+        return rangeM - approachM;
+      },
+      LOW_APPROACH_TOLERANCE_M,
       () =>
-        `the camera did not close to ${String(LOW_HEIGHT_M / 1000)} km above the ground (at ${String(Math.round(aboveGround()))} m)`,
+        `the camera did not close to ${String(Math.round(approachM / 1000))} km from the centre, ${String(LOW_APPROACH_M / 1000)} km over the ground (ranges ${rangesM.map((rangeM) => String(Math.round(rangeM / 1000))).join(", ")} km)`,
       timing.closeHolds,
+      { share: LOW_HOLD_SHARE },
+    );
+    // Each rested reading, for the step's failure to name.
+    const slantsM: number[] = [];
+    const reckoned = new ReckonedSlant(async () => {
+      const slantM = await restedSlantM({
+        framesDrawn: (count) => framesDrawn(count, count * 1000 * MAX_FREE_STEP_S),
+        slantM: () => slantRangeM(ground()),
+      });
+      slantsM.push(slantM);
+      return slantM;
+    });
+    const toleranceM = CLOSE_TOLERANCE * LOW_HEIGHT_M;
+    await closeIn(
+      () => reckoned.remainingM(toleranceM),
+      toleranceM,
+      () =>
+        `the camera did not close to ${String(LOW_HEIGHT_M / 1000)} km above the ground (slant ranges read at rest ${slantsM.map((slantM) => String(Math.round(slantM))).join(", ")} m)`,
+      timing.closeHolds,
+      // Reckoned, a hold needs no coast before the next.
+      { share: LOW_HOLD_SHARE, coastFrames: 0, flew: (flownM) => reckoned.flew(flownM) },
     );
     if (heldLow) {
       await setMaximized(false, "low over the ground");
     }
-    await grounded.until(
-      "the terrain did not stream once the camera stood low over the ground",
-      () => !plate().statements.includes("TERRAIN: STREAMING"),
-      () => plate().statements.join("; "),
+    // The terrain may stream on past the ground's wait 4 km up, as on SwiftShader at the high
+    // setting: the window is measured all the same, its statements stating TERRAIN: STREAMING (main's
+    // lean, 2026-11-05), since a profile is not judged.
+    await awaitedOrNot(
+      grounded.until(
+        "the terrain did not stream once the camera stood low over the ground",
+        () => !plate().statements.includes("TERRAIN: STREAMING"),
+        () => plate().statements.join("; "),
+      ),
     );
     await settle();
     await measured("low", "the low window");
