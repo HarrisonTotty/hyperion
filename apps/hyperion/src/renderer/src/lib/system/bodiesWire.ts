@@ -254,7 +254,7 @@ function atLeastZero(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
 }
 
-/** A mode's mixing-ratio exponent: finite and above −1, where its share above a level is singular. */
+/** A mode's mixing-ratio exponent: finite and above −1; at −1 its share above a level is singular. */
 function aboveMinusOne(value: number): boolean {
   return Number.isFinite(value) && value > -1;
 }
@@ -1277,7 +1277,7 @@ function toNotModelled(reason: AerosolNotModelledDto): AerosolNotModelled {
 /**
  * An aerosol mode, checked: its column mass and optical depth, where sent, not negative, the
  * optical depth sent with its basis, its temperature, where sent, positive, its coverage a
- * fraction, its layer usable, its exponent not negative, and the members it leaves out the ones
+ * fraction, its layer usable, its exponent finite and above −1, and the members it leaves out the ones
  * its not-modelled reason names ({@link membersFitReason}).
  *
  * @remarks

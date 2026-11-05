@@ -1583,7 +1583,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     ],
     ["a base above its top", { base_pa: 50_000 }, "condensate deck unusable"],
     ["a base of no temperature", { base_temperature_k: 0 }, "condensate deck unusable"],
-    ["a negative f_sed", { f_sed: -1 }, "condensate deck unusable"],
+    ["a negative f_sed, which a mode takes", { f_sed: -0.5 }, "condensate deck unusable"],
     ["the vapour phase", { phase: "vapour" }, "aerosol phase unusable"],
     ["the supercritical phase", { phase: "supercritical" }, "aerosol phase unusable"],
   ] satisfies ReadonlyArray<[string, Partial<CondensateDeckDto>, string]>)(

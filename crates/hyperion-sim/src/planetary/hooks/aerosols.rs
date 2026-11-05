@@ -370,20 +370,24 @@ pub const TITAN_HAZE_MONOMERS: f64 = 3_000.0;
 pub const TITAN_HAZE_FRACTAL_DIMENSION: f64 = 2.0;
 
 /// The haze's top over the ground's pressure: four decades (Titan's particles reach from the
-/// surface to its ionosphere). Between them it is well mixed below generator version 30, and from
-/// 30 (`HAZE_PROFILE_VERSION`) its mixing ratio rises aloft as [`TITAN_HAZE_MIXING_EXPONENT`], so
-/// that its extinction falls more slowly than its air's, as DISR's does above 80 km (a 65 km
-/// scale height there).
+/// surface to its ionosphere).
+///
+/// Between them the haze is well mixed below generator version 30, and from 30
+/// (`HAZE_PROFILE_VERSION`) its mixing ratio rises aloft as [`TITAN_HAZE_MIXING_EXPONENT`], so that
+/// its extinction falls more slowly than its air's, as DISR's does above 80 km (some 65 km there,
+/// recalled: research-leans-36 §1; this law's is about twice it, its top holding the rest).
 pub const HAZE_TOP_RATIO: f64 = 1e-4;
 
 /// The methane haze's mixing-ratio exponent f in (p ÷ `p_ground`)^f: −0.83, its mixing ratio rising
-/// aloft, fitted to DISR's three layers (Tomasko et al. 2008, Fig. 47, as Bazzon et al. 2014 fit
+/// aloft.
+///
+/// It is fitted to DISR's three layers (Tomasko et al. 2008, Fig. 47, as Bazzon et al. 2014 fit
 /// them: τ(550) 3.940 above 80 km, 2.793 from 30 to 80 km and 1.372 below) on rendering plan R08's
 /// Titan-class column, isothermal at 93.65 K from 1,467 hPa to 1 Pa, where it gives 3.93, 2.29 and
 /// 1.88 (R08.T17; research-leans-36 §1); on that column its extinction's scale height is the air's
-/// over 1 + f, some 124 km. One power law cannot make DISR's growth below 30 km; the upper layer,
-/// which it matches, sets the disc's colour, its haze absorbing the blue above the air whose
-/// Rayleigh scattering would send it back. Topped at [`HAZE_TOP_RATIO`] (14.7 Pa on Titan), it
+/// over 1 + f, some 124 km. One power law cannot match all three layers; it matches the upper one,
+/// which sets the disc's colour, its haze absorbing the blue above the air whose Rayleigh
+/// scattering would send it back. Topped at [`HAZE_TOP_RATIO`] (14.7 Pa on Titan), it
 /// puts 3.48 above 80 km on that column: recorded. Taken from generator version 30
 /// (`HAZE_PROFILE_VERSION`).
 pub const TITAN_HAZE_MIXING_EXPONENT: f64 = -0.83;
@@ -394,9 +398,10 @@ pub const TITAN_HAZE_MIXING_EXPONENT: f64 = -0.83;
 /// orange-brown, not grey; 30, held with the 30 train (train 29's list froze before it).
 ///
 /// Below it [`HazeProfileRules::in_force`] is [`HazeProfileRules::WellMixed`]: the haze is well
-/// mixed from the ground to [`HAZE_TOP_RATIO`], and every figure is version 29's bit for bit. 30's
-/// bump deletes this hold, [`HazeProfileRules`] with its `WellMixed` arm, the tests' switch, its
-/// line in the tests' `HeldRules` and its tripwire
+/// mixed from the ground to [`HAZE_TOP_RATIO`], and every figure is the version's own bit for bit.
+/// 30's bump deletes this hold: [`HazeProfileRules`] with its `WellMixed` arm (`methane_haze` then
+/// takes [`TITAN_HAZE_MIXING_EXPONENT`] directly), the tests' `HAZE_PROFILE_RULES` and
+/// `with_haze_profile`, its line in the tests' `HeldRules` and its tripwire
 /// (`the_haze_profile_is_held_only_until_the_30_bump`).
 pub(crate) const HAZE_PROFILE_VERSION: GeneratorVersion = GeneratorVersion::new(30);
 

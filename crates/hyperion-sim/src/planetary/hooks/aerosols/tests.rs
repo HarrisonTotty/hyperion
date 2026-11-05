@@ -1446,9 +1446,10 @@ fn the_haze_profile_is_held_only_until_the_30_bump() {
     assert!(
         GENERATOR_VERSION < HAZE_PROFILE_VERSION,
         "the 29 → 30 bump raises the methane haze's mixing ratio aloft: delete \
-         `HAZE_PROFILE_VERSION`, `HazeProfileRules` with its `WellMixed` arm and its match in \
-         `methane_haze`, the tests' `with_haze_profile`, its line in `HeldRules`, and this test; \
-         restate the tests held below 30"
+         `HAZE_PROFILE_VERSION`, `HazeProfileRules` with its `WellMixed` arm (`methane_haze` then \
+         takes `TITAN_HAZE_MIXING_EXPONENT` directly), the tests' `HAZE_PROFILE_RULES` and \
+         `with_haze_profile`, its line in `HeldRules`, and this test; restate the tests held below \
+         30"
     );
     assert_eq!(HazeProfileRules::in_force(), HazeProfileRules::WellMixed);
     assert_eq!(
