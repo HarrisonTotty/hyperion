@@ -300,17 +300,22 @@ fn the_400_and_the_goldens() -> Vec<AuditSet> {
 }
 
 /// The bodies whose states decision-p14-t54a-states §3.4 anchors (its tests' list), by set and
-/// ID: the golden `e101`, a `MagmaOcean` (decision-triton-and-e101 §2); the two frozen `Temperate`s
-/// of its §4, `close_binary` .0600 and `m_dwarf_resonant_chain` .0100, each by rule 5 at its
-/// climate after P14.T53.a's weathering thermostat; and decision-pre-23-review item 33's world
-/// ([`ITEM_33_WORLD`]), not a runaway. A golden system's ID may name another system in the
-/// sample's universe, so the set is part of the key.
-const ANCHORS: [(&str, &str); 4] = [
-    ("close_binary", "42002cb200000009.e101"),
+/// ID: the two frozen `Temperate`s of its §4, `close_binary` .0600 and `m_dwarf_resonant_chain`
+/// .0100, each by rule 5 at its climate after P14.T53.a's weathering thermostat; and
+/// decision-pre-23-review item 33's world ([`ITEM_33_WORLD`]), not a runaway. A golden system's ID
+/// may name another system in the sample's universe, so the set is part of the key. The list's
+/// fourth, the golden `e101`, a `MagmaOcean` to generator version 27 (decision-triton-and-e101
+/// §2), has evaporated from 28 (P14.T55.b.a: [`EVAPORATED_ANCHOR`]).
+const ANCHORS: [(&str, &str); 3] = [
     ("close_binary", "42002cb200000009.0600"),
     ("m_dwarf_resonant_chain", "02002b2ca0000000.0100"),
     ("sample", ITEM_33_WORLD),
 ];
+
+/// decision-p14-t54a-states §3.4's anchor `e101`, by set and ID: the close binary's dwarf planet,
+/// a `MagmaOcean` to generator version 27, which from 28 is destroyed by its evaporation
+/// (P14.T55.b.a), as its neighbours e102 and e103 are, and so is not in the census.
+const EVAPORATED_ANCHOR: (&str, &str) = ("close_binary", "42002cb200000009.e101");
 
 /// `n` of `of` as a percentage.
 fn percent(n: usize, of: usize) -> f64 {
@@ -344,8 +349,9 @@ fn passes_of(bodies: &[CensusBody]) -> u64 {
 ///   surface (stated, not asserted: a count over goes to the findings).
 /// - **Item 26's second start** for every published runaway, from the melt's 0.10: the bistable
 ///   magma oceans, each a runaway at the generator's start that settles molten from the melt's.
-/// - **The anchors** (decision-p14-t54a-states §3.4, [`ANCHORS`]): `e101` a `MagmaOcean`, the two
-///   frozen `Temperate`s by rule 5 and item 33's 46 K world not a runaway, asserted.
+/// - **The anchors** (decision-p14-t54a-states §3.4, [`ANCHORS`]): the two frozen `Temperate`s by
+///   rule 5 and item 33's 46 K world not a runaway, asserted; `e101`, a `MagmaOcean` to 27,
+///   evaporated from 28 ([`EVAPORATED_ANCHOR`]), asserted absent.
 /// - **The cost:** every body's passes summed, and the walk's time, printed.
 #[test]
 #[ignore = "a measurement for the 25 bless, run by name"]
@@ -360,6 +366,13 @@ fn the_present_climate_sets_the_state_over_the_400() {
         passes_of(&at_25)
     );
     // The anchors.
+    let (set, id) = EVAPORATED_ANCHOR;
+    assert!(
+        !at_25
+            .iter()
+            .any(|body| body.set == set && body.published.id == id),
+        "{set} {id} has evaporated"
+    );
     for (set, id) in ANCHORS {
         let body = at_25
             .iter()
@@ -367,9 +380,6 @@ fn the_present_climate_sets_the_state_over_the_400() {
             .unwrap_or_else(|| panic!("{set} {id} is in the census"));
         eprintln!("anchor {} {}", body.label, body.published.line());
         match id {
-            "42002cb200000009.e101" => {
-                assert_eq!(body.published.state, SurfaceState::MagmaOcean, "{id}");
-            }
             ITEM_33_WORLD => {
                 assert_ne!(
                     body.published.state,
