@@ -13866,7 +13866,8 @@ pub(crate) struct ThinAirBody {
 }
 
 impl ThinAirBody {
-    /// The figures of `record` and `derived`, a body of `set` and `kind`, with an `Ok` surface.
+    /// The figures of `record` and `derived`, a body of `set` and `kind`, with an `Ok` bulk and
+    /// surface.
     fn of(
         (set, ctx): (&str, &SystemContext),
         kind: &str,
@@ -13880,7 +13881,9 @@ impl ThinAirBody {
         };
         let conditions = surface.conditions();
         let p = conditions.surface_pressure().value();
-        let g = derived.surface_gravity().value();
+        // The record's own gravity, its bulk's: a moon's radius is its own (ruling 83.7) and an
+        // icy member's ruling 112.8's, not its derivation's body's; a moon's air is judged at it.
+        let g = record.bulk().ok()?.surface_gravity().value();
         let coldest = conditions.climate_range().0.value();
         let gases = conditions.gases().to_vec();
         let air = derived.atmosphere();
