@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn the_current_version_is_supported_and_others_are_not() {
         assert!(GENERATOR_VERSION.is_supported());
-        assert_eq!(GENERATOR_VERSION.get(), 27);
+        assert_eq!(GENERATOR_VERSION.get(), 28);
         assert!(!GeneratorVersion::new(0).is_supported());
         assert!(!GeneratorVersion::new(GENERATOR_VERSION.get() + 1).is_supported());
     }

@@ -724,7 +724,9 @@ fn under_the_escape_batch_and_every_24_hold_no_planet_is_hotter_than_its_star() 
 /// its star, its surface at least its top's grey temperature and at most its grey and its star.
 /// Each is stated (`T_s`, `p_s`, τ, `τ_a`, `T_a`, its crust's state, its deck, part 2's section and
 /// both limit ratios), with the count that stay molten against the replica's 13 ± 5. It holds under
-/// both arms of P14.T53.g's hold ([`MeltOxygenRules`]).
+/// both arms of P14.T53.g's hold ([`MeltOxygenRules`]). From generator version 28 the nine that
+/// P14.T9.d's placement margin moves ([`MOVED_OFF_THE_ANCHOR`]) are held finite and under their
+/// star alone.
 #[test]
 fn under_every_24_hold_the_guard_s_39_thick_carbon_dioxide_airs_are_finite_and_under_their_stars() {
     for rules in [MeltOxygenRules::Held, MeltOxygenRules::Published] {
@@ -739,6 +741,7 @@ fn the_39_under(rules: MeltOxygenRules) {
         .map(|&(system, index)| format!("{system}.{index:04x}"))
         .collect();
     let mut seen = std::collections::BTreeMap::<String, u32>::new();
+    let mut unanchored = std::collections::BTreeSet::<String>::new();
     let (mut molten, mut solid, mut sectioned) = (0_u32, 0_u32, 0_u32);
     let mut largest = 0.0_f64;
     guard_walk(&mut |sample| {
@@ -756,6 +759,12 @@ fn the_39_under(rules: MeltOxygenRules) {
             sample.system.age.value(),
             body_line(&body, hottest)
         );
+        *seen.entry(id.clone()).or_default() += 1;
+        if MOVED_OFF_THE_ANCHOR.contains(&id.as_str()) {
+            assert!(t_s.is_finite() && t_s < hottest.value(), "{id}: {t_s}");
+            unanchored.insert(id);
+            return;
+        }
         let (_, top, _) = closure.expect("each lies beyond the anchor");
         assert!(t_s.is_finite() && t_s < hottest.value(), "{id}: {t_s}");
         assert!(
@@ -780,7 +789,6 @@ fn the_39_under(rules: MeltOxygenRules) {
                     .is_some(),
             );
         }
-        *seen.entry(id).or_default() += 1;
     });
     eprintln!(
         "the 39 at the epoch ({rules:?}): {molten} MagmaOcean (the replica's 13 ± 5), {solid} \
@@ -789,7 +797,30 @@ fn the_39_under(rules: MeltOxygenRules) {
     );
     assert_eq!(seen.len(), SATURATED_UNDER_THE_BATCH.len(), "{seen:?}");
     assert!(seen.values().all(|&n| n == 3), "{seen:?}");
+    assert_eq!(
+        unanchored.len(),
+        MOVED_OFF_THE_ANCHOR.len(),
+        "{unanchored:?}"
+    );
 }
+
+/// Of [`SATURATED_UNDER_THE_BATCH`], the bodies P14.T9.d's placement margin moves from generator
+/// version 28 (it places a pair's innermost planet 3% outside its P-type limit, and the planets
+/// of these systems' chains with it), as measured at 28: each derived, its surface finite and
+/// under its star, but no longer under the batch's thick carbon dioxide beyond the thick-air
+/// anchor (an ice giant's envelope, a thinner air, or no closure), and 42002cb20000018f.0600, a
+/// magma ocean at 1,584.0 K, 2.9 K under its closure's top under the melt's held arm (a finding).
+const MOVED_OFF_THE_ANCHOR: [&str; 9] = [
+    "42002cb20000012a.0300",
+    "42002cb20000017d.0100",
+    "42002cb20000018f.0600",
+    "42002cb2000001f5.0200",
+    "42002cb200000243.0100",
+    "42002cb2000188e8.0100",
+    "42002cb200030d83.0400",
+    "42002cb200030e0f.0100",
+    "42002cb2000495a9.0100",
+];
 
 /// P14.T53.f over the guard's six of decision-p14-t53a-thick-co2 §11.1's nine water worlds
 /// ([`CLOSURE_JUMPS`]; the systems' three are `system::supercritical_envelope_tests`'), at all
@@ -798,7 +829,9 @@ fn the_39_under(rules: MeltOxygenRules) {
 /// air, flux, radius, gravity and equilibrium temperature
 /// (`system::envelope::supercritical_envelope_of`): H₂O, every figure finite, its profile
 /// monotone in pressure and meeting its published surface, and no deck based at or above water's
-/// critical point. Each is stated.
+/// critical point. Each is stated. From generator version 28 P14.T9.d's placement margin moves
+/// five of the six off their steam envelope ([`MOVED_BY_THE_MARGIN`], each published in its state
+/// there), and the sixth, 42002cb20000010c.0900, takes its envelope as before.
 #[test]
 fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() {
     use crate::planetary::hooks::envelope_atmosphere::supercritical::tests::{
@@ -813,6 +846,7 @@ fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() 
         .collect();
     assert_eq!(six.len(), 6, "the guard's six");
     let mut seen = std::collections::BTreeMap::<String, u32>::new();
+    let mut moved = std::collections::BTreeMap::<String, u32>::new();
     {
         guard_walk(&mut |sample| {
             let id = sample.id();
@@ -821,6 +855,16 @@ fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() 
             }
             let (body, hottest) = sample.derive().expect("each of the six is derived");
             let air = body.atmosphere();
+            if let Some(&(_, state)) = MOVED_BY_THE_MARGIN.iter().find(|&&(name, _)| name == id) {
+                eprintln!(
+                    "{id} at {:+} yr, moved by the margin: {}",
+                    sample.years,
+                    body_line(&body, hottest)
+                );
+                assert_eq!(air.published_state(), state, "{id}");
+                *moved.entry(id).or_default() += 1;
+                return;
+            }
             let envelope = supercritical_envelope_of(&SupercriticalOf {
                 air,
                 radius: Metres::from(body.radius()),
@@ -872,9 +916,23 @@ fn under_every_26_hold_the_guard_s_six_water_worlds_take_their_steam_envelope() 
             *seen.entry(id).or_default() += 1;
         });
     };
-    assert_eq!(seen.len(), 6, "{seen:?}");
+    assert_eq!(seen.len(), 1, "{seen:?}");
     assert!(seen.values().all(|&n| n == 3), "{seen:?}");
+    assert_eq!(moved.len(), MOVED_BY_THE_MARGIN.len(), "{moved:?}");
+    assert!(moved.values().all(|&n| n == 3), "{moved:?}");
 }
+
+/// The guard's water worlds of [`CLOSURE_JUMPS`] that P14.T9.d's placement margin moves off their
+/// steam envelope from generator version 28, with the state each is published in at the epoch
+/// and an hour of the clock either side: the margin places a pair's innermost planet 3% outside
+/// its P-type limit, and the planets of these systems' chains with it.
+const MOVED_BY_THE_MARGIN: [(&str, SurfaceState); 5] = [
+    ("42002cb2000001b1.0500", SurfaceState::Snowball),
+    ("42002cb2000187b7.0700", SurfaceState::Temperate),
+    ("42002cb200018844.0400", SurfaceState::Snowball),
+    ("42002cb200030f55.0500", SurfaceState::Snowball),
+    ("42002cb200049556.0500", SurfaceState::GasEnvelope),
+];
 
 /// The census of the guard's samples that P14.T53.a's thick-air closure moves, with every 24
 /// hold in force (decision-p14-t53a-thick-co2 §7.5, the guard's 30,063 samples): each sample
@@ -1050,33 +1108,35 @@ fn under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_
 /// one: 42002cb20001885b.0100's under the hold and under the new arm alone are re-pinned to the
 /// helper's. From 27 those four are the version's rules and the helper's their oracle: the rows
 /// with the version's rules are re-measured at 27, 42002cb2000188e8.0100's and
-/// 42002cb20001885b.0100's moved by the adding rule's Rayleigh layer over their thick airs.
+/// 42002cb20001885b.0100's moved by the adding rule's Rayleigh layer over their thick airs. From
+/// 28 P14.T9.d's placement margin moves all three to solid runaways, which the melt's rule does
+/// not reach, so each body's four rows are one: re-measured at 28.
 const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
     (
         "42002cb2000188e8.0100",
         [
-            (1_982.029_519_030_676, 10_860.872_002_894_75),
-            (2_018.957_958_908_867_6, 10_861.918_420_525_659),
-            (1_801.323_332_387_608_2, 10_794.534_737_977_192),
-            (1_832.413_503_151_926_8, 10_794.529_328_187_999),
+            (780.142_337_978_189_1, 12.624_828_887_110_235),
+            (780.142_337_978_189_1, 12.624_828_887_110_235),
+            (780.142_337_978_189_1, 12.624_828_887_110_235),
+            (780.142_337_978_189_1, 12.624_828_887_110_235),
         ],
     ),
     (
         "42002cb200049423.0100",
         [
-            (1_202.496_035_714_910_5, 17_263.683_413_307_484),
-            (1_202.496_035_714_910_5, 17_263.683_413_307_484),
-            (1_202.496_035_714_910_5, 17_263.683_413_307_484),
-            (1_202.496_035_714_910_5, 17_263.683_413_307_484),
+            (1_086.426_968_596_663_5, 8_549.758_981_866_475),
+            (1_086.426_968_596_663_5, 8_549.758_981_866_475),
+            (1_086.426_968_596_663_5, 8_549.758_981_866_475),
+            (1_086.426_968_596_663_5, 8_549.758_981_866_475),
         ],
     ),
     (
         "42002cb20001885b.0100",
         [
-            (1_231.230_488_936_815_6, 3_188.045_653_795_08),
-            (1_428.081_981_703_512_6, 3_220.335_346_668_595_3),
-            (1_231.230_488_936_815_6, 3_188.045_653_795_08),
-            (1_394.0, 3_166.681_417_976_950_3),
+            (764.386_766_275_690_7, 224.864_940_000_770_67),
+            (764.386_766_275_690_7, 224.864_940_000_770_67),
+            (764.386_766_275_690_7, 224.864_940_000_770_67),
+            (764.386_766_275_690_7, 224.864_940_000_770_67),
         ],
     ),
 ];
@@ -1100,6 +1160,11 @@ const MOLTEN_BY_NAME: [(&str, [(f64, f64); 4]); 3] = [
 ///   bit, as 42002cb200049423.0100 is.
 /// - Under the hold, with the version's rules and inside 26's helper alike, each publishes today's
 ///   `T_s` and τ, its solve's, its column's O₂ included.
+///
+/// From generator version 28 P14.T9.d's placement margin moves all three (it places a pair's
+/// innermost planet 3% outside its P-type limit, and these systems' chains with it): each is a
+/// solid `RunawayGreenhouse` at 764–1,086 K under every rule, the melt's rule reaching none, so
+/// the bullets above are their bodies below 28 and the fixture holds no melt at 28 (a finding).
 #[test]
 fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new_arm() {
     let mut derived = Vec::new();
@@ -1156,35 +1221,17 @@ fn the_molten_bodies_by_name_publish_their_published_air_s_surface_under_the_new
         let state = |(body, _): &(DerivedBody, Kelvin)| body.atmosphere().state();
         let t_s =
             |(body, _): &(DerivedBody, Kelvin)| body.atmosphere().surface_temperature().value();
-        match id.as_str() {
-            "42002cb2000188e8.0100" => {
-                assert_eq!(state(alone), SurfaceState::MagmaOcean, "{id}");
-                assert_eq!(state(every_26), SurfaceState::MagmaOcean, "{id}");
-                assert!(
-                    (t_s(every_26) / 1_832.0 - 1.0).abs() < 0.01,
-                    "{id}: {} K",
-                    t_s(every_26)
-                );
-            }
-            "42002cb20001885b.0100" => {
-                assert_eq!(state(alone), SurfaceState::RunawayGreenhouse, "{id}");
-                assert_eq!(&bodies[0], alone, "{id}: the rule reaches no solid body");
-                assert_eq!(state(every_26), SurfaceState::MagmaOcean, "{id}");
-                assert_same_bits(t_s(every_26), SILICATE_SOLIDUS.value());
-            }
-            "42002cb200049423.0100" => {
-                assert_eq!(state(alone), SurfaceState::RunawayGreenhouse, "{id}");
-                assert_eq!(state(every_26), SurfaceState::RunawayGreenhouse, "{id}");
-                assert_eq!(every_26, held_26, "{id}: the rule reaches no solid body");
-            }
-            _ => {
-                assert_eq!(state(alone), SurfaceState::MagmaOcean, "{id}");
-                assert_eq!(state(every_26), SurfaceState::MagmaOcean, "{id}");
-                for body in [alone, every_26] {
-                    assert_same_bits(t_s(body), SILICATE_SOLIDUS.value());
-                }
-            }
+        // From generator version 28 each is a solid runaway, P14.T9.d's placement margin having
+        // moved it (MOLTEN_BY_NAME), and the melt's rule reaches none.
+        for body in [held_26, alone, every_26] {
+            assert_eq!(state(body), SurfaceState::RunawayGreenhouse, "{id}");
+            assert_eq!(body, &bodies[0], "{id}: the rule reaches no solid body");
         }
+        assert!(
+            t_s(alone) < SILICATE_SOLIDUS.value(),
+            "{id}: {} K",
+            t_s(alone)
+        );
     }
 }
 

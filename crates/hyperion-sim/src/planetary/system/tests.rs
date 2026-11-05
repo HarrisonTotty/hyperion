@@ -2274,7 +2274,8 @@ fn every_body_s_states_across_the_window_are_a_prefix_of_its_life() {
 /// Across the window, in whole systems: a moon or a ring is never present while its parent is
 /// not, and takes its parent's state then (a giant engulfed by its evolved host takes its moons
 /// and rings with it); a regular or captured moon and a ring are present whenever their parent
-/// is; and a belt member's moon is no exception (P14.T30.b).
+/// is, but for a small moon whose rock has evaporated (P14.T55.b.a, from generator version 28);
+/// and a belt member's moon is no exception (P14.T30.b).
 ///
 /// The fast tier walks [`whole_fast`]'s chunk of the sample, and
 /// [`satellites_share_their_parent_s_state_across_the_window_over_the_rest_of_the_sample`] the rest
@@ -2295,7 +2296,7 @@ fn satellites_share_their_parent_s_state_across_the_window_over_the_rest_of_the_
 /// The body of [`satellites_share_their_parent_s_state_across_the_window`] and its slow twin, over
 /// the systems `systems`.
 fn satellites_share_their_parent_s_state(systems: &'static [(SystemContext, PlanetarySystem)]) {
-    let (mut followed, mut engulfed) = (0u32, 0u32);
+    let (mut followed, mut engulfed, mut evaporated) = (0u32, 0u32, 0u32);
     for (ctx, system) in systems {
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
@@ -2314,7 +2315,22 @@ fn satellites_share_their_parent_s_state(systems: &'static [(SystemContext, Plan
                 let (own, of_parent) = (state_of(body.index()), state_of(parent));
                 match (of_parent, body.kind()) {
                     (BodyState::Present, BodyKind::Moon(MoonOrigin::GiantImpact)) => {}
-                    (BodyState::Present, _) => assert_eq!(own, BodyState::Present),
+                    // A small moon whose rock has evaporated keeps its own ending, before its
+                    // parent's if its parent has one.
+                    (_, _)
+                        if matches!(
+                            own,
+                            BodyState::Destroyed {
+                                cause: DestructionCause::Evaporated,
+                                at,
+                            } if of_parent.ended_at().is_none_or(|end| at <= end)
+                        ) =>
+                    {
+                        evaporated += 1;
+                    }
+                    (BodyState::Present, _) => {
+                        assert_eq!(own, BodyState::Present, "{:?}", body.index());
+                    }
                     (other, _) => {
                         assert_eq!(own, other, "{:?} of {parent:?}", body.index());
                         followed += 1;
@@ -2331,7 +2347,10 @@ fn satellites_share_their_parent_s_state(systems: &'static [(SystemContext, Plan
         }
     }
     assert!(followed > 0, "no satellite of an absent parent");
-    eprintln!("{followed} satellites followed an absent parent, {engulfed} engulfed");
+    eprintln!(
+        "{followed} satellites followed an absent parent, {engulfed} engulfed; {evaporated} \
+         evaporated about a present parent"
+    );
 }
 
 /// Every body's primordial circularisation is T8.e's damping time with Chen and Kipping's median
@@ -6074,9 +6093,11 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     // jump (2.5%; 21 cover flips, most of them 15–28 K icy members whose cap gains or loses its
     // argon ice between passes, 2 onsets and a state edge) and 29 of 954 are bracketed (3.04%).
     // At generator version 27, re-measured, 24 of 872 jump (2.75%; 22 cover flips, most of them
-    // icy members at 15–37 K, and 2 state edges) and 33 of 872 are bracketed (3.78%).
-    assert!(jumps <= 24, "{jumps} of {total} jump");
-    assert!(held <= 33, "{held} of {total} bracketed");
+    // icy members at 15–37 K, and 2 state edges) and 33 of 872 are bracketed (3.78%). At 28,
+    // re-measured, 25 of 846 jump (2.96%; 23 cover flips, most of them icy members at 15–37 K, and
+    // 2 state edges) and 34 of 846 are bracketed (4.02%), 26 small hot bodies having evaporated.
+    assert!(jumps <= 25, "{jumps} of {total} jump");
+    assert!(held <= 34, "{held} of {total} bracketed");
     let planets = &tallies["planets"];
     let planet_jumps = count(planets, Class::Jump) + count(planets, Class::ContextJump);
     // The planets' 2% guard is over the 400 systems' planets (main, on C2's escalation:
@@ -7202,9 +7223,9 @@ fn under_the_secant_root_the_passes_and_movers_are_stated() {
 /// 01ffdb2c1fff0001.0900 and .0b00, 01ffdb2c60020000.0100 and 01ffeb2d1ffc0000.0600), and
 /// 02003b2d1ffe0001.0200, whose bracket held several jumps, by P14.T53.e's present state; from 26
 /// 01ffeb2cdffd0000.0a02, and `close_binary`'s `.0800` and `.e501`, which the CO₂ cap's energy
-/// balance moves (P14.T53.h); and from 27 01ffdb2c1fff0000.0700, 01ffeb2d1ffc0000.0900 and
-/// 41ffecb1ffc00007.0d01.
-const SECANT_PINNED_CONVERGED: [&str; 12] = [
+/// balance moves (P14.T53.h); and from 27 01ffdb2c1fff0000.0700 and 01ffeb2d1ffc0000.0900.
+/// 41ffecb1ffc00007.0d01, which converged at 27, brackets again from 28 (train 28's folds).
+const SECANT_PINNED_CONVERGED: [&str; 11] = [
     "01ffeb2c5ffe0000.0400",
     "01ffdb2c1fff0001.0900",
     "01ffdb2c1fff0001.0b00",
@@ -7216,7 +7237,6 @@ const SECANT_PINNED_CONVERGED: [&str; 12] = [
     "close_binary.e501",
     "01ffdb2c1fff0000.0700",
     "01ffeb2d1ffc0000.0900",
-    "41ffecb1ffc00007.0d01",
 ];
 
 /// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition

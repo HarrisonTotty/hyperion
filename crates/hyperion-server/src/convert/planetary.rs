@@ -3486,47 +3486,47 @@ mod tests {
     }
 
     /// P14.T35.f (decision-backlog-2 §2): every surface sends the melt's own vapour absent, with
-    /// no key, the close binary's magma oceans among them; and its dwarf planet `e101`, a magma
-    /// ocean at 1,684 K, sends its volatiles' zero: 0 Pa, no gas and no mixture figures.
+    /// no key, the golden systems' magma oceans among them, each of rock. The close binary's dwarf
+    /// planets `e101` to `e103`, magma oceans at some 1,684 K below generator version 28, whose
+    /// volatiles' zero this test pinned, have evaporated from 28 (P14.T55.b.a): each is sent
+    /// destroyed by its evaporation, with no surface.
     #[test]
     fn every_surface_sends_the_melt_s_vapour_absent_and_e101_the_volatiles_zero() {
         let close_binary = 0x4200_2cb2_0000_0009;
-        let e101 = BodyIdHex::from_parts(close_binary, 0xe101);
         let mut magma_oceans = Vec::new();
-        let mut pinned = None;
         for (_, dto, wire) in ok_surfaces() {
             let id = wire.id.as_str();
             assert_eq!(dto.silicate_vapour, Modelled::NotModelled, "{id}");
             let sent = serde_json::to_value(dto).expect("a surface section serializes");
             assert!(sent.get("silicate_vapour").is_none(), "{id}: {sent}");
             if dto.state == SurfaceStateDto::MagmaOcean {
+                assert_eq!(dto.material, SurfaceMaterialDto::Rock, "{id}");
                 magma_oceans.push(wire.id.clone());
             }
-            if wire.id == e101 {
-                pinned = Some(dto);
-            }
         }
+        assert!(
+            !magma_oceans.is_empty(),
+            "the golden systems hold a magma ocean"
+        );
         for index in [0xe101, 0xe102, 0xe103] {
             let id = BodyIdHex::from_parts(close_binary, index);
+            let (_, wire) = GOLDEN_RECORDS
+                .iter()
+                .find(|(_, wire)| wire.id == id)
+                .unwrap_or_else(|| panic!("{id} is among the golden systems' records"));
             assert!(
-                magma_oceans.contains(&id),
-                "{id} is not among the magma oceans {magma_oceans:?}"
+                matches!(
+                    wire.state,
+                    BodyStateDto::Destroyed {
+                        cause: DestructionCauseDto::Evaporated,
+                        ..
+                    }
+                ),
+                "{id}: {:?}",
+                wire.state
             );
+            assert!(!magma_oceans.contains(&id), "{id} has a surface");
         }
-        let Some(dto) = pinned else {
-            panic!("{e101} has no ok surface: a re-pin of the golden systems re-pins this test");
-        };
-        assert_eq!(
-            (dto.state, dto.material),
-            (SurfaceStateDto::MagmaOcean, SurfaceMaterialDto::Rock)
-        );
-        assert_eq!(dto.surface_pressure_pa.to_bits(), 0.0_f64.to_bits());
-        assert!(dto.gases.is_empty(), "{:?}", dto.gases);
-        assert_eq!(
-            (dto.mean_molar_mass_g_per_mol, dto.heat_capacity_over_r),
-            (None, None)
-        );
-        assert_eq!(dto.silicate_vapour, Modelled::NotModelled);
     }
 
     /// P14.T35.e: every substance the server sends is a registry key, by construction from the

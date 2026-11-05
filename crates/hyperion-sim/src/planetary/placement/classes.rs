@@ -1945,14 +1945,14 @@ mod tests {
             let ratio = s.mass().value() * SOLAR_MASS_KG / (jupiter.mass().value() * EARTH_MASS_KG);
             let roche = radius * (ROCHE_COEFFICIENT * math::cbrt(ratio));
             assert!(jupiter.orbit().periapsis() >= roche * (2.0 * (1.0 - 1e-12)));
-            // Inside 10 days, or held at its lower bound where the zone begins beyond 10 days; the
-            // disc's inner edge does not hold it (it migrates inside the cavity).
+            // Inside 10 days, or held at its lower bound where the zone begins beyond 10 days, a
+            // pair's P-type limit with its margin (P14.T9.d, from generator version 28); the disc's
+            // inner edge does not hold it (it migrates inside the cavity).
             let period = Days::from(jupiter.orbit().period());
             let roche_bound = roche * 2.0;
-            let bound = s
-                .limits
-                .inner()
-                .map_or(roche_bound, |r| r.max_of(roche_bound));
+            let bound = s.limits.inner().map_or(roche_bound, |r| {
+                (r * (1.0 + P_TYPE_PLACEMENT_MARGIN)).max_of(roche_bound)
+            });
             let a = jupiter.orbit().semi_major_axis();
             assert!(
                 period.value() < 10.0 + 1e-9 || (a / bound - 1.0).abs() < 1e-12,

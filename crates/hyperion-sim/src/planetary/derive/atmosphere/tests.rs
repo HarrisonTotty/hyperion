@@ -5761,8 +5761,9 @@ fn under_every_24_hold_only_a_runaway_under_its_deck_below_430_k_is_solved_again
 
 /// P14.T53.b part 1 (b) and (c) under the dry deck (research-census-25 §4), on hand-built
 /// atmospheres: a published runaway under Venus's deck that lists liquid water is solved again
-/// without it at 430 K and above, and a dry or deckless one is judged as at 25; and (c) does not
-/// judge a hothouse a first solve labelled a steam envelope.
+/// without it at 430 K and above, and a dry or deckless one is judged as at 25; and from generator
+/// version 28 (c) judges a hothouse a first solve labelled a steam envelope over a `Temperate` too
+/// (part 3's B5, decision-p14-t53b-part3 §8).
 #[test]
 fn under_the_dry_deck_a_runaway_over_a_sea_is_solved_without_it() {
     let air = atmosphere(&earth_inputs(255.0, Insolation::InsideRunaway));
@@ -5798,7 +5799,7 @@ fn under_the_dry_deck_a_runaway_over_a_sea_is_solved_without_it() {
         ..air
     };
     assert_eq!(steam.published_state(), SurfaceState::SteamEnvelope);
-    assert!(!solved_as_a_hothouse(&steam));
+    assert!(solved_as_a_hothouse(&steam));
     let open = Atmosphere {
         steam_envelope: false,
         ..steam
