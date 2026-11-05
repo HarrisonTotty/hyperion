@@ -1,6 +1,8 @@
 //! The binary classes' prior members (plan 11's test helpers; P11.T8.a and P11.T8.b): every
 //! first-attempt binary of the grid that [`carved_class`] puts in a class, drawn with no carve-out,
-//! against which a class's sampler is checked (P11.T8) and plan 15's P15.T10.b fits it.
+//! against which a class's sampler is checked (P11.T8) and plan 15's P15.T10.b fits it. A
+//! record's first attempt is the generator's, under its own multiplicity and on its primary's
+//! kept kick, so a displaced record has none (`members_of`).
 
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{CellKey, SystemRecord, generate_cell};
@@ -10,14 +12,15 @@ use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements};
 use crate::rng::Threshold;
 use crate::stellar::Phase;
+use crate::stellar::binary::carve::redraws;
 use crate::stellar::binary::classify::{
     MAGNETIC_CV_SHARE, nova_recurrence_under, white_dwarf_feeding, xray_binary_reading, xrb_line,
 };
 use crate::stellar::binary::{
     BinaryClass, BinaryTimeline, CarvedClass, HmxbKind, XrbKind, carved_class,
 };
-use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt};
-use crate::stellar::system::{StarModel, SystemStars, draw_metallicity, primary_draws};
+use crate::stellar::multiplicity::RedrawAttempt;
+use crate::stellar::system::{SystemStars, draw_metallicity, grid_multiplicity};
 use crate::tables::binary::{AwdDonorKind, CLASS_SHARES, XrbHostKind};
 use crate::units::{MetresPerSecond, Seconds, SolarMasses, SolarMassesPerYear, Years};
 use std::collections::BTreeMap;
@@ -650,28 +653,32 @@ const fn gcd(mut a: u64, mut b: u64) -> u64 {
 }
 
 /// The members of `classes` among the first attempt's pairs of grid record `record`, of a stellar
-/// layer.
+/// layer: the pairs of the system the generator draws there, before any redraw
+/// (`SystemStars::generate_at`), under the record's own multiplicity ([`grid_multiplicity`]) and
+/// on its primary's model as every reader takes it ([`primary_model`]'s, the kept attempt of plan
+/// 08's kick loop for a record that constrains its kick). A record whose system the carve-out
+/// never redraws ([`redraws`]), a displaced one, which the generator shows single, has none, so
+/// that a census's members are the pairs the carve-out takes from the grid (P15.T10.b; train 27's
+/// finding, where a census on the primary's own draws under `Free` took displaced remnants for
+/// X-ray binaries).
+///
+/// [`primary_model`]: crate::stellar::system::primary_model
 fn members_of(
     galaxy: &Galaxy,
     record: &SystemRecord,
     classes: &[CarvedClass],
     out: &mut Vec<ClassMember>,
 ) {
-    let composition = draw_metallicity(galaxy, record);
+    let ctx = grid_multiplicity(record);
+    if !redraws(galaxy, record, ctx) {
+        return;
+    }
     let age = record.age_at_epoch();
-    let primary = StarModel::new_under(
-        record.primary_initial_mass(),
-        composition,
-        primary_draws(galaxy, record),
-        age,
-        galaxy.rules().stellar,
-    )
-    .expect("a stellar layer's primary is a star with a finite age");
-    let stars = SystemStars::at_attempt(
+    let stars = SystemStars::generate_at(
         galaxy,
         record,
-        &primary,
-        MultiplicityContext::Free,
+        &draw_metallicity(galaxy, record),
+        ctx,
         RedrawAttempt::FIRST,
     );
     for pair in stars.pairs() {
@@ -1076,7 +1083,7 @@ mod tests {
                 galaxy,
                 &record,
                 &draw_metallicity(galaxy, &record),
-                crate::stellar::system::grid_multiplicity(&record),
+                grid_multiplicity(&record),
                 RedrawAttempt::FIRST,
             );
             let age = record.age_at_epoch();
