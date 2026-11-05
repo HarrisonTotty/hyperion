@@ -405,7 +405,8 @@ fn numbers(streams: &[StreamNumber]) -> std::collections::BTreeSet<u16> {
 /// (perf-range-census-streams); it reads only the tables of streams whose envelopes its spheres
 /// meet, which [`GlobalListSource::streams_read_with`] names, and passes some by. Over
 /// [`envelope_spheres`], at the epoch and a millennium on; below 300 ly, its hits and the sky's
-/// members over each window too.
+/// members over each window too, the sky reading only the tables
+/// [`GlobalListSource::streams_seen_with`] names (perf-range-cold-tables).
 #[test]
 fn kept_envelopes_pass_tables_by_and_move_no_count_or_hit() {
     let galaxy = galaxy();
@@ -431,7 +432,7 @@ fn kept_envelopes_pass_tables_by_and_move_no_count_or_hit() {
     // Made afresh for each call, so that it keeps no envelope and reads every table in reach.
     let without =
         || GlobalListSource::new(galaxy, &streams, &NoCentreOrbitCache).expect("no centre");
-    let (mut passed, mut touched) = (0, 0);
+    let (mut passed, mut touched, mut sky_passed) = (0, 0, 0);
     let (mut hits_read, mut hits_read_without) = (0, 0);
     for (centre, radius) in envelope_spheres(&streams.tubes) {
         for years in [0, 1_000] {
@@ -454,10 +455,33 @@ fn kept_envelopes_pass_tables_by_and_move_no_count_or_hit() {
                 read.append(&mut hit_tables);
                 let sphere = (centre, radius);
                 let seen = sky_members(|| with.clone(), galaxy, sphere, s.time());
+                let sky_read = enveloped.taken();
                 let unseen = sky_members(without, galaxy, sphere, s.time());
                 assert_eq!(seen, unseen, "{radius} ly, {years}");
-                // The sky's reads, padded by its own rule, are not the query's to name.
-                drop(enveloped.taken());
+                // The sky's reads, padded by its own rule, are those `streams_seen_with` names
+                // among the streams whose shells it meets (perf-range-cold-tables).
+                let (window, outer) = ((UniverseTime::EPOCH, s.time()), LightYears::new(radius));
+                let list = &streams.list;
+                let named = numbers(&GlobalListSource::streams_seen_with(
+                    galaxy,
+                    list,
+                    &enveloped.models,
+                    &centre,
+                    window,
+                    outer,
+                ));
+                let shelled = numbers(&GlobalListSource::streams_seen(
+                    galaxy, list, &centre, window, outer,
+                ));
+                assert!(
+                    sky_read.is_subset(&named),
+                    "the sky read {sky_read:?}, named {named:?}"
+                );
+                assert!(
+                    named.is_subset(&shelled),
+                    "named {named:?}, shelled {shelled:?}"
+                );
+                sky_passed += shelled.len() - named.len();
             }
             let query = RangeQuery::builder(centre, LightYears::new(radius))
                 .time(UniverseTime::from_julian_years(years).expect("in the clock window"))
@@ -483,8 +507,8 @@ fn kept_envelopes_pass_tables_by_and_move_no_count_or_hit() {
         }
     }
     assert!(
-        passed > 20 && touched > 20,
-        "{passed} tables passed by, {touched} touched"
+        passed > 20 && touched > 20 && sky_passed > 0,
+        "{passed} tables passed by, {touched} touched, {sky_passed} passed by the sky"
     );
     assert!(
         hits_read < hits_read_without,

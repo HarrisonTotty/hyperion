@@ -597,7 +597,10 @@ async fn the_answer_echoes_the_request_and_repeats_itself_from_the_cache(server:
         "the query's cells were kept: {cells:?}"
     );
 
-    // The same request twice is the same JSON, byte for byte, warm or cold.
+    // The same request twice is the same JSON, byte for byte, warm or cold. Warm, the query
+    // passes by the streams whose envelopes the cold one kept and whose tubes its sphere misses,
+    // and reads only the tables of the rest (perf-range-cold-tables).
+    let read = server.stats().tube_tables();
     let again = ask(&mut client, &universe.id, &query).await.unwrap();
     assert_eq!(
         serde_json::to_string(&again).unwrap(),
@@ -607,6 +610,14 @@ async fn the_answer_echoes_the_request_and_repeats_itself_from_the_cache(server:
     assert!(
         cells.hits() > 0,
         "the second query read the first one's cells: {cells:?}"
+    );
+    let reread = server.stats().tube_tables();
+    assert_eq!(reread.misses(), read.misses(), "no table built again");
+    assert!(
+        reread.hits() - read.hits() < read.hits(),
+        "the warm query read {} tables, the cold one {}",
+        reread.hits() - read.hits(),
+        read.hits()
     );
 
     client.close().await;

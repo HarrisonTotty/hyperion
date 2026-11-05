@@ -474,6 +474,89 @@ pub fn streams_seen_in(
     query: &SkyQuery,
 ) -> Vec<crate::galaxy::global_list::StreamNumber> {
     let observer = query.observer();
+    seen_reach(galaxy, (plan, shells), query).map_or_else(Vec::new, |outer| {
+        let window = window(observer, outer);
+        GlobalListSource::streams_seen(galaxy, list, observer.position(), window, outer)
+    })
+}
+
+/// The streams of [`streams_seen_in`] whose tables the members' census of `shells` reads through
+/// `models`, the models of `list`, `galaxy`'s global list, for `query`, in list order: those whose
+/// envelopes the models do not keep, and those whose envelopes the farthest of the shells' reaches
+/// meets ([`GlobalListSource::streams_seen_with`]). What a server builds before a sky's step's
+/// members' jobs, so that a stream whose kept envelope the sky misses needs no table, even one its
+/// cache has evicted (perf-range-cold-tables); the census reads no other.
+///
+/// # Panics
+///
+/// As [`streams_seen_in`], and if `models` are not `list`'s by their counts.
+///
+/// # Examples
+///
+/// Once a stream's table has been read and its envelope kept, a sky its tube passes far from
+/// names it no more (not run: the list and the table take seconds):
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::global_list::{GlobalList, GlobalListModels, TubeTable};
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::census::{
+///     SHELL_EDGES_LY, SkyQuery, census_plan_with_edges, streams_seen_in, streams_seen_in_with,
+/// };
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::{LightYears, Magnitudes};
+///
+/// let galaxy = Galaxy::new(Seed::new(7)).with_full_potential();
+/// let list = GlobalList::build(&galaxy);
+/// let at = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let query = SkyQuery::builder(Observer::new(at, UniverseTime::EPOCH)?, Magnitudes::new(8.0))
+///     .build()?
+///     .with_caps_forced(LightYears::new(2_000.0))?;
+/// let caps = query.forced_caps().ok_or("forced caps")?.to_vec();
+/// let plan = census_plan_with_edges(&query, caps, &SHELL_EDGES_LY);
+/// let models = GlobalListModels::new(&galaxy, &list);
+/// // With no envelope kept, the streams whose shells the sky meets.
+/// let shelled = streams_seen_in(&galaxy, &list, (&plan, plan.shells()), &query);
+/// let unkept = streams_seen_in_with(&galaxy, &list, &models, (&plan, plan.shells()), &query);
+/// assert_eq!(unkept, shelled);
+/// // Its first stream's table read, and its envelope kept: named only if the sky meets its tube.
+/// let first = *shelled.first().ok_or("a stream near the Sun")?;
+/// models.keep_envelope(&TubeTable::build(&galaxy, list.stream(first).ok_or("listed")?)?);
+/// let named = streams_seen_in_with(&galaxy, &list, &models, (&plan, plan.shells()), &query);
+/// assert!(named.iter().all(|number| shelled.contains(number)));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn streams_seen_in_with(
+    galaxy: &Galaxy,
+    list: &crate::galaxy::global_list::GlobalList,
+    models: &crate::galaxy::global_list::GlobalListModels,
+    (plan, shells): (&CensusPlan, impl IntoIterator<Item = Shell>),
+    query: &SkyQuery,
+) -> Vec<crate::galaxy::global_list::StreamNumber> {
+    let observer = query.observer();
+    seen_reach(galaxy, (plan, shells), query).map_or_else(Vec::new, |outer| {
+        let (at, window) = (observer.position(), window(observer, outer));
+        GlobalListSource::streams_seen_with(galaxy, list, models, at, window, outer)
+    })
+}
+
+/// The farthest the members' census of `shells`, some of `plan`'s, reads a global list's entries
+/// for `query`: each shell's outer edge and its layer's stars' offset, as [`census_members`] takes
+/// them, or `None` for shells of no stellar layer ([`streams_seen_in`]).
+///
+/// # Panics
+///
+/// If a shell is not one of `plan`'s.
+#[must_use]
+fn seen_reach(
+    galaxy: &Galaxy,
+    (plan, shells): (&CensusPlan, impl IntoIterator<Item = Shell>),
+    query: &SkyQuery,
+) -> Option<LightYears> {
+    let observer = query.observer();
     let [x, y, z] = observer.position().to_light_years_f64();
     let from_centre = math::hypot(math::hypot(x, y), z);
     let outer = shells
@@ -496,17 +579,7 @@ pub fn streams_seen_in(
             plan.shell_span(shell).1.value() + layer_offset_bound(galaxy, layer, reach).value()
         })
         .fold(0.0, f64::max);
-    if outer <= 0.0 {
-        return Vec::new();
-    }
-    let outer = LightYears::new(outer);
-    GlobalListSource::streams_seen(
-        galaxy,
-        list,
-        observer.position(),
-        window(observer, outer),
-        outer,
-    )
+    (outer > 0.0).then(|| LightYears::new(outer))
 }
 
 /// The stars of `shell`'s members beyond the grid, one of `plan`'s shells, of the members `part`

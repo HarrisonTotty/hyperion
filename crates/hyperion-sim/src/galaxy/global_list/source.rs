@@ -659,6 +659,41 @@ impl<'a> GlobalListSource<'a> {
             .collect()
     }
 
+    /// The streams of [`streams_seen`](Self::streams_seen) whose tables the sky's census reads
+    /// through `models`, `list`'s, in list order: those whose envelopes `models` does not keep, and
+    /// those whose envelopes the sphere meets out to where the census reads their cells, padded by
+    /// their own members' speed bound over the window's farthest time from the epoch
+    /// ([`TubeEnvelope`]), as [`streams_read_with`](Self::streams_read_with) names a range query's.
+    ///
+    /// A server builds these before a sky's members' jobs, so that it builds no table for a stream
+    /// whose kept envelope the sky's reach misses, even one its cache has evicted
+    /// (perf-range-cold-tables). The census reads none outside them: it passes by the same
+    /// streams, and an envelope once kept is kept.
+    ///
+    /// # Panics
+    ///
+    /// As [`streams_seen`](Self::streams_seen), and if `models` are not `list`'s by their counts.
+    #[must_use]
+    pub fn streams_seen_with(
+        galaxy: &Galaxy,
+        list: &GlobalList,
+        models: &GlobalListModels,
+        centre: &GalacticPosition,
+        window: (UniverseTime, UniverseTime),
+        outer: LightYears,
+    ) -> Vec<StreamNumber> {
+        assert!(models.fit(list), "the models of the list");
+        let (_, farthest) = seen_sphere(centre, window, outer);
+        let mut seen = Self::streams_seen(galaxy, list, centre, window, outer);
+        seen.retain(|&number| {
+            models.envelope(number).is_none_or(|envelope| {
+                let within = member_reach(outer, farthest, envelope.member_speed_bound());
+                envelope.may_touch(centre, within)
+            })
+        });
+        seen
+    }
+
     /// Core `number`'s model, if it is played.
     #[must_use]
     fn core(&self, number: super::DwarfCoreNumber) -> Option<&DwarfCoreModel> {

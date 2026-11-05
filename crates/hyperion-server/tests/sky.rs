@@ -133,6 +133,19 @@ async fn coarse_sky_server(radius_ly: f64, workers: usize) -> (TestServer, TempD
     sky_server_with(caps, workers).await
 }
 
+/// A server as [`coarse_sky_server`]'s that keeps no sky's final reply, so that a sky asked again
+/// is censused again (R06.T11.l), and its data directory.
+async fn unkept_coarse_sky_server(radius_ly: f64, workers: usize) -> (TestServer, TempDir) {
+    let caps = SkyCaps::forced(LightYears::new(radius_ly))
+        .expect("a small forced cap")
+        .with_band_spec(COARSE_BAND);
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = sky_config(data_dir.path(), caps, workers)
+        .kept_skies(KeptSkies::Off)
+        .build();
+    (TestServer::start_with(config).await, data_dir)
+}
+
 /// A server that serves the sky to `caps`, with `workers` CPU workers, and its data directory.
 ///
 /// Its sky's cell cache has the default budget, 0, which turns it off (R06.T8.o).
@@ -534,12 +547,15 @@ const CAPPED: [(Layer, MassLayer); 6] = [
 /// they are not listed as not modelled, as every sky's were below 27; and the census its jobs
 /// merged is the sim's own, layer by layer. Its server marches the coarse band ([`COARSE_BAND`]), whose size and bytes the reply
 /// states; the standard band's are asserted by the tests that keep it
-/// (`decision-test-coverage.md`, N13).
+/// (`decision-test-coverage.md`, N13). Asked again, warm, once the first sky has kept the envelopes
+/// of the streams whose tables it read, it builds and reads only the tables of streams whose
+/// envelopes it meets, and its reply and its stars are the cold one's (perf-range-cold-tables).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_sky_near_the_sun_takes_the_feature_members_from_27() {
-    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
+    let (server, _data_dir) = unkept_coarse_sky_server(SMALL_CAP_LY, 2).await;
     let (mut client, universe) = opened(&server).await;
-    let response = served(&mut client, sky(&universe)).await.response;
+    let cold = served(&mut client, sky(&universe)).await;
+    let (stars, response) = (cold.payload(), cold.response);
 
     assert!(
         !response.not_modelled.contains(&SkyGapDto::FeatureMembers),
@@ -644,8 +660,34 @@ async fn a_sky_near_the_sun_takes_the_feature_members_from_27() {
         (31_557_600, 0)
     );
 
+    warm_is_cold(&server, &mut client, sky(&universe), (&stars, &response)).await;
+
     client.close().await;
     server.stop().await;
+}
+
+/// Asks `request` again of `server`, warm, after a cold sky whose stars and reply were `cold`, and
+/// checks that it reads fewer tables, builds none, and answers as the cold sky did: the streams
+/// whose envelopes the cold sky kept and whose tubes pass far from this one are passed by, and
+/// nothing moves (perf-range-cold-tables).
+async fn warm_is_cold(
+    server: &TestServer,
+    client: &mut TestClient,
+    request: SkyRequest,
+    (stars, response): (&[u8], &SkyResponse),
+) {
+    let read = server.stats().tube_tables();
+    let warm = served(client, request).await;
+    let reread = server.stats().tube_tables();
+    assert_eq!(&warm.response, response);
+    assert_eq!(warm.payload(), stars, "the stars, bit for bit");
+    assert_eq!(reread.misses(), read.misses(), "no table built again");
+    assert!(
+        reread.hits() - read.hits() < read.hits(),
+        "the warm sky read {} tables, the cold one {}",
+        reread.hits() - read.hits(),
+        read.hits()
+    );
 }
 
 /// A sky whose cut is at or brighter than RM3's ceiling and whose caps lie within the real limit

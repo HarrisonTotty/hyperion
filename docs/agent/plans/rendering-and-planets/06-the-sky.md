@@ -10042,3 +10042,8 @@ CensusCost)`.
   - **Cost.** The measurements are in the lane's outbox; no star moves.
   - **Left (finding).** No `Member::radius` is asked twice at one mass in a step: each trial of
     the bisection has a mass of its own.
+- **R06.T16.a's step tables by the kept envelopes (perf-range-cold-tables, 2026-11-05; no star
+  moves).** New `sky::census::streams_seen_in_with` (and `GlobalListSource::streams_seen_with`)
+  names the streams of `streams_seen_in` whose kept tube envelopes the sky's reach meets, or that
+  keep none; the handler's `streams_by_step` takes the held list's models, so a sky builds no table
+  whose kept envelope it misses. A cold galaxy's first sky still builds every table its shells meet.

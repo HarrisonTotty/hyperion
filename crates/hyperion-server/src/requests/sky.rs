@@ -63,7 +63,9 @@ use hyperion_protocol::{
 };
 use hyperion_sim::coords::UnitVector;
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::global_list::{GlobalList, GlobalListSource, StreamNumber, StreamSpec};
+use hyperion_sim::galaxy::global_list::{
+    GlobalList, GlobalListModels, GlobalListSource, StreamNumber, StreamSpec,
+};
 use hyperion_sim::galaxy::placement::{ResolveSystemError, resolve};
 use hyperion_sim::galaxy::query::pad_speed;
 use hyperion_sim::id::{Layer, SystemId};
@@ -73,7 +75,7 @@ use hyperion_sim::sky::band::{BandMarch, BandTexel};
 use hyperion_sim::sky::caps::{LayerCap, REAL_LIMIT_LY};
 use hyperion_sim::sky::census::{
     BuildSkyQueryError, CensusPlan, CensusTallies, Completeness, Cone, LayerTally, Shell,
-    SkyCensus, SkyQuery, SkyStar, streams_seen_in,
+    SkyCensus, SkyQuery, SkyStar, streams_seen_in_with,
 };
 use hyperion_sim::sky::dgl::Illumination;
 use hyperion_sim::sky::disc::{HostDisc, host_discs};
@@ -367,7 +369,7 @@ async fn sky_list(
         return Ok(None);
     }
     let held = state.global_lists.get(key).await?;
-    let by_step = streams_by_step(galaxy, held.list(), (plan, steps), query);
+    let by_step = streams_by_step(galaxy, (held.list(), held.models()), (plan, steps), query);
     let tubes = ListedTubes::new(
         (Arc::clone(galaxy), key),
         Arc::clone(&held),
@@ -424,13 +426,14 @@ async fn step_tables(
 }
 
 /// The streams whose tube tables the members of each of `steps`, of `plan`, read through
-/// `galaxy`'s global list `list` for `query`, each named at the first step that reads it
-/// ([`streams_seen_in`]; R06.T16.a's cost): what a sky's handler builds before each step's
-/// members' jobs.
+/// `galaxy`'s global list `list` and its models `models` for `query`, each named at the first step
+/// that reads it ([`streams_seen_in_with`]; R06.T16.a's cost): what a sky's handler builds before
+/// each step's members' jobs. A stream whose kept envelope the sky misses is named at no step, so
+/// it needs no table, even one the cache has evicted (perf-range-cold-tables).
 #[must_use]
 fn streams_by_step(
     galaxy: &Galaxy,
-    list: &GlobalList,
+    (list, models): (&GlobalList, &GlobalListModels),
     (plan, steps): (&CensusPlan, &[Vec<Shell>]),
     query: &SkyQuery,
 ) -> Vec<Vec<StreamNumber>> {
@@ -438,7 +441,7 @@ fn streams_by_step(
     steps
         .iter()
         .map(|shells| {
-            streams_seen_in(galaxy, list, (plan, shells.iter().copied()), query)
+            streams_seen_in_with(galaxy, list, models, (plan, shells.iter().copied()), query)
                 .into_iter()
                 .filter(|&number| named.insert(number))
                 .collect()
@@ -1275,7 +1278,8 @@ mod tests {
     /// R06.T16.a's cost: near the Sun at 27, to the served sky's 2,000 ly, the streams each
     /// delivery step's members read are named at the first step that reads them, once, and every
     /// step's together are the census's whole `streams_seen`. (A stream is seen where its
-    /// galactocentric shell meets the sky's, so near the Sun the first step names nearly all.)
+    /// galactocentric shell meets the sky's, so near the Sun the first step names nearly all.) A
+    /// stream whose kept envelope the sky misses is named at no step.
     #[test]
     fn each_steps_streams_are_named_once_and_together_are_the_censuss() {
         let galaxy = Galaxy::from_params_at_version(
@@ -1303,7 +1307,8 @@ mod tests {
             caps.shell_edges_ly(),
         );
         let steps = compute::sky::delivery_steps(&plan, caps.delivery_order());
-        let by_step = streams_by_step(&galaxy, &list, (&plan, &steps), &query);
+        let models = GlobalListModels::new(&galaxy, &list);
+        let by_step = streams_by_step(&galaxy, (&list, &models), (&plan, &steps), &query);
         let named: Vec<StreamNumber> = by_step.iter().flatten().copied().collect();
         let once: BTreeSet<StreamNumber> = named.iter().copied().collect();
         assert_eq!(once.len(), named.len(), "a stream named twice");
@@ -1315,6 +1320,39 @@ mod tests {
         let counts: Vec<usize> = by_step.iter().map(Vec::len).collect();
         eprintln!("streams named by step: {counts:?} of {}", whole.len());
         assert!(!whole.is_empty(), "no stream seen near the Sun");
+        // With the envelopes kept of the first two seen streams whose tubes pass farther than
+        // 5,000 ly from the observer, beyond the sky's reach, neither is named, and every other
+        // stream still is (perf-range-cold-tables).
+        let mut far = Vec::new();
+        for &number in &whole {
+            let spec = list.stream(number).expect("a stream of the list");
+            let table = hyperion_sim::galaxy::global_list::TubeTable::build(&galaxy, spec)
+                .expect("the full potential");
+            let envelope = hyperion_sim::galaxy::global_list::TubeEnvelope::of(&table);
+            if !envelope.may_touch(&at, LightYears::new(5_000.0)) {
+                models.keep_envelope(&table);
+                far.push(number);
+                if far.len() == 2 {
+                    break;
+                }
+            }
+        }
+        assert_eq!(
+            far.len(),
+            2,
+            "two seen streams' tubes pass far from the observer"
+        );
+        let enveloped: BTreeSet<StreamNumber> =
+            streams_by_step(&galaxy, (&list, &models), (&plan, &steps), &query)
+                .into_iter()
+                .flatten()
+                .collect();
+        let rest: BTreeSet<StreamNumber> = whole
+            .iter()
+            .copied()
+            .filter(|number| !far.contains(number))
+            .collect();
+        assert_eq!(enveloped, rest);
     }
 
     fn request() -> SkyRequest {

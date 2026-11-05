@@ -2441,3 +2441,12 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   - _Left._ An envelope is its table's: before a stream's first read or warm-up (test servers warm
     none) a query still builds every table whose shell it meets. The sky's handler builds every
     stream `sky::census::streams_seen_in` names; it could take the envelopes as `streams_read_with`.
+- **P10.T10.b, a cold query's tables (lane `perf-range-cold-tables`, 2026-11-05, at 27; no output
+  moved).**
+  - _Sky._ New `GlobalListSource::streams_seen_with` and `sky::census::streams_seen_in_with`, the
+    sky's `streams_read_with`; the server's sky step tables (`streams_by_step`) take the held
+    list's models, so a sky builds no table whose kept envelope its reach misses.
+  - _No envelope before the table (lean, 2026-11-05)._ None is built: neither the progenitor's
+    orbit nor tubes reduced from a quarter of the spray's releases bound a tube's tips, whose knots
+    rest on a few lone tracers (the lane's outbox has the figures). A cold query still builds every
+    table whose shell it meets: 121 for the Sun-like 50 ly query, which needs 10.
