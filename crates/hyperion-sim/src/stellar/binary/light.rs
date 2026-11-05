@@ -1378,7 +1378,7 @@ mod tests {
         /// described.
         missed: Vec<String>,
         /// Pairs the bound calls `Detached` that the pre-test sends to the engine for its wind
-        /// alone (P11.T12's fix): the bound's `Detached` takes the wind's reach from 28.
+        /// alone (P11.T12's fix): the bound's `Detached` takes the wind's reach from 29.
         wind_fed: u64,
     }
 
@@ -1481,8 +1481,9 @@ mod tests {
     /// Checks `per_layer` generated pairs of each stellar layer, printing each layer's shares, and
     /// asserts that no `Detached` pair passes the pre-test's lobe and decay tests. From 27 the
     /// pre-test also sends a pair to the engine where its main-sequence star takes 10⁻⁴ M☉ of its
-    /// partner's wind (P11.T12's fix), which the bound's `Detached` does not bound until 28 (its
-    /// wind's reach, retargeted from 27): those pairs are counted apart, not asserted.
+    /// partner's wind (P11.T12's fix), which the bound's `Detached` does not bound until 29 (its
+    /// wind's reach, retargeted from 27 and again from 28): those pairs are counted apart, not
+    /// asserted.
     fn no_detached_pair_interacts(per_layer: usize) {
         let galaxy = milky_way();
         let mut missed = 0;
@@ -1524,7 +1525,7 @@ mod tests {
     /// age and at a young one: no `Detached` pair passes `can_interact`'s lobe and decay tests at
     /// its window's end. At 27, 67 of the 4,000 runs are `Detached` pairs the pre-test sends to the
     /// engine for their wind alone, 27 of layer C's and 40 of layer D's at their records' ages
-    /// (P11.T12's fix; the bound takes the wind's reach from 28).
+    /// (P11.T12's fix; the bound takes the wind's reach from 29).
     #[test]
     fn detached_generated_pairs_are_passed_over() {
         no_detached_pair_interacts(400);

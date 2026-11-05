@@ -4106,8 +4106,8 @@ mod tests {
         faint_white_dwarfs: u64,
         /// Stars a detached partner's wind grew past their initial mass that outshine their bound:
         /// from generator version 27 a wide pair's star takes its partner's wind (P11.T12), which
-        /// the bound's `Detached` verdict reaches only at 28 (its wind reach, retargeted; train
-        /// 27's findings), so they are counted, not asserted.
+        /// the bound's `Detached` verdict reaches only at 29 (its wind reach, retargeted from 27 by
+        /// train 27's findings and from 28 by train 28), so they are counted, not asserted.
         wind_fed: u64,
     }
 
