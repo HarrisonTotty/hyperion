@@ -1,6 +1,6 @@
 //! The hosts of the catalogue features' and the galactic centre's feature-level lists in the alert
 //! walks (plan 09's P09.T36, P09.T43 and plan 11's P11.T8.f in plan 12's walks), from generator
-//! version 29 (`LISTED_ALERTS_VERSION`).
+//! version 29.
 //!
 //! From version 27 the young field gives most of its young stars to the features that bore them
 //! (P09.T2.c), and their deaths are their lists' (P09.T36): the core collapses of the nurseries and
@@ -71,7 +71,6 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::supernova::{LIFETIME_REACH, SupernovaEntry, SupernovaKind};
@@ -101,45 +100,12 @@ use super::recurrent::{
     xray_binary_host_detections,
 };
 use super::registry::TransientKind;
-use super::{AlertContext, AlertQuery, Detection, SourceStatus, Unwalked};
+use super::{AlertContext, AlertQuery, Detection, SourceStatus};
 
 mod hosts;
 
 use hosts::ClassHosts;
 pub use hosts::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache};
-
-/// The generator version from which the alert walks read the hosts of the features' and the
-/// galactic centre's lists beside the classes' cells (module documentation): 29, train 27's
-/// finding that from 27 the walks see the field's deaths alone (fix-p09-alert-walk-features), and
-/// the lists' other classes with them (fix-p09-alert-walk-features-2).
-///
-/// Below it `ListedAlertsRules::of_version` is `ListedAlertsRules::FieldAlone`, and every walk is
-/// version 27's bit for bit. 29's bump deletes this hold, `ListedAlertsRules` with its `FieldAlone`
-/// arm, `GalaxyRules::listed_alerts`, the `match` in `ListedWalk::rules_read`, the held arm of
-/// `ListedWalk::source_status` and its tripwire (`the_listed_alerts_are_held_only_until_the_29_bump`).
-pub(crate) const LISTED_ALERTS_VERSION: GeneratorVersion = GeneratorVersion::new(29);
-
-/// Whether the alert walks read the lists' hosts (its hold, [`LISTED_ALERTS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum ListedAlertsRules {
-    /// Version 28's and before: the classes' cells alone.
-    FieldAlone,
-    /// Version 29's: the lists' hosts beside them.
-    Lists,
-}
-
-impl ListedAlertsRules {
-    /// The arm at `version`: [`Lists`](Self::Lists) from [`LISTED_ALERTS_VERSION`], the held arm
-    /// below it.
-    #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
-        if version.get() >= LISTED_ALERTS_VERSION.get() {
-            Self::Lists
-        } else {
-            Self::FieldAlone
-        }
-    }
-}
 
 /// The relative margin on a pad, over the rounding of its products.
 const PAD_MARGIN: f64 = 1e-9;
@@ -566,19 +532,9 @@ pub(crate) struct ListedWalk {
 }
 
 impl ListedWalk {
-    /// Whether `galaxy`'s walks read the lists (the hold, [`LISTED_ALERTS_VERSION`]).
-    #[must_use]
-    fn rules_read(galaxy: &Galaxy) -> bool {
-        match galaxy.rules().listed_alerts {
-            ListedAlertsRules::FieldAlone => false,
-            ListedAlertsRules::Lists => true,
-        }
-    }
-
     /// The lists of `class` that `query`'s walk reads in `galaxy`, their features through `cells`
-    /// and the lists as the walks read them through `lists` (module documentation), or `None` below
-    /// [`LISTED_ALERTS_VERSION`] and for a class no list holds or whose kinds the sensor does not
-    /// see.
+    /// and the lists as the walks read them through `lists` (module documentation), or `None` for a
+    /// class no list holds or whose kinds the sensor does not see.
     ///
     /// # Panics
     ///
@@ -591,9 +547,6 @@ impl ListedWalk {
         query: &AlertQuery,
         class: ClassId,
     ) -> Option<Self> {
-        if !Self::rules_read(galaxy) {
-            return None;
-        }
         let reaches = Reaches::of(class, query)?;
         let mut walk = Self::default();
         let observer = query.observer_position();
@@ -619,7 +572,7 @@ impl ListedWalk {
     ) -> Self {
         let mut walk = Self::default();
         let slabs = class_slabs(class, sphere);
-        if !Self::rules_read(galaxy) || !slabs.contains(&x) {
+        if !slabs.contains(&x) {
             return walk;
         }
         let Some(reaches) = Reaches::of(class, query) else {
@@ -780,17 +733,12 @@ impl ListedWalk {
         }
     }
 
-    /// The status of the catalogue features' lists' source in `galaxy` (the census's
-    /// [`AlertSource::FeatureLists`](super::AlertSource::FeatureLists)): walked with their classes
-    /// from [`LISTED_ALERTS_VERSION`], every class they hold, and below it not walked, their task
-    /// P09.T36.
+    /// The status of the catalogue features' lists' source (the census's
+    /// [`AlertSource::FeatureLists`](super::AlertSource::FeatureLists)): walked with their classes,
+    /// every class they hold.
     #[must_use]
-    pub(crate) fn source_status(galaxy: &Galaxy) -> SourceStatus {
-        if Self::rules_read(galaxy) {
-            SourceStatus::Complete
-        } else {
-            SourceStatus::Unwalked(Unwalked::NotBuilt("P09.T36"))
-        }
+    pub(crate) const fn source_status() -> SourceStatus {
+        SourceStatus::Complete
     }
 
     /// The expected candidates of the class on the lists read: what the census adds to its cells'.
@@ -924,8 +872,8 @@ fn slab_bounds(slabs: &Range<i32>, x: i32, edge: f64) -> (f64, f64) {
 /// scan runs beside its cells: over every slab of `sphere`, merged by arrival and then by event,
 /// the detections are those the interactive walk adds to the class's cells'
 /// ([`alerts_in`](super::alerts_in)), each to the bit, in any order and with any cache. Nothing
-/// below generator version 29 (`LISTED_ALERTS_VERSION`), for a class no list holds, a slab outside
-/// the sphere's, or a class the query does not ask about. The features are read through the
+/// for a class no list holds, a slab outside the sphere's, or a class the query does not ask
+/// about. The features are read through the
 /// context's feature cells ([`AlertContext::with_feature_cells`]) and their lists through its
 /// listed hosts ([`AlertContext::with_listed_hosts`]).
 ///

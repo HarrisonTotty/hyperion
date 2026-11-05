@@ -571,7 +571,7 @@ fn alerts_of_the_centre_come_through_the_global_list() {
     }
     assert_eq!(
         source(&without, AlertSource::FeatureLists),
-        SourceStatus::Unwalked(Unwalked::NotBuilt("P09.T36"))
+        SourceStatus::Complete
     );
 
     let with = centre_alerts(&query, true);

@@ -216,9 +216,9 @@ async fn a_background_walk_in_slab_jobs_gives_the_interactive_walks_pushes_each_
     server.shutdown().await.unwrap();
 }
 
-/// Seed 9's galaxy at generator version 29, whose core collapses' walks read the features' lists
+/// Seed 9's galaxy at the generator version, whose core collapses' walks read the features' lists
 /// (the sim's `listed`), with its kinematic tables, as the server's galaxies are built.
-fn galaxy_at_29() -> &'static Galaxy {
+fn seed_9_galaxy() -> &'static Galaxy {
     static GALAXY: std::sync::OnceLock<Galaxy> = std::sync::OnceLock::new();
     GALAXY.get_or_init(|| {
         let seed = hyperion_sim::Seed::new(crate::alerts::testing::SEED);
@@ -228,7 +228,7 @@ fn galaxy_at_29() -> &'static Galaxy {
                 seed,
                 hyperion_sim::galaxy::imf::MassFunctionKind::default(),
             ),
-            hyperion_sim::GeneratorVersion::new(29),
+            hyperion_sim::GENERATOR_VERSION,
         )
         .unwrap()
         .with_full_potential()
@@ -238,17 +238,17 @@ fn galaxy_at_29() -> &'static Galaxy {
 /// From generator version 29 a background walk of the core collapses in slab jobs gives the
 /// interactive walk's pushes with the features' lists' (the sim's `listed`), each once: 0.2 ly
 /// spinward of a nursery's supernova that goes off 234.8 years after the epoch at
-/// [−12,727.7, 26,883.1, 204.0] ly in seed 9's galaxy at 29, through a V sensor that reaches some
+/// [−12,727.7, 26,883.1, 204.0] ly in seed 9's galaxy, through a V sensor that reaches some
 /// 700 ly, over the first scan's year and its walk back. Its member's onset is detected, and the
 /// jobs draw the lists' candidates beside the cells'.
 #[tokio::test]
 async fn from_29_a_background_walk_gives_the_interactive_walks_listed_pushes() {
     let (server, _data_dir) = server(|config| config).await;
     let state = server.state();
-    let galaxy = galaxy_at_29();
+    let galaxy = seed_9_galaxy();
     let key = GalaxyKey::new(
         crate::alerts::testing::SEED,
-        hyperion_sim::GeneratorVersion::new(29),
+        hyperion_sim::GENERATOR_VERSION,
     );
     let host = hyperion_sim::id::SystemId::from_raw(0xe65a_0018_f000_0003).unwrap();
     let far = GalacticPosition::from_light_years([-12_727.473, 26_883.128, 204.046]).unwrap();
@@ -316,16 +316,16 @@ async fn from_29_a_background_walk_gives_the_interactive_walks_listed_pushes() {
 /// the interactive walk's pushes with the features' lists' (the sim's `listed`), each once, and
 /// reads its lists from the server's listed hosts, which a second walk finds them in: 1 ly from a
 /// globular's slow nova that begins 764.6 years after the epoch at [−9,792.8, −5,763.1,
-/// −17,139.2] ly in seed 9's galaxy at 29, through a V sensor through which the novae reach 50 ly,
+/// −17,139.2] ly in seed 9's galaxy, through a V sensor through which the novae reach 50 ly,
 /// over the first scan's year. Its member's onset is detected.
 #[tokio::test]
 async fn from_29_a_background_walk_of_the_slow_novae_gives_the_interactive_walks_listed_pushes() {
     let (server, _data_dir) = server(|config| config).await;
     let state = server.state();
-    let galaxy = galaxy_at_29();
+    let galaxy = seed_9_galaxy();
     let key = GalaxyKey::new(
         crate::alerts::testing::SEED,
-        hyperion_sim::GeneratorVersion::new(29),
+        hyperion_sim::GENERATOR_VERSION,
     );
     let host = hyperion_sim::id::SystemId::from_raw(0xe6b9_6000_7000_0057).unwrap();
     let at = GalacticPosition::from_light_years([-9_792.817, -5_763.148, -17_138.163]).unwrap();

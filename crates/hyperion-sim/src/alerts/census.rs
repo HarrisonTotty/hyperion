@@ -360,8 +360,7 @@ pub fn class_alerts<P: ClassProcess>(
 /// [`class_alerts`] for a class whose hosts the features' and the centre's lists hold too
 /// (P09.T36, P09.T43, P11.T8.f; [`listed`](super::listed)): where its cells alone leave it
 /// complete, the lists its walk reads add their expected candidates to its cells', and a class
-/// still complete is walked, `walk` over its cells, then its lists, into `out`. Below the lists'
-/// version (`LISTED_ALERTS_VERSION`) it is [`class_alerts`] bit for bit.
+/// still complete is walked, `walk` over its cells, then its lists, into `out`.
 /// A class its cells send to the background or put over its limit is not counted further: a
 /// background walk counts the candidates its lists drew ([`listed_scan_slab`](super::listed_scan_slab)).
 ///
@@ -650,7 +649,7 @@ pub fn alerts_in_with<L: AlertClasses + ?Sized, S: StarsCache>(
         },
         SourceCensus {
             source: AlertSource::FeatureLists,
-            status: ListedWalk::source_status(galaxy),
+            status: ListedWalk::source_status(),
         },
     ];
     local_events(galaxy, ctx, query, observed, stars, cache, &mut detections);

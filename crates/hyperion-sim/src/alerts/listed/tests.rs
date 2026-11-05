@@ -1,5 +1,4 @@
-//! The tests of the lists' walks (P09.T36, P09.T43 and P11.T8.f in plan 12's walks), under the
-//! hold's new arm.
+//! The tests of the lists' walks (P09.T36, P09.T43 and P11.T8.f in plan 12's walks).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,47 +40,12 @@ use crate::observe::NoStarsCache;
 use crate::planetary::testing::in_shares;
 use crate::units::WattsPerSquareMetre;
 
-/// The lists' walks are held until the 28 → 29 bump: the rules in force are version 28's and
-/// before, and 29's turn them on.
-#[test]
-fn the_listed_alerts_are_held_only_until_the_29_bump() {
-    use crate::GENERATOR_VERSION;
-    assert!(
-        GENERATOR_VERSION < LISTED_ALERTS_VERSION,
-        "the 28 → 29 bump puts the lists' walks on the record (fix-p09-alert-walk-features): \
-         delete `LISTED_ALERTS_VERSION`, `ListedAlertsRules` with its `FieldAlone` arm, \
-         `GalaxyRules::listed_alerts`, the `match` in `ListedWalk::rules_read`, the held arm of \
-         `ListedWalk::source_status` and this test, and re-pin the alert tests' counts at 29"
-    );
-    assert_eq!(LISTED_ALERTS_VERSION, GeneratorVersion::new(29));
-    assert_eq!(
-        ListedAlertsRules::of_version(GENERATOR_VERSION),
-        ListedAlertsRules::FieldAlone
-    );
-    assert_eq!(
-        ListedAlertsRules::of_version(GeneratorVersion::new(28)),
-        ListedAlertsRules::FieldAlone
-    );
-    assert_eq!(
-        ListedAlertsRules::of_version(LISTED_ALERTS_VERSION),
-        ListedAlertsRules::Lists
-    );
-}
-
 /// The shares a whole-cube walk runs in.
 const SHARES: usize = 16;
 
-/// The rules of version `version`.
-fn at(version: u32) -> GalaxyRules {
-    GalaxyRules::of_version(GeneratorVersion::new(version))
-}
-
-/// The version's rules from 28 with this hold's new arm alone: the lists walked.
+/// The version's rules: the lists walked.
 fn listed() -> GalaxyRules {
-    GalaxyRules {
-        listed_alerts: ListedAlertsRules::Lists,
-        ..at(28)
-    }
+    GalaxyRules::of_version(crate::GENERATOR_VERSION)
 }
 
 /// The 26-like reference: the field's budget, which held every young star at 26, and no lists.
@@ -89,7 +53,7 @@ fn budget() -> GalaxyRules {
     GalaxyRules {
         field_share: FieldShareRules::None,
         feature_classes: FeatureClassesRules::Unlisted,
-        ..at(28)
+        ..listed()
     }
 }
 
@@ -390,14 +354,13 @@ fn is_listed(host: SystemId) -> bool {
 /// The brief's census, measured and logged, not asserted beyond its shape: the whole cube's
 /// magnetars through an X-ray limit of 10⁻¹⁴ W m⁻² over the first century from the Sun-like point
 /// in the Milky Way fixture of seed `0x0926_0000` (research's, P12.T8.b.2), and its supernovae
-/// through a V limit of 10⁻¹² over the first 1,000 years, at 28 (the cells alone), at 29 (the cells
-/// and the lists) and in the 26-like budget (the field holding every young star, no lists). The
-/// cells' detections are 28's bit for bit at 29. At 29 the magnetars are walked twice through one
-/// cache of the lists, cold and then warm, and the second walk builds no list and finds the
+/// through a V limit of 10⁻¹² over the first 1,000 years, under the version's rules (the cells and
+/// the lists) and in the 26-like budget (the field holding every young star, no lists). The
+/// magnetars are walked twice through one cache of the lists, cold and then warm, and the second walk builds no list and finds the
 /// first's detections, each to the bit: the lists' cost before the cache and after it
 /// (fix-p09-alert-walk-features-2), logged.
 #[test]
-#[ignore = "slow: every feature's list and the core collapses' cells of the cube, thrice"]
+#[ignore = "slow: every feature's list and the core collapses' cells of the cube, twice"]
 fn the_whole_cube_s_core_collapses_with_the_lists_measured() {
     let params = GalaxyParams::milky_way_like;
     let class = ClassId::CORE_COLLAPSE;
@@ -408,8 +371,7 @@ fn the_whole_cube_s_core_collapses_with_the_lists_measured() {
         (AlertBand::Photometric(Band::V), 1e-12),
         (0, 1_000),
     );
-    let mut cells_at_28 = None;
-    for (label, rules) in [("28", at(28)), ("29", listed()), ("budget", budget())] {
+    for (label, rules) in [("29", listed()), ("budget", budget())] {
         let galaxy = galaxy(0x0926_0000, params(), rules);
         let (features, lists) = (KeepCells::default(), KeepLists::default());
         every_feature_cell_made(&galaxy, &features);
@@ -466,32 +428,24 @@ fn the_whole_cube_s_core_collapses_with_the_lists_measured() {
                     .to_light_years_f64(),
             );
         }
-        match label {
-            "28" => {
-                assert_eq!((bursts.lists.len(), explosions.lists.len()), (0, 0));
-                cells_at_28 = Some((bursts.cells, explosions.cells));
-            }
-            "29" => {
-                let (b, e) = cells_at_28.take().expect("28 walks first");
-                assert_eq!(bursts.cells, b, "the cells' magnetars at 29 are 28's");
-                assert_eq!(explosions.cells, e, "the cells' supernovae at 29 are 28's");
-                assert!(bursts.drawn > 0 && explosions.drawn > 0);
-            }
-            _ => assert_eq!((bursts.lists.len(), explosions.lists.len()), (0, 0)),
+        if label == "29" {
+            assert!(bursts.drawn > 0 && explosions.drawn > 0);
+        } else {
+            assert_eq!((bursts.lists.len(), explosions.lists.len()), (0, 0));
         }
     }
 }
 
 /// The census of each class the lists hold beside its cells, measured and logged as the brief's
 /// count table, not asserted beyond its shape: the whole cube's hosts and detections of each from
-/// the Sun-like point in the Milky Way fixture of seed `0x0926_0000`, at 28 (the cells alone), at 29
-/// (the cells and the lists) and in the 26-like budget (the field holding every young star, no
-/// lists), the cells' detections 28's bit for bit at 29. The sensors: X-rays at 10⁻¹⁴ W m⁻² and V
+/// the Sun-like point in the Milky Way fixture of seed `0x0926_0000`, under the version's rules (the
+/// cells and the lists) and in the 26-like budget (the field holding every young star, no lists).
+/// The sensors: X-rays at 10⁻¹⁴ W m⁻² and V
 /// at 10⁻¹² (some twelfth magnitude), over windows that see each class's events: the core
 /// collapses' as [`the_whole_cube_s_core_collapses_with_the_lists_measured`]'s, the novae' and the
 /// X-ray binaries' over a year, the rest over a millennium.
 #[test]
-#[ignore = "slow: every class's cells and lists of the cube, thrice"]
+#[ignore = "slow: every class's cells and lists of the cube, twice"]
 fn every_listed_class_s_whole_cube_hosts_counted() {
     let params = GalaxyParams::milky_way_like;
     let (x, v) = (
@@ -509,12 +463,11 @@ fn every_listed_class_s_whole_cube_hosts_counted() {
         (ClassId::STELLAR_MERGER, v, (0, 1_000)),
         (ClassId::NEUTRON_STAR_MERGER, v, (0, 1_000)),
     ];
-    let mut cells_at_28 = Vec::new();
-    for (label, rules) in [("28", at(28)), ("29", listed()), ("budget", budget())] {
+    for (label, rules) in [("29", listed()), ("budget", budget())] {
         let galaxy = galaxy(0x0926_0000, params(), rules);
         let (features, lists) = (KeepCells::default(), KeepLists::default());
         every_feature_cell_made(&galaxy, &features);
-        for (k, &(class, (band, detect), window)) in classes.iter().enumerate() {
+        for &(class, (band, detect), window) in &classes {
             let query = query(class, sun(), (band, detect), window);
             let walked = whole_cube(&galaxy, &query, (&features, &lists), true);
             eprintln!(
@@ -533,13 +486,8 @@ fn every_listed_class_s_whole_cube_hosts_counted() {
             );
             assert!(walked.cells.iter().all(|d| !is_listed(d.host())));
             assert!(walked.lists.iter().all(|d| is_listed(d.host())));
-            match label {
-                "28" => {
-                    assert_eq!((walked.lists.len(), walked.drawn), (0, 0));
-                    cells_at_28.push(walked.cells);
-                }
-                "29" => assert_eq!(walked.cells, cells_at_28[k], "{class}: the cells are 28's"),
-                _ => assert_eq!(walked.lists.len(), 0),
+            if label == "budget" {
+                assert_eq!(walked.lists.len(), 0);
             }
         }
     }
@@ -712,22 +660,16 @@ fn the_first_millennium_s_core_collapses_with_the_lists_measured() {
     }
 }
 
-/// Seed 9's galaxy (`Galaxy::new`'s parameters, the server's alert fixture) at 28, or with the
-/// lists walked ([`listed`]), with its kinematic tables, built once each.
-fn seed_9(lists: bool) -> &'static Galaxy {
-    static AT_28: OnceLock<Galaxy> = OnceLock::new();
+/// Seed 9's galaxy (`Galaxy::new`'s parameters, the server's alert fixture) under the version's
+/// rules ([`listed`]), with its kinematic tables, built once.
+fn seed_9() -> &'static Galaxy {
     static LISTED: OnceLock<Galaxy> = OnceLock::new();
-    let (cell, rules) = if lists {
-        (&LISTED, listed())
-    } else {
-        (&AT_28, at(28))
-    };
-    cell.get_or_init(|| {
+    LISTED.get_or_init(|| {
         let params = GalaxyParams::from_seed(
             Seed::new(9),
             crate::galaxy::imf::MassFunctionKind::default(),
         );
-        galaxy(9, params, rules)
+        galaxy(9, params, listed())
     })
 }
 
@@ -940,21 +882,17 @@ fn brute_force(galaxy: &Galaxy, query: &AlertQuery) -> Vec<Detection> {
     out
 }
 
-/// From 29 `query`'s class's walk sees `host`'s detections beside the cells' (module
-/// documentation), each named on the list's member, and the cells' are 28's bit for bit; the
-/// census adds the lists' expected candidates to the cells' and finds the lists' source complete;
-/// below 29 no list is read. The walk's lists find what every list near enough finds whole
+/// `query`'s class's walk sees `host`'s detections beside the cells' (module documentation), each
+/// named on the list's member; the census counts the lists' expected candidates and finds the
+/// lists' source complete. The walk's lists find what every list near enough finds whole
 /// ([`brute_force`]), and the same with the lists kept between walks as without, the second walk
 /// building none. A background scan's slabs give the lists' detections in any order and count the
 /// candidates the interactive walk's lists drew. Returns 29's detections of `host`, pinned in the
 /// golden `name`.
 fn listed_beside_the_cells(query: &AlertQuery, host: SystemId, name: &str) -> Vec<Detection> {
     let class = class_of(query);
-    let (old, new) = (seed_9(false), seed_9(true));
-    let (before, after) = (
-        alerts(old, query, &NoListedHostsCache),
-        alerts(new, query, &NoListedHostsCache),
-    );
+    let new = seed_9();
+    let after = alerts(new, query, &NoListedHostsCache);
     let kept = KeepLists::default();
     assert_eq!(
         alerts(new, query, &kept),
@@ -965,38 +903,27 @@ fn listed_beside_the_cells(query: &AlertQuery, host: SystemId, name: &str) -> Ve
     assert!(built > 0);
     assert_eq!(alerts(new, query, &kept), after, "a walk of the kept lists");
     assert_eq!(kept.built(), built, "the second walk builds no list");
-    let (listed, cells): (Vec<Detection>, Vec<Detection>) = after
+    let listed: Vec<Detection> = after
         .detections()
         .iter()
+        .filter(|d| is_listed(d.host()))
         .cloned()
-        .partition(|d| is_listed(d.host()));
-    assert_eq!(cells, before.detections(), "the cells' walk is 28's");
-    assert!(before.detections().iter().all(|d| !is_listed(d.host())));
+        .collect();
     let none = (
         &NoFeatureCache as &dyn FeatureCellCache,
         &NoListedHostsCache as &dyn ListedHostsCache,
     );
-    let lists = ListedWalk::find(new, none, query, class).expect("read from 29");
-    assert!(ListedWalk::find(old, none, query, class).is_none());
-    let census = |result: &AlertResult| {
-        let census = result.class_census(class).expect("asked");
-        assert_eq!(census.status(), ClassStatus::Complete);
-        census.expected_hosts().expect("counted")
-    };
-    assert_same_bits(census(&after), census(&before) + lists.expected());
+    let lists = ListedWalk::find(new, none, query, class).expect("read");
+    let census = after.class_census(class).expect("asked");
+    assert_eq!(census.status(), ClassStatus::Complete);
+    assert!(census.expected_hosts().expect("counted") >= lists.expected());
     assert!(lists.expected() > 0.0);
-    let source = |result: &AlertResult| {
-        result
-            .sources()
-            .iter()
-            .find(|source| source.source() == AlertSource::FeatureLists)
-            .map(SourceCensus::status)
-    };
-    assert_eq!(
-        source(&before),
-        Some(SourceStatus::Unwalked(Unwalked::NotBuilt("P09.T36")))
-    );
-    assert_eq!(source(&after), Some(SourceStatus::Complete));
+    let source = after
+        .sources()
+        .iter()
+        .find(|source| source.source() == AlertSource::FeatureLists)
+        .map(SourceCensus::status);
+    assert_eq!(source, Some(SourceStatus::Complete));
     let mut whole = brute_force(new, query);
     sort_detections(&mut whole);
     assert_eq!(whole, listed, "the lists' walk finds every list's whole");
@@ -1006,7 +933,6 @@ fn listed_beside_the_cells(query: &AlertQuery, host: SystemId, name: &str) -> Ve
         "the slabs give the interactive walk's lists"
     );
     assert_eq!(drawn, lists.drawn());
-    assert_eq!(slabs(old, query), (Vec::new(), 0));
     pinned(listed, host, name)
 }
 
@@ -1040,34 +966,29 @@ fn pinned(listed: Vec<Detection>, host: SystemId, name: &str) -> Vec<Detection> 
     mine
 }
 
-/// From 29 a background scan of `query`'s class, whose census sends it to the background whatever
-/// its reach, sees `host`'s detections on the lists slab by slab (module documentation), each named
-/// on the list's member; the slabs' lists find what every list near enough finds whole
-/// ([`brute_force`]), in any order of the slabs, and below 29 no list is read. (The class's cells,
-/// whose candidates its scan reads every one of, are 28's at 29 in
-/// [`every_listed_class_s_whole_cube_hosts_counted`].) Returns 29's detections of `host`, pinned in
-/// the golden `name`.
+/// A background scan of `query`'s class, whose census sends it to the background whatever its
+/// reach, sees `host`'s detections on the lists slab by slab (module documentation), each named on
+/// the list's member; the slabs' lists find what every list near enough finds whole
+/// ([`brute_force`]), in any order of the slabs. Returns the detections of `host`, pinned in the
+/// golden `name`.
 fn listed_in_the_background(query: &AlertQuery, host: SystemId, name: &str) -> Vec<Detection> {
     let class = class_of(query);
-    let (old, new) = (seed_9(false), seed_9(true));
-    for galaxy in [old, new] {
-        let census = alerts(galaxy, query, &NoListedHostsCache);
-        let status = census.class_census(class).map(ClassCensus::status);
-        assert!(
-            matches!(
-                status,
-                Some(ClassStatus::OverLimit | ClassStatus::NeedsBackgroundScan)
-            ),
-            "{class} waits for the background: {status:?}"
-        );
-    }
+    let new = seed_9();
+    let census = alerts(new, query, &NoListedHostsCache);
+    let status = census.class_census(class).map(ClassCensus::status);
+    assert!(
+        matches!(
+            status,
+            Some(ClassStatus::OverLimit | ClassStatus::NeedsBackgroundScan)
+        ),
+        "{class} waits for the background: {status:?}"
+    );
     let (listed, drawn) = slabs(new, query);
     assert!(drawn > 0);
     assert!(listed.iter().all(|d| is_listed(d.host())));
     let mut whole = brute_force(new, query);
     sort_detections(&mut whole);
     assert_eq!(whole, listed, "the slabs' lists find every list's whole");
-    assert_eq!(slabs(old, query), (Vec::new(), 0));
     pinned(listed, host, name)
 }
 
@@ -1143,7 +1064,7 @@ fn from_29_a_listed_magnetar_bursts_beside_the_cells() {
 /// members, dying in the walk's cut.
 #[test]
 fn the_centre_s_list_is_read_as_its_own() {
-    let galaxy = seed_9(true);
+    let galaxy = seed_9();
     let x = reaching(AlertBand::XRay, TransientKind::MagnetarBurst, 10.0);
     let class = ClassId::CORE_COLLAPSE;
     let query = sensor_query(class, GalacticPosition::ORIGIN, x, (0, 100));
@@ -1277,7 +1198,7 @@ fn every_listed_class_is_walked_for_its_own_kinds() {
 #[test]
 #[should_panic(expected = "a cell's lists are of its whole contents")]
 fn a_cell_s_lists_are_of_its_whole_contents() {
-    let galaxy = seed_9(true);
+    let galaxy = seed_9();
     let cell = FeatureCell::new([0, 6, -1]).unwrap();
     let partial = FeatureCatalogue::cell_through(
         galaxy,
@@ -1292,7 +1213,7 @@ fn a_cell_s_lists_are_of_its_whole_contents() {
 /// cell's hosts found by a walk change none of them, nor what the cell charges a cache.
 #[test]
 fn a_cell_s_lists_are_its_features_lists() {
-    let galaxy = seed_9(true);
+    let galaxy = seed_9();
     let cell = FeatureCell::new([0, 6, -1]).unwrap();
     let contents = FeatureCatalogue::cell(galaxy, cell);
     let listed = ListedCell::of(galaxy, &contents);

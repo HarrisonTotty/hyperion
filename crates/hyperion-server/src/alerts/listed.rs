@@ -228,10 +228,10 @@ mod tests {
 
     use super::*;
 
-    /// The galaxy of seed 9 at 29, with its kinematic tables, and its key.
+    /// The galaxy of seed 9 at the version, with its kinematic tables, and its key.
     fn galaxy() -> (Galaxy, GalaxyKey) {
         let seed = hyperion_sim::Seed::new(9);
-        let version = hyperion_sim::GeneratorVersion::new(29);
+        let version = hyperion_sim::GENERATOR_VERSION;
         let galaxy = Galaxy::from_params_at_version(
             seed,
             hyperion_sim::galaxy::params::GalaxyParams::from_seed(
@@ -282,7 +282,7 @@ mod tests {
                 galaxy.seed(),
                 hyperion_sim::galaxy::imf::MassFunctionKind::default(),
             ),
-            hyperion_sim::GeneratorVersion::new(29),
+            hyperion_sim::GENERATOR_VERSION,
         )
         .unwrap();
         let unlisted = handle.cell(&bare, cell, &NoFeatureCache);
@@ -292,7 +292,7 @@ mod tests {
             2,
             "a bare galaxy stores nothing"
         );
-        let other = cache.handle(GalaxyKey::new(10, hyperion_sim::GeneratorVersion::new(29)));
+        let other = cache.handle(GalaxyKey::new(10, hyperion_sim::GENERATOR_VERSION));
         let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             other.cell(&galaxy, cell, &NoFeatureCache)
         }));

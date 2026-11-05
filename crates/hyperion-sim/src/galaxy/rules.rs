@@ -16,8 +16,6 @@
 //!
 //! - [`binary_tables`](GalaxyRules::binary_tables), plan 15's binary class tables refitted on the
 //!   generator's own pairs from 29 (P15.T10.b, [`BinaryTableRules`]);
-//! - [`listed_alerts`](GalaxyRules::listed_alerts), whether the alert walks read the features' and
-//!   the centre's lists of the recently dead, from 29 (`alerts::listed::LISTED_ALERTS_VERSION`);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -26,7 +24,6 @@
 //! inside [`StellarRules`].
 
 use crate::GeneratorVersion;
-use crate::alerts::listed::ListedAlertsRules;
 use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::catalogue_classes::binary::BinaryTableRules;
 use crate::galaxy::displaced::DisplacedRules;
@@ -59,10 +56,6 @@ pub(crate) struct GalaxyRules {
     /// [`BinaryTableRules`]): its share matrix's class shares, read where the galaxy is built, so
     /// that `Galaxy::with_rules` refuses to change it, and its binary classes' samplers and rows.
     pub(crate) binary_tables: BinaryTableRules,
-    /// Whether the core collapses' and the Type Ia's alert walks read the recently dead of the
-    /// features' and the centre's lists beside their cells (P09.T36 in plan 12's walks): from 29,
-    /// [`ListedAlertsRules::of_version`]. Read only when a walk runs.
-    pub(crate) listed_alerts: ListedAlertsRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -78,15 +71,13 @@ impl GalaxyRules {
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
             binary_tables: BinaryTableRules::of_version(version),
-            listed_alerts: ListedAlertsRules::of_version(version),
             stellar: StellarRules::of_version(version),
         }
     }
 
     /// Every galaxy and stellar hold at 29 in force, for a test that asserts a 29 figure: the
     /// version's rules from 29: the binary class tables refitted on the generator's own pairs
-    /// (P15.T10.b, [`BinaryTableRules::Published`]), the alert walks' lists (P09.T36) and the
-    /// stellar holds ([`StellarRules::every_29_hold`],
+    /// (P15.T10.b, [`BinaryTableRules::Published`]) and the stellar holds ([`StellarRules::every_29_hold`],
     /// P11.T4's and P11.T12's wind reach). The 29 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
@@ -175,22 +166,6 @@ mod tests {
                 StellarRules::of_version(GeneratorVersion::new(v))
             );
         }
-    }
-
-    /// The lists' alert walks are held below 29 and walked from it on (`LISTED_ALERTS_VERSION`).
-    #[test]
-    fn the_listed_alerts_turn_on_at_29() {
-        for v in [23, 27, 28] {
-            assert_eq!(
-                GalaxyRules::of_version(GeneratorVersion::new(v)).listed_alerts,
-                ListedAlertsRules::FieldAlone,
-                "{v}"
-            );
-        }
-        assert_eq!(
-            GalaxyRules::of_version(crate::alerts::listed::LISTED_ALERTS_VERSION).listed_alerts,
-            ListedAlertsRules::Lists
-        );
     }
 
     /// The galaxy's every 29 hold takes the stellar holds at 29, P11.T4's `swollen_dwarf` and
