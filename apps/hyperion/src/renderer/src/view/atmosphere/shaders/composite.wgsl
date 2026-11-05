@@ -241,7 +241,12 @@ fn withinDisc(dir : vec3f, source : SkySource) -> bool {
 // tie-break every sky and limb pixel, whose four depths are all 0, took the first candidate, so the
 // half-resolution layer stood one output pixel down and right of the scene.
 fn rayMarched(pixel : vec2u, depth : f32) -> vec4f {
-  let at = rayMarchTexelOf(pixel, depth);
+  return rayMarchedFrom(marchCandidatesOf(pixel), pixel, depth);
+}
+
+// `rayMarched` from the pixel's candidates, read already.
+fn rayMarchedFrom(candidates : MarchCandidates, pixel : vec2u, depth : f32) -> vec4f {
+  let at = rayMarchTexelFrom(candidates, pixel, depth);
   if (!at.found) {
     return vec4f(0.0, 0.0, 0.0, 1.0);
   }
@@ -255,35 +260,69 @@ struct MarchTexel {
   found : bool,
 }
 
-// `rayMarched`'s choice of texel: at full resolution the pixel's own; at half, of the four nearest,
-// the one whose source pixel's depth is closest to this pixel's, ties to the nearest centre.
-fn rayMarchTexelOf(pixel : vec2u, depth : f32) -> MarchTexel {
+// The four march texels `rayMarchTexelOf` chooses from at half resolution and the scene's depth at
+// each one's source pixel, read once a pixel for `behindAtMarch` too, which reads the same four
+// wherever its own corner is theirs (plan R07, the owner's Mac): `half` false at full resolution,
+// where none is read.
+struct MarchCandidates {
+  half : bool,
+  // The corner texel, `vec2i(pixel × scale − 0.5)`, before the target's clamp.
+  base : vec2i,
+  // Each candidate, j outer and i inner, and its source pixel's depth.
+  texels : array<vec2u, 4>,
+  depths : vec4f,
+}
+
+// The candidates of `pixel` at the march's resolution (`MarchCandidates`).
+fn marchCandidatesOf(pixel : vec2u) -> MarchCandidates {
+  var out : MarchCandidates;
   let scale = draw.output.z;
-  if (scale >= 1.0) {
-    return MarchTexel(pixel, true);
+  out.half = scale < 1.0;
+  if (!out.half) {
+    return out;
   }
   // The target may be larger than this frame's output; the kernel filled only its share.
   let size = vec2u(ceil(draw.output.xy * scale));
   let full = vec2u(draw.output.xy);
-  let base = vec2i(vec2f(pixel) * scale - 0.5);
+  out.base = vec2i(vec2f(pixel) * scale - 0.5);
+  for (var j = 0; j < 2; j++) {
+    for (var i = 0; i < 2; i++) {
+      let t = vec2u(clamp(out.base + vec2i(i, j), vec2i(0), vec2i(size) - 1));
+      let source = min(vec2u((vec2f(t) + 0.5) / scale), full - 1u);
+      out.texels[2 * j + i] = t;
+      out.depths[2 * j + i] = textureLoad(sceneDepth, source, 0);
+    }
+  }
+  return out;
+}
+
+// `rayMarched`'s choice of texel: at full resolution the pixel's own; at half, of the four nearest,
+// the one whose source pixel's depth is closest to this pixel's, ties to the nearest centre.
+fn rayMarchTexelOf(pixel : vec2u, depth : f32) -> MarchTexel {
+  return rayMarchTexelFrom(marchCandidatesOf(pixel), pixel, depth);
+}
+
+// `rayMarchTexelOf` from the pixel's candidates, read already.
+fn rayMarchTexelFrom(candidates : MarchCandidates, pixel : vec2u, depth : f32) -> MarchTexel {
+  if (!candidates.half) {
+    return MarchTexel(pixel, true);
+  }
+  let scale = draw.output.z;
   let centre = vec2f(pixel) + 0.5;
   var best = MarchTexel(vec2u(0u), false);
   var bestError = 3.4e38;
   var bestDistance = 3.4e38;
-  for (var j = 0; j < 2; j++) {
-    for (var i = 0; i < 2; i++) {
-      let t = vec2u(clamp(base + vec2i(i, j), vec2i(0), vec2i(size) - 1));
-      let source = min(vec2u((vec2f(t) + 0.5) / scale), full - 1u);
-      let error = abs(textureLoad(sceneDepth, source, 0) - depth);
-      // A tie of depths goes to the texel nearest the pixel's centre, the one the full-resolution
-      // scene lines up with: the squared distance between their centres in output pixels.
-      let offset = (vec2f(t) + 0.5) / scale - centre;
-      let distance = dot(offset, offset);
-      if (error < bestError || (error == bestError && distance < bestDistance)) {
-        bestError = error;
-        bestDistance = distance;
-        best = MarchTexel(t, true);
-      }
+  for (var k = 0; k < 4; k++) {
+    let t = candidates.texels[k];
+    let error = abs(candidates.depths[k] - depth);
+    // A tie of depths goes to the texel nearest the pixel's centre, the one the full-resolution
+    // scene lines up with: the squared distance between their centres in output pixels.
+    let offset = (vec2f(t) + 0.5) / scale - centre;
+    let distance = dot(offset, offset);
+    if (error < bestError || (error == bestError && distance < bestDistance)) {
+      bestError = error;
+      bestDistance = distance;
+      best = MarchTexel(t, true);
     }
   }
   return best;
@@ -321,21 +360,36 @@ struct MarchBehind {
 // lies within a texel of a drawn edge, the body's face among them, whose datum cuts the pixel's own
 // far-limb footprint (`farLimb.wgsl`'s ground piece) where no texel's can stand for it: those stood
 // up to 5 stops apart, and `found` is false, as it is past the depth with a bright light behind.
-fn behindAtMarch(pixel : vec2u, colour : vec3f, scattered : vec3f) -> MarchBehind {
+// Each candidate's depth is `candidates`', read by `rayMarched` already, wherever their corner is
+// the same, and so their texels and source pixels (all but the first row and column at half
+// resolution); else its own.
+fn behindAtMarch(
+  pixel : vec2u,
+  colour : vec3f,
+  scattered : vec3f,
+  candidates : MarchCandidates,
+) -> MarchBehind {
   let scale = draw.output.z;
   let size = vec2i(ceil(draw.output.xy * scale));
   let full = vec2u(draw.output.xy);
   let at = (vec2f(pixel) + 0.5) * scale - 0.5;
   let base = floor(at);
   let f = at - base;
+  let read = candidates.half && all(vec2i(base) == candidates.base);
   var sum = vec3f(0.0);
   var most = vec3f(-3.4e38);
   var least = vec3f(3.4e38);
   for (var j = 0; j < 2; j++) {
     for (var i = 0; i < 2; i++) {
       let t = vec2u(clamp(vec2i(base) + vec2i(i, j), vec2i(0), size - 1));
-      let source = min(vec2u((vec2f(t) + 0.5) / scale), full - 1u);
-      if (textureLoad(sceneDepth, source, 0) != 0.0) {
+      var sceneDepthHere : f32;
+      if (read) {
+        sceneDepthHere = candidates.depths[2 * j + i];
+      } else {
+        let source = min(vec2u((vec2f(t) + 0.5) / scale), full - 1u);
+        sceneDepthHere = textureLoad(sceneDepth, source, 0);
+      }
+      if (sceneDepthHere != 0.0) {
         return MarchBehind(vec3f(1.0), false);
       }
       let lnDepth = textureLoad(behindMarch, t, 0).rgb;
@@ -487,7 +541,8 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
       behind = vec3f(1.0);
       inscattered = vec3f(0.0);
       if (here) {
-        inscattered = rayMarched(pixel, depth).rgb;
+        let candidates = marchCandidatesOf(pixel);
+        inscattered = rayMarchedFrom(candidates, pixel, depth).rgb;
         if (COMPOSITE_PROBE != 2u) {
           // From the march's resolution where the frame formed it and the read stands for the
           // pixel's own (the owner's priority, 2026-11-01; `behindAtMarch`): neither the footprint
@@ -501,7 +556,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
           var fromMarch = MarchBehind(vec3f(1.0), false);
           let reads = draw.levers.x > 0.5 && COMPOSITE_PROBE != 3u && !inDisc;
           for (var read = reads; read; read = false) {
-            fromMarch = behindAtMarch(pixel, colour, inscattered * factor);
+            fromMarch = behindAtMarch(pixel, colour, inscattered * factor, candidates);
           }
           behind = fromMarch.behind;
           for (var perPixel = !fromMarch.found; perPixel; perPixel = false) {

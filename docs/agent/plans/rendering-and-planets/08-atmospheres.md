@@ -25159,3 +25159,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   closing T16.b's left item "a body drawn as a point has no air" and T10.b's "a point draws no
   air"; its planetshine and its eclipses keep its figure and photometry, as T16.a.2 left them. Its
   air's own light and its ground's emission (R08.T18) are not in the point.
+- **The composite's march candidates read once** (2026-11-05, perf-body-shading; the owner's Mac).
+  `composite.wgsl`'s `marchCandidatesOf` reads a half-resolution pixel's four march candidates'
+  scene depths once; `rayMarchTexelFrom`, `rayMarchedFrom` and `behindAtMarch(…, candidates)` take
+  them, `behindAtMarch` reading its own only where its corner is not theirs (the first row and
+  column). Bit for bit.
