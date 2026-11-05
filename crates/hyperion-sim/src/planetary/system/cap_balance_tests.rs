@@ -16,12 +16,20 @@ use crate::planetary::hooks::surface::{CapBalanceRules, rotates, with_cap_balanc
 /// 2026-10-31, the cap's scope read on CO₂'s inventory and a capped CO₂ held at its cap), by ID in
 /// the census's order: CO₂ airs that collapse or thin, each a fast rotator whose cap is frost.
 /// Against the gate alone, holding a capped CO₂ at its cap (d = 1) adds nine, among them LOOK72's
-/// 020e56ef20080000.0700, `Temperate` at 273.15 K under 43.7 bar → `Snowball` at 170 K, a class
+/// 020e56ef20080000.0700, `Temperate` at 273.15 K under 43.7 bar → `Snowball` at 169 K, a class
 /// change; with no sea of its own (c = 0) it adds 41ffecb5ffc00001.0c00, `Temperate` at 273.15 K
-/// under 42.2 bar at 0.198 S⊕ → `Snowball` at 163.6 K, the other. The cap `partition_over` reads, which the passes' area mix reads too
-/// ([`partition_over`](crate::planetary::hooks::figures::partition_over)), takes
-/// 42002cb200000009.0700 to a 0.36 bar `Snowball` at 122 K.
-const MOVERS: [&str; 24] = [
+/// under 42.2 bar at 0.198 S⊕ → `Snowball` at 163 K, the other.
+///
+/// Re-measured at generator version 27 (20, from 24): 01ffeb2c20000000.0500 joins, `Temperate` at
+/// 273.15 K under 140 bar of O₂, CO₂ and N₂ at 0.042 S⊕ → a 74 bar O₂ `Snowball` at 155 K, a third
+/// class change, P14.T24.h.b's (with its four holds set back the cap leaves it `Temperate`);
+/// `close_binary`'s 0700 and 0800 move at 27 in their last bits alone ([`NUDGED`]),
+/// where to 26 the cap `partition_over` reads took 0700 to a 0.36 bar `Snowball` at 122 K; and four
+/// leave with their systems, the golden `fallback_black_hole`'s 0200 and 0300 (its system the
+/// golden systems' search's at 27) and LOOK72's 820e6ee00000008d.0900 (its four-remnant system
+/// places no planet at 27).
+const MOVERS: [&str; 20] = [
+    "01ffeb2c20000000.0500",
     "01ffeb2c20000000.0600",
     "01fffb2be0000000.0500",
     "21ffd6587ff80000.0200",
@@ -37,27 +45,25 @@ const MOVERS: [&str; 24] = [
     "42002cb1ff800003.0a00",
     "41ffecb1ffc00000.0a00",
     "42006cba00000009.0400",
-    "42002cb200000009.0700",
-    "42002cb200000009.0800",
     "42002cb200000009.e401",
     "42002cb200000009.e501",
     "42006c9a00000004.0504",
-    "8200b2e00000000a.0200",
-    "8200b2e00000000a.0300",
     "020e56ef20080000.0700",
-    "820e6ee00000008d.0900",
 ];
 
 /// The records the cap moves in their last bits alone, within 10⁻⁶ ([`within_a_millionth`]), by
 /// ID in the census's order: a step or a thermostat trial on the way read a cap, and the steps
-/// settled a few ulps away.
-const NUDGED: [&str; 1] = ["820e6ee00000008d.e302"];
+/// settled a few ulps away. At generator version 27 `close_binary`'s 0700 and 0800 (by 10⁻¹² of
+/// their pressure and 3 × 10⁻⁸ K); LOOK72's 820e6ee00000008d.e302, nudged to 26, is not.
+const NUDGED: [&str; 2] = ["42002cb200000009.0700", "42002cb200000009.0800"];
 
 /// The records whose airborne CO₂ stands over its cap's saturation pressure by more than 1%, each
-/// pinned at under twice it ([`OVER_THE_CAP_AT_MOST`]): 41ffecb600000007.0300, 1.6% over, whose
-/// greenhouse ends at its steps' limit, one more partition moving its CO₂ by 1.4% to its cap's
-/// saturation. Its partition at its record's span holds the cap's saturation to the bit.
-const OVER_THE_CAP: [&str; 1] = ["41ffecb600000007.0300"];
+/// pinned at under twice it ([`OVER_THE_CAP_AT_MOST`]): none at generator version 27. To 26
+/// 41ffecb600000007.0300 stood 1.6% over, its greenhouse ending at its steps' limit, one more
+/// partition moving its CO₂ by 1.4% to its cap's saturation; at 27, under P14.T24.h.b's scattering,
+/// its steps end there, at 249.9 K (263.0 K with its four holds set back), its CO₂ at its cap's
+/// saturation to four figures.
+const OVER_THE_CAP: [&str; 0] = [];
 
 /// The most an [`OVER_THE_CAP`] record's airborne CO₂ may stand over its cap's saturation, as a
 /// ratio: 2.
