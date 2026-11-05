@@ -10137,3 +10137,16 @@ CensusCost)`.
   - _Left._ A cold build's plan job (5.1 s on one worker) leads it; after the tables, a relaunched
     first reply waits on the census plan (2.0 s), its first step's march (2.2 s) and the band
     (4.9 s).
+- **R06, the tables' plan searched in jobs and the tables pinned whole (lane
+  `perf-sky-tables-on-disk`, part 2, 2026-11-05, at 28; no output moved).**
+  - _Sim._ `LuminosityTables::plan_search`;
+    `PlanSearch::{stages, run_ends, companions_jobs, run_companions, finish}`, `StageEnds`,
+    `CompanionsJob`, `CompanionsPart`. `TablesPlan::new` runs the search in turn; `stage_grids`
+    is gone. The golden `sky/tables_words` (`sky::pins::tables_and_gas_index_words_golden`) pins
+    the tables and the features' gas index by their words, capacities left out: a change that
+    moves it needs the version bump that renames the server's files.
+  - _Server._ `build_on_pool`'s plan is `plan_on_pool`: the search, a job a stage's ends, the
+    companions' integrals in a job a worker, then the finish.
+  - _Left._ With the global list warmed at the open (the default), a cold galaxy's first sky
+    waits on the list's tube tables, which the warm-up builds at the sky's own bulk priority; the
+    split's gain reaches its first reply only with the warm-up off.

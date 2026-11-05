@@ -2251,8 +2251,9 @@ fn sim_host(disc: &HostDisc) -> HostDiscDto {
 /// sim's census at the ceiling, its C, D and E listed within their caps towards each star's texel
 /// in the final reply too, and the band holding the light beyond.
 ///
-/// The server builds the galaxy's own tables on its pool, staged from `LuminosityTables::plan`,
-/// while the test builds them serially, so the band's light is the tables' and the caps are forced.
+/// The server builds the galaxy's own tables on its pool, its plan searched in jobs from
+/// `LuminosityTables::plan_search` and then staged, while the test builds them serially, so the
+/// band's light is the tables' and the caps are forced.
 /// The request asks the eye and a camera's deeper cut, so the band keeps the eye's light beside its
 /// own (R06.T9.j); a small `n_max`, so that the overflow's stars are splatted into the band; and a
 /// system of the Sun's cell left out, whose stars come back as discs at the request's time.

@@ -82,8 +82,10 @@
 //! Nothing here draws a random word or changes generated output: the tables only read.
 
 use std::collections::BTreeMap;
+use std::num::NonZeroUsize;
 use std::ops::Range;
 
+use crate::Seed;
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
 use crate::galaxy::Population;
@@ -704,6 +706,20 @@ impl LuminosityTables {
         )
     }
 
+    /// [`plan`](Self::plan)'s search, for a caller that runs its jobs on its own threads
+    /// ([`PlanSearch`]): made in milliseconds, its [`finish`](PlanSearch::finish) the same plan.
+    #[must_use]
+    pub fn plan_search(galaxy: &Galaxy) -> PlanSearch {
+        let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
+        PlanSearch::new(
+            galaxy,
+            REFERENCE_TIME,
+            &all,
+            BuildOptions::STANDARD,
+            SAMPLE_JOB_NODES,
+        )
+    }
+
     /// The time the tables were built for: [`REFERENCE_TIME`], or a test's own.
     #[must_use]
     pub const fn time(&self) -> UniverseTime {
@@ -944,7 +960,8 @@ const SAMPLE_JOB_NODES: usize = 64;
 /// Each stage has its own mass panels, cut where its tracks end their phases at the galaxy's age
 /// edges (R06.T5.e), so a stage's sample jobs are counted from its own nodes. Making the plan,
 /// serially, takes some 5 CPU-s for the Milky Way (the search for those panels some 3), of the
-/// build's 31, so a server makes it off its async runtime.
+/// build's 31, so a server makes it off its async runtime, and searches it in jobs
+/// ([`PlanSearch`]).
 ///
 /// Every job is a pure function of the plan and its inputs. The chunks are put back in their jobs'
 /// order, and every bin adds its nodes in their own order (an accumulation job panics otherwise),
@@ -1221,9 +1238,120 @@ impl BinSums {
     }
 }
 
-impl TablesPlan {
-    /// The plan of [`LuminosityTables::build_with`], with sample jobs of at most `job_nodes` mass
-    /// nodes.
+/// [`LuminosityTables::plan`]'s search for each stage's mass panels, as jobs for a caller that runs
+/// them on its own threads (perf-sky-tables-on-disk, part 2): what makes a plan cost some 5 CPU-s
+/// for the Milky Way, which a pool would otherwise spend in one job with its other workers idle.
+///
+/// [`LuminosityTables::plan_search`] makes the search, in milliseconds: the components' bins, the
+/// stages and the global breaks. Then, in any order and on any threads:
+///
+/// 1. Each stage's ends ([`run_ends`](Self::run_ends)): the masses at which its tracks end a phase
+///    or die at an age edge (R06.T5.e), its panels' edges; some 0.08 to 0.2 CPU-s a stage, 3.4 of
+///    the plan's 4.9 CPU-s.
+/// 2. Once every stage's ends are in, the companions' integrals H(c) at every cell edge of every
+///    stage's grid, split into jobs ([`companions_jobs`](Self::companions_jobs),
+///    [`run_companions`](Self::run_companions)): 1.6 CPU-s, each value a pure function of its
+///    band and edge, which the stages share.
+/// 3. [`finish`](Self::finish) makes each stage's grid from its ends and the integrals, which it
+///    only looks up: the plan [`LuminosityTables::plan`] makes, bit for bit
+///    (`a_plan_searched_in_jobs_is_the_plan`), since every value comes from the same function of
+///    the same inputs, and the integrals are a cache that no value depends on the order of.
+///
+/// Its figures: test build, pod, 2026-11-05.
+///
+/// # Examples
+///
+/// The jobs run in turn here; a server hands each to its pool (`no_run`: a plan takes some
+/// seconds of CPU).
+///
+/// ```no_run
+/// use std::num::NonZeroUsize;
+///
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+///
+/// let galaxy = Galaxy::from_params(Seed::new(7), GalaxyParams::milky_way_like())?;
+/// let search = LuminosityTables::plan_search(&galaxy);
+/// let ends: Vec<_> = search.stages().map(|stage| search.run_ends(&galaxy, stage)).collect();
+/// let jobs = search.companions_jobs(&galaxy, &ends, NonZeroUsize::new(8).ok_or("eight")?);
+/// let parts: Vec<_> = jobs.iter().map(|job| search.run_companions(&galaxy, job)).collect();
+/// let plan = search.finish(&galaxy, &ends, parts);
+/// assert_eq!(plan, LuminosityTables::plan(&galaxy));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanSearch {
+    seed: Seed,
+    time: UniverseTime,
+    options: BuildOptions,
+    solar_radius: f64,
+    /// The oldest age any snapshot reads, years.
+    max_age: f64,
+    stages: Vec<PlannedStage>,
+    job_nodes: usize,
+    layout: Vec<Option<(Vec<f64>, Vec<f64>)>>,
+    bins: Vec<PlannedBin>,
+    pair_evolution: PairEvolution,
+    /// The global breaks ([`global_breaks`]), M☉, which cut every stage's panels.
+    breaks: Vec<f64>,
+    /// Their panels' edges, over which every H(c) is integrated.
+    global_edges: Vec<f64>,
+    /// The ln m at which each stage's phase ends are scanned ([`phase_end_scan`]).
+    scan: Vec<f64>,
+}
+
+/// One stage's ends, as [`PlanSearch::run_ends`] finds them: its panels' edges, M☉, and the seed of
+/// the galaxy they are of.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StageEnds {
+    seed: Seed,
+    stage: usize,
+    edges: Vec<f64>,
+}
+
+impl StageEnds {
+    /// The stage whose ends these are.
+    #[must_use]
+    pub const fn stage(&self) -> Stage {
+        Stage { index: self.stage }
+    }
+}
+
+/// One job of the companions' integrals ([`PlanSearch::companions_jobs`]): H(c) of each band and
+/// cell edge it names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompanionsJob {
+    seed: Seed,
+    /// Each value's key in the memo, and its band and c, M☉.
+    cells: Vec<(CompanionsKey, (MassBand, f64))>,
+}
+
+impl CompanionsJob {
+    /// The integrals the job makes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.cells.len()
+    }
+
+    /// Whether the job makes none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+}
+
+/// What a [`CompanionsJob`] made: each of its integrals, by its key.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompanionsPart {
+    seed: Seed,
+    values: Vec<(CompanionsKey, f64)>,
+}
+
+impl PlanSearch {
+    /// The search for the plan of [`LuminosityTables::build_with`], with sample jobs of at most
+    /// `job_nodes` mass nodes: everything of the plan but its stages' grids.
     #[must_use]
     fn new(
         galaxy: &Galaxy,
@@ -1281,12 +1409,14 @@ impl TablesPlan {
         planned.sort_by_key(|(index, _)| *index);
         let bins: Vec<PlannedBin> = planned.into_iter().flat_map(|(_, bins)| bins).collect();
         let stages = stages_of(&bins);
+        let breaks = global_breaks(galaxy);
+        let global_edges = panel_edges(&breaks);
+        let scan = phase_end_scan(&global_edges);
         Self {
+            seed: galaxy.seed(),
             time,
             options,
             solar_radius,
-            grids: stage_grids(galaxy, time, options, &stages, Years::new(max_age)),
-            brown_dwarfs: BrownDwarfGrid::new(galaxy.mass_function()),
             max_age,
             stages,
             job_nodes: job_nodes.max(1),
@@ -1297,7 +1427,200 @@ impl TablesPlan {
             } else {
                 PairEvolution::Ignored
             },
+            breaks,
+            global_edges,
+            scan,
         }
+    }
+
+    /// The stages, in their order: each one's ends are a job ([`run_ends`](Self::run_ends)).
+    pub fn stages(&self) -> impl Iterator<Item = Stage> + use<> {
+        (0..self.stages.len()).map(|index| Stage { index })
+    }
+
+    /// Finds `stage`'s ends: its panels cut at the global breaks and at the masses where the
+    /// tracks at its \[Fe/H\] end a phase or die at an age edge of a component that reads it
+    /// (`stage_ages`, `phase_end_masses`; R06.T5.e). A function of the galaxy, the stage's
+    /// \[Fe/H\] and the plan's time alone, never of the components or bins a build asks for.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not the search's galaxy's, or `stage` not one of its stages.
+    #[must_use]
+    pub fn run_ends(&self, galaxy: &Galaxy, stage: Stage) -> StageEnds {
+        self.check(galaxy);
+        let fe_h = self.stages[stage.index].fe_h;
+        let ages = stage_ages(galaxy, self.time, fe_h);
+        let ends = phase_end_masses(
+            &composition_at(fe_h),
+            &ages,
+            &self.scan,
+            Years::new(self.max_age),
+        );
+        let masses: Vec<f64> = ends.iter().map(|end| end.mass.value()).collect();
+        StageEnds {
+            seed: self.seed,
+            stage: stage.index,
+            edges: panel_edges(self.breaks.iter().chain(&masses)),
+        }
+    }
+
+    /// The companions' integrals that every stage's grid reads, from `ends`, the ends of every
+    /// stage in any order, in at most `jobs` jobs of about as many integrals each: each band's
+    /// H(c) at each edge of every stage's companion cells, once however many stages share it, in
+    /// the memo's order. None where the plan counts no companions.
+    ///
+    /// # Panics
+    ///
+    /// If the seed of `galaxy`, or of a stage's `ends`, is not the search's galaxy's.
+    #[must_use]
+    pub fn companions_jobs(
+        &self,
+        galaxy: &Galaxy,
+        ends: &[StageEnds],
+        jobs: NonZeroUsize,
+    ) -> Vec<CompanionsJob> {
+        self.check(galaxy);
+        if self.options.companions != Companions::Included {
+            return Vec::new();
+        }
+        let mut cells = BTreeMap::new();
+        for stage in ends {
+            self.check_seed(stage.seed);
+            let (_, boundaries) =
+                MassGrid::cells(galaxy.mass_function(), self.options, &stage.edges);
+            for band in MassBand::ALL {
+                for &ln_c in boundaries.iter().flatten() {
+                    let (key, c) = CompanionsMemo::key(band, ln_c);
+                    cells.entry(key).or_insert((band, c));
+                }
+            }
+        }
+        let cells: Vec<_> = cells.into_iter().collect();
+        let per_job = cells.len().div_ceil(jobs.get()).max(1);
+        cells
+            .chunks(per_job)
+            .map(|chunk| CompanionsJob {
+                seed: self.seed,
+                cells: chunk.to_vec(),
+            })
+            .collect()
+    }
+
+    /// Runs one job of the companions' integrals.
+    ///
+    /// # Panics
+    ///
+    /// If the seed of `galaxy`, or of `job`, is not the search's galaxy's.
+    #[must_use]
+    pub fn run_companions(&self, galaxy: &Galaxy, job: &CompanionsJob) -> CompanionsPart {
+        self.check(galaxy);
+        self.check_seed(job.seed);
+        let f = galaxy.mass_function();
+        // Every population's fates have the same companions (`fates_for`).
+        let fates = fates_for(Population::OldThinDisc);
+        CompanionsPart {
+            seed: self.seed,
+            values: job
+                .cells
+                .iter()
+                .map(|&(key, (band, c))| {
+                    (key, companions_below(f, fates, band, c, &self.global_edges))
+                })
+                .collect(),
+        }
+    }
+
+    /// The plan, from the ends of every stage, in any order, and the companions' integrals
+    /// `parts`, any of them or none: each stage's grid is made on its panels, reading H(c) from
+    /// `parts` and integrating what they lack, as [`LuminosityTables::plan`] does all of them.
+    ///
+    /// # Panics
+    ///
+    /// If the seed of `galaxy`, or of any of `ends` or `parts`, is not the search's galaxy's, or
+    /// `ends` does not hold each stage's once.
+    #[must_use]
+    pub fn finish(
+        self,
+        galaxy: &Galaxy,
+        ends: &[StageEnds],
+        parts: impl IntoIterator<Item = CompanionsPart>,
+    ) -> TablesPlan {
+        self.check(galaxy);
+        let mut by_stage: Vec<Option<&StageEnds>> = vec![None; self.stages.len()];
+        for stage_ends in ends {
+            self.check_seed(stage_ends.seed);
+            let at = stage_ends.stage;
+            assert!(
+                by_stage[at].replace(stage_ends).is_none(),
+                "each stage's ends once"
+            );
+        }
+        let mut values = BTreeMap::new();
+        for part in parts {
+            self.check_seed(part.seed);
+            values.extend(part.values);
+        }
+        let mut memo = CompanionsMemo::new(self.global_edges);
+        memo.values = values;
+        let f = galaxy.mass_function();
+        let grids = by_stage
+            .into_iter()
+            .map(|stage_ends| {
+                let stage_ends = stage_ends.expect("every stage's ends");
+                MassGrid::new(f, self.options, &stage_ends.edges, &mut memo)
+            })
+            .collect();
+        TablesPlan {
+            time: self.time,
+            options: self.options,
+            solar_radius: self.solar_radius,
+            grids,
+            brown_dwarfs: BrownDwarfGrid::new(f),
+            max_age: self.max_age,
+            stages: self.stages,
+            job_nodes: self.job_nodes,
+            layout: self.layout,
+            bins: self.bins,
+            pair_evolution: self.pair_evolution,
+        }
+    }
+
+    /// Panics unless `galaxy` is the search's.
+    fn check(&self, galaxy: &Galaxy) {
+        assert_eq!(
+            galaxy.seed(),
+            self.seed,
+            "a plan's search runs on its own galaxy"
+        );
+    }
+
+    /// Panics unless `seed`, that of a job's input, is the search's galaxy's.
+    fn check_seed(&self, seed: Seed) {
+        assert_eq!(
+            seed, self.seed,
+            "a plan's search takes its own galaxy's ends and integrals"
+        );
+    }
+}
+
+impl TablesPlan {
+    /// The plan of [`LuminosityTables::build_with`], with sample jobs of at most `job_nodes` mass
+    /// nodes: its search ([`PlanSearch`]) run in turn.
+    #[must_use]
+    fn new(
+        galaxy: &Galaxy,
+        time: UniverseTime,
+        components: &[ComponentId],
+        options: BuildOptions,
+        job_nodes: usize,
+    ) -> Self {
+        let search = PlanSearch::new(galaxy, time, components, options, job_nodes);
+        let ends: Vec<StageEnds> = search
+            .stages()
+            .map(|stage| search.run_ends(galaxy, stage))
+            .collect();
+        search.finish(galaxy, &ends, [])
     }
 
     /// The mass nodes of a stage: its stars', then the brown dwarfs'.
@@ -2088,8 +2411,11 @@ struct CompanionsMemo {
     /// The edges every H is integrated over, M☉: the global breaks' ([`global_breaks`]).
     edges: Vec<f64>,
     /// H by layer index and ln c, `None` from the band's top, where H is flat.
-    values: BTreeMap<(usize, Option<Exact>), f64>,
+    values: BTreeMap<CompanionsKey, f64>,
 }
+
+/// A key of [`CompanionsMemo`]'s: a layer's index, and ln c, or `None` from the band's top.
+type CompanionsKey = (usize, Option<Exact>);
 
 impl CompanionsMemo {
     /// An empty memo over `edges`.
@@ -2101,6 +2427,19 @@ impl CompanionsMemo {
         }
     }
 
+    /// The key of H(c) of `band`'s primaries at c = e<sup>`ln_c`</sup> M☉, and the c it is
+    /// integrated at: held at the band's top, from which H is flat, every companion being lighter
+    /// than its primary, so that every c beyond it shares one key and one quadrature.
+    #[must_use]
+    fn key(band: MassBand, ln_c: f64) -> (CompanionsKey, f64) {
+        let c = math::exp(ln_c).min(band.hi());
+        let key = (
+            layer_index(Layer::from(band)),
+            (c < band.hi()).then_some(Exact(ln_c)),
+        );
+        (key, c)
+    }
+
     /// H(c) of `band`'s primaries at c = e<sup>`ln_c`</sup> M☉, from `f` and `fates`, whose
     /// companions every population shares.
     fn below(
@@ -2110,13 +2449,7 @@ impl CompanionsMemo {
         band: MassBand,
         ln_c: f64,
     ) -> f64 {
-        // From the band's top H is flat, every companion being lighter than its primary: the
-        // same quadrature, bit for bit, whatever c beyond it.
-        let c = math::exp(ln_c).min(band.hi());
-        let key = (
-            layer_index(Layer::from(band)),
-            (c < band.hi()).then_some(Exact(ln_c)),
-        );
+        let (key, c) = Self::key(band, ln_c);
         let edges = &self.edges;
         *self
             .values
@@ -2127,8 +2460,8 @@ impl CompanionsMemo {
 
 impl MassGrid {
     /// The grid of one stage, on the panels of `edges` (M☉, [`panel_edges`]' form, split by
-    /// [`ln_mass_panels`]): each panel takes `options`' nodes, and the companions' cells read H(c)
-    /// through `memo`.
+    /// [`ln_mass_panels`]): each panel takes `options`' nodes ([`cells`](Self::cells)), and the
+    /// companions' cells read H(c) through `memo`.
     #[must_use]
     fn new(
         f: &dyn MassFunction,
@@ -2138,6 +2471,39 @@ impl MassGrid {
     ) -> Self {
         // Every population's fates have the same companions (`fates_for`).
         let fates = fates_for(Population::OldThinDisc);
+        let (mut nodes, boundaries) = Self::cells(f, options, edges);
+        if options.companions == Companions::Included {
+            for band in MassBand::ALL {
+                let layer = layer_index(Layer::from(band));
+                let mut below = |ln_c: f64| memo.below(f, fates, band, ln_c);
+                let mut node = 0;
+                for cells in &boundaries {
+                    let mut previous = below(cells[0]);
+                    for &end in &cells[1..] {
+                        let next = below(end);
+                        nodes[node].weights[layer] += next - previous;
+                        previous = next;
+                        node += 1;
+                    }
+                }
+            }
+        }
+        Self {
+            nodes,
+            #[cfg(test)]
+            edges: edges.to_vec(),
+        }
+    }
+
+    /// The nodes of a stage's grid on the panels of `edges`, each weighted by its share of each
+    /// layer's primaries alone, and per panel its companions' cells' ends in ln m: from the
+    /// panel's start, through the midpoints between its nodes, to its end, one more than its nodes.
+    #[must_use]
+    fn cells(
+        f: &dyn MassFunction,
+        options: BuildOptions,
+        edges: &[f64],
+    ) -> (Vec<Node>, Vec<Vec<f64>>) {
         let panels = ln_mass_panels(edges);
         let mut nodes = Vec::with_capacity(
             panels
@@ -2174,27 +2540,7 @@ impl MassGrid {
             cells.push(hi);
             boundaries.push(cells);
         }
-        if options.companions == Companions::Included {
-            for band in MassBand::ALL {
-                let layer = layer_index(Layer::from(band));
-                let mut below = |ln_c: f64| memo.below(f, fates, band, ln_c);
-                let mut node = 0;
-                for cells in &boundaries {
-                    let mut previous = below(cells[0]);
-                    for &end in &cells[1..] {
-                        let next = below(end);
-                        nodes[node].weights[layer] += next - previous;
-                        previous = next;
-                        node += 1;
-                    }
-                }
-            }
-        }
-        Self {
-            nodes,
-            #[cfg(test)]
-            edges: edges.to_vec(),
-        }
+        (nodes, boundaries)
     }
 }
 
@@ -2444,38 +2790,6 @@ fn phase_end_scan(global_edges: &[f64]) -> Vec<f64> {
     let mut scan = vec![floor];
     scan.extend(panels.iter().map(|&(_, hi)| hi).filter(|&u| u > floor));
     scan
-}
-
-/// Each stage's mass grid (R06.T5.e): its panels cut at the global breaks ([`global_breaks`]) and
-/// at the masses where the tracks at its \[Fe/H\] end a phase or die at an age edge of a component
-/// that reads it ([`stage_ages`], [`phase_end_masses`]). A stage's grid is a function of the
-/// galaxy, its \[Fe/H\] and `time` alone, never of the components or bins a build asks for.
-#[must_use]
-fn stage_grids(
-    galaxy: &Galaxy,
-    time: UniverseTime,
-    options: BuildOptions,
-    stages: &[PlannedStage],
-    max_age: Years,
-) -> Vec<MassGrid> {
-    let breaks = global_breaks(galaxy);
-    let global_edges = panel_edges(&breaks);
-    let scan = phase_end_scan(&global_edges);
-    let mut memo = CompanionsMemo::new(global_edges);
-    stages
-        .iter()
-        .map(|stage| {
-            let ages = stage_ages(galaxy, time, stage.fe_h);
-            let ends = phase_end_masses(&composition_at(stage.fe_h), &ages, &scan, max_age);
-            let masses: Vec<f64> = ends.iter().map(|end| end.mass.value()).collect();
-            MassGrid::new(
-                galaxy.mass_function(),
-                options,
-                &panel_edges(breaks.iter().chain(&masses)),
-                &mut memo,
-            )
-        })
-        .collect()
 }
 
 /// The composition at the reference metallicity `fe_h`, with no helium excess.
@@ -3082,6 +3396,88 @@ mod tests {
             }
             Sharing::Unshared => {}
         }
+    }
+
+    /// A plan searched in jobs is [`LuminosityTables::plan`]'s, whatever the order of its stages'
+    /// ends and however its companions' integrals are split and in whatever order they come,
+    /// some or none of them (perf-sky-tables-on-disk, part 2). Each split's jobs name every
+    /// integral once.
+    #[test]
+    fn a_plan_searched_in_jobs_is_the_plan() {
+        let galaxy = milky_way_galaxy();
+        let plan = LuminosityTables::plan(galaxy);
+        let search = LuminosityTables::plan_search(galaxy);
+        let mut stages: Vec<Stage> = search.stages().collect();
+        stages.reverse();
+        let mut ends: Vec<StageEnds> = stages
+            .into_iter()
+            .map(|stage| search.run_ends(galaxy, stage))
+            .collect();
+        assert_eq!(ends.len(), plan.stages.len());
+        let whole = search.companions_jobs(galaxy, &ends, NonZeroUsize::MIN);
+        assert_eq!(whole.len(), 1);
+        let integrals = whole[0].len();
+        let keys = |jobs: &[CompanionsJob]| {
+            jobs.iter()
+                .flat_map(|job| job.cells.iter().map(|&(key, _)| key))
+                .collect::<Vec<_>>()
+        };
+        let every = keys(&whole);
+        assert!(integrals > 1_000, "{integrals} integrals");
+        for jobs in [1, 7, integrals + 5] {
+            let split =
+                search.companions_jobs(galaxy, &ends, NonZeroUsize::new(jobs).expect("jobs"));
+            assert!(
+                (1..=jobs.min(integrals)).contains(&split.len()),
+                "{} of {jobs} jobs",
+                split.len()
+            );
+            assert!(
+                keys(&split) == every,
+                "{jobs} jobs name every integral once, in order"
+            );
+            let mut parts: Vec<CompanionsPart> = split
+                .iter()
+                .rev()
+                .map(|job| search.run_companions(galaxy, job))
+                .collect();
+            if jobs == 7 {
+                // Some integrals lacking: the grids make them as the plan does.
+                parts.truncate(4);
+            }
+            ends.rotate_left(5);
+            let searched = search.clone().finish(galaxy, &ends, parts);
+            // Plans and bits compared whole, not printed: some 10⁴ nodes.
+            assert!(searched == plan, "the plan searched in {jobs} jobs differs");
+            assert!(
+                plan_grid_bits(&searched) == plan_grid_bits(&plan),
+                "the grids searched in {jobs} jobs differ in their bits"
+            );
+        }
+        let searched = search.finish(galaxy, &ends, []);
+        assert!(
+            searched == plan && plan_grid_bits(&searched) == plan_grid_bits(&plan),
+            "the plan searched with no integrals differs"
+        );
+    }
+
+    /// Every stage's grid by its bits ([`grid_bits`]), which `==` would take for equal across a
+    /// zero's sign.
+    fn plan_grid_bits(plan: &TablesPlan) -> Vec<u64> {
+        plan.grids.iter().flat_map(grid_bits).collect()
+    }
+
+    /// A search runs on its own galaxy alone.
+    #[test]
+    #[should_panic(expected = "a plan's search runs on its own galaxy")]
+    fn a_plan_s_search_refuses_another_galaxy() {
+        let search = LuminosityTables::plan_search(milky_way_galaxy());
+        let other = Galaxy::from_params(
+            crate::Seed::new(milky_way_galaxy().seed().get() + 1),
+            crate::galaxy::params::GalaxyParams::milky_way_like(),
+        )
+        .expect("another Milky Way");
+        drop(search.run_ends(&other, Stage { index: 0 }));
     }
 
     #[test]

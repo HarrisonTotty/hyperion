@@ -10,11 +10,16 @@
 //! galaxy's tables at once share one build through a [`SingleFlight`], and if every one of them
 //! gives up, the build is given up too: its jobs still queued are skipped.
 //!
-//! The build runs as bulk jobs from [`LuminosityTables::plan`], which the sim splits so that the
-//! server's pool can run it (the sim spawns no threads): one job makes the plan, some 5 CPU-s for
-//! the Milky Way; then, stage by stage, one metallicity at a time from the lowest, the stage's
-//! track samples, a dozen jobs of at most 64 mass nodes, and its accumulation, one job per
-//! component bin that reads the stage; then one job assembles the tables. While a stage
+//! The build runs as bulk jobs from [`LuminosityTables::plan_search`], which the sim splits so that
+//! the server's pool can run it (the sim spawns no threads). The plan, some 5 CPU-s for the Milky
+//! Way, which one job made while the other workers idled, 5.05 of a cold build's 13.2 s on eight
+//! workers (release, pod, 16 vCPU, 2026-11-05), is searched in jobs
+//! ([`PlanSearch`](hyperion_sim::sky::luminosity::PlanSearch)): one job makes the search; then
+//! each stage's ends, a job each; then one job splits the companions' integrals that every stage's
+//! grid reads, made in a job for each worker; then one job finishes the plan. Then, stage by
+//! stage, one metallicity at a time from the lowest, the stage's track samples, a dozen jobs of at
+//! most 64 mass nodes, and its accumulation, one job per component bin that reads the stage; then
+//! one job assembles the tables. While a stage
 //! accumulates, the next stage's samples are made, one stage ahead, which holds two stages' samples
 //! at once and keeps every worker busy through each stage's few accumulation jobs (R06's Risks,
 //! "The job split in stages": about 440 MiB on 16 threads, against 240 MiB without). A bin adds its
@@ -402,9 +407,10 @@ impl fmt::Debug for SkyTablesService {
     }
 }
 
-/// The tables of `galaxy`, built as bulk jobs under `token` from [`LuminosityTables::plan`] (see
-/// the [module](self) documentation): the plan, then stage by stage its samples and their
-/// accumulation, the next stage's samples made while a stage accumulates, then the assembly.
+/// The tables of `galaxy`, built as bulk jobs under `token` from [`LuminosityTables::plan_search`]
+/// (see the [module](self) documentation): the plan's search ([`plan_on_pool`]), then stage by
+/// stage its samples and their accumulation, the next stage's samples made while a stage
+/// accumulates, then the assembly.
 ///
 /// # Errors
 ///
@@ -414,15 +420,7 @@ pub(crate) async fn build_on_pool(
     galaxy: &Arc<Galaxy>,
     token: &CancelToken,
 ) -> Result<SkyTables, ComputeError> {
-    let plan = {
-        let galaxy = Arc::clone(galaxy);
-        Arc::new(
-            bulk(pool, token, move |_: &CancelToken| {
-                LuminosityTables::plan(&galaxy)
-            })
-            .await?,
-        )
-    };
+    let plan = Arc::new(plan_on_pool(pool, galaxy, token).await?);
     let mut sums: Vec<Option<BinSums>> = plan.bin_sums().into_iter().map(Some).collect();
     let stages: Vec<Stage> = plan.stages().collect();
     let mut sampling = match stages.first() {
@@ -453,6 +451,57 @@ pub(crate) async fn build_on_pool(
     let galaxy = Arc::clone(galaxy);
     bulk(pool, token, move |_: &CancelToken| {
         SkyTables::new(plan.assemble(sums), &galaxy)
+    })
+    .await
+}
+
+/// The plan of `galaxy`'s tables, [`LuminosityTables::plan`]'s bit for bit, searched as bulk jobs
+/// under `token` ([`PlanSearch`](hyperion_sim::sky::luminosity::PlanSearch)): the search in one
+/// job, each stage's ends in one each, the companions' integrals split in one and made in a job
+/// for each of the pool's workers, and the plan finished in one.
+///
+/// # Errors
+///
+/// Those of [`bulk`].
+async fn plan_on_pool(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    token: &CancelToken,
+) -> Result<TablesPlan, ComputeError> {
+    let search = {
+        let galaxy = Arc::clone(galaxy);
+        Arc::new(
+            bulk(pool, token, move |_: &CancelToken| {
+                LuminosityTables::plan_search(&galaxy)
+            })
+            .await?,
+        )
+    };
+    let ends = search.stages().map(|stage| {
+        let (search, galaxy) = (Arc::clone(&search), Arc::clone(galaxy));
+        move || search.run_ends(&galaxy, stage)
+    });
+    let ends = Arc::new(BulkJobs::submit(pool, token, ends).await?.results().await?);
+    let jobs = {
+        let (search, galaxy, ends) = (Arc::clone(&search), Arc::clone(galaxy), Arc::clone(&ends));
+        let workers = pool.workers();
+        bulk(pool, token, move |_: &CancelToken| {
+            search.companions_jobs(&galaxy, &ends, workers)
+        })
+        .await?
+    };
+    let parts = jobs.into_iter().map(|job| {
+        let (search, galaxy) = (Arc::clone(&search), Arc::clone(galaxy));
+        move || search.run_companions(&galaxy, &job)
+    });
+    let parts = BulkJobs::submit(pool, token, parts)
+        .await?
+        .results()
+        .await?;
+    let galaxy = Arc::clone(galaxy);
+    bulk(pool, token, move |_: &CancelToken| {
+        // Every other job of the search has run, so the search is this job's alone.
+        Arc::unwrap_or_clone(search).finish(&galaxy, &ends, parts)
     })
     .await
 }
@@ -802,6 +851,38 @@ mod tests {
         let (_, galaxy) = galaxy();
         let other = GalaxyKey::new(SEED + 1, GENERATOR_VERSION);
         drop(service.get(other, &galaxy).await);
+    }
+
+    /// The plan searched in jobs on a pool of three workers equals the sim's serial plan, whose
+    /// bits the sim's `a_plan_searched_in_jobs_is_the_plan` pins (perf-sky-tables-on-disk, part 2).
+    #[tokio::test]
+    async fn a_plan_searched_on_the_pool_is_the_sim_s() {
+        let pool = Arc::new(
+            CpuPool::new(
+                NonZeroUsize::new(3).expect("three"),
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+            )
+            .unwrap(),
+        );
+        let (_, galaxy) = galaxy();
+        let searched = timeout(WAIT, plan_on_pool(&pool, &galaxy, &CancelToken::new()))
+            .await
+            .expect("timed out searching the plan")
+            .unwrap();
+        let serial = {
+            let galaxy = Arc::clone(&galaxy);
+            timeout(
+                WAIT,
+                tokio::task::spawn_blocking(move || LuminosityTables::plan(&galaxy)),
+            )
+            .await
+            .expect("timed out making the plan")
+            .unwrap()
+        };
+        // Compared whole, not printed: some 10⁴ nodes.
+        assert!(searched == serial, "the plan searched on the pool differs");
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
     /// A service with files writes the tables it builds there, and a service started again over
