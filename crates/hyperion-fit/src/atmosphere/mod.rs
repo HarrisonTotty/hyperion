@@ -73,7 +73,7 @@ mod venus_uv_absorber;
 
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -278,13 +278,26 @@ pub(crate) fn trace_reference_with(
 /// reference is the same, bit for bit, traced whole or resumed any number of times: each job's
 /// moments are merged from its blocks in index order either way, and a checkpoint holds them as
 /// JSON that reads back to the bit.
+///
+/// A job still being traced is also kept in part, every [`PARTIAL_CHECKPOINT_EVERY`] of the
+/// trace's time (R08.T16.a.2; LANE-RULES' long runs, a checkpoint at least every hour): its moments
+/// merged so far, of its samples `0..k` for k in whole blocks, from which a rerun carries it on, as
+/// [`trace_spans`] carries a run on. A job's part is the fold of its first blocks in index order,
+/// the very value the whole job's fold passes through, so a job resumed from it is the same to the
+/// bit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TraceWork<'a> {
     dir: &'a Path,
     case_sha256: &'a str,
     build_sha256: &'a str,
     other_builds: OtherBuilds,
+    partial_every: Duration,
 }
+
+/// How often a resumable trace keeps the job it is tracing in part: every 10 minutes of the
+/// trace's time, so that a run cut short loses at most that of its threads' work, where a job of
+/// many samples takes hours (`saturn-envelope`'s `disc-p0`, 1.6–2.8 h a wavelength on 32 threads).
+pub const PARTIAL_CHECKPOINT_EVERY: Duration = Duration::from_secs(600);
 
 impl<'a> TraceWork<'a> {
     /// The work directory `dir`, made if it is missing, of the trace of the case whose file has
@@ -306,6 +319,17 @@ impl<'a> TraceWork<'a> {
             case_sha256,
             build_sha256,
             other_builds,
+            partial_every: PARTIAL_CHECKPOINT_EVERY,
+        }
+    }
+
+    /// The work, keeping the job it is tracing in part every `every` of the trace's time rather
+    /// than every [`PARTIAL_CHECKPOINT_EVERY`]; at zero, after each of its blocks.
+    #[must_use]
+    pub fn with_partial_every(self, every: Duration) -> Self {
+        Self {
+            partial_every: every,
+            ..self
         }
     }
 }
@@ -326,6 +350,7 @@ pub enum OtherBuilds {
 pub struct Resumed {
     jobs: usize,
     read: usize,
+    partial: usize,
     other_build: usize,
 }
 
@@ -342,8 +367,14 @@ impl Resumed {
         self.read
     }
 
-    /// Those read from checkpoints written by another build, where [`OtherBuilds::Read`] lets
-    /// them be.
+    /// Those carried on from a part of their samples kept in the work directory.
+    #[must_use]
+    pub fn partial(&self) -> usize {
+        self.partial
+    }
+
+    /// Those read whole or in part from checkpoints written by another build, where
+    /// [`OtherBuilds::Read`] lets them be.
     #[must_use]
     pub fn other_build(&self) -> usize {
         self.other_build
@@ -393,7 +424,8 @@ struct CheckpointKey<'a> {
     default_samples: u64,
 }
 
-/// One job's checkpoint: its key, the job, and its moments, vertices and threads' seconds.
+/// One job's checkpoint: its key, the job, and its moments, vertices and threads' seconds; whole,
+/// or in part.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Checkpoint {
@@ -406,6 +438,10 @@ struct Checkpoint {
     wavelength: u64,
     /// The job's samples.
     samples: u64,
+    /// In a job's part, the samples `0..merged` its moments hold, in whole blocks, fewer than the
+    /// job's; absent from a whole job's, whose moments hold every sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    merged: Option<u64>,
     build_sha256: String,
     /// Each of the [`MOMENTS`] over the job's samples and over their first quarter.
     whole: Vec<Moments>,
@@ -416,9 +452,32 @@ struct Checkpoint {
 }
 
 impl Checkpoint {
-    /// Whether it is the checkpoint of `job` of the trace keyed `key`.
+    /// Whether it is the whole checkpoint of `job` of the trace keyed `key`.
     #[must_use]
     fn is_of(&self, key: &CheckpointKey<'_>, source: u64, job: &Job) -> bool {
+        self.merged.is_none()
+            && self.is_keyed(key, source, job)
+            && self.whole[I].samples() == job.end - job.start
+    }
+
+    /// Whether it is a part of `job` of the trace keyed `key`, a whole run's: its samples
+    /// `0..merged`, in whole blocks and fewer than the job's, its first quarter's those of them
+    /// below the job's.
+    #[must_use]
+    fn is_part_of(&self, key: &CheckpointKey<'_>, source: u64, job: &Job) -> bool {
+        self.merged.is_some_and(|merged| {
+            job.start == 0
+                && merged < job.end
+                && merged.is_multiple_of(BLOCK_SAMPLES)
+                && self.is_keyed(key, source, job)
+                && self.whole[I].samples() == merged
+                && self.quarter[I].samples() == merged.min(job.quarter)
+        })
+    }
+
+    /// Whether its key, source, wavelength and count are those of `job` of the trace keyed `key`.
+    #[must_use]
+    fn is_keyed(&self, key: &CheckpointKey<'_>, source: u64, job: &Job) -> bool {
         self.format == CHECKPOINT_FORMAT
             && self.case_sha256 == key.case_sha256
             && self.polarisation == key.polarisation
@@ -428,23 +487,34 @@ impl Checkpoint {
             && self.samples == job.end
             && self.whole.len() == MOMENTS
             && self.quarter.len() == MOMENTS
-            && self.whole[I].samples() == job.end - job.start
     }
 }
 
 /// The checkpoint's file of the job of source key `source` at wavelength `wavelength`, in `dir`:
-/// `geometry-0012-w1.json`, `ground-0003-w0.json` or `top-0003-w2.json`.
+/// `geometry-0012-w1.json`, `ground-0003-w0.json` or `top-0003-w2.json`; its part's,
+/// `geometry-0012-w1.part.json`.
 #[must_use]
-fn checkpoint_path(dir: &Path, source: u64, wavelength: usize) -> PathBuf {
+fn checkpoint_path(dir: &Path, source: u64, wavelength: usize, kept: Kept) -> PathBuf {
     let kind = match source >> 32 {
         0 => "geometry",
         1 => "ground",
         _ => "top",
     };
+    let suffix = match kept {
+        Kept::Whole => "",
+        Kept::Part => ".part",
+    };
     dir.join(format!(
-        "{kind}-{:04}-w{wavelength}.json",
+        "{kind}-{:04}-w{wavelength}{suffix}.json",
         source & 0xffff_ffff
     ))
+}
+
+/// Which of a job's checkpoints: the whole job's, or a part of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kept {
+    Whole,
+    Part,
 }
 
 /// A trace's whole runs, before they are traced: what [`trace_moments`] takes.
@@ -458,7 +528,7 @@ struct Whole<'a> {
 }
 
 impl Whole<'_> {
-    /// [`trace_moments`] of the runs, each finished job given to `done`.
+    /// [`trace_moments`] of the runs, each job given to `done` as each of its blocks is merged.
     fn trace(
         &self,
         done: &mut dyn FnMut(usize, JobDone<'_>) -> Result<(), TraceReferenceError>,
@@ -475,8 +545,9 @@ impl Whole<'_> {
     }
 
     /// The runs traced in the work directory `work`, of the trace keyed `key`: each job read
-    /// from its checkpoint there if it has one, and the others traced, each kept as it finishes;
-    /// with what was read.
+    /// from its checkpoint there if it has one, carried on from its part if one is kept, and the
+    /// others traced; each kept in part as it is traced, every `work`'s interval, and whole as it
+    /// finishes; with what was read.
     fn resume(
         &self,
         work: &TraceWork<'_>,
@@ -496,87 +567,186 @@ impl Whole<'_> {
             jobs: jobs.len(),
             ..Resumed::default()
         };
-        let mut left = Vec::new();
+        // Each job left to trace by its index, from its part where one is kept.
+        let mut left: Vec<(usize, Job)> = Vec::new();
         for (k, job) in jobs.iter().enumerate() {
             let source = self.sources[job.source].0;
-            let path = checkpoint_path(work.dir, source, job.wavelength);
-            let text = match std::fs::read_to_string(&path) {
-                Ok(text) => text,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    left.push(k);
-                    continue;
+            let path = checkpoint_path(work.dir, source, job.wavelength, Kept::Whole);
+            if let Some(checkpoint) = read_checkpoint(&path)? {
+                if !checkpoint.is_of(key, source, job) {
+                    return Err(TraceReferenceError::StaleCheckpoint { path });
                 }
-                Err(source) => return Err(TraceReferenceError::Work { path, source }),
+                let other_build = written_by_other_build(work, &checkpoint, path)?;
+                traced.whole[k].copy_from_slice(&checkpoint.whole);
+                traced.quarters[k].copy_from_slice(&checkpoint.quarter);
+                traced.vertices[k] = checkpoint.vertices;
+                resumed.read += 1;
+                resumed.other_build += usize::from(other_build);
+                continue;
+            }
+            let path = checkpoint_path(work.dir, source, job.wavelength, Kept::Part);
+            let Some(part) = read_checkpoint(&path)? else {
+                left.push((k, *job));
+                continue;
             };
-            let checkpoint: Checkpoint = serde_json::from_str(&text).map_err(|source| {
-                TraceReferenceError::CorruptCheckpoint {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
-            if !checkpoint.is_of(key, source, job) {
+            let merged = part.merged.filter(|_| part.is_part_of(key, source, job));
+            let Some(merged) = merged else {
                 return Err(TraceReferenceError::StaleCheckpoint { path });
-            }
-            let other_build = checkpoint.build_sha256 != work.build_sha256;
-            if other_build && work.other_builds == OtherBuilds::Refused {
-                return Err(TraceReferenceError::OtherBuildCheckpoint { path });
-            }
-            traced.whole[k].copy_from_slice(&checkpoint.whole);
-            traced.quarters[k].copy_from_slice(&checkpoint.quarter);
-            traced.vertices[k] = checkpoint.vertices;
-            resumed.read += 1;
-            if other_build {
-                resumed.other_build += 1;
-            }
+            };
+            let other_build = written_by_other_build(work, &part, path)?;
+            let mut prior = [Moments::default(); MOMENTS];
+            prior.copy_from_slice(&part.whole);
+            let mut quarter_prior = [Moments::default(); MOMENTS];
+            quarter_prior.copy_from_slice(&part.quarter);
+            left.push((
+                k,
+                Job {
+                    start: merged,
+                    prior,
+                    quarter_prior,
+                    prior_vertices: part.vertices,
+                    prior_seconds: part.thread_seconds,
+                    ..*job
+                },
+            ));
+            resumed.partial += 1;
+            resumed.other_build += usize::from(other_build);
         }
-        let remaining: Vec<Job> = left.iter().map(|&k| jobs[k]).collect();
+        let remaining: Vec<Job> = left.iter().map(|&(_, job)| job).collect();
+        // A part is kept once `work`'s interval has passed since the last, for the job whose block
+        // was merged then.
+        let mut last_part = Instant::now();
         let fresh = Whole {
             jobs: &remaining,
             ..*self
         }
         .trace(&mut |index, done| {
             let job = &remaining[index];
-            let source = self.sources[job.source].0;
-            let path = checkpoint_path(work.dir, source, job.wavelength);
-            // A value that is not finite is the tracer's bug, which `finite` names once the trace
-            // is done; JSON would write it as `null`, so it is not kept.
-            if done
-                .whole
-                .iter()
-                .chain(done.quarter)
-                .any(|m| !(m.mean().is_finite() && m.standard_error().is_finite()))
-            {
+            let kept = if done.merged == job.end {
+                Kept::Whole
+            } else if last_part.elapsed() >= work.partial_every {
+                last_part = Instant::now();
+                Kept::Part
+            } else {
                 return Ok(());
-            }
-            let checkpoint = Checkpoint {
-                format: CHECKPOINT_FORMAT,
-                case_sha256: key.case_sha256.to_owned(),
-                polarisation: key.polarisation,
-                default_samples: key.default_samples,
-                source,
-                wavelength: wide(job.wavelength),
-                samples: job.end,
-                build_sha256: work.build_sha256.to_owned(),
-                whole: done.whole.to_vec(),
-                quarter: done.quarter.to_vec(),
-                vertices: done.vertices,
-                thread_seconds: done.seconds,
             };
-            let text = serde_json::to_string(&checkpoint)
-                .expect("a checkpoint of numbers and strings serialises into a String");
-            // Written whole beside it, then renamed, so that a run cut short leaves no part.
-            let partial = path.with_extension("json.partial");
-            std::fs::write(&partial, text)
-                .and_then(|()| std::fs::rename(&partial, &path))
-                .map_err(|source| TraceReferenceError::Work { path, source })
+            keep(work, key, self.sources[job.source].0, job, &done, kept)
         })?;
-        for (index, &k) in left.iter().enumerate() {
+        for (index, &(k, _)) in left.iter().enumerate() {
             traced.whole[k] = fresh.whole[index];
             traced.quarters[k] = fresh.quarters[index];
             traced.vertices[k] = fresh.vertices[index];
         }
         Ok((traced, resumed))
     }
+}
+
+/// Keeps `done`, as far as `job` of source key `source` is traced, in `work` for the trace keyed
+/// `key`: whole or in part, as `kept` says.
+///
+/// # Errors
+///
+/// [`TraceReferenceError::Work`] if its checkpoint cannot be written.
+fn keep(
+    work: &TraceWork<'_>,
+    key: &CheckpointKey<'_>,
+    source: u64,
+    job: &Job,
+    done: &JobDone<'_>,
+    kept: Kept,
+) -> Result<(), TraceReferenceError> {
+    // A value that is not finite is the tracer's bug, which `finite` names once the trace is done;
+    // JSON would write it as `null`, so it is not kept.
+    if done
+        .whole
+        .iter()
+        .chain(done.quarter)
+        .any(|m| !(m.mean().is_finite() && m.standard_error().is_finite()))
+    {
+        return Ok(());
+    }
+    let checkpoint = Checkpoint {
+        format: CHECKPOINT_FORMAT,
+        case_sha256: key.case_sha256.to_owned(),
+        polarisation: key.polarisation,
+        default_samples: key.default_samples,
+        source,
+        wavelength: wide(job.wavelength),
+        samples: job.end,
+        merged: match kept {
+            Kept::Whole => None,
+            Kept::Part => Some(done.merged),
+        },
+        build_sha256: work.build_sha256.to_owned(),
+        whole: done.whole.to_vec(),
+        quarter: done.quarter.to_vec(),
+        vertices: done.vertices,
+        thread_seconds: done.seconds,
+    };
+    write_checkpoint(
+        &checkpoint,
+        &checkpoint_path(work.dir, source, job.wavelength, kept),
+    )
+}
+
+/// The checkpoint at `path`, or `None` where there is none.
+///
+/// # Errors
+///
+/// [`TraceReferenceError::Work`] if it cannot be read, [`TraceReferenceError::CorruptCheckpoint`]
+/// if it is not a checkpoint.
+fn read_checkpoint(path: &Path) -> Result<Option<Checkpoint>, TraceReferenceError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(TraceReferenceError::Work {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    serde_json::from_str(&text)
+        .map(Some)
+        .map_err(|source| TraceReferenceError::CorruptCheckpoint {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+/// Whether `checkpoint`, at `path`, was written by another build of the tracer than `work`'s.
+///
+/// # Errors
+///
+/// [`TraceReferenceError::OtherBuildCheckpoint`] for one that was, unless `work` reads them.
+fn written_by_other_build(
+    work: &TraceWork<'_>,
+    checkpoint: &Checkpoint,
+    path: PathBuf,
+) -> Result<bool, TraceReferenceError> {
+    let other_build = checkpoint.build_sha256 != work.build_sha256;
+    if other_build && work.other_builds == OtherBuilds::Refused {
+        return Err(TraceReferenceError::OtherBuildCheckpoint { path });
+    }
+    Ok(other_build)
+}
+
+/// Writes `checkpoint` to `path`: whole beside it, then renamed, so that a run cut short leaves no
+/// part of a file.
+///
+/// # Errors
+///
+/// [`TraceReferenceError::Work`] if it cannot be written.
+fn write_checkpoint(checkpoint: &Checkpoint, path: &Path) -> Result<(), TraceReferenceError> {
+    let text = serde_json::to_string(checkpoint)
+        .expect("a checkpoint of numbers and strings serialises into a String");
+    let partial = path.with_extension("json.partial");
+    std::fs::write(&partial, text)
+        .and_then(|()| std::fs::rename(&partial, path))
+        .map_err(|source| TraceReferenceError::Work {
+            path: path.to_path_buf(),
+            source,
+        })
 }
 
 /// A traced reference with the vertices its samples reached (R08.T13.a's cost, main's reading 2):
@@ -740,6 +910,10 @@ pub(crate) fn trace_spans(
                 // Every sample of a span lies at or past its start: none is the first quarter's.
                 quarter: s.start(),
                 prior,
+                quarter_prior: [Moments::default(); MOMENTS],
+                // A span's vertices are its own samples'.
+                prior_vertices: 0,
+                prior_seconds: 0.0,
             }
         })
         .collect();
@@ -978,8 +1152,10 @@ fn push_sample(
 /// One source's samples a trace takes at one wavelength.
 ///
 /// They are `start..end` of its stream, those below `quarter` also kept apart, merged onto
-/// `prior`, the moments of its samples before `start`. A whole run is `0..N` with its first
-/// quarter `N ÷ 4` and no prior; [`trace_spans`] carries a run on from where it stopped.
+/// `prior`, the moments of its samples before `start`, and those below `quarter` onto
+/// `quarter_prior`. A whole run is `0..N` with its first quarter `N ÷ 4` and no prior;
+/// [`trace_spans`] carries a run on from where it stopped, and a resumable trace a job from its
+/// part.
 #[derive(Debug, Clone, Copy)]
 struct Job {
     /// The wavelength, by index into the media.
@@ -990,6 +1166,10 @@ struct Job {
     end: u64,
     quarter: u64,
     prior: [Moments; MOMENTS],
+    quarter_prior: [Moments; MOMENTS],
+    /// The vertices of the samples before `start`, and the threads' seconds on them.
+    prior_vertices: u64,
+    prior_seconds: f64,
 }
 
 impl Job {
@@ -1006,19 +1186,25 @@ impl Job {
                     end: n,
                     quarter: n / 4,
                     prior: [Moments::default(); MOMENTS],
+                    quarter_prior: [Moments::default(); MOMENTS],
+                    prior_vertices: 0,
+                    prior_seconds: 0.0,
                 })
             })
             .collect()
     }
 }
 
-/// A job just traced, as [`trace_moments`] gives it to its `done`.
+/// A job as far as it is traced, as [`trace_moments`] gives it to its `done`: its moments, vertices
+/// and seconds over its samples `0..merged`, its prior's and its blocks' merged so far.
 struct JobDone<'a> {
     whole: &'a [Moments; MOMENTS],
     quarter: &'a [Moments; MOMENTS],
     vertices: u64,
     /// The seconds the threads spent on its blocks.
     seconds: f64,
+    /// One past the last sample merged: the job's `end` once it is traced.
+    merged: u64,
 }
 
 /// Traces each job.
@@ -1026,8 +1212,8 @@ struct JobDone<'a> {
 /// It gives the moments of (I, Q, U, V), of the scalar radiance and of the radiance less it, per
 /// job, over its samples merged onto its prior, and over those below its `quarter`. The scalar
 /// mode fills the first alone. Each job of at least one sample is given to `done` by its index as
-/// soon as its last block is merged, the jobs in their order; the first error `done` returns is
-/// returned once the trace is finished, and no job after it is given.
+/// each of its blocks is merged, its last's as soon as it is, the blocks in their order; the first
+/// error `done` returns is returned once the trace is finished, and nothing after it is given.
 fn trace_moments(
     seed: u64,
     media: &[Medium<'_>],
@@ -1053,9 +1239,9 @@ fn trace_moments(
     // Each job's blocks merge onto its prior in index order, as a whole run's merge onto the
     // empty moments: a run carried on from N reads as one traced from 0.
     let mut whole: Vec<[Moments; MOMENTS]> = jobs.iter().map(|job| job.prior).collect();
-    let mut quarters = vec![[Moments::default(); MOMENTS]; jobs.len()];
-    let mut vertices = vec![0_u64; jobs.len()];
-    let mut seconds = vec![0.0; jobs.len()];
+    let mut quarters: Vec<[Moments; MOMENTS]> = jobs.iter().map(|job| job.quarter_prior).collect();
+    let mut vertices: Vec<u64> = jobs.iter().map(|job| job.prior_vertices).collect();
+    let mut seconds: Vec<f64> = jobs.iter().map(|job| job.prior_seconds).collect();
     let mut failed = None;
     map_reduce_chunks(
         items,
@@ -1095,7 +1281,7 @@ fn trace_moments(
                     }
                     (
                         index,
-                        item + 1 == starts[index + 1],
+                        end,
                         block_moments,
                         quarter_moments,
                         scratch.take_vertices(),
@@ -1105,7 +1291,7 @@ fn trace_moments(
                 .collect::<Vec<_>>()
         },
         |results| {
-            for (index, last, block_moments, quarter_moments, block_vertices, block_seconds) in
+            for (index, merged, block_moments, quarter_moments, block_vertices, block_seconds) in
                 results
             {
                 vertices[index] += block_vertices;
@@ -1116,7 +1302,7 @@ fn trace_moments(
                 for (total, part) in quarters[index].iter_mut().zip(&quarter_moments) {
                     total.merge(part);
                 }
-                if last && failed.is_none() {
+                if failed.is_none() {
                     failed = done(
                         index,
                         JobDone {
@@ -1124,6 +1310,7 @@ fn trace_moments(
                             quarter: &quarters[index],
                             vertices: vertices[index],
                             seconds: seconds[index],
+                            merged,
                         },
                     )
                     .err();
@@ -1574,6 +1761,149 @@ mod tests {
             ),
             Err(TraceReferenceError::StaleCheckpoint { .. })
         ));
+    }
+
+    #[test]
+    fn atmosphere_resumable_traces_carry_a_job_on_from_its_part_to_the_bit() {
+        // R08.T16.a.2's parts: the sample case thickened, its aerosol isotropic so that the Stokes
+        // mode traces it, its ground view at 12 blocks of its own (its first quarter 3). Kept in
+        // part after every block, each job's last part stands beside its whole checkpoint: with
+        // three of those lost, the trace carries those jobs on from their parts, to the bit.
+        let mut value = case::tests::thickened_sample_case();
+        value["terms"][1]["phase"] = json!({ "kind": "isotropic" });
+        value["geometries"][0]["samples"] = json!(12 * BLOCK_SAMPLES);
+        let case = case_of(&value);
+        let (samples, threads) = (
+            NonZeroU64::new(1100).unwrap(),
+            NonZeroUsize::new(3).unwrap(),
+        );
+        let whole = trace_reference(&case, Polarisation::Stokes, samples, threads)
+            .unwrap()
+            .to_json();
+        let dir = tempfile::tempdir().unwrap();
+        let work = TraceWork::new(dir.path(), "the case's", "a", OtherBuilds::Refused);
+        let resumably = |work: &TraceWork<'_>| {
+            trace_reference_resumably(&case, Polarisation::Stokes, samples, threads, work)
+        };
+        let (reference, resumed) = resumably(&work.with_partial_every(Duration::ZERO)).unwrap();
+        assert_eq!(reference.to_json(), whole);
+        assert_eq!((resumed.read(), resumed.partial()), (0, 0));
+        for lost in [
+            "geometry-0000-w0.json",
+            "geometry-0000-w1.json",
+            "top-0000-w1.json",
+        ] {
+            std::fs::remove_file(dir.path().join(lost)).unwrap();
+        }
+        let (reference, resumed) = resumably(&work).unwrap();
+        assert_eq!(reference.to_json(), whole);
+        assert_eq!((resumed.read(), resumed.partial()), (5, 3));
+        // A part from within the ground view's first quarter, as a run cut short after its second
+        // block leaves it, carries on to the same bits.
+        let fresh = tempfile::tempdir().unwrap();
+        let key = CheckpointKey {
+            case_sha256: "the case's",
+            polarisation: Polarisation::Stokes,
+            default_samples: samples.get(),
+        };
+        let part = part_after(&case, &key, samples, 2 * BLOCK_SAMPLES);
+        let path = checkpoint_path(fresh.path(), part.source, 0, Kept::Part);
+        write_checkpoint(&part, &path).unwrap();
+        let early = TraceWork::new(fresh.path(), "the case's", "a", OtherBuilds::Refused);
+        let (reference, resumed) = resumably(&early).unwrap();
+        assert_eq!(reference.to_json(), whole);
+        assert_eq!((resumed.read(), resumed.partial()), (0, 1));
+        // A part not in whole blocks, or another trace's, is refused; another build's is read
+        // only where the work reads them.
+        for stale in [
+            Checkpoint {
+                merged: Some(BLOCK_SAMPLES + 1),
+                ..part.clone()
+            },
+            Checkpoint {
+                case_sha256: "another case's".to_owned(),
+                ..part.clone()
+            },
+        ] {
+            let other = tempfile::tempdir().unwrap();
+            write_checkpoint(
+                &stale,
+                &checkpoint_path(other.path(), part.source, 0, Kept::Part),
+            )
+            .unwrap();
+            let work = TraceWork::new(other.path(), "the case's", "a", OtherBuilds::Refused);
+            assert!(
+                matches!(
+                    resumably(&work),
+                    Err(TraceReferenceError::StaleCheckpoint { .. })
+                ),
+                "{stale:?}"
+            );
+        }
+        let other = tempfile::tempdir().unwrap();
+        write_checkpoint(
+            &part,
+            &checkpoint_path(other.path(), part.source, 0, Kept::Part),
+        )
+        .unwrap();
+        let refused = TraceWork::new(other.path(), "the case's", "b", OtherBuilds::Refused);
+        assert!(matches!(
+            resumably(&refused),
+            Err(TraceReferenceError::OtherBuildCheckpoint { .. })
+        ));
+        let read = TraceWork::new(other.path(), "the case's", "b", OtherBuilds::Read);
+        let (reference, resumed) = resumably(&read).unwrap();
+        assert_eq!(reference.to_json(), whole);
+        assert_eq!((resumed.partial(), resumed.other_build()), (1, 1));
+    }
+
+    /// The part of `case`'s first job, its first geometry's at its first wavelength, after its
+    /// samples `0..merged`, as the build `a` keeps it for the trace keyed `key`: traced as a
+    /// resumable trace traces it, its moments taken as the block ending at `merged` is merged.
+    fn part_after(
+        case: &AtmosphereCase,
+        key: &CheckpointKey<'_>,
+        samples: NonZeroU64,
+        merged: u64,
+    ) -> Checkpoint {
+        let grid = shell_grid(case);
+        let media: Vec<Medium<'_>> = (0..case.wavelengths_nm().len())
+            .map(|w| Medium::new(case, &grid, w, Estimator::ByMedium, Orders::Every))
+            .collect();
+        let sources = sources_of(case, &grid);
+        let jobs = Job::whole_runs(media.len(), &counts_of(case, samples.get()));
+        let job = jobs[0];
+        let mut part = None;
+        Whole {
+            seed: case.seed(),
+            media: &media,
+            sources: &sources,
+            jobs: &jobs[..1],
+            polarisation: key.polarisation,
+            threads: NonZeroUsize::new(2).unwrap(),
+        }
+        .trace(&mut |_, done| {
+            if done.merged == merged {
+                part = Some(Checkpoint {
+                    format: CHECKPOINT_FORMAT,
+                    case_sha256: key.case_sha256.to_owned(),
+                    polarisation: key.polarisation,
+                    default_samples: key.default_samples,
+                    source: sources[job.source].0,
+                    wavelength: 0,
+                    samples: job.end,
+                    merged: Some(merged),
+                    build_sha256: "a".to_owned(),
+                    whole: done.whole.to_vec(),
+                    quarter: done.quarter.to_vec(),
+                    vertices: done.vertices,
+                    thread_seconds: done.seconds,
+                });
+            }
+            Ok(())
+        })
+        .unwrap();
+        part.expect("the job reaches the part's samples")
     }
 
     #[test]

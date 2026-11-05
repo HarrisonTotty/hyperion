@@ -14,7 +14,8 @@
 //!                                   [--resume-other-build]
 //!                                        # an atmosphere case's reference radiances (plan R08,
 //!                                        # R08.T12.a), not a fit: outside `tables.lock`;
-//!                                        # resumable from DIR (R08.T12.h)
+//!                                        # resumable from DIR, its jobs whole or in part
+//!                                        # (R08.T12.h, R08.T16.a.2)
 //! hyperion-fit atmosphere-sweep <sweep.case.json> --out <sweep.json> --work <dir>
 //!                               --cpu-per-vertex-us X --vroom-cpu-per-vertex-us Y
 //!                               [--point-cap-cpu-h 24] [--threads N] [--max-points N]
@@ -195,8 +196,9 @@ pub struct AtmosphereReferenceArgs {
     #[arg(long)]
     pub stokes: bool,
     /// Keep each geometry's and aggregate's moments at each wavelength in this directory as they
-    /// finish, and read back those there on a rerun of the same trace, which then traces only
-    /// the rest: the reference is the same, bit for bit (R08.T12.h).
+    /// finish, and the job being traced in part every 10 minutes, and read back those there on a
+    /// rerun of the same trace, which then traces only the rest: the reference is the same, bit
+    /// for bit (R08.T12.h, R08.T16.a.2).
     #[arg(long)]
     pub work: Option<PathBuf>,
     /// Read `--work`'s checkpoints written by another build of the tracer, which are refused
@@ -438,10 +440,11 @@ fn atmosphere_reference(
                 trace_reference_resumably(&case, polarisation, samples, threads, &work)?;
             writeln!(
                 out,
-                "read {} of {} jobs from {}{}",
+                "read {} of {} jobs from {}, and carried {} on from their parts{}",
                 resumed.read(),
                 resumed.jobs(),
                 dir.display(),
+                resumed.partial(),
                 if resumed.other_build() > 0 {
                     format!(
                         ", {} of them written by another build of the tracer",
