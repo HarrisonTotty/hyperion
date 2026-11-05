@@ -81,18 +81,24 @@ use hyperion_sim::math;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::caps::CAPPED_LAYERS;
+#[cfg(not(target_family = "wasm"))]
+use hyperion_sim::sky::census::SkyStar;
 use hyperion_sim::sky::census::{
-    CensusTallies, GRID_STAR_BOUND, RecordLight, SkyQuery, SkyStar, StarBounds, flux_bound,
-    merge_census, star_offset_bound,
+    CensusTallies, GRID_STAR_BOUND, RecordLight, SkyQuery, StarBounds, flux_bound, merge_census,
+    star_offset_bound,
 };
 use hyperion_sim::sky::envelope::{BrightnessEnvelope, max_star_mass};
 use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
 use hyperion_sim::sky::phase::PhaseEnvelope;
 use hyperion_sim::sky::photometry::absolute_v_of_state;
 use hyperion_sim::stellar::Phase;
+#[cfg(not(target_family = "wasm"))]
 use hyperion_sim::stellar::binary::{PairLight, pair_light_bound};
+#[cfg(not(target_family = "wasm"))]
 use hyperion_sim::stellar::multiplicity::{StarIndex, hierarchy_bound};
-use hyperion_sim::stellar::system::{SystemStars, draw_metallicity};
+use hyperion_sim::stellar::system::SystemStars;
+#[cfg(not(target_family = "wasm"))]
+use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::{LightYears, Magnitudes};
 use hyperion_testkit::float;
@@ -560,8 +566,8 @@ fn the_census_is_its_oracle_for_the_dwarfs_near_the_sun() {
 /// kept is answered `Detached` at the system's age then and its state is not its own model's, as
 /// `sky::census::cell`'s realised check knows one. From generator version 27 a wide pair's
 /// main-sequence star takes its partner's wind (P11.T12), which the bound's `Detached` verdict
-/// reaches only at 29 (its wind reach, retargeted by train 27 and again by train 28), so such a star can
-/// outshine the bound the census skips its record by.
+/// reaches only at 29 (its wind reach, retargeted by train 27 and again by train 28), so such a
+/// star can outshine the bound the census skips its record by.
 #[cfg(not(target_family = "wasm"))]
 fn wind_fed_star(
     g: &Galaxy,
