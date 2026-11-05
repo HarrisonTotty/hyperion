@@ -57,6 +57,7 @@
 import {
   ATMOSPHERE_DECK_ENTRIES,
   ATMOSPHERE_LIMB_ENTRIES,
+  ATMOSPHERE_THICK_LEVER_ENTRIES,
   ATMOSPHERE_ONE_BAND_ENTRIES,
   ATMOSPHERE_THERMAL_ENTRIES,
   ATMOSPHERE_THICK_ENTRIES,
@@ -104,6 +105,8 @@ import {
   checkMarchPackedGeneral,
   checkMarchTableBySlot,
   checkMarchTableShared,
+  checkThickMarchLeversBySlot,
+  checkThickMarchLeversShared,
   checkMarchSpecialised,
   checkCorrectionFrameTwinsEarth,
   checkRoutedTwins,
@@ -484,7 +487,8 @@ async function run(
       !DISC_AIR_ENTRIES.includes(entry) &&
       !DISC_EMISSIVE_AIR_ENTRIES.includes(entry) &&
       !TABLE_ONLY_ENTRIES.includes(entry) &&
-      !MARCH_TABLE_ONLY_ENTRIES.includes(entry),
+      !MARCH_TABLE_ONLY_ENTRIES.includes(entry) &&
+      !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
   await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
@@ -610,6 +614,10 @@ async function run(
   await group(8, "R08.T8.e's table: the march by slot's sources from the sources' table", () =>
     checkMarchTableBySlot(engine, checks, summary.fallback),
   );
+  // In part 8 after R08.T8.e's table's, over the thick read's march by slot (perf-thick-march).
+  await group(8, "perf-thick-march the thick read's march levers by slot", () =>
+    checkThickMarchLeversBySlot(engine, checks, summary.fallback),
+  );
   await group(12, "R08.T11.b the face's count on a drawn surface", () =>
     checkFaceCount(engine, checks, twins),
   );
@@ -691,6 +699,11 @@ async function run(
   await group(17, "T9.b catalogue: the far limb's packed kernels", () =>
     checkCatalogue(engine, status, ATMOSPHERE_LIMB_ENTRIES, checks),
   );
+  // perf-thick-march's thick read's marches from the table and its packed limb's, in part 17 beside
+  // the thin read's packed kernels: parts 8 and 12 hold their checks.
+  await group(17, "T9.b catalogue: the thick read's march levers' kernels", () =>
+    checkCatalogue(engine, status, ATMOSPHERE_THICK_LEVER_ENTRIES, checks),
+  );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),
   );
@@ -761,6 +774,10 @@ async function run(
   // In part 12 after the specialised march's, over the shared read that its group compiled.
   await group(12, "R08.T8.e's table: the shared read's sources from the sources' table", () =>
     checkMarchTableShared(engine, checks, summary.fallback),
+  );
+  // In part 12 after R08.T8.e's table's, over the thick read's shared read (perf-thick-march).
+  await group(12, "perf-thick-march the thick read's march levers over the shared read", () =>
+    checkThickMarchLeversShared(engine, checks, summary.fallback),
   );
   // R08.T18.b's thermal forms of the per-frame kernels, compiled and held to their twins, in part 12,
   // the lightest (54 s at 03e12ec's tree).

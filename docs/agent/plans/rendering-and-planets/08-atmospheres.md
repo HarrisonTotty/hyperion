@@ -4602,7 +4602,9 @@ added on 2026-10-22 by `decision-r08-t8-leans.md` §9):
   static check beside R05's. It follows T8.c and precedes R08.T10.b. `pnpm test` and
   `just test-render` pass. _Built 2026-10-22_ (Risks, "Deviations in T8.d, as built").
   _Reopened 2026-11-03 for the far limb's rays from orbit (the owner's M5 profile): built, the
-  Mac A/B pending_ (Risks, "R08.T8.d's far limb from orbit, as built").
+  Mac A/B pending_ (Risks, "R08.T8.d's far limb from orbit, as built"). _On the thick read
+  2026-11-05: built, the Mac A/B pending_ (Risks, "R08.T8.d's packed limb on the thick read, as
+  built").
 
 - **R08.T8.e The march's sources and steps from outside the air** (`decision-r08-t8-leans.md`
   §9). At the setting's count the march is a blocker for R08.T10.b: from 400 km on high, after
@@ -24973,6 +24975,25 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     and the packed limb's (compiled in part 16 only).
   - _Pending, the owner's Mac A/B_ (`--march-sources`, its command in the outbox's `gate.txt`) and
     the RTX QW.
+- **R08.T8.d's packed limb on the thick read, as built** (2026-11-05; lane perf-thick-march; no
+  generated value moves). The pod's figures are in the lane's outbox, `measurements.md`.
+  - `limbRays` `packed` reaches the thick read's march but over a deck, which every world with air
+    takes once its correction lands (`CORRECTION_ROUTED`): `THICK_LIMB_PAIRS` (`THICK_LIMB_KERNELS`,
+    8, the thin read's packed forms per step through `thickPerStep`; the resolve and the
+    dispatches shared).
+  - `RAY_MARCH_THICK_KERNEL` and its forms keep their bytes (the deck and thermal bases) and stay
+    the per-texel march.
+  - Exact (R08.T14.c's read): every lever kernel finds the altitude row once a sample
+    (`withThickRowOnce`, `thickSampleRow.wgsl`); the march per step, the sky view and the aerial
+    perspective still search a source.
+  - `LimbKernels.pair(march, read, form)`; `FrameKernelsAhead.thickPacked`.
+  - Catalogue: `ATMOSPHERE_THICK_LEVER_ENTRIES` (smoke part 17). VIEW's kernel bound 97 → 105.
+  - Smoke: parts 8 (by slot: the measured Earth, TEST TITAN) and 12 (the shared read: R05's Earth,
+    the Saturn-class figure), each over a patterned thick table, packed against the general thick
+    march over the whole frame to the bit.
+  - Left: the deck and thermal marches per texel.
+  - _Pending, the owner's Mac A/B_ on a routed body and the RTX QW (commands in the outbox's
+    `gate.txt`).
 - **The chromophore gate, as built: it misses** (R08.T16.a.2, 2026-11-04; lane
   `r08-t16a2-chromophore-gate`; research-leans-30 §5, research-rm4-rm5-close-out §1.1; figures in
   the lane's outbox). Renderer only; no generated value moves.

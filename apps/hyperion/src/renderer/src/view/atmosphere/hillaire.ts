@@ -125,6 +125,7 @@ import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
 import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import thickReadBandsWgsl from "./shaders/thickReadBands.wgsl?raw";
+import thickSampleRowWgsl from "./shaders/thickSampleRow.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
   absorberCount,
@@ -455,8 +456,9 @@ export type ViewMarchCover = Exclude<MarchCover, "whole frame">;
  * `packed`, each blended texel's nodes written to a list by the march (`rayMarchPacked.wgsl`) and
  * marched one an invocation (`limbNodes.wgsl`), then summed into the texel in node order
  * (`limbResolve.wgsl`), so that each texel's bits are the per-texel march's. A texel whose nodes
- * find no room in the lists is marched per texel. The thin read's march alone, on the area and the
- * tile cull; the thick, deck and self-luminous marches, and the whole frame, march per texel.
+ * find no room in the lists is marched per texel. The thin read's march, on the area and the tile
+ * cull, and since perf-thick-march the thick read's but over a deck, on the area; the deck and
+ * self-luminous marches, and the whole frame, march per texel.
  */
 export type LimbRays = "per-texel" | "packed";
 
@@ -1254,24 +1256,31 @@ const CENTRE_PAIRS: Readonly<Record<MarchRead, Readonly<Record<MarchForm, Kernel
 };
 
 /**
+ * {@link RAY_MARCH_PACKED_KERNEL}'s march as before R08.T8.e's table, each step's sources per step,
+ * as {@link RAY_MARCH_PER_STEP_KERNEL} is the footprint's: the base of the thick read's packed
+ * entry point per step (perf-thick-march). No frame dispatches it.
+ */
+const RAY_MARCH_PACKED_PER_STEP_KERNEL = kernel(
+  "atmosphere ray march, its limb packed",
+  `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchPackedWgsl}`,
+);
+/** {@link RAY_MARCH_PACKED_PER_STEP_KERNEL} by slot. No frame dispatches it. */
+const RAY_MARCH_SLOTS_PACKED_PER_STEP_KERNEL = kernel(
+  "atmosphere ray march by slot, its limb packed",
+  `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchPackedWgsl}`,
+);
+
+/**
  * The ray march's entry point over the far limb's footprint with its node rays packed (plan R08,
  * R08.T8.d; {@link LimbRays} `packed`; `rayMarchPacked.wgsl`): each texel blended in writes its
  * nodes to the limb's lists and marches its centre ray alone, for the node pass
  * ({@link RAY_MARCH_LIMB_KERNEL}) and the resolve ({@link LIMB_RESOLVE_KERNEL}); every other texel
  * as {@link RAY_MARCH_KERNEL} marches it.
  */
-export const RAY_MARCH_PACKED_KERNEL = withMarchSourceTable(
-  kernel(
-    "atmosphere ray march, its limb packed",
-    `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${rayMarchPackedWgsl}`,
-  ),
-);
+export const RAY_MARCH_PACKED_KERNEL = withMarchSourceTable(RAY_MARCH_PACKED_PER_STEP_KERNEL);
 /** {@link RAY_MARCH_PACKED_KERNEL} by slot, {@link RAY_MARCH_SLOTS_KERNEL}'s read (R08.T8.d). */
 export const RAY_MARCH_SLOTS_PACKED_KERNEL = withMarchSourceTable(
-  kernel(
-    "atmosphere ray march by slot, its limb packed",
-    `${farLimbWgsl}\n${limbListWgsl}\n${marchAreaWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${rayMarchPackedWgsl}`,
-  ),
+  RAY_MARCH_SLOTS_PACKED_PER_STEP_KERNEL,
 );
 
 /**
@@ -1298,25 +1307,31 @@ function withoutMarchTargets(pair: KernelPair): KernelPair {
 }
 
 /**
+ * {@link RAY_MARCH_LIMB_KERNEL}'s node pass as before R08.T8.e's table, each step's sources per
+ * step: the base of the thick read's node pass per step (perf-thick-march). No frame dispatches it.
+ */
+const RAY_MARCH_LIMB_PER_STEP_KERNEL = withoutMarchTargets(
+  kernel(
+    "atmosphere ray march's limb rays",
+    `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${limbNodesWgsl}`,
+  ),
+);
+/** {@link RAY_MARCH_LIMB_PER_STEP_KERNEL} by slot. No frame dispatches it. */
+const RAY_MARCH_SLOTS_LIMB_PER_STEP_KERNEL = withoutMarchTargets(
+  kernel(
+    "atmosphere ray march's limb rays by slot",
+    `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${limbNodesWgsl}`,
+  ),
+);
+
+/**
  * The far limb's node pass (plan R08, R08.T8.d; `limbNodes.wgsl`): each node ray the packed entry
  * point listed, one an invocation, by the one `marchRay` call site, over the shared read.
  */
-export const RAY_MARCH_LIMB_KERNEL = withMarchSourceTable(
-  withoutMarchTargets(
-    kernel(
-      "atmosphere ray march's limb rays",
-      `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchCurvesWgsl}\n${limbNodesWgsl}`,
-    ),
-  ),
-);
+export const RAY_MARCH_LIMB_KERNEL = withMarchSourceTable(RAY_MARCH_LIMB_PER_STEP_KERNEL);
 /** {@link RAY_MARCH_LIMB_KERNEL} by slot (R08.T8.d). */
 export const RAY_MARCH_SLOTS_LIMB_KERNEL = withMarchSourceTable(
-  withoutMarchTargets(
-    kernel(
-      "atmosphere ray march's limb rays by slot",
-      `${limbListWgsl}\n${rayMarchWgsl}\n${rayMarchSlotsWgsl}\n${limbNodesWgsl}`,
-    ),
-  ),
+  RAY_MARCH_SLOTS_LIMB_PER_STEP_KERNEL,
 );
 
 /** {@link RAY_MARCH_PACKED_KERNEL} specialised for one band and no layer edge (R08.T8.d). */
@@ -1519,6 +1534,101 @@ export const RAY_MARCH_THICK_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_THI
 export const RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL = withMarchSpecialised(
   RAY_MARCH_SLOTS_THICK_KERNEL,
 );
+
+/**
+ * The thick read's altitude row once a sample (plan R08, perf-thick-march's step 4;
+ * `thickSampleRow.wgsl`): the march's step clears the row held (`rayMarch.wgsl`'s rayMarchStep),
+ * and `thickReadBands.wgsl`'s thickMultipleAt takes it from `thickSampleRowAt`, which finds it at
+ * the step's first source, in place of a search a source. Each line stands once in a thick march.
+ */
+const THICK_ROW_ONCE: ReadonlyArray<readonly [string, string]> = [
+  [
+    "let shares = rayMarchSourcesAt(body, start, datum.normal, ray.dir, lobes, local);",
+    [
+      "thickSampleRowFound = false;",
+      "  let shares = rayMarchSourcesAt(body, start, datum.normal, ray.dir, lobes, local);",
+    ].join("\n"),
+  ],
+  [
+    "let row = thickRowAt(max(start.scaledHeightM, 0.0));",
+    "let row = thickSampleRowAt(start.scaledHeightM);",
+  ],
+];
+
+/**
+ * `pair`, a thick read's march ({@link withThickRead}), with its altitude row found once a sample and
+ * shared by the sample's sources ({@link THICK_ROW_ONCE}), `thickSampleRow.wgsl` appended: exact,
+ * since every source of a step reads the row at the step's h*. Its name is kept.
+ *
+ * @throws Error naming the kernel when its sources hold a rewritten line nowhere, or twice.
+ */
+function withThickRowOnce(pair: KernelPair): KernelPair {
+  const shared = withMarchRewrites(pair, THICK_ROW_ONCE, "the row once a sample");
+  return {
+    ...shared,
+    name: pair.name,
+    reference: `${shared.reference}\n${thickSampleRowWgsl}`,
+    subgroup: shared.subgroup === null ? null : `${shared.subgroup}\n${thickSampleRowWgsl}`,
+  };
+}
+
+/**
+ * The thick read's march of `pair`, a thin march per step, with its row once a sample, named
+ * `name` (perf-thick-march): {@link RAY_MARCH_THICK_KERNEL}'s arithmetic to the bit.
+ */
+function thickPerStep(pair: KernelPair, name: string): KernelPair {
+  return { ...withThickRowOnce(withThickRead(pair)), name };
+}
+
+/** The thick read's forms of the march (R08.T14.c): it has no one-band, edged form. */
+export type ThickMarchForm = Exclude<MarchForm, "one band">;
+
+/**
+ * Each read's packed entry point and node pass over the thick read, by form (plan R08,
+ * perf-thick-march; {@link LimbRays} `packed` on the thick read): {@link LIMB_PAIRS}' thin forms
+ * per step through {@link thickPerStep}, which march as the thick read's march per texel does, to
+ * the bit.
+ */
+const THICK_LIMB_PAIRS: Readonly<
+  Record<
+    MarchRead,
+    Readonly<Record<ThickMarchForm, { readonly footprint: KernelPair; readonly nodes: KernelPair }>>
+  >
+> = (() => {
+  const thickFormsOf = (
+    footprint: KernelPair,
+    nodes: KernelPair,
+  ): Readonly<
+    Record<ThickMarchForm, { readonly footprint: KernelPair; readonly nodes: KernelPair }>
+  > => {
+    const general = {
+      footprint: thickPerStep(footprint, `${footprint.name}, thick`),
+      nodes: thickPerStep(nodes, `${nodes.name}, thick`),
+    };
+    return {
+      general,
+      special: {
+        footprint: withMarchSpecialised(general.footprint),
+        nodes: withMarchSpecialised(general.nodes),
+      },
+    };
+  };
+  return {
+    "shared read": thickFormsOf(RAY_MARCH_PACKED_PER_STEP_KERNEL, RAY_MARCH_LIMB_PER_STEP_KERNEL),
+    "by slot": thickFormsOf(
+      RAY_MARCH_SLOTS_PACKED_PER_STEP_KERNEL,
+      RAY_MARCH_SLOTS_LIMB_PER_STEP_KERNEL,
+    ),
+  };
+})();
+
+/**
+ * The thick read's packed kernels (perf-thick-march): each read's packed entry point and node pass
+ * in each form; the resolve and the dispatches are {@link LIMB_KERNELS}'.
+ */
+export const THICK_LIMB_KERNELS: ReadonlyArray<KernelPair> = Object.values(
+  THICK_LIMB_PAIRS,
+).flatMap((forms) => Object.values(forms).flatMap(({ footprint, nodes }) => [footprint, nodes]));
 
 /**
  * The thermal source's rewrites of a per-frame kernel's sources (plan R08, R08.T18.b;
@@ -2096,39 +2206,79 @@ interface LimbPair {
   readonly dispatch: ComputeHandle;
 }
 
-/** The far limb's packed kernels (R08.T8.d; {@link LIMB_KERNELS}). */
+/**
+ * The march whose far limb's node rays a frame packs (plan R08, R08.T8.d; perf-thick-march): the
+ * thin read's ({@link LIMB_PAIRS}), or the thick read's but over a deck ({@link THICK_LIMB_PAIRS}).
+ */
+type LimbMarch = "thin" | "thick";
+
+/**
+ * `march`'s packed entry point and node pass of `read` in `form`, or `null` where it has none: the
+ * thick read has no one-band, edged form.
+ */
+function limbPairsOf(
+  march: LimbMarch,
+  read: MarchRead,
+  form: MarchForm,
+): { readonly footprint: KernelPair; readonly nodes: KernelPair } | null {
+  let pairs: { readonly footprint: KernelPair; readonly nodes: KernelPair } | null;
+  switch (march) {
+    case "thin":
+      pairs = LIMB_PAIRS[read][form];
+      break;
+    case "thick":
+      pairs = form === "one band" ? null : THICK_LIMB_PAIRS[read][form];
+      break;
+  }
+  return pairs;
+}
+
+/** The far limb's packed kernels (R08.T8.d; {@link LIMB_KERNELS}, {@link THICK_LIMB_KERNELS}). */
 interface LimbKernels {
   /**
-   * Each read's packed kernels in `form`, or `null` while they are made: at the first ask, at once
-   * or in the background ({@link limbKernelsOver}'s `later`), a frame marching its limb per texel,
-   * which gives the same bits, until they are made, and for good where their making failed.
+   * Each march's packed kernels of each read in `form`, or `null` while they are made, or where the
+   * march has none in that form: at the first ask, at once or in the background
+   * ({@link limbKernelsOver}'s `later`), a frame marching its limb per texel, which gives the same
+   * bits, until they are made, and for good where their making failed.
    */
-  readonly pair: (read: MarchRead, form: MarchForm) => LimbPair | null;
+  readonly pair: (march: LimbMarch, read: MarchRead, form: MarchForm) => LimbPair | null;
 }
 
 /**
  * The far limb's packed kernels on `engine` (R08.T8.d): the resolve, the dispatches and, of `reads`,
- * each form of `forms` made up front, asynchronously; every other made at its first ask, in the
- * background.
+ * each form of `forms` made up front, asynchronously, the thin read's, and the thick read's in each
+ * of `thickForms` (perf-thick-march); every other made at its first ask, in the background.
  */
 async function limbKernelsOf(
   engine: RenderEngine,
   reads: MarchReads,
   forms: ReadonlyArray<MarchForm>,
+  thickForms: ReadonlyArray<ThickMarchForm>,
 ): Promise<LimbKernels> {
   const asked = (["shared read", "by slot"] as const).filter(
     (read) => reads === "both" || reads === read,
   );
-  const keys = asked.flatMap((read) => forms.map((form) => [read, form] as const));
+  const keys: Array<readonly [LimbMarch, MarchRead, MarchForm]> = [];
+  for (const read of asked) {
+    for (const form of forms) {
+      keys.push(["thin", read, form]);
+    }
+    for (const form of thickForms) {
+      keys.push(["thick", read, form]);
+    }
+  }
   const [pairs, resolve, dispatch] = await Promise.all([
     Promise.all(
-      keys.map(async ([read, form]) => {
-        const kernels = LIMB_PAIRS[read][form];
+      keys.map(async ([march, read, form]) => {
+        const kernels = limbPairsOf(march, read, form);
+        if (kernels === null) {
+          throw new Error(`the ${march} read has no packed kernels in the ${form} form`);
+        }
         const [footprint, nodes] = await Promise.all([
           engine.createComputeAsync(kernels.footprint),
           engine.createComputeAsync(kernels.nodes),
         ]);
-        return [`${read}/${form}`, { footprint, nodes }] as const;
+        return [`${march}/${read}/${form}`, { footprint, nodes }] as const;
       }),
     ),
     engine.createComputeAsync(LIMB_RESOLVE_KERNEL),
@@ -2162,13 +2312,16 @@ function limbKernelsOver(
   };
   const asked = new Set<string>();
   return {
-    pair: (read, form) => {
-      const key = `${read}/${form}`;
+    pair: (march, read, form) => {
+      const key = `${march}/${read}/${form}`;
       const held = made.get(key);
       if (held !== undefined) {
         return held;
       }
-      const pairs = LIMB_PAIRS[read][form];
+      const pairs = limbPairsOf(march, read, form);
+      if (pairs === null) {
+        return null;
+      }
       if (!later) {
         common ??= {
           resolve: engine.createCompute(LIMB_RESOLVE_KERNEL),
@@ -2194,7 +2347,7 @@ function limbKernelsOver(
         };
         void making().catch((cause: unknown) => {
           console.warn(
-            `the far limb's packed kernels (${read}, ${form}) could not be made; its frames march per texel:`,
+            `the far limb's packed kernels (${march}, ${read}, ${form}) could not be made; its frames march per texel:`,
             cause,
           );
         });
@@ -2619,6 +2772,12 @@ export interface FrameKernelsAhead {
    * first frame that takes it.
    */
   readonly packed?: boolean | ReadonlyArray<MarchForm>;
+  /**
+   * Whether the thick read's packed kernels are made too ({@link THICK_LIMB_KERNELS};
+   * perf-thick-march), of the reads asked, in its every form (`true`) or in those listed: for the
+   * smoke's check of them. Not where absent; then each made at the first frame that takes it.
+   */
+  readonly thickPacked?: boolean | ReadonlyArray<ThickMarchForm>;
 }
 
 /** The forms a {@link FrameKernelsAhead} member asks for: every one for `true`, none where absent. */
@@ -2727,8 +2886,13 @@ export async function createAtmosphereFrameKernels(
   let behind: ComputeHandle | null =
     ahead.behind === true ? await engine.createComputeAsync(COMPOSITE_BEHIND_KERNEL) : null;
   const packedForms = formsOf(ahead.packed);
+  const thickPackedForms = formsOf(ahead.thickPacked).filter(
+    (form): form is ThickMarchForm => form !== "one band",
+  );
   let limb: LimbKernels | null =
-    packedForms.length > 0 ? await limbKernelsOf(engine, reads, packedForms) : null;
+    packedForms.length > 0 || thickPackedForms.length > 0
+      ? await limbKernelsOf(engine, reads, packedForms, thickPackedForms)
+      : null;
   // The fill is a reader's (the smoke's), which a view's frame never asks: made at the first ask.
   let fill: ComputeHandle | null = null;
   return {
@@ -4294,16 +4458,23 @@ export class HillaireAtmosphere {
       // area from above the top, where alone a footprint blends, by its packed entry point in the
       // march's form, then the lists' dispatches, the node pass and the resolve, each texel's bits
       // the per-texel march's; per texel while the packed kernels are made. Where the camera's f32
-      // h* stands on the top, either march gives the same bits.
+      // h* stands on the top, either march gives the same bits. Since perf-thick-march the thick
+      // read's march but over a deck likewise.
       const cameraAt = this.#uniforms["camera"];
       const curvatureAt = this.#uniforms["curvature"];
+      let limbMarch: LimbMarch | null = null;
+      if (marched?.kind === "thin") {
+        limbMarch = "thin";
+      } else if (marched?.kind === "thick" && deckTable === null) {
+        limbMarch = "thick";
+      }
       const pair =
         deferUnread &&
-        marched?.kind === "thin" &&
+        limbMarch !== null &&
         this.#cover !== "whole frame" &&
         this.#levers.limbRays === "packed" &&
         (cameraAt?.[3] ?? 0) * (curvatureAt?.[2] ?? 0) >= medium.topHeightM
-          ? kernels.limb().pair(slotDepths === null ? "shared read" : "by slot", form)
+          ? kernels.limb().pair(limbMarch, slotDepths === null ? "shared read" : "by slot", form)
           : null;
       if (pair !== null) {
         const lists = this.#limbLists(area);

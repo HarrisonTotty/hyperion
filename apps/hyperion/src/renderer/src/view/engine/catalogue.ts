@@ -51,6 +51,7 @@ import {
   SKY_VIEW_THERMAL_KERNEL,
   SKY_VIEW_THICK_KERNEL,
   SKY_VIEW_THICK_THERMAL_KERNEL,
+  THICK_LIMB_KERNELS,
 } from "../atmosphere/hillaire";
 import { MARCH_CENSUS_KERNEL } from "../atmosphere/marchProbe";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
@@ -262,6 +263,16 @@ export const ATMOSPHERE_THICK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL,
   IRRADIANCE_THICK_KERNEL,
 ].map((spec): CatalogueEntry => ({ kind: "compute", spec }));
+
+/**
+ * The thick read's march levers (perf-thick-march; `hillaire.ts`'s `thickPerStep`): the packed
+ * limb's kernels of each read in both forms (`THICK_LIMB_KERNELS`; the resolve and the dispatches
+ * are {@link ATMOSPHERE_LIMB_ENTRIES}'). The smoke page compiles them in a part of their own
+ * (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
+ */
+export const ATMOSPHERE_THICK_LEVER_ENTRIES: ReadonlyArray<CatalogueEntry> = THICK_LIMB_KERNELS.map(
+  (spec): CatalogueEntry => ({ kind: "compute", spec }),
+);
 
 /**
  * R08.T18.b's per-frame atmosphere with the medium's own light (`hillaire.ts`' `withThermalSource`):
@@ -510,6 +521,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...ATMOSPHERE_ONE_BAND_ENTRIES,
   ...ATMOSPHERE_LIMB_ENTRIES,
   ...ATMOSPHERE_THICK_ENTRIES,
+  ...ATMOSPHERE_THICK_LEVER_ENTRIES,
   ...ATMOSPHERE_THERMAL_ENTRIES,
   ...ATMOSPHERE_DECK_ENTRIES,
   ...TERRAIN_ENTRIES,

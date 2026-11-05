@@ -3283,8 +3283,11 @@ interface AreaBody {
   readonly name: string;
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
-  /** Its figure and gravity, the tables' slicing. */
-  readonly body: () => AtmosphereBody;
+  /**
+   * Its figure and gravity, the tables' slicing; or a sphere its tables stand on with no body of
+   * their own, as a route's row's do (TEST TITAN's, `frameTiming.ts`' `routedFrameMedium`).
+   */
+  readonly body: (() => AtmosphereBody) | { readonly sphere: SpheroidFigure };
   readonly frames: ReadonlyArray<AreaFrame>;
   /**
    * Whether its tables take the march specialised for one band and no layer edge over the area
@@ -3381,6 +3384,42 @@ const ONE_BAND_BODIES: ReadonlyArray<AreaBody> = [
     oneBand: true,
   },
 ];
+
+/**
+ * `body`'s tables on `engine`, on its figure with its gravity or on its sphere, holding a thick
+ * table where it is listed to ({@link withThickTable}, R08.T14.c).
+ */
+function areaTablesOf(engine: RenderEngine, body: AreaBody): AtmosphereTables {
+  const stand = body.body;
+  let tables: AtmosphereTables;
+  if (typeof stand === "function") {
+    const sliced = stand();
+    tables = new AtmosphereTables(
+      engine,
+      body.medium,
+      tableRadiusM(sliced.figure),
+      body.curves,
+      sliced,
+    );
+  } else {
+    tables = new AtmosphereTables(
+      engine,
+      body.medium,
+      tableRadiusM(stand.sphere),
+      body.curves,
+      null,
+    );
+  }
+  try {
+    if (body.thick === true) {
+      withThickTable(tables, body.curves.length);
+    }
+  } catch (error: unknown) {
+    tables.dispose();
+    throw error;
+  }
+  return tables;
+}
 
 /** One cover's frame read back: the composite's output, the march's whole target, and the tiles. */
 interface AreaReads {
@@ -3665,6 +3704,12 @@ export async function checkMarchOneBand(
   }
 }
 
+/** The Saturn-class figure's frames: from 10⁸ m on high and 3 × 10⁸ m on low. */
+const GENERAL_FRAMES: ReadonlyArray<AreaFrame> = [
+  { name: "from 10⁸ m", setting: "high", distanceM: 1e8, surfaceM: null },
+  { name: "from 3 × 10⁸ m", setting: "low", distanceM: 3e8, surfaceM: null },
+];
+
 /**
  * The Saturn-class figure (R08.T6.f), of several slices and bands, so that its area takes the
  * general march, and its packed limb the general forms (R08.T8.d), as a generated world's
@@ -3676,10 +3721,7 @@ const GENERAL_BODIES: ReadonlyArray<AreaBody> = [
     medium: saturnClassMedium(),
     curves: NO_ABSORBER_CURVES,
     body: saturnBody,
-    frames: [
-      { name: "from 10⁸ m", setting: "high", distanceM: 1e8, surfaceM: null },
-      { name: "from 3 × 10⁸ m", setting: "low", distanceM: 3e8, surfaceM: null },
-    ],
+    frames: GENERAL_FRAMES,
     specialised: false,
   },
 ];
@@ -3804,14 +3846,7 @@ async function checkMarchTableBodies(
   const kernels = await createAtmosphereFrameKernels(engine, { reads });
   try {
     for (const body of bodies) {
-      const sliced = body.body();
-      const tables = new AtmosphereTables(
-        engine,
-        body.medium,
-        tableRadiusM(sliced.figure),
-        body.curves,
-        sliced,
-      );
+      const tables = areaTablesOf(engine, body);
       try {
         for (const frame of body.frames) {
           const what = `R08.T8.e's table ${body.name}, ${frame.setting}, ${frame.name}`;
@@ -4234,6 +4269,155 @@ export async function checkThickMarchSpecialised(
   }
 }
 
+// --- perf-thick-march: the thick read's march levers --------------------------------------------
+
+/** The thick read's levers' frames of the Earths: {@link THICK_AREA_FRAMES}, and 10⁷ m on low. */
+const THICK_LEVER_FRAMES: ReadonlyArray<AreaFrame> = [
+  ...THICK_AREA_FRAMES,
+  ...AREA_FRAMES.filter((frame) => frame.setting === "low"),
+];
+
+/**
+ * The thick read's levers' bodies of the shared read: R05's Earth over the thick table, its march
+ * specialised, and the Saturn-class figure over it, of the general march and several bands.
+ */
+const THICK_LEVER_SHARED_BODIES: ReadonlyArray<AreaBody> = [
+  {
+    name: "R05's Earth over the thick table",
+    medium: R05_EARTH_REFERENCE,
+    curves: NO_ABSORBER_CURVES,
+    body: earthBody,
+    frames: THICK_LEVER_FRAMES,
+    specialised: true,
+    thick: true,
+  },
+  {
+    name: "the Saturn-class figure over the thick table",
+    medium: saturnClassMedium(),
+    curves: NO_ABSORBER_CURVES,
+    body: saturnBody,
+    frames: GENERAL_FRAMES,
+    specialised: false,
+    thick: true,
+  },
+];
+
+/** The measured Earth over the thick table, by slot, its march specialised. */
+const THICK_LEVER_SLOT_BODIES: ReadonlyArray<AreaBody> = [
+  {
+    name: "the measured Earth over the thick table",
+    medium: EARTH_REFERENCE,
+    curves: EARTH_REFERENCE_CURVES,
+    body: earthBody,
+    frames: THICK_LEVER_FRAMES,
+    specialised: true,
+    thick: true,
+  },
+];
+
+/**
+ * TEST TITAN (`titan-class`, the haze route's, R08.T14.d.4; its tholin haze τ 8.1 at 550 nm,
+ * `TITAN_HAZE`, its channels' columns up to about 13) over the thick table, on its sphere of one
+ * slice and one band with no body of its own, as (R)'s row's tables stand: its haze's layer edges
+ * give it the general thick march, by slot. From 400 km, just above its top (390 km), and from
+ * 4 × 10⁶ m on both settings, about 1.6 of its radii, its disc and limb as the Earth's from 10⁷ m.
+ *
+ * @throws Error where the case is not on a sphere.
+ */
+async function titanLeverBody(): Promise<AreaBody> {
+  const { titanClassReferenceCase } = await import("../view/atmosphere/reference/thickCases");
+  const titan = titanClassReferenceCase();
+  if (titan.figure.kind !== "sphere") {
+    throw new Error("titan-class's case is on a sphere");
+  }
+  const radiusM = titan.figure.radiusM;
+  return {
+    name: "TEST TITAN over the thick table",
+    medium: titan.medium,
+    curves: [titan.curves],
+    body: { sphere: { equatorialRadiusM: radiusM, polarRadiusM: radiusM } },
+    frames: [
+      { name: "from 400 km", setting: "high", distanceM: radiusM + 400_000, surfaceM: null },
+      { name: "from 4 × 10⁶ m", setting: "high", distanceM: 4e6, surfaceM: null },
+      { name: "from 4 × 10⁶ m", setting: "low", distanceM: 4e6, surfaceM: null },
+    ],
+    specialised: false,
+    thick: true,
+  };
+}
+
+/**
+ * The thick read's march levers (perf-thick-march; `hillaire.ts`'s `thickPerStep`) on `bodies`,
+ * each over a thick table, over the device's shared kernels of `reads`, made ahead with the packed
+ * limb's general and specialised forms: each frame over the air's area with its far limb's node
+ * rays packed and its row once a sample, held to the thick read's general march over the whole
+ * frame byte for byte on a fallback adapter and within T8.d's ulp on hardware
+ * ({@link checkAreaBodies}).
+ */
+async function checkThickMarchLevers(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+  bodies: ReadonlyArray<AreaBody>,
+  reads: "shared read" | "by slot",
+): Promise<void> {
+  const kernels = await createAtmosphereFrameKernels(engine, {
+    reads,
+    thick: true,
+    thickPacked: ["general", "special"],
+  });
+  try {
+    await checkAreaBodies(
+      engine,
+      checks,
+      fallback,
+      kernels,
+      bodies,
+      false,
+      "perf-thick-march",
+      true,
+    );
+  } finally {
+    engine.releaseMaterial(kernels.composite);
+    engine.releaseMesh(kernels.triangle);
+  }
+}
+
+/**
+ * The thick read's march levers on the march by slot ({@link checkThickMarchLevers}): the measured
+ * Earth and TEST TITAN, each of one band, over the thick table.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkThickMarchLeversBySlot(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  const titan = await titanLeverBody();
+  await checkThickMarchLevers(
+    engine,
+    checks,
+    fallback,
+    [...THICK_LEVER_SLOT_BODIES, titan],
+    "by slot",
+  );
+}
+
+/**
+ * The thick read's march levers on the shared read's march ({@link checkThickMarchLevers}): R05's
+ * Earth, of one band, and the Saturn-class figure, of several, over the thick table.
+ *
+ * @param fallback - Whether the adapter is a fallback one (`AdapterSummary.fallback`).
+ */
+export async function checkThickMarchLeversShared(
+  engine: RenderEngine,
+  checks: Checks,
+  fallback: boolean,
+): Promise<void> {
+  await checkThickMarchLevers(engine, checks, fallback, THICK_LEVER_SHARED_BODIES, "shared read");
+}
+
 /**
  * {@link checkMarchArea}'s, {@link checkMarchSpecialised}'s and {@link checkMarchOneBand}'s bodies
  * and frames over the device's shared kernels, each frame over the area and, where `tileCull`,
@@ -4253,18 +4437,8 @@ async function checkAreaBodies(
   const met = { miss: 0, centre: 0, footprint: 0, unknown: 0 };
   const listed = { texels: 0, rays: 0 };
   for (const body of bodies) {
-    const sliced = body.body();
-    const tables = new AtmosphereTables(
-      engine,
-      body.medium,
-      tableRadiusM(sliced.figure),
-      body.curves,
-      sliced,
-    );
+    const tables = areaTablesOf(engine, body);
     try {
-      if (body.thick === true) {
-        withThickTable(tables, body.curves.length);
-      }
       // Whether the area's frames take the specialised march, or the thin read's march for one
       // band, edged (R08.T11.g), as the body is listed to.
       const specialised = marchSpecialisedFor(tables);
@@ -4416,14 +4590,7 @@ export async function checkCompositeArea(engine: RenderEngine, checks: Checks): 
     if (body === undefined) {
       throw new Error("R08.T11.d's check has no body");
     }
-    const sliced = body.body();
-    const tables = new AtmosphereTables(
-      engine,
-      body.medium,
-      tableRadiusM(sliced.figure),
-      body.curves,
-      sliced,
-    );
+    const tables = areaTablesOf(engine, body);
     try {
       for (const frame of body.frames) {
         // The harness's GPU work runs in order: each frame is read back before the next draws.
@@ -4653,14 +4820,7 @@ export async function checkCompositeBehind(engine: RenderEngine, checks: Checks)
     if (body === undefined) {
       throw new Error("R08.T11.d's check has no body");
     }
-    const sliced = body.body();
-    const tables = new AtmosphereTables(
-      engine,
-      body.medium,
-      tableRadiusM(sliced.figure),
-      body.curves,
-      sliced,
-    );
+    const tables = areaTablesOf(engine, body);
     try {
       for (const frame of body.frames.filter((each) => each.surfaceM === null)) {
         const figure = tablesFigureOf(tables);

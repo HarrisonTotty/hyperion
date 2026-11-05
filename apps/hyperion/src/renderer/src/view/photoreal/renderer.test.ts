@@ -110,6 +110,7 @@ import {
   RAY_MARCH_SPECIAL_KERNEL,
   RAY_MARCH_THICK_KERNEL,
   RAY_MARCH_THICK_SPECIAL_KERNEL,
+  THICK_LIMB_KERNELS,
   SKY_VIEW_BELOW_DECK_KERNEL,
   SKY_VIEW_KERNEL,
   SKY_VIEW_THICK_KERNEL,
@@ -1509,13 +1510,14 @@ async function overlayDatums(
  * transmittance, which the lit passes read on both settings, and the `disc cells` kernels' four
  * table-only twins, which the app's engine makes for a body of one band (`SourceTableEngine`), and
  * since R08.T8.e's table the thin read's marches' twenty-four table-only twins, made likewise;
+ * since perf-thick-march the thick read's packed limb's eight kernels;
  * since plan R14's T4.a the cluster cull,
  * the mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d
  * the depth pyramid's, made with the renderer; and the sky bake's four. Each is a module constant,
  * its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 97,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 105,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -1579,6 +1581,7 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
     BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   ].flatMap((pair) => tableOnlyKernel(pair) ?? []),
   ...MARCH_TABLE_ONLY_KERNELS,
+  ...THICK_LIMB_KERNELS,
   CLUSTER_CULL_KERNEL,
   ...BAKE_KERNELS,
 ];
@@ -1778,16 +1781,20 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // where both leave it off; and under `packed` the first frame of each read and form from above
     // the top makes that pair of the packed limb's fourteen, with the resolve and the dispatches, in
     // the background, so that the thin first pass makes the pairs its kinds of air meet, and the
-    // rest stay unmade.
+    // rest stay unmade. Since perf-thick-march the thick pass makes the thick read's packed pairs
+    // its kinds of air meet, as the thin pass the thin read's.
     const made = new Set(engine.kernelPairs.map((pair) => pair.name));
     const limbMade = LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
     expect(limbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
+    const thickLimbMade = THICK_LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
+    expect(thickLimbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
     const unmade =
       47 +
       (leverOff((levers) => levers.marchCover === "tiles") ? 4 : -2) +
-      (LIMB_KERNELS.length - limbMade);
+      (LIMB_KERNELS.length - limbMade) +
+      (THICK_LIMB_KERNELS.length - thickLimbMade);
     expect([held[kinds.length - 1], held[2 * kinds.length - 1]]).toEqual([
-      VIEW_KERNELS.length - BAKE_KERNELS.length - unmade - 1 - 4,
+      VIEW_KERNELS.length - BAKE_KERNELS.length - unmade - 1 - 4 - thickLimbMade,
       VIEW_KERNELS.length - BAKE_KERNELS.length - unmade - 4,
     ]);
     expect(new Set(held.slice(3 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));

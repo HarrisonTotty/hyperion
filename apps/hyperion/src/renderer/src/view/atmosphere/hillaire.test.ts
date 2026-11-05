@@ -3057,7 +3057,7 @@ describe("the march's step's sources from the sources' table (R08.T8.e's table)"
         .filter((pair) => declaresSourceTable(pair) && !marches.includes(pair))
         .every((pair) => pair.reference.includes("fn atmosphere_sun_transmittance(")),
       [RAY_MARCH_PER_STEP_KERNEL, RAY_MARCH_SLOTS_PER_STEP_KERNEL].some(declaresSourceTable),
-    ]).toEqual([true, 14, false, true, false]);
+    ]).toEqual([true, 22, false, true, false]);
   });
 
   it("twins every thin march of both reads, in every form and entry point, its step's lookup compiled out", () => {
