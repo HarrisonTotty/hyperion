@@ -2703,7 +2703,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Stand-ins are reckoned as drawn (a mask one to three levels down as a patch at stride 2^levels,
     deeper, or of an edge or unmeasured bake, a whole grid), edge and unmeasured bakes whole.
   - A reckoning, not a bound: a neighbour's band or a fade (kept whole) can draw finer; the probe
-    logs the drawn beside the reckoned (`drawnPastReckonedMax`).
+    logs the drawn beside the reckoned (`drawnPastReckonedMax`). Fades, the path's first frames and
+    the camera's approach are reckoned since (`r14-edge-stand-ins` part 2, below).
   - B and every count include the skirts: 8,704 a whole patch, its 64 blocks' 8,192 and its 32
     strips' 512 (the probe's drawn and stride-1 counts took the strips in, research-leans-42).
   - `maxPatches` stays ⌊slots ÷ 2⌋ (the pins ran to 1.4 times the patches at the budget).
@@ -2801,6 +2802,21 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Not built: levels 2–3 and low's no-cluster parts across the edge stay on the lit mesh.
   - Pending: the owner's Mac (`views-check --terrain --hidden --setting high|low`, with and without
     `--geometry edgeStandIns=off`), the RTX lit pass, TERRAIN TEST mid-survey; Windows NOT RUN.
+- **R14.T3.e's reckoning, drawn ≤ reckoned** (`r14-edge-stand-ins` part 2, 2026-11-06; the frames
+  by cause in the lane's outbox):
+  - The past-τ′ count takes a cluster its may-discard template draws at stride 1, never past τ′
+    (`clusterCull.wgsl`'s `discard_template`, `cull.ts`' `discardTemplateOf`): an edge patch's and
+    an edge mask's blocks and strips. It feeds `DETAIL LIMITED` alone, not the probe's counts.
+  - `TriangleBudget.fadingTriangles(key, resident)`: a seen patch reckons at least 8,704 where the
+    time morph keeps it whole (`TimeMorph.fadesOver`: a change to come or in progress over its area
+    or an ancestor's within `MAX_SUB_PATCH_LEVELS`, its rebake), so the budget can bind no sooner
+    than the patches.
+  - `TriangleBudget.moveFraction` (the pass's `RESELECT_MOVE_FRACTION`): strides reckoned at the
+    box's nearest point less the camera's approach before the next selection.
+  - `strideErrorsM` answers only once a lit frame drew strides on the path (`#stridesDrawn`).
+  - (lean, 2026-11-06) A coarsen's held finer patches (four whole grids under one leaf) are not
+    reckoned: counted at a node, they inflate a coarse node while the traversal still splits it, and
+    the budget bound early (a pass test stopped at 514 patches of 604).
 - **R14.T2.e, the Mac batch's passes** (`tool-mac-batch-passes`, 2026-11-05; built):
   - `--count-gpu-calls` counts each render pass's attachments too (`GpuCallCounter.take()` gives
     `{ calls, attachments }`): by pass label, slot, view (format, size, samples), load and store,

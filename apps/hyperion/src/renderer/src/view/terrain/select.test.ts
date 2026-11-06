@@ -22,6 +22,7 @@ import {
   type PatchKey,
   patchKeyString,
   rootKey,
+  sameKey,
 } from "./patchKey";
 import type { GroundContact } from "./grounded";
 import { lookaheadInput } from "./lookahead";
@@ -42,6 +43,7 @@ import {
   PatchLeafSet,
   pruneSelectionMemo,
   SAGITTA_FACTOR,
+  type SelectedPatch,
   type Selection,
   type SelectionInput,
   selectionErrorM,
@@ -737,12 +739,15 @@ function trianglesBudget(
   patches: number,
   errorsM?: StrideErrorsM,
   tolerancesPx: ReadonlyArray<number> = [],
+  fadingTriangles: TriangleBudget["fadingTriangles"] = () => 0,
 ): TriangleBudget {
   return {
     maxTriangles: patches * PATCH_LIT_TRIANGLES[0],
     bandFraction: 0.002,
+    moveFraction: 0,
     tolerancesPx,
     strideErrorsM: () => errorsM,
+    fadingTriangles,
   };
 }
 
@@ -850,6 +855,66 @@ describe("selection under a triangle budget (plan R14, R14.T3.e)", () => {
       more: smooth.patches.size > 300,
       within: reckoned <= 300 * PATCH_LIT_TRIANGLES[0] * (1 + 1e-9),
     }).toEqual({ more: true, within: true });
+  });
+
+  it("reckons a seen patch at the least its fades draw whole at stride 1, whatever its strides (R14.T3.e's reckoning)", () => {
+    const v = pose();
+    const tauRad = (2 * Math.tan(v.fovXRad / 2) * v.tauPx) / v.viewport.widthPx;
+    const budgetOf = (fading: TriangleBudget["fadingTriangles"]): TriangleBudget =>
+      trianglesBudget(10_000, [0, 0, 0], [], fading);
+    const plain = selected({ maxPatches: 10_000, triangleBudget: budgetOf(() => 0) });
+    const [fadingPatch, coarsenPatch] = [...plain.patches.values()].filter((patch) => patch.seen);
+    if (fadingPatch === undefined || coarsenPatch === undefined) {
+      throw new Error("the test's pose sees fewer than two patches");
+    }
+    // Each patch's reckoning at its strides, as `patchLitTriangles` gives it.
+    const strided = (patch: SelectedPatch): number =>
+      patchLitTriangles(
+        selectionErrorM(PLANET, patch.key.level),
+        [0, 0, 0],
+        distanceToBoxM(relativeBounds(patch.bounds, v.camera.positionM)),
+        tauRad,
+        0.002,
+        0,
+      );
+    const asked: boolean[] = [];
+    const fades = selected({
+      maxPatches: 10_000,
+      triangleBudget: budgetOf((key, resident) => {
+        asked.push(resident);
+        return sameKey(key, fadingPatch.key)
+          ? PATCH_LIT_TRIANGLES[0]
+          : sameKey(key, coarsenPatch.key)
+            ? 4 * PATCH_LIT_TRIANGLES[0]
+            : 0;
+      }),
+    });
+    expect([
+      [...fades.patches.keys()],
+      (fades.litTriangles?.[0] ?? 0) - (plain.litTriangles?.[0] ?? 0),
+      // No baked ranges: every patch is drawn as its own.
+      asked.length > 0 && asked.every((resident) => resident),
+    ]).toEqual([
+      [...plain.patches.keys()],
+      PATCH_LIT_TRIANGLES[0] -
+        strided(fadingPatch) +
+        4 * PATCH_LIT_TRIANGLES[0] -
+        strided(coarsenPatch),
+      true,
+    ]);
+  });
+
+  it("reckons each patch's strides at its nearest point less the camera's approach before the next selection, its selection unchanged (R14.T3.e's reckoning)", () => {
+    const at = (moveFraction: number): Selection =>
+      selected({
+        maxPatches: 10_000,
+        triangleBudget: { ...trianglesBudget(10_000, [0, 0, 0]), moveFraction },
+      });
+    const [still, closing] = [at(0), at(0.1)];
+    expect([
+      [...closing.patches.keys()],
+      (closing.litTriangles?.[0] ?? 0) > (still.litTriangles?.[0] ?? 0),
+    ]).toEqual([[...still.patches.keys()], true]);
   });
 
   it("reckons each view's strides at its own tolerance, so that a view whose strides take a laxer τ′ reckons fewer triangles and selects more", () => {

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { vec3 } from "../../geometry/vec3";
 import { selectionOf } from "../../test/terrainFixtures";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
-import { childKeys, type PatchKey, patchKeyString, rootKey } from "./patchKey";
+import { childKeys, type PatchKey, patchKeyString, rootKey, sameKey } from "./patchKey";
 import { slotLayout } from "./slotLayout";
 import { DATUM_SLOT, fadeWord, MIX_STEPS, mixStep, PARENT_MIX_SLOT } from "./gpu/uniforms";
 import { MORPH_IN_MS, MORPH_MAX_MS, MORPH_MS_PER_PX, TimeMorph } from "./timeMorph";
@@ -140,9 +140,15 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     const drawer = held.patches.find(
       (p) => p.within !== null && patchKeyString(p.within) === patchKeyString(finest),
     );
-    expect([drawer?.keyString, footprints(morph, 1_000 + MORPH_IN_MS / 2)]).toEqual([
+    // Each grandchild's area is drawn by `first`, falling, whole (R14.T3.e's reckoning): `finest`,
+    // resident, and the others, stand-ins; and their children by `first`'s fall over its area.
+    const whole = grandchildren.map(
+      (k) => morph.fadesOver(k, sameKey(k, finest)) && morph.fadesOver(childKeys(k)[0], false),
+    );
+    expect([drawer?.keyString, footprints(morph, 1_000 + MORPH_IN_MS / 2), whole]).toEqual([
       patchKeyString(first),
       grandchildren.map((k) => [patchKeyString(k), 0.5]),
+      grandchildren.map(() => true),
     ]);
     footprints(morph, 1_000 + MORPH_IN_MS);
     expect(morph.swapDue).toBe(true);
@@ -434,6 +440,37 @@ describe("the drawn ground's changes over time (R10.T16.i)", () => {
     expect([wordAt(true), wordAt(false)]).toEqual([
       [fadeWord(0, MIX_STEPS, PARENT_MIX_SLOT), fadeWord(0, mixStep(0.5), PARENT_MIX_SLOT)],
       [0, 0],
+    ]);
+  });
+
+  it("says where the next draws keep a patch whole as its heights mix: a change to come or in progress, a rebake, and none once steady or for a stand-in (R14.T3.e's reckoning)", () => {
+    const [first] = CHILDREN;
+    const cache = cacheWith([ROOT, ...CHILDREN]);
+    const resolver = new DrawSetResolver(cache);
+    const morph = new TimeMorph(32);
+    // Before any present, a patch drawn as itself starts a change; a stand-in fades nothing.
+    const before = [morph.fadesOver(ROOT, true), morph.fadesOver(first, false)];
+    morph.present(resolver.resolve(selectionOf(CHILDREN)), cache, unseen);
+    morph.footprintsAt(0);
+    // The children are presented, steady; their root, not presented, would coarsen.
+    const children = [morph.fadesOver(first, true), morph.fadesOver(ROOT, true)];
+    const coarse = selectionOf([ROOT]);
+    morph.present(resolver.resolve(coarse), cache, unseen);
+    morph.footprintsAt(1_000);
+    footprints(morph, 1_000 + MORPH_IN_MS);
+    morph.present(resolver.resolve(coarse), cache, unseen);
+    morph.footprintsAt(2_000);
+    const swapped = morph.fadesOver(ROOT, true);
+    morph.rebake(patchKeyString(ROOT), 7);
+    const rebaking = morph.fadesOver(ROOT, true);
+    morph.footprintsAt(3_000);
+    morph.footprintsAt(3_000 + MORPH_IN_MS);
+    expect([before, children, swapped, rebaking, morph.fadesOver(ROOT, true)]).toEqual([
+      [true, false],
+      [false, true],
+      false,
+      true,
+      false,
     ]);
   });
 

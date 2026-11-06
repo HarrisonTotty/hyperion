@@ -51,7 +51,7 @@ import {
   mixStep,
   PARENT_MIX_SLOT,
 } from "./gpu/uniforms";
-import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
+import { ancestorIndex, childKeys, type PatchKey, patchKeyIndex, patchKeyString } from "./patchKey";
 
 /**
  * The time a change of the drawn ground morphs in over at least, ms: the seamless probe's, for the
@@ -236,6 +236,11 @@ export class TimeMorph {
   readonly #rebakeWords = new Map<string, number>();
   /** The older bakes' slots whose fades have ended, for the pass to free. */
   readonly #released: number[] = [];
+  /**
+   * The transitions' areas by level, each a set of `patchKeyIndex`es ({@link TimeMorph.fadesOver}),
+   * made at the first ask after the transitions change; `null` until then.
+   */
+  #transitionAreas: Map<number, Set<number>> | null = null;
 
   /**
    * @param capacity - The most instances a draw set presents: the cache's slot count, which the
@@ -464,6 +469,7 @@ export class TimeMorph {
       presented.set(areaString, patch);
     }
     this.#transitions = transitions;
+    this.#transitionAreas = null;
     this.#presented = presented;
     this.#swapDue = false;
     set.patches.length = 0;
@@ -815,6 +821,7 @@ export class TimeMorph {
       const ended = transition.t >= 1;
       if (transition.held === null && ended && fade <= 0) {
         this.#transitions.delete(areaString);
+        this.#transitionAreas = null;
         continue;
       }
       this.#swapDue ||= transition.held !== null && ended;
@@ -848,9 +855,65 @@ export class TimeMorph {
     return out;
   }
 
+  /**
+   * Whether the draws after the next {@link TimeMorph.present} keep `area`'s own patch whole while
+   * its heights mix, which the cull draws at stride 1 whatever its strides (plan R14, R14.T3.e: the
+   * triangle budget's reckoning; `CULL_INPUT_WHOLE`), where the selection draws that patch there
+   * (`resident`): where its change is in progress (a refine's or a rise's over the area, or its
+   * patch's rebake), and where it was not presented there as itself, where the present may start
+   * one (a refine or a rise; taken for ground newly in view too, which starts none, the cheaper
+   * test; a coarsen draws its finer patches, held, before it); and, resident or a stand-in, where a transition is in progress over its area
+   * or an ancestor's up to {@link MAX_SUB_PATCH_LEVELS} levels coarser, whose instance a present
+   * draws whole there: a coarser patch still falling or rising (a deferred refine's), or finer ones
+   * falling from a coarsen the selection refines back into. A stand-in else draws as its reckoning
+   * takes it.
+   */
+  fadesOver(area: PatchKey, resident: boolean): boolean {
+    for (const [level, areas] of this.#transitionsByLevel()) {
+      if (
+        level <= area.level &&
+        area.level - level <= MAX_SUB_PATCH_LEVELS &&
+        areas.has(ancestorIndex(area, level))
+      ) {
+        return true;
+      }
+    }
+    if (!resident) {
+      return false;
+    }
+    const areaString = patchKeyString(area);
+    const was = this.#presented.get(areaString);
+    return (
+      was === undefined ||
+      was.within !== null ||
+      was.keyString !== areaString ||
+      this.#rebakes.has(areaString)
+    );
+  }
+
+  /** The transitions' areas by level ({@link TimeMorph.fadesOver}). */
+  #transitionsByLevel(): Map<number, Set<number>> {
+    let areas = this.#transitionAreas;
+    if (areas === null) {
+      areas = new Map();
+      for (const transition of this.#transitions.values()) {
+        const { area } = transition;
+        let atLevel = areas.get(area.level);
+        if (atLevel === undefined) {
+          atLevel = new Set();
+          areas.set(area.level, atLevel);
+        }
+        atLevel.add(patchKeyIndex(area));
+      }
+      this.#transitionAreas = areas;
+    }
+    return areas;
+  }
+
   /** Forgets every transition and what was presented: a device's restore, or the pass's fault. */
   clear(): void {
     this.#transitions.clear();
+    this.#transitionAreas = null;
     this.#presented.clear();
     this.#swapDue = false;
     for (const { slot } of this.#rebakes.values()) {

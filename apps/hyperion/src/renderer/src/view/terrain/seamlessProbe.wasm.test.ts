@@ -38,6 +38,7 @@ import {
   TERRAIN_INPUT_EDGE_MASK,
   TERRAIN_INPUT_STAND_IN_BITS,
   TERRAIN_INPUT_SURVEYED,
+  TERRAIN_MASK_LEVELS,
   TERRAIN_SUB_PATCH_MASK,
   terrainMaskCluster,
   terrainRecordClass,
@@ -90,7 +91,7 @@ import {
   NO_PARENT_SLOT,
 } from "./gpu/uniforms";
 import { handoverTauPx, handsOver, limbDistanceM, pixelAngleRad } from "./handover";
-import { parentKey, type PatchKey, patchKeyString } from "./patchKey";
+import { parentKey, parsePatchKeyString, type PatchKey, patchKeyString } from "./patchKey";
 import { type BodyFigure, type PlanetGeometry, spheroidNormal, surfacePoint } from "./planet";
 import {
   FLIP_S,
@@ -110,6 +111,7 @@ import {
   summariseSeamRun,
 } from "./seamlessSummary";
 import {
+  patchLitTriangles,
   type Selection,
   type SelectionInput,
   selectionErrorM,
@@ -1675,6 +1677,25 @@ interface BudgetFrame {
    * (`Selection.litTriangles`), `NaN` without a budget.
    */
   readonly reckonedTriangles: number;
+  /**
+   * The selection's own reckoning re-formed patch by patch ({@link reckoningOf}), summed: equal to
+   * {@link BudgetFrame.reckonedTriangles} where the probe forms it as `select.ts` does; `NaN` without.
+   */
+  readonly reckoningSum: number;
+  /** Whether this frame's step ran selection (`TerrainStep.reselected`). */
+  readonly reselected: boolean;
+  /**
+   * The tolerance the reckoning took the strides at, px (its budget's `tolerancesPx`, view 0), and
+   * the least of the drawn whole patches' stride scales' this frame (1 ÷ τ′_rad), px; `NaN` for none.
+   */
+  readonly reckonTauPx: number;
+  readonly strideTauPx: number;
+  /**
+   * Where the lit triangles pass the reckoning ({@link pastReckoningOf}): each group's excess, the
+   * drawn instances over or within selected patches less those patches' reckoning, summed by the
+   * group's cause; `null` where they do not pass it, or without a reckoning.
+   */
+  readonly pastReckoned: Readonly<Record<PastCause, number>> | null;
   /** The cache's slots: in use, pinned (the forced region, and the selection's chain and draws). */
   readonly slots: number;
   readonly usedSlots: number;
@@ -1784,10 +1805,17 @@ class BudgetFrames {
       | "atStride1By"
       | "litMeshStandInsBy"
       | "edgeStandInsBy"
+      | "reckoningSum"
+      | "pastReckoned"
+      | "strideTauPx"
     >,
+    reckoning: ReadonlyMap<string, number> | null,
   ): void {
     const { figure } = planet;
     const pass = { strideCap: 8 } as const;
+    const drawnBy: Array<readonly [DrawnInstance, number]> = [];
+    const pxPerRad = cam.viewport.widthPx / (2 * Math.tan(cam.fovXRad / 2));
+    let strideTauPx = Number.NaN;
     let litTriangles = 0;
     let litTrianglesAtStride1 = 0;
     let litAtStride1Only = 0;
@@ -1967,6 +1995,11 @@ class BudgetFrames {
       }
       litTriangles += instanceTriangles;
       litTrianglesAtStride1 += instanceAtStride1;
+      drawnBy.push([inst, instanceTriangles]);
+      if (inst.levels === 0 && inst.strideScale.perErrorM > 0) {
+        const tauPx = pxPerRad / inst.strideScale.perErrorM;
+        strideTauPx = Number.isNaN(strideTauPx) ? tauPx : Math.min(strideTauPx, tauPx);
+      }
       if ((inst.standInBits & TERRAIN_INPUT_SURVEYED) !== 0) {
         edgeStandIns.surveyed += instanceTriangles;
       } else if ((inst.standInBits & TERRAIN_INPUT_EDGE_MASK) !== 0) {
@@ -2008,8 +2041,211 @@ class BudgetFrames {
       atStride1By: causes,
       litMeshStandInsBy: standIns,
       edgeStandInsBy: edgeStandIns,
+      strideTauPx,
+      reckoningSum:
+        reckoning === null ? Number.NaN : [...reckoning.values()].reduce((a, b) => a + b, 0),
+      pastReckoned:
+        reckoning === null || !(litTriangles > figures.reckonedTriangles)
+          ? null
+          : pastReckoningOf(drawnBy, reckoning),
     });
   }
+}
+
+/**
+ * Why a drawn instance draws more than the selection reckoned for its patches
+ * ({@link BudgetFrame.pastReckoned}): its heights fade, which the cull keeps whole at stride 1
+ * (`fading`); the forced region's stride 1 (`finest`); the lit mesh's whole grid, of a patch or a
+ * stand-in (`litMesh`, `litMeshStandIn`); a whole patch on the path, measured, with no stride
+ * scale, as where the frame drew no strides (`unscaled`); a sub-patch on its own grid not at the camera passes' cap,
+ * its hold or fade setting its edges' k, where the reckoning takes a mask (`ownGrid`); a whole
+ * patch's edges held at k = 0 or fading, at most stride 4 there (`holds`); a mask (`masks`); or
+ * none of these, its blocks' shared bands finer than its box's nearest point gives (`other`).
+ */
+type PastCause =
+  | "fading"
+  | "finest"
+  | "litMesh"
+  | "litMeshStandIn"
+  | "unscaled"
+  | "ownGrid"
+  | "holds"
+  | "masks"
+  | "other";
+
+/** {@link PastCause}'s causes, in their order of precedence. */
+const PAST_CAUSES: ReadonlyArray<PastCause> = [
+  "fading",
+  "finest",
+  "litMesh",
+  "litMeshStandIn",
+  "unscaled",
+  "ownGrid",
+  "holds",
+  "masks",
+  "other",
+];
+
+/** Why `inst` may draw past its reckoning ({@link PastCause}). */
+function pastCauseOf(inst: DrawnInstance): PastCause {
+  const masked = inst.onPath && (inst.subWord & TERRAIN_SUB_PATCH_MASK) !== 0;
+  if (inst.rebakeFade > 0) {
+    return "fading";
+  }
+  if ((inst.quadrantWord & INSTANCE_FINEST) !== 0) {
+    return "finest";
+  }
+  if (!inst.onPath) {
+    return inst.levels > 0 ? "litMeshStandIn" : "litMesh";
+  }
+  if (
+    inst.levels === 0 &&
+    inst.held.bake.clusterErrors !== undefined &&
+    !(inst.strideScale.perErrorM > 0)
+  ) {
+    return "unscaled";
+  }
+  if (inst.levels > 0 && !masked && (inst.quadrantWord & INSTANCE_SUB_GRID_STRIDES) === 0) {
+    return "ownGrid";
+  }
+  if (inst.levels === 0 && (((inst.quadrantWord >>> 2) & 0xff) !== 0 || inst.holdFadesWord !== 0)) {
+    return "holds";
+  }
+  return masked ? "masks" : "other";
+}
+
+/** `key`'s ancestor at `level`, at or above its own. */
+function ancestorKeyAt(key: PatchKey, level: number): PatchKey {
+  const shift = key.level - level;
+  return { face: key.face, level, i: key.i >> shift, j: key.j >> shift };
+}
+
+/**
+ * Each drawn group's lit triangles past the selection's reckoning of its patches, by the group's
+ * cause ({@link BudgetFrame.pastReckoned}): a group the selected patch that holds its instances (a
+ * patch drawn as itself, a sub-patch stand-in, or the time morph's parts of it), or an instance
+ * drawn whole over finer selected patches (a whole stand-in), with their reckonings summed; its
+ * cause its instances' first in {@link PAST_CAUSES}' order.
+ */
+function pastReckoningOf(
+  drawnBy: ReadonlyArray<readonly [DrawnInstance, number]>,
+  reckoning: ReadonlyMap<string, number>,
+): Record<PastCause, number> {
+  // Each selected patch's reckoning summed into each of its ancestors, for whole stand-ins.
+  const under = new Map<string, number>();
+  for (const [keyString, triangles] of reckoning) {
+    const key = parsePatchKeyString(keyString);
+    if (key === null) {
+      continue;
+    }
+    for (let l = key.level - 1; l >= 0; l -= 1) {
+      const up = patchKeyString(ancestorKeyAt(key, l));
+      under.set(up, (under.get(up) ?? 0) + triangles);
+    }
+  }
+  const groups = new Map<string, { drawn: number; reckoned: number; causes: PastCause[] }>();
+  for (const [inst, triangles] of drawnBy) {
+    let group: string | null = null;
+    for (let l = inst.area.level; l >= 0 && group === null; l -= 1) {
+      const up = patchKeyString(ancestorKeyAt(inst.area, l));
+      group = reckoning.has(up) ? up : null;
+    }
+    const keyString = group ?? patchKeyString(inst.area);
+    const held = groups.get(keyString) ?? {
+      drawn: 0,
+      reckoned: group === null ? (under.get(keyString) ?? 0) : (reckoning.get(keyString) ?? 0),
+      causes: [],
+    };
+    held.drawn += triangles;
+    held.causes.push(pastCauseOf(inst));
+    groups.set(keyString, held);
+  }
+  const out: Record<PastCause, number> = {
+    fading: 0,
+    finest: 0,
+    litMesh: 0,
+    litMeshStandIn: 0,
+    unscaled: 0,
+    ownGrid: 0,
+    holds: 0,
+    masks: 0,
+    other: 0,
+  };
+  for (const { drawn, reckoned, causes } of groups.values()) {
+    if (drawn > reckoned) {
+      const cause = PAST_CAUSES.find((c) => causes.includes(c)) ?? "other";
+      out[cause] += drawn - reckoned;
+    }
+  }
+  return out;
+}
+
+/**
+ * The primary view's lit triangles as selection reckoned each patch it sees (plan R14, R14.T3.e;
+ * `select.ts`' `nodeTriangles`, view 0), by `patchKeyString`: `patchLitTriangles` of its level's
+ * error, its budget's largest errors (none where forced or standing in), its box's nearest point,
+ * the budget's tolerance and β, and its levels to its nearest baked ancestor, an edge or unmeasured
+ * bake's stand-in reckoned as its lit mesh's whole grid, and at least its fades' whole records
+ * (`TriangleBudget.fadingTriangles`); bare ground none. `null` without a budget.
+ */
+function reckoningOf(
+  planet: PlanetGeometry,
+  input: SelectionInput,
+  selection: Selection,
+): Map<string, number> | null {
+  const budget = input.triangleBudget;
+  const view = input.views[0];
+  if (budget === undefined || view === undefined) {
+    return null;
+  }
+  const heights = input.heightRanges;
+  const toleranceRad =
+    (2 * Math.tan(view.fovXRad / 2) * (budget.tolerancesPx[0] ?? view.tauPx)) /
+    view.viewport.widthPx;
+  const out = new Map<string, number>();
+  for (const [keyString, patch] of selection.patches) {
+    const { key } = patch;
+    if ((patch.views & 1) === 0 || input.survey?.surveyedUnder(key) === false) {
+      continue;
+    }
+    let bakedLevel: number | null = null;
+    for (let l = key.level; l >= 0 && bakedLevel === null; l -= 1) {
+      bakedLevel = heights?.heightRangeM(ancestorKeyAt(key, l)) === undefined ? null : l;
+    }
+    const levels =
+      patch.forced || heights === undefined || bakedLevel === key.level
+        ? 0
+        : bakedLevel === null
+          ? null
+          : key.level - bakedLevel;
+    const standIn =
+      levels !== null &&
+      levels > 0 &&
+      levels <= TERRAIN_MASK_LEVELS &&
+      budget.strideErrorsM(ancestorKeyAt(key, key.level - levels)) === undefined
+        ? TERRAIN_MASK_LEVELS + 1
+        : levels;
+    const errorsM = patch.forced || standIn !== 0 ? undefined : budget.strideErrorsM(key);
+    const fading = patch.forced || levels === null ? 0 : budget.fadingTriangles(key, levels === 0);
+    out.set(
+      keyString,
+      Math.max(
+        fading,
+        patchLitTriangles(
+          selectionErrorM(planet, key.level),
+          errorsM,
+          errorsM === undefined
+            ? 0
+            : (1 - budget.moveFraction) *
+                distanceToBoxM(relativeBounds(patch.bounds, view.camera.positionM)),
+          toleranceRad,
+          budget.bandFraction,
+          standIn,
+        ),
+      ),
+    );
+  }
+  return out;
 }
 
 /** The altitude bands the budget's counts are summarised in, m, as the counting harness's. */
@@ -2100,6 +2336,29 @@ function budgetSummaryOf(frames: ReadonlyArray<BudgetFrame>): Record<string, unk
                 : Math.max(...reckoned.map((f) => f.litTriangles - f.reckonedTriangles)),
             framesDrawnPastReckoned: reckoned.filter((f) => f.litTriangles > f.reckonedTriangles)
               .length,
+            // The probe's re-formed reckoning against the selection's own, the most they part.
+            reckoningPartsMax: Math.max(
+              0,
+              ...reckoned
+                .filter((f) => Number.isFinite(f.reckoningSum))
+                .map((f) => Math.abs(f.reckoningSum - f.reckonedTriangles)),
+            ),
+            // Each frame past the reckoning: its time, excess, step and causes' excesses.
+            pastReckoned: reckoned
+              .filter((f) => f.litTriangles > f.reckonedTriangles)
+              .map((f) => ({
+                tS: f.tS,
+                excess: f.litTriangles - f.reckonedTriangles,
+                reselected: f.reselected,
+                reckonTauPx: f.reckonTauPx,
+                strideTauPx: f.strideTauPx,
+                causes:
+                  f.pastReckoned === null
+                    ? null
+                    : Object.fromEntries(
+                        Object.entries(f.pastReckoned).filter(([, value]) => value > 0),
+                      ),
+              })),
             slots: band[0]?.slots ?? null,
             usedSlots: pick((f) => f.usedSlots),
             pinned: pick((f) => f.pinnedForced + f.pinnedDrawn),
@@ -2885,7 +3144,17 @@ async function play(options: ProbeOptions): Promise<Played> {
   let lastDrawn = new Map<string, DrawnArea>();
   let selectedResident = new Set<string>();
   // The primary view at the last selection: held in an object, since the observer sets it.
-  const latest: { cam: Camera | null } = { cam: null };
+  const latest: {
+    cam: Camera | null;
+    reckoning: Map<string, number> | null;
+    selectedS: number | null;
+    reckonTauPx: number;
+  } = {
+    cam: null,
+    reckoning: null,
+    selectedS: null,
+    reckonTauPx: Number.NaN,
+  };
   let observed = false;
   let nowS = 0;
   let handOverS: number | null = null;
@@ -2926,6 +3195,11 @@ async function play(options: ProbeOptions): Promise<Played> {
           bands,
           tauPrimeRad: morphView.tauPx / (view.viewport.widthPx / (2 * Math.tan(view.fovXRad / 2))),
         };
+        latest.selectedS = nowS;
+        if (COUNTS) {
+          latest.reckoning = reckoningOf(pass.planet, input, selection);
+          latest.reckonTauPx = input.triangleBudget?.tolerancesPx[0] ?? view.tauPx;
+        }
         const demanded = new Set<string>();
         for (const request of selection.demand) {
           const keyString = patchKeyString(request.key);
@@ -3090,23 +3364,32 @@ async function play(options: ProbeOptions): Promise<Played> {
         for (const patch of counted.selection.patches.values()) {
           seen += patch.seen ? 1 : 0;
         }
-        budgetFrames.frame(drawingPass.planet, camNow, slotRecords, drawnNow, {
-          tS,
-          selected: seen,
-          drawn: counted.drawSet.count,
-          standingIn: counted.drawSet.standingIn,
-          missing: counted.drawSet.missing,
-          limitExcess: counted.selection.limitExcess,
-          slots: drawingPass.layout.slots.slotCount,
-          usedSlots: drawingPass.usedSlots,
-          pinnedForced: pressure.forced,
-          pinnedDrawn: pressure.drawn,
-          bakesAnswered: answers.count,
-          demand: counted.selection.demand.length,
-          reckonedTriangles: counted.selection.litTriangles?.[0] ?? Number.NaN,
-          stepMs,
-          drawMs,
-        });
+        budgetFrames.frame(
+          drawingPass.planet,
+          camNow,
+          slotRecords,
+          drawnNow,
+          {
+            tS,
+            selected: seen,
+            drawn: counted.drawSet.count,
+            standingIn: counted.drawSet.standingIn,
+            missing: counted.drawSet.missing,
+            limitExcess: counted.selection.limitExcess,
+            slots: drawingPass.layout.slots.slotCount,
+            usedSlots: drawingPass.usedSlots,
+            pinnedForced: pressure.forced,
+            pinnedDrawn: pressure.drawn,
+            bakesAnswered: answers.count,
+            demand: counted.selection.demand.length,
+            reckonedTriangles: counted.selection.litTriangles?.[0] ?? Number.NaN,
+            reselected: latest.selectedS === tS,
+            reckonTauPx: latest.reckonTauPx,
+            stepMs,
+            drawMs,
+          },
+          latest.reckoning,
+        );
       }
       if (
         OCCLUDED &&

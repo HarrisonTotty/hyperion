@@ -2114,6 +2114,11 @@ export class TerrainPass {
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
   #planet: PlanetGeometry;
   #rangesVersion = 0;
+  /**
+   * Whether the last lit frame drew the camera's strides on the cluster path (plan R14, R14.T3.e),
+   * by which the triangle budget reckons them: none before the lit pass's cluster forms are made.
+   */
+  #stridesDrawn = false;
   #device: Device;
   #selected: Selected | null = null;
   /**
@@ -4723,6 +4728,10 @@ export class TerrainPass {
         device.clusterShadowMaterial !== null);
     // The camera's strides (plan R14, R14.T3.c): each patch's scale and its edges' shared bands.
     const strides = this.#stridesOn() && this.#litClustersReady(device, state, forms);
+    if (lit) {
+      // Whether the triangle budget reckons strides at the next selection (R14.T3.e).
+      this.#stridesDrawn = strides;
+    }
     // The stand-ins' strides (`GeometrySettings.standInStrides`): those on their own grids at the
     // camera passes' cap, and the masks by their slot's patch's scale (`#sharedStridesOf`).
     const subGridStrides = strides && this.#geometry.standInStrides !== "off";
@@ -6075,13 +6084,23 @@ export class TerrainPass {
    * camera strides are on, and at stride 1 where they are off.
    */
   #triangleBudget(views: ReadonlyArray<PassSelectionView>): TriangleBudget {
-    const table = this.#device.largestStrideErrors;
-    const strides = this.#stridesOn();
+    const device = this.#device;
+    const table = device.largestStrideErrors;
+    // Strided only where the lit pass last drew strides on the cluster path: before its forms are
+    // made, or while one is made again, every patch and stand-in draws by the lit mesh, whole.
+    const strides = this.#stridesOn() && this.#stridesDrawn;
+    const morph = device.morph;
     return {
       maxTriangles: TERRAIN_TRIANGLE_BUDGET[this.#setting],
       bandFraction: STRIDE_BAND_FRACTION,
+      // The camera closes at most this share of the nearest non-finest patch's distance, and so of
+      // each one's, before the next selection (`#due`).
+      moveFraction: RESELECT_MOVE_FRACTION,
       tolerancesPx: views.map((view) => this.#views.get(view.id)?.bandTauPx ?? view.bandTauPx),
       strideErrorsM: (key) => (strides ? table.get(key) : undefined),
+      // A fade's record kept whole at stride 1, a whole patch's (R10.T16.i).
+      fadingTriangles: (key, resident) =>
+        morph.fadesOver(key, resident) ? PATCH_LIT_TRIANGLES[0] : 0,
     };
   }
 

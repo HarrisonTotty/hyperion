@@ -350,12 +350,32 @@ export interface TriangleBudget {
    */
   readonly bandFraction: number;
   /**
+   * The share of a seen patch's distance the camera may close before the next selection (the terrain
+   * pass's `RESELECT_MOVE_FRACTION` of the nearest non-finest patch's distance, and so no more than
+   * any non-finest patch's own), by which each patch's strides are reckoned at its box's nearest
+   * point less it, so that the reckoning holds until then (plan R14, R14.T3.e; R14.T3.c's edge
+   * stand-ins' part 2: at 5,100 km on TERRAIN TEST's descent the strides' bands lie within 1% of
+   * each other, and the camera may close 9%).
+   */
+  readonly moveFraction: number;
+  /**
    * A resident patch's largest measured errors towards strides 2, 4 and 8 over its clusters, m
    * (`largestStrideErrorsM` of its bake), or `undefined` where it is not resident, not measured,
    * not an interior bake (an edge patch's may-discard clusters draw at stride 1) or its view draws
-   * no strides.
+   * no strides (the strides off, or the lit pass not drawing on the cluster path yet).
    */
   strideErrorsM(key: PatchKey): StrideErrorsM | undefined;
+  /**
+   * The lit triangles drawn over `key`'s area at stride 1 whatever its strides, where the selection
+   * draws its own patch there (`resident`) or a stand-in: the terrain pass's record whose heights mix
+   * from another surface (plan R10, R10.T16.i's fades: a refine's, a rise's, a rebake's, and a
+   * coarser patch still falling over a stand-in's area), which the cull keeps whole (the time
+   * morph's `fadesOver`); 0 for none. A seen patch is reckoned at the larger of this
+   * and {@link patchLitTriangles}' (plan R14, R14.T3.e's reckoning, R14.T3.c's edge stand-ins'
+   * part 2). At most a whole patch's, so that the budget binds no sooner than the patches would at
+   * stride 1: a coarse node is a leaf for a while as the traversal splits it.
+   */
+  fadingTriangles(key: PatchKey, resident: boolean): number;
 }
 
 /** A patch's largest errors towards strides 2, 4 and 8, m (`clusters/strides.ts`' `StrideErrorsM`). */
@@ -372,8 +392,8 @@ export const PATCH_LIT_TRIANGLES: readonly [number, number, number, number] = [
 /**
  * The lit triangles the triangle budget reckons a seen patch to draw in one view (plan R14,
  * R14.T3.e), never fewer than the cull draws there at the view's strides but where a neighbour's
- * band holds an edge finer or a rebake's fade keeps the patch whole for its 0.4 s (a reckoning, not
- * a bound):
+ * band holds an edge finer (a reckoning, not a bound; a fade's whole records are the budget's
+ * {@link TriangleBudget.fadingTriangles}, taken beside it):
  *
  * - **measured** (`errorsM` given): the coarsest stride s = 2^l, l up to 3, whose every band up to
  *   it, (1 + β) (E_L + e_s) ÷ τ_rad, the patch's box's nearest point `distanceM` is past, so that
@@ -1012,7 +1032,8 @@ const NO_TRIANGLES: ReadonlyArray<number> = [];
  * A seen node's lit triangles under `budget` in each view, those in `seenBy` reckoned by
  * {@link patchLitTriangles}: a forced patch, which the camera passes draw at stride 1, its whole grid
  * in each; where baked ranges are given, an unbaked one as its baked ancestor's stand-in draws, a
- * mask where that ancestor is a measured interior bake and else its lit mesh, whole.
+ * mask where that ancestor is a measured interior bake and else its lit mesh, whole; each at least
+ * its fades' whole records ({@link TriangleBudget.fadingTriangles}).
  */
 function nodeTriangles(
   t: Traversal,
@@ -1040,6 +1061,8 @@ function nodeTriangles(
       : levels;
   const errorsM = forced || standIn !== 0 ? undefined : budget.strideErrorsM(key);
   const statedM = t.errorM[key.level] ?? 0;
+  // Its fades' records, kept whole at stride 1 whatever its strides (R10.T16.i).
+  const fading = forced || levels === null ? 0 : budget.fadingTriangles(key, levels === 0);
   const out = t.views.map(() => 0);
   for (let n = 0; n < t.views.length; n += 1) {
     const v = t.views[n];
@@ -1047,13 +1070,18 @@ function nodeTriangles(
       continue;
     }
     const { viewport, fovXRad, tauPx, camera } = v.input;
-    out[n] = patchLitTriangles(
-      statedM,
-      errorsM,
-      errorsM === undefined ? 0 : distanceToPackedBoxFromM(packed, camera.positionM),
-      (2 * Math.tan(fovXRad / 2) * (budget.tolerancesPx[n] ?? tauPx)) / viewport.widthPx,
-      budget.bandFraction,
-      standIn,
+    out[n] = Math.max(
+      fading,
+      patchLitTriangles(
+        statedM,
+        errorsM,
+        errorsM === undefined
+          ? 0
+          : (1 - budget.moveFraction) * distanceToPackedBoxFromM(packed, camera.positionM),
+        (2 * Math.tan(fovXRad / 2) * (budget.tolerancesPx[n] ?? tauPx)) / viewport.widthPx,
+        budget.bandFraction,
+        standIn,
+      ),
     );
   }
   return out;
