@@ -6,10 +6,11 @@ Usage: hold_ci.py [--version N] [--since REV] [--plan] [--threads N]
 
 Three sets, found from the code's graph (`rust_graph.py`) and run in this order:
 
-1. held: every test whose code reaches version N's holds, by default the newest version that has a
-   union of them: that union (`with_every_N_hold`, `GalaxyRules::every_N_hold`,
-   `StellarRules::every_N_hold`) or one of the switches the planetary union sets (each `with_*`
-   function its body calls). Its restated tests, its censuses and its "held only until the N bump"
+1. held: every test whose code reaches version N's holds, by default the newest version that has
+   holds: their union (`with_every_N_hold`, `GalaxyRules::every_N_hold`,
+   `StellarRules::every_N_hold`) or one of their switches (each `with_*` function the planetary
+   union's body calls, and each test `with_*` function that names the rules type of one of N's
+   gates, so that a version no union gathers yet is found by its switches alone). Its restated tests, its censuses and its "held only until the N bump"
    tests among them. With them, every test whose own code (its body and the test code it calls)
    names one of version N's gates, the constants that are N (`const X: GeneratorVersion =
    GeneratorVersion::new(N)`, each `*_VERSION` and `*_FROM`), or the version itself: a gate no
@@ -106,6 +107,41 @@ def unions_and_switches(graph: rust_graph.Graph) -> Tuple[Dict[int, Set[str]], D
     switches = {v: {d for n in ns for d in graph.edges.get(n, ()) if SWITCH.search(d) and not UNION.search(d)}
                 for v, ns in unions.items()}
     return unions, switches
+
+
+def held_switches(root: Path, graph: rust_graph.Graph) -> Dict[int, Set[str]]:
+    """Each held version's switches, found from its gates rather than a union: for each constant that
+    is a version past `GENERATOR_VERSION`, the rules types whose members name it, and the test
+    `with_*` functions of its file that name one of those types (`with_merged_steps` for
+    `MergedStepsRules`, whose `in_force` reads `MERGED_STEPS_VERSION`). A version whose holds no
+    union gathers (between a bump that folds the unions and the first new one) has these alone."""
+    current = re.search(r"GENERATOR_VERSION: GeneratorVersion = GeneratorVersion::new\((\d+)\)",
+                        (root / "crates/hyperion-base/src/version.rs").read_text(encoding="utf-8"))
+    if current is None:
+        return {}
+    quick = re.compile(r"GeneratorVersion\s*::\s*new\s*\(\s*(\d+)\s*\)")
+    out: Dict[int, Set[str]] = {}
+    for path, facts in graph.rs.items():
+        text = (root / path).read_text(encoding="utf-8", errors="replace")
+        if not any(int(v) > int(current.group(1)) for v in quick.findall(text)):
+            continue
+        kinds = {item[0]: (item[1], bool(item[5])) for item in facts.items}
+        tokens = {ident: [v for _, v in t] for ident, t in rust_graph.item_tokens(text).items()}
+        for ident, values in tokens.items():
+            if kinds.get(ident, ("", True)) != ("const", False):
+                continue
+            versions = [int(values[i + 4]) for i in range(len(values) - 5)
+                        if values[i:i + 4] == ["GeneratorVersion", "::", "new", "("] and values[i + 4].isdigit()]
+            if not versions or versions[0] <= int(current.group(1)):
+                continue
+            gate = ident.rsplit(":", 1)[-1]
+            types = {m.group(1) for other, vs in tokens.items() if gate in vs
+                     for m in [re.match(r"member:[\w:]*:impl (\w+)::", other)] if m}
+            out.setdefault(versions[0], set()).update(
+                rust_graph.item_node(path, other) for other, vs in tokens.items()
+                if re.match(r"fn:[\w:]*:with_\w+$", other) and kinds.get(other, ("", False))[1]
+                and types.intersection(vs))
+    return out
 
 
 class Names:
@@ -209,11 +245,14 @@ def choose(root: Path, graph: rust_graph.Graph, version: Optional[int]
            ) -> Tuple[int, List[Tuple[str, str]], List[Tuple[str, str]]]:
     """The version, and sets 1 and 2 as (binary id, test name)."""
     unions, switches = unions_and_switches(graph)
+    for held, found in held_switches(root, graph).items():
+        unions.setdefault(held, set())
+        switches.setdefault(held, set()).update(found)
     if not unions:
-        raise SystemExit("error: no version's union of holds found")
+        raise SystemExit("error: no version's holds found")
     version = max(unions) if version is None else version
     if version not in unions:
-        raise SystemExit(f"error: no union of version {version}'s holds (found {sorted(unions)})")
+        raise SystemExit(f"error: no holds of version {version} (found {sorted(unions)})")
     reverse: Dict[str, Set[str]] = {}
     for source, targets in graph.edges.items():
         for target in targets:
