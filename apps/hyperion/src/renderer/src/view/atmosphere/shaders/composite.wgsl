@@ -76,6 +76,12 @@
 // its split (`levers.z`), a drawn surface within the volume's reach whose ray meets the deck's datum
 // first takes the ray march, which reads the deck there (R08.T16.b.2), as beyond the reach: the
 // volume reads no deck, and the ground within the reach showed dim through it, the deck beyond.
+// Changes (plan R08, R08.T17): from above the top, a pixel whose four candidates at half resolution
+// lie on both sides of the body's drawn limb reads the march between them by its ray's tangent
+// height over the datum (`rayMarchEdgeOf`), in place of the nearest of its own kind, which stood up
+// to 1.5 px off it across a limb a few scale heights thin: TEST JUPITER's top limb from
+// 9.5 x 10^8 m on high's stepped floor drew a dark cap and a dotted fringe, a stop and more under
+// its full resolution's.
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -240,24 +246,27 @@ fn withinDisc(dir : vec3f, source : SkySource) -> bool {
 // whose centre is nearest the pixel's (R08.T8.b, `decision-r08-t8-leans.md` §6.2). Without the
 // tie-break every sky and limb pixel, whose four depths are all 0, took the first candidate, so the
 // half-resolution layer stood one output pixel down and right of the scene.
-fn rayMarched(pixel : vec2u, depth : f32) -> vec4f {
-  return rayMarchedFrom(marchCandidatesOf(pixel), pixel, depth);
-}
-
-// `rayMarched` from the pixel's candidates, read already.
-fn rayMarchedFrom(candidates : MarchCandidates, pixel : vec2u, depth : f32) -> vec4f {
-  let at = rayMarchTexelFrom(candidates, pixel, depth);
+// Since R08.T17, about a far body's drawn limb, the march between two texels (`rayMarchEdgeOf`),
+// `at` the pixel's read, formed once in `fragmentMain`.
+fn rayMarched(at : MarchEdge) -> vec4f {
   if (!at.found) {
     return vec4f(0.0, 0.0, 0.0, 1.0);
   }
-  return textureLoad(rayMarch, at.texel, 0);
+  var light = textureLoad(rayMarch, at.lightLow, 0);
+  for (var blend = at.blended; blend; blend = false) {
+    light = mix(light, textureLoad(rayMarch, at.lightHigh, 0), at.lightShare);
+  }
+  return light;
 }
 
 // The ray march's texel `rayMarched` reads for a pixel (R08.T9.c, which reads the second target
-// there too): `found` false where no candidate's depth compares (a NaN), which reads (0, 0, 0, 1).
+// there too): `found` false where no candidate's depth compares (a NaN), which reads (0, 0, 0, 1);
+// `edge` where its four candidates' source pixels lie on both sides of a drawn edge, some sky and
+// some surface (R08.T17).
 struct MarchTexel {
   texel : vec2u,
   found : bool,
+  edge : bool,
 }
 
 // The four march texels `rayMarchTexelOf` chooses from at half resolution and the scene's depth at
@@ -305,15 +314,17 @@ fn rayMarchTexelOf(pixel : vec2u, depth : f32) -> MarchTexel {
 // `rayMarchTexelOf` from the pixel's candidates, read already.
 fn rayMarchTexelFrom(candidates : MarchCandidates, pixel : vec2u, depth : f32) -> MarchTexel {
   if (!candidates.half) {
-    return MarchTexel(pixel, true);
+    return MarchTexel(pixel, true, false);
   }
   let scale = draw.output.z;
   let centre = vec2f(pixel) + 0.5;
-  var best = MarchTexel(vec2u(0u), false);
+  var best = MarchTexel(vec2u(0u), false, false);
   var bestError = 3.4e38;
   var bestDistance = 3.4e38;
+  var skies = 0u;
   for (var k = 0; k < 4; k++) {
     let t = candidates.texels[k];
+    skies += select(0u, 1u, candidates.depths[k] == 0.0);
     let error = abs(candidates.depths[k] - depth);
     // A tie of depths goes to the texel nearest the pixel's centre, the one the full-resolution
     // scene lines up with: the squared distance between their centres in output pixels.
@@ -322,10 +333,192 @@ fn rayMarchTexelFrom(candidates : MarchCandidates, pixel : vec2u, depth : f32) -
     if (error < bestError || (error == bestError && distance < bestDistance)) {
       bestError = error;
       bestDistance = distance;
-      best = MarchTexel(t, true);
+      best = MarchTexel(t, true, false);
     }
   }
+  best.edge = skies > 0u && skies < 4u;
   return best;
+}
+
+// The texels a pixel reads the march from (R08.T17; `rayMarchEdgeOf`): its light between `lightLow`
+// and `lightHigh` by `lightShare`, and a drawn surface's transmittance, and the light's mean of it,
+// between `ownLow` and `ownHigh` by `ownShare`; `found` as `MarchTexel`'s. Where not `blended` all
+// four are `rayMarchTexelOf`'s texel, and a reader takes it alone, as before R08.T17, its loads and
+// bits unchanged (a texel's inf stays inf, where `mix` would make it NaN).
+struct MarchEdge {
+  lightLow : vec2u,
+  lightHigh : vec2u,
+  lightShare : f32,
+  ownLow : vec2u,
+  ownHigh : vec2u,
+  ownShare : f32,
+  found : bool,
+  blended : bool,
+}
+
+// The candidates of one side of a drawn edge about a pixel's ray (`rayMarchEdgeOf`): the one whose
+// centre ray's tangent height is the greatest at or under the pixel's (`low`, `lowM`) and the one
+// whose is the least at or over it (`high`, `highM`), each height ±3.4e38 m where none is; and how
+// many the side holds.
+struct EdgeSide {
+  low : vec2u,
+  lowM : f32,
+  high : vec2u,
+  highM : f32,
+  count : u32,
+}
+
+fn edgeSideNone(texel : vec2u) -> EdgeSide {
+  return EdgeSide(texel, -3.4e38, texel, 3.4e38, 0u);
+}
+
+// `side` with candidate `texel` of tangent height `heightM`, against the pixel's `pixelM`.
+fn edgeSideTake(side : ptr<function, EdgeSide>, texel : vec2u, heightM : f32, pixelM : f32) {
+  (*side).count += 1u;
+  if (heightM <= pixelM && heightM > (*side).lowM) {
+    (*side).lowM = heightM;
+    (*side).low = texel;
+  }
+  if (heightM >= pixelM && heightM < (*side).highM) {
+    (*side).highM = heightM;
+    (*side).high = texel;
+  }
+}
+
+// The far limb's rays from the draw's own members (`farLimb.wgsl`'s `farLimbRaysOf`), so that no
+// helper here takes the whole view with its sources' array.
+fn drawnLimbRays() -> FarLimbRays {
+  return FarLimbRays(
+    draw.camera.xyz, draw.right.xyz, draw.upRay.xyz, draw.forward.xyz, draw.figure.x, draw.figure.y
+  );
+}
+
+// How far above the lowest sky candidate's tangent height the highest surface candidate's may stand
+// for a drawn edge to be read as the limb (`rayMarchEdgeOf`), a share of the four's spread: 0.75,
+// over the limb's 1/sqrt(2) and under the 1 of an edge across the heights' rows.
+const MARCH_EDGE_ORDER : f32 = 0.75;
+
+// How much farther than the nearest surface candidate another, or the pixel's own surface, may
+// stand for all to be one surface (`rayMarchEdgeOf`), a share of the distance: 0.5. Across a limb
+// the face's distance moves by about sqrt(2 R h) a pixel's height h in: some 12 to 17% two to
+// three pixels in on R05's Earth from 2.2 radii (smoke part 12's `checkFarLimbEdge`), which the
+// march's own 0.1 (`marchArea.wgsl`'s MARCH_SAME_SURFACE_SHARE) would refuse, and about 2% on
+// TEST JUPITER from 10^9 m. A ship or a moon drawn across the limb, a factor of several nearer,
+// keeps the nearest by depth.
+const MARCH_EDGE_SAME_SURFACE_SHARE : f32 = 0.5;
+
+// The march a pixel reads (plan R08, R08.T17): `rayMarchTexelOf`'s texel, but from above the top
+// where its four candidates lie on both sides of the body's drawn limb, the march between two of
+// them by the tangent heights over the datum of their centre rays and of the pixel's own ray
+// (`farLimb.wgsl`'s `farLimbHeightAt`), linear in it: across a limb a few scale heights thin the
+// light moves by stops within a texel, along the limb's normal, which the height measures, and the
+// nearest of a pixel's own kind stood up to 1.5 px off it across the limb. A surface's light and
+// its transmittance are between the two of its own side nearest the pixel's height, clamped to the
+// one where it lies past them all; the light, where it lies past all of its own side, between the
+// nearest of its own and the nearest of the other (a sky pixel just outside the limb, past every
+// sky texel's centre, the face's light below it and the sky's above). The drawn edge is the limb
+// where every surface candidate's height is under, and every sky candidate's over, the spread of
+// the four's heights, about a texel, and the surface lies below the sky across it: the highest
+// surface candidate at most `MARCH_EDGE_ORDER` of the spread above the lowest sky one. A texel is
+// a surface's where its own pixel, half a pixel down and right of its centre, is, so across the
+// limb that difference stays under 1/sqrt(2) of the spread; a surface drawn off the datum
+// (`checkLowPick`'s quad), whose edge crosses the heights' rows, keeps the nearest. Each candidate
+// is classed sky or surface by the pixel the march itself read for it (`marchArea.wgsl`'s
+// `marchTexelDepthOf`, the one under `uv x full`), so that a side's texels are the march's own: on
+// an axis of an odd number of pixels that is 2t where the pick's source is 2t + 1; where the march
+// traced all four as the pixel's own kind, it reads between those by height, and where none, the
+// nearest. Every candidate's ray and the pixel's must meet their closest approach ahead of the
+// camera, and every surface candidate, and the pixel's own surface, stand within
+// MARCH_EDGE_SAME_SURFACE_SHARE of one depth. Inside a loop of at most one pass, not an `if`, so
+// that SwiftShader pays the heights only at those pixels (`fragmentMain`'s note).
+fn rayMarchEdgeOf(candidates : MarchCandidates, pixel : vec2u, depth : f32) -> MarchEdge {
+  let one = rayMarchTexelFrom(candidates, pixel, depth);
+  var out = MarchEdge(one.texel, one.texel, 0.0, one.texel, one.texel, 0.0, one.found, false);
+  let across = one.found && one.edge && draw.camera.w * draw.curvature.z >= draw.shell.x;
+  for (var edge = across; edge; edge = false) {
+    let scale = draw.output.z;
+    let size = vec2u(ceil(draw.output.xy * scale));
+    let full = vec2u(draw.output.xy);
+    let base = vec2i(vec2f(pixel) * scale - 0.5);
+    let rays = drawnLimbRays();
+    let pixelApproach = farLimbApproach(
+      rays.camera, farLimbRayThrough(rays, (vec2f(pixel) + 0.5) / draw.output.xy), rays.a, rays.c
+    );
+    let pixelM = pixelApproach.x;
+    var ahead = pixelApproach.y > 0.0;
+    var own = edgeSideNone(one.texel);
+    var other = edgeSideNone(one.texel);
+    var surfaceMostM = -3.4e38;
+    var skyLeastM = 3.4e38;
+    var leastM = 3.4e38;
+    var mostM = -3.4e38;
+    // Reversed-Z depth is near / distance: the nearest surface the greatest depth.
+    var nearestDepth = select(0.0, depth, depth > 0.0);
+    var farthestDepth = select(3.4e38, depth, depth > 0.0);
+    for (var j = 0; j < 2; j++) {
+      for (var i = 0; i < 2; i++) {
+        let t = vec2u(clamp(base + vec2i(i, j), vec2i(0), vec2i(size) - 1));
+        let uv = (vec2f(t) + 0.5) / vec2f(size);
+        let traced = min(vec2u(uv * vec2f(full)), full - 1u);
+        let tracedDepth = textureLoad(sceneDepth, traced, 0);
+        let surface = tracedDepth > 0.0;
+        let approach = farLimbApproach(rays.camera, farLimbRayThrough(rays, uv), rays.a, rays.c);
+        let heightM = approach.x;
+        ahead = ahead && approach.y > 0.0;
+        leastM = min(leastM, heightM);
+        mostM = max(mostM, heightM);
+        if (surface) {
+          surfaceMostM = max(surfaceMostM, heightM);
+          nearestDepth = max(nearestDepth, tracedDepth);
+          farthestDepth = min(farthestDepth, tracedDepth);
+        } else {
+          skyLeastM = min(skyLeastM, heightM);
+        }
+        if (surface == (depth > 0.0)) {
+          edgeSideTake(&own, t, heightM, pixelM);
+        } else {
+          edgeSideTake(&other, t, heightM, pixelM);
+        }
+      }
+    }
+    let spreadM = mostM - leastM;
+    let oneSurface = farthestDepth * (1.0 + MARCH_EDGE_SAME_SURFACE_SHARE) >= nearestDepth;
+    let limb = ahead && oneSurface && spreadM > 0.0 && surfaceMostM <= spreadM &&
+      skyLeastM >= -spreadM && surfaceMostM - skyLeastM <= MARCH_EDGE_ORDER * spreadM;
+    if (!limb || own.count == 0u) {
+      break;
+    }
+    let ownBelow = own.lowM > -3.4e38;
+    let ownAbove = own.highM < 3.4e38;
+    let ownLow = select(own.high, own.low, ownBelow);
+    let ownHigh = select(own.low, own.high, ownAbove);
+    var ownShare = 0.0;
+    if (ownBelow && ownAbove && own.highM > own.lowM) {
+      ownShare = (pixelM - own.lowM) / (own.highM - own.lowM);
+    }
+    var low = ownLow;
+    var lowM = own.lowM;
+    var high = ownHigh;
+    var highM = own.highM;
+    if (!ownBelow && other.lowM > -3.4e38) {
+      low = other.low;
+      lowM = other.lowM;
+    }
+    if (!ownAbove && other.highM < 3.4e38) {
+      high = other.high;
+      highM = other.highM;
+    }
+    var share = 0.0;
+    if (lowM > -3.4e38 && highM < 3.4e38 && highM > lowM) {
+      share = (pixelM - lowM) / (highM - lowM);
+    } else if (lowM > -3.4e38) {
+      high = low;
+    } else {
+      low = high;
+    }
+    out = MarchEdge(low, high, share, ownLow, ownHigh, ownShare, true, true);
+  }
+  return out;
 }
 
 // The most optical depth, in any channel at any of a pixel's four candidates, under which
@@ -424,12 +617,10 @@ fn marchedHere(pixel : vec2u) -> bool {
 
 // The ray march's texel for this pixel (`rayMarched`) where the march wrote it, and outside the
 // area what it would have written there, its ray missing the air (R08.T11.d): the first target's
-// alone, for the sky.
-fn marchedLightAt(pixel : vec2u, depth : f32, here : bool) -> vec4f {
-  if (here) {
-    return rayMarched(pixel, depth);
-  }
-  return vec4f(0.0, 0.0, 0.0, 1.0);
+// alone, for the sky. Outside the area `fragmentMain` forms no read, `at.found` false, which
+// `rayMarched` reads as that.
+fn marchedLightAt(at : MarchEdge) -> vec4f {
+  return rayMarched(at);
 }
 
 // The ray march's two targets at a pixel's texel: the first's in-scatter and mean transmittance,
@@ -440,15 +631,21 @@ struct Marched {
 }
 
 // `marchedLightAt` with the second target's texel beside the first's (R08.T9.c), for a surface.
-fn marchedAt(pixel : vec2u, depth : f32, here : bool) -> Marched {
-  if (here) {
-    let at = rayMarchTexelOf(pixel, depth);
-    if (at.found) {
-      return Marched(
-        textureLoad(rayMarch, at.texel, 0),
-        textureLoad(rayMarchTransmittance, at.texel, 0).rgb,
+fn marchedAt(at : MarchEdge) -> Marched {
+  if (at.found) {
+    var light = textureLoad(rayMarch, at.lightLow, 0);
+    var transmittance = textureLoad(rayMarchTransmittance, at.ownLow, 0).rgb;
+    // A surface's transmittance, and the light's mean of it, from its own side alone (R08.T17).
+    for (var blend = at.blended; blend; blend = false) {
+      let mean = mix(
+        textureLoad(rayMarch, at.ownLow, 0).a, textureLoad(rayMarch, at.ownHigh, 0).a, at.ownShare
+      );
+      light = vec4f(mix(light, textureLoad(rayMarch, at.lightHigh, 0), at.lightShare).rgb, mean);
+      transmittance = mix(
+        transmittance, textureLoad(rayMarchTransmittance, at.ownHigh, 0).rgb, at.ownShare
       );
     }
+    return Marched(light, transmittance);
   }
   return Marched(vec4f(0.0, 0.0, 0.0, 1.0), vec3f(1.0));
 }
@@ -515,6 +712,17 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let count = skySourceCount(v);
   // Whether the pixel lies in the march's area (R08.T11.d); outside it, it reads no air.
   let here = marchedHere(pixel);
+  // The march's texels the pixel reads, formed once, where the march wrote them (R08.T17):
+  // SwiftShader inlines every call, and the edge's read at each of its readers' four call sites
+  // took its GPU process past what it compiles (exit_code=139 on the smoke's first composite,
+  // 2026-11-06).
+  // Its march candidates too, read once a pixel for `behindAtMarch` as well (plan R07).
+  var candidates : MarchCandidates;
+  var at = MarchEdge(vec2u(0u), vec2u(0u), 0.0, vec2u(0u), vec2u(0u), 0.0, false, false);
+  if (here) {
+    candidates = marchCandidatesOf(pixel);
+    at = rayMarchEdgeOf(candidates, pixel, depth);
+  }
 
   if (depth == 0.0) {
     if (COMPOSITE_PROBE == 1u) {
@@ -541,8 +749,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
       behind = vec3f(1.0);
       inscattered = vec3f(0.0);
       if (here) {
-        let candidates = marchCandidatesOf(pixel);
-        inscattered = rayMarchedFrom(candidates, pixel, depth).rgb;
+        inscattered = rayMarched(at).rgb;
         if (COMPOSITE_PROBE != 2u) {
           // From the march's resolution where the frame formed it and the read stands for the
           // pixel's own (the owner's priority, 2026-11-01; `behindAtMarch`): neither the footprint
@@ -585,7 +792,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
         inscattered = textureSampleLevel(skyView, linearClamp, skyUv, 0.0).rgb;
       }
       if (marchWeight > 0.0) {
-        let marched = marchedLightAt(pixel, depth, here);
+        let marched = marchedLightAt(at);
         if (marchWeight < 1.0) {
           inscattered = mix(inscattered, marched.rgb, marchWeight);
         } else {
@@ -643,7 +850,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     }
     var luminance = colour * through + aerialAt.rgb * factor;
     if (marchWeight > 0.0) {
-      let marched = marchedAt(pixel, depth, here);
+      let marched = marchedAt(at);
       luminance = mix(
         luminance,
         colour * marchedThrough(marched, channels) + marched.light.rgb * factor,
@@ -652,7 +859,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     }
     return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
   }
-  let marched = marchedAt(pixel, depth, here);
+  let marched = marchedAt(at);
   let luminance = colour * marchedThrough(marched, channels) + marched.light.rgb * factor;
   return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
 }

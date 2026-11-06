@@ -4274,6 +4274,155 @@ export async function checkMarchOverBody(engine: RenderEngine, checks: Checks): 
   }
 }
 
+/** R08.T17's far limb at half resolution: the frame, 192 × 108 texels of low's march. */
+const FAR_EDGE_FRAME_SIZE: ViewSize = { widthPx: 384, heightPx: 216 };
+
+/**
+ * The far limb's camera range, R05's Earth's radii: 2.2, at which the disc stands some 110 px
+ * across {@link FAR_EDGE_FRAME_SIZE}'s 90° of height and a pixel some 92 km at the limb.
+ */
+const FAR_EDGE_RANGE_RADII = 2.2;
+
+/**
+ * The least share of the full-resolution march's light that the half-resolution march keeps over
+ * the 3 × 3 pixels about any pixel of the limb (R08.T17): 0.45. Before `composite.wgsl`'s
+ * `rayMarchEdgeOf` the pixels about the limb read texels whose centres stood up to 1.5 px off them
+ * across it, and the worst window kept 0.28 (38 of 780 under 0.45); with it 0.53 (none). The
+ * rest is half resolution's trade (`farLimbLow.test.ts`): a glow under a pixel thick,
+ * the brightest pixel at full resolution, spread over a texel at half its light, which no read of
+ * the texels restores, and which 3 × 3 pixels hold whole.
+ */
+const FAR_EDGE_KEPT_SHARE = 0.45;
+
+/**
+ * The share of the limb band's brightest light, in the full-resolution march, under which a pixel
+ * is too dim to judge: the sky's tail past the limb, where a half step of `rgba16float` is a large
+ * share of it.
+ */
+const FAR_EDGE_LIT_SHARE = 0.1;
+
+/**
+ * R08.T17: low's half-resolution march over a far body's limb, composited, against the same frame
+ * marched at full resolution.
+ *
+ * @remarks
+ * R05's Earth on a sphere from {@link FAR_EDGE_RANGE_RADII} radii, drawn black with its own depth
+ * ({@link bodyMeshOf}), so that the composite's pixels over it hold the air's light alone, as a
+ * routed giant's black datum does (`TEST JUPITER` from 9.5 × 10⁸ m on high's stepped floor). Its
+ * shell, 100 km under a texel of some 185 km, is the far limb's. About every pixel within two of
+ * the disc's edge whose full-resolution light is at least {@link FAR_EDGE_LIT_SHARE} of the band's
+ * brightest, the 3 × 3 pixels at half resolution must hold at least {@link FAR_EDGE_KEPT_SHARE} of
+ * their light at full. The composite read each pixel's texel by depth and then by distance, and so
+ * took, about the limb, the light of a texel up to 1.5 px further in or out across it: a dark cap
+ * where the limb ran along a row of texels and a dotted fringe where it crossed them, a limb pixel a
+ * stop and more under its row's neighbours (fix-r08-far-giant-disc's captures, 2026-11-05).
+ */
+export async function checkFarLimbEdge(engine: RenderEngine, checks: Checks): Promise<void> {
+  const figure = sphereFigure(BODY_FRAME_RADIUS_M);
+  const half = twinSizes(TABLE_SIZES.low);
+  const positionM = { x: FAR_EDGE_RANGE_RADII * BODY_FRAME_RADIUS_M, y: 0, z: 0 };
+  const camera: AtmosphereCamera = {
+    positionM,
+    orientation: lookAlong({ x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }),
+    fovXRad: 2 * Math.atan(FAR_EDGE_FRAME_SIZE.widthPx / FAR_EDGE_FRAME_SIZE.heightPx),
+    viewport: FAR_EDGE_FRAME_SIZE,
+  };
+  // Over the camera's shoulder and above, so that the top limb and both sides are lit.
+  const sun: SunState = {
+    directionBodyFixed: normalise({ x: 0.6, y: 0.3, z: 0.74 }),
+    illuminanceLx: SUN_ILLUMINANCE_LX,
+    angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
+    drawsDisc: false,
+  };
+  const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, half, figure);
+  const mesh = bodyMeshOf(engine, camera);
+  const material = engine.createMaterial(flatSpec("far limb's edge"));
+  const surface: SceneSurface = () => drawOf(mesh, material, [0, 0, 0, 1]);
+  const frame = (over: HillaireAtmosphere, label: string): Promise<Float64Array> =>
+    drawComposite(
+      engine,
+      over,
+      camera,
+      [sun],
+      { label, surface, preExposure: SMOKE_EXPOSURE_SCALE },
+      async (output) => {
+        const texels = halfTexels(await engine.readTexture(output.colour));
+        return Float64Array.from({ length: texels.length / 4 }, (_, i) => luminanceOf(texels, i));
+      },
+    );
+  try {
+    const halved = await frame(atmosphere, "far limb's edge, half resolution");
+    const fullSizes: TableSizes = { ...half, rayMarchScale: 1 };
+    const reference = HillaireAtmosphere.over(engine, atmosphere.tables, fullSizes, null);
+    let whole: Float64Array;
+    try {
+      whole = await frame(reference, "far limb's edge, full resolution");
+    } finally {
+      reference.dispose();
+    }
+    const { widthPx: w, heightPx: h } = FAR_EDGE_FRAME_SIZE;
+    const onBody = (x: number, y: number): boolean =>
+      x >= 0 && y >= 0 && x < w && y < h && bodyDepthAlong(camera, x + 0.5, y + 0.5) !== null;
+    const band: number[] = [];
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const own = onBody(x, y);
+        let near = false;
+        for (let j = -2; j <= 2 && !near; j += 1) {
+          for (let i = -2; i <= 2 && !near; i += 1) {
+            near = onBody(x + i, y + j) !== own;
+          }
+        }
+        if (near) {
+          band.push(y * w + x);
+        }
+      }
+    }
+    const brightest = band.reduce((most, at) => Math.max(most, whole[at] ?? 0), 0);
+    const about = (light: Float64Array, x: number, y: number): number => {
+      let sum = 0;
+      for (let j = -1; j <= 1; j += 1) {
+        for (let i = -1; i <= 1; i += 1) {
+          const xx = Math.min(Math.max(x + i, 0), w - 1);
+          const yy = Math.min(Math.max(y + j, 0), h - 1);
+          sum += light[yy * w + xx] ?? 0;
+        }
+      }
+      return sum;
+    };
+    let judged = 0;
+    let under = 0;
+    let worst = Infinity;
+    let worstAt = "none";
+    for (const at of band) {
+      if (!((whole[at] ?? 0) >= FAR_EDGE_LIT_SHARE * brightest)) {
+        continue;
+      }
+      judged += 1;
+      const x = at % w;
+      const y = Math.floor(at / w);
+      const kept = about(halved, x, y) / about(whole, x, y);
+      // A NaN in either frame counts against the check.
+      if (!(kept >= FAR_EDGE_KEPT_SHARE)) {
+        under += 1;
+      }
+      if (kept < worst) {
+        worst = kept;
+        worstAt = `(${String(x)}, ${String(y)}) on the ${onBody(x, y) ? "disc" : "sky"}`;
+      }
+    }
+    checks.check(
+      `R08.T17 R05's Earth from ${String(FAR_EDGE_RANGE_RADII)} radii, black, low's half-resolution march over its limb: the 3 × 3 pixels about every pixel within two of the disc's edge keep at least ${String(FAR_EDGE_KEPT_SHARE)} of the full-resolution march's light`,
+      brightest > 0 && judged > 200 && under === 0 && Number.isFinite(worst),
+      `${String(judged)} of ${String(band.length)} band pixels judged (at least ${String(FAR_EDGE_LIT_SHARE)} of the brightest); ${String(under)} under; worst ${worst.toFixed(3)} at ${worstAt}`,
+    );
+  } finally {
+    atmosphere.dispose();
+    engine.releaseMesh(mesh);
+    engine.releaseMaterial(material);
+  }
+}
+
 /**
  * A smoke check's deck for `tables` (R08.T15.a.2): `test/thickTables.ts`'s deck pattern over the
  * tables' medium, the deck's upper medium, and its J above it with the correction's pattern summed

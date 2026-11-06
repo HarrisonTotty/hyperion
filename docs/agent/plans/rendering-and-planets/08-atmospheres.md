@@ -25100,6 +25100,22 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     ended `TEST JUPITER`'s march above its floor from 5 × 10⁸ m on low's and high's stepped half
     resolution, in columns where `f32` put it on the nearer pixel. Smoke part 12 holds the frame
     marched as a view marches it (`viewMarchOverBody`).
+- **The composite's read about a far limb** (R08.T17's fix lane `fix-r08-far-giant-disc`, part 2,
+  2026-11-05).
+  - `composite.wgsl`: `rayMarchTexelOf`'s `MarchTexel` gains `edge`; `rayMarched` and `marchedAt`
+    read through `rayMarchEdgeOf`. From above the top, at half resolution, a pixel whose
+    candidates straddle the body's drawn limb takes the march between two texels by tangent
+    height over the datum. A surface's transmittance comes from its own side. Candidates are
+    classed by the pixel the march traced. The read applies only where the edge is the limb
+    (`MARCH_EDGE_ORDER`, one surface within `MARCH_EDGE_SAME_SURFACE_SHARE` of depth, every
+    ray's approach ahead); elsewhere, at full resolution and inside the air, the texel and its
+    loads are as before. `fragmentMain` forms the read once (`at`): at each of the readers' four
+    call sites SwiftShader's GPU process crashed (exit_code=139).
+  - Smoke part 12: `checkFarLimbEdge` checks the half-resolution march over R05's Earth at 2.2
+    radii, drawn black, against the same frame at full resolution, over each 3 × 3 window about
+    the limb. It must keep at least 0.45; without the fix the worst kept 0.28, with it 0.53.
+  - Landed over plan R07's march candidates read once (landing round 4): `rayMarchEdgeOf` takes
+    `fragmentMain`'s `MarchCandidates`, and `rayMarchTexelFrom` counts the sky candidates from them.
 - **The cool giants' route, as built** (R08.T16.a.2, 2026-11-05; lane `fix-r08-cool-giant-route`;
   research-leans-43's lean, kept by main with four corrections; figures in the lane's outbox).
   Renderer only; no reference traced (main's ruling).

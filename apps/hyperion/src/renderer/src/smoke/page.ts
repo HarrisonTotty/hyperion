@@ -95,6 +95,7 @@ import {
   checkBinarySlotLayers,
   checkFaceCount,
   checkFarLimb,
+  checkFarLimbEdge,
   checkFarLimbFootprint,
   checkLowPick,
   checkCompositeArea,
@@ -852,6 +853,11 @@ async function run(
   // Earth's shared read as the specialised march's, in the same part.
   await group(12, "fix-disc-air-rows the half-resolution march over a drawn body", () =>
     checkMarchOverBody(engine, checks),
+  );
+  // R08.T17's far limb, in part 12 beside fix-disc-air-rows' frame, whose Earth and sizes it takes;
+  // with it the part ran 250 to 280 s of its 360 s on a pod (16 vCPU, 2026-11-06).
+  await group(12, "R08.T17 the half-resolution march about a far limb", () =>
+    checkFarLimbEdge(engine, checks),
   );
   // In part 12 after the specialised march's, over the shared read that its group compiled.
   await group(12, "R08.T8.e's table: the shared read's sources from the sources' table", () =>
