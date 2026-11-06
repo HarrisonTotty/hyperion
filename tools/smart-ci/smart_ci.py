@@ -8,7 +8,7 @@ integration branch, `rendering-and-planets`) and the working tree, untracked fil
 works before a commit as well as after. `A...B` names the commits of B since its merge-base with A
 instead, with no working tree: a plan for another branch, made with `--plan`.
 
-Each changed path maps to the checks that read it (`classify`, and the README's "smart-ci" table),
+Each changed path maps to the checks that read it (`classify`; docs/development/checks.md's table),
 and the plan runs those checks through the recipes `just ci` runs, scoped to the crates, packages
 and files concerned, in `ci`'s order and phases: the checks that need no build directory, and vitest
 (which takes no lock), beside the cargo steps, then every Rust suite in one hold of the heavy-test

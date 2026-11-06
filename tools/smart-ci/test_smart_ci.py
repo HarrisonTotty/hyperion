@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Tests of `just smart-ci` (`smart_ci.py`), run by `just ci` (`_smart-ci-test`).
 
-Two kinds. The rules, path by path, on a small workspace shaped like the real one (its crates,
-their graph and features, a few TypeScript files that read Rust files), so that each rule of the
-README's table is pinned without depending on today's tree. And smart-ci against the real
-justfile and workspace: every step `just ci` runs is one smart-ci knows (`CI_STEPS`), each step
-calls the recipes the table says with the arguments it says, and every recipe a plan runs exists
-and takes the arguments the plan gives it. A step added to `ci`, or a command added to one of its
-steps, fails `just ci` here until smart-ci knows it.
+Two kinds. The rules, path by path, on a small workspace shaped like the real one (its crates, their
+graph and features, a few TypeScript files that read Rust files), so that each rule of the table in
+docs/development/checks.md is pinned without depending on today's tree. And smart-ci against the
+real justfile and workspace: every step `just ci` runs is one smart-ci knows (`CI_STEPS`), each step
+calls the recipes the table says with the arguments it says, and every recipe a plan runs exists and
+takes the arguments the plan gives it. A step added to `ci`, or a command added to one of its steps,
+fails `just ci` here until smart-ci knows it.
 
 Standard library only: `python3 tools/smart-ci/test_smart_ci.py`.
 """

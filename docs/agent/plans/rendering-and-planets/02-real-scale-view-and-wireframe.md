@@ -1155,9 +1155,10 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
 - **The server's scene, for the runs that need it.** `just server`, then `just place-ship`, then
   `just client`, F2, `OPEN` the universe `place-ship` names (`Dev Fixture`), and F4: `VIEW` then
   draws the server's scene of FPF 1Z0P1Z D-35 with the system's first planet straight ahead from
-  the seat, and no `TRAINING` (R03.T6's note; the README, "Seeing a generated system in `VIEW`").
-  Without `just place-ship` the stand-in is in no system and `VIEW` stays on its kept scene. Run it
-  again after each server start; `--look-at barycentre` looks at the star of a single system.
+  the seat, and no `TRAINING` (R03.T6's note; `docs/development/running.md`, "Seeing a generated
+  system in `VIEW`"). Without `just place-ship` the stand-in is in no system and `VIEW` stays on its
+  kept scene. Run it again after each server start; `--look-at barycentre` looks at the star of a
+  single system.
 - Files: this plan's Verification, "Recorded runs" table. R12 consolidates.
 - Acceptance: the table has one row per run, and every failure is filed as a finding against the
   task that owns it.

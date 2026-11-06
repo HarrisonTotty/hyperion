@@ -932,9 +932,10 @@ server, with no server mode of its own: it finds or creates a universe (`Dev Fix
 0.01 au behind the planet along its orbital velocity, so that the seat camera, which looks along
 the stand-in's velocity in the system frame (R02.T17's stand-in attitude), has the planet ahead;
 `--look-at barycentre` puts it at rest 1 au along galactic +z from the barycentre instead, and
-`--look-at <body ID>`, `--distance`, `--time` and `--rate` choose the rest. The README's
-"Seeing a generated system in `VIEW`" lists the options. The sessions plan, which retires the
-stand-in, retires the tool with it. Added 2026-10-02 (RM1 validation, see the Risks).
+`--look-at <body ID>`, `--distance`, `--time` and `--rate` choose the rest.
+`docs/development/running.md`'s "Seeing a generated system in `VIEW`" lists the options. The
+sessions plan, which retires the stand-in, retires the tool with it. Added 2026-10-02 (RM1
+validation, see the Risks).
 
 ### R03.T7 The scene's core
 
