@@ -34,6 +34,11 @@
 //! The server answers `sky` only behind its switch, `--serve-sky` (R06.T11.c), on by default since
 //! rendering plan R13's R13.T2; off (`--serve-sky=false`), the request never reaches this handler.
 //!
+//! `host_discs` ([`host_discs_answer`]) answers a system's discs on their own, the bytes a sky that
+//! leaves the system out carries as its `hosts` at the same time, with no census: looked up and
+//! drawn in interactive jobs, so that a view lights a new system at once, whatever its sky costs. It
+//! reads no table, and is served with the sky's switch off too.
+//!
 //! The last skies' final replies are kept ([`kept`], R06.T11.l), in memory and in files under the
 //! data directory (R06.T11.n), and a sky asked again exactly as one of them, before or after a
 //! restart, is answered with its kept reply alone, with no sky job on the pool, unless the server
@@ -67,9 +72,9 @@ use std::time::Instant;
 use futures_util::TryFutureExt;
 use futures_util::future::try_join3;
 use hyperion_protocol::{
-    BandSpecDto, ConeDto, ErrorCode, EyeDto, GalacticPosition, HostDiscDto, MAX_CUT_V,
-    MAX_SKY_STARS, PowerTwoDto, RequestError, ResponseBody, SkyGapDto, SkyLayerCensusDto,
-    SkyRequest, SkyResponse, SystemIdHex, UniverseIdHex,
+    BandSpecDto, ConeDto, ErrorCode, EyeDto, GalacticPosition, HostDiscDto, HostDiscsDto,
+    HostDiscsRequest, MAX_CUT_V, MAX_SKY_STARS, PowerTwoDto, RequestError, ResponseBody, SkyGapDto,
+    SkyLayerCensusDto, SkyRequest, SkyResponse, SystemIdHex, UniverseIdHex,
 };
 use hyperion_sim::coords::UnitVector;
 use hyperion_sim::galaxy::Galaxy;
@@ -307,7 +312,14 @@ async fn computed(
         .prefer_near(key, asked.observer.position());
     let galaxy = state.galaxies.get(key).await?;
     if let (Some(system), Some(named)) = (asked.exclude, &request.exclude_system) {
-        check_exclude(state, (key, &galaxy), system, named, token.clone()).await?;
+        check_exclude(
+            state,
+            (key, &galaxy),
+            system,
+            ("exclude_system", named),
+            token.clone(),
+        )
+        .await?;
     }
     let pool = &state.pool;
     let tables = state.sky_tables.get(key, &galaxy).await?;
@@ -782,11 +794,7 @@ fn wire_band(band: &SkyBand) -> Vec<SkyTexelWire> {
 }
 
 /// The discs of `system`'s stars at the query's time (Design note 16; R06.T11.c), in one bulk job
-/// under `token`: the system's stars from the server's system cache, generated if they are not
-/// held, then `host_discs`.
-///
-/// A system whose stars are not generated, a centre member until plan 09's system stage or a rogue
-/// planet, which has none, has no disc to draw: the reply's hosts are then empty.
+/// under `token`: [`discs_of`].
 ///
 /// # Errors
 ///
@@ -806,37 +814,101 @@ async fn discs(
         query.observer().time(),
     );
     compute::sky::bulk(&state.pool, token, move |_: &CancelToken| {
-        // A viewer system's synthetic star is its store's context's (rendering plan R15); one
-        // evicted since the check has no disc to draw.
-        if is_viewer(system) {
-            return shared
-                .viewer
-                .get(key, system)
-                .map_or_else(Vec::new, |kept| {
-                    host_discs_of_context(&kept.0, t)
-                        .iter()
-                        .map(host_disc)
-                        .collect()
-                });
-        }
-        match shared
-            .systems
-            .get_or_generate(key, &galaxy, system, &Listing::Unlisted)
-        {
-            Ok(stars) => host_discs(&galaxy, &stars, t)
-                .iter()
-                .map(host_disc)
-                .collect(),
-            // A system the stellar stage does not generate has no star to draw as a disc.
-            Err(
-                ResolveSystemError::KindNotGenerated | ResolveSystemError::LayerNotGenerated(_),
-            ) => Vec::new(),
-            Err(ResolveSystemError::NoSuchSystem) => {
-                panic!("the excluded system {system} was resolved before the sky's jobs")
-            }
-        }
+        discs_of(&shared, (key, &galaxy), system, t)
     })
     .await
+}
+
+/// The discs of `system`'s stars in the galaxy `key` names at `t`, as the wire carries them (Design
+/// note 16; R06.T11.c): the system's stars from the server's system cache, generated if they are
+/// not held, then `host_discs`; a viewer system's synthetic star from its store's context
+/// (rendering plan R15). A sky's `hosts` and `host_discs` both take them from here, so that the two
+/// are the same bytes for the same system and time.
+///
+/// A system whose stars are not generated, a centre member until plan 09's system stage or a rogue
+/// planet, which has none, has no disc to draw, and nor has a viewer system evicted since it was
+/// looked up: its discs are then empty.
+///
+/// # Panics
+///
+/// If `system` names no system of the galaxy, which [`check_exclude`] rules out first.
+#[must_use]
+fn discs_of(
+    state: &AppState,
+    (key, galaxy): (GalaxyKey, &Galaxy),
+    system: SystemId,
+    t: UniverseTime,
+) -> Vec<HostDiscDto> {
+    if is_viewer(system) {
+        return state.viewer.get(key, system).map_or_else(Vec::new, |kept| {
+            host_discs_of_context(&kept.0, t)
+                .iter()
+                .map(host_disc)
+                .collect()
+        });
+    }
+    match state
+        .systems
+        .get_or_generate(key, galaxy, system, &Listing::Unlisted)
+    {
+        Ok(stars) => host_discs(galaxy, &stars, t)
+            .iter()
+            .map(host_disc)
+            .collect(),
+        // A system the stellar stage does not generate has no star to draw as a disc.
+        Err(ResolveSystemError::KindNotGenerated | ResolveSystemError::LayerNotGenerated(_)) => {
+            Vec::new()
+        }
+        Err(ResolveSystemError::NoSuchSystem) => {
+            panic!("the system {system} was resolved before its discs were drawn")
+        }
+    }
+}
+
+/// A system's stars as discs at a time, on their own (`host_discs`; rendering plans R06 and R07):
+/// the discs a sky whose `exclude_system` is `request.system` carries as its `hosts` at
+/// `request.time` ([`discs_of`]), with no census, so that a view lights a new system's bodies before
+/// its sky's first reply. The system is looked up as a sky's `exclude_system` is
+/// ([`check_exclude`]), and its discs drawn, each in an interactive pool job under `token`.
+///
+/// # Errors
+///
+/// Those of [`openable_universe`]; `bad_request` naming `time` for a time outside the clock window;
+/// `unknown_system` naming `system` for an ID whose bits are not a system ID, that `resolve`
+/// refuses, or a viewer system the store does not hold, as a sky refuses its `exclude_system`; those
+/// of the galaxy cache; `queue_full` if the interactive queue has no room; and `cancelled` or
+/// `internal` from either job.
+pub(crate) async fn host_discs_answer(
+    state: Arc<AppState>,
+    request: HostDiscsRequest,
+    token: CancelToken,
+) -> Result<ResponseBody, RequestError> {
+    let universe = openable_universe(&state, &request.universe)?;
+    let t = query_time(&request.time)?;
+    let system = SystemId::from_raw(request.system.to_u64())
+        .map_err(|error| unknown_system_named("system", &request.system, error))?;
+    let key = universe.key();
+    let galaxy = state.galaxies.get(key).await?;
+    check_exclude(
+        &state,
+        (key, &galaxy),
+        system,
+        ("system", &request.system),
+        token.clone(),
+    )
+    .await?;
+    let shared = Arc::clone(&state);
+    let draw = move |_: &CancelToken| discs_of(&shared, (key, &galaxy), system, t);
+    let receiver = state.pool.try_submit(Priority::Interactive, token, draw)?;
+    let hosts = receiver
+        .await
+        .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
+    Ok(ResponseBody::HostDiscs(HostDiscsDto {
+        universe: request.universe,
+        system: request.system,
+        time: request.time,
+        hosts,
+    }))
 }
 
 /// A host star's disc as the wire carries it (Design note 16): every array in B, V, R order.
@@ -905,7 +977,8 @@ impl TryFrom<&SkyRequest> for SkyAsk {
             .exclude_system
             .as_ref()
             .map(|system| {
-                SystemId::from_raw(system.to_u64()).map_err(|error| unknown_exclude(system, error))
+                SystemId::from_raw(system.to_u64())
+                    .map_err(|error| unknown_system_named("exclude_system", system, error))
             })
             .transpose()?;
         Ok(Self {
@@ -1052,27 +1125,32 @@ fn field_stop(cone: &ConeDto) -> Result<Cone, ConvertRequestError> {
         .map_err(|error| ConvertRequestError::new("cone", error))
 }
 
-/// The refusal of an `exclude_system` that names no system of the universe: `unknown_system`,
-/// naming the field.
+/// The refusal of a system ID read from `field`, a sky's `exclude_system` or `host_discs`' `system`,
+/// that names no system of the universe: `unknown_system`, naming the field.
 #[must_use]
-fn unknown_exclude(system: &SystemIdHex, reason: impl fmt::Display) -> RequestError {
+fn unknown_system_named(
+    field: &'static str,
+    system: &SystemIdHex,
+    reason: impl fmt::Display,
+) -> RequestError {
     RequestError {
         code: ErrorCode::UnknownSystem,
         message: format!(
-            "exclude_system {} names no system of this universe: {reason}",
+            "{field} {} names no system of this universe: {reason}",
             system.as_str()
         ),
-        field: Some("exclude_system".to_owned()),
+        field: Some(field.to_owned()),
     }
 }
 
 /// Looks `system` up in `galaxy` with plan 03's `resolve`, as plan 04 requires of every ID read
-/// from a client, in an interactive pool job, as the scene resolves its frames.
+/// from a client, in an interactive pool job, as the scene resolves its frames; `named` is the field
+/// it was read from and its value, which a refusal names.
 async fn check_exclude(
     state: &AppState,
     (key, galaxy): (GalaxyKey, &Arc<Galaxy>),
     system: SystemId,
-    named: &SystemIdHex,
+    (field, named): (&'static str, &SystemIdHex),
     token: CancelToken,
 ) -> Result<(), RequestError> {
     // A viewer system is the viewer store's, which no galaxy resolves (rendering plan R15).
@@ -1081,7 +1159,7 @@ async fn check_exclude(
             .viewer
             .get(key, system)
             .map(|_| ())
-            .ok_or_else(|| unknown_exclude(named, ResolveSystemError::NoSuchSystem));
+            .ok_or_else(|| unknown_system_named(field, named, ResolveSystemError::NoSuchSystem));
     }
     let galaxy = Arc::clone(galaxy);
     let check = move |_: &CancelToken| resolve(&galaxy, system).map(|_| ());
@@ -1089,7 +1167,7 @@ async fn check_exclude(
     receiver
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))?
-        .map_err(|error| unknown_exclude(named, error))
+        .map_err(|error| unknown_system_named(field, named, error))
 }
 
 /// The census's answer (R06.T11.a–d) for the universe and observer `asked`: the cut, each layer's

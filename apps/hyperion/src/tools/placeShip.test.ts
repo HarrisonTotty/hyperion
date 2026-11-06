@@ -269,6 +269,7 @@ class FakeServer {
       case "viewer_planet":
       case "viewer_randomize":
       case "viewer_inputs":
+      case "host_discs":
         break;
     }
     return { code: "unsupported", message: `not faked: ${body.kind}`, field: null };

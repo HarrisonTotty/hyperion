@@ -40,7 +40,7 @@ use crate::scene::{
     SceneCamerasRequest, SceneNotificationDto, SceneShipRequest, SceneShipSet, SceneStateDto,
     SceneSubscribeRequest,
 };
-use crate::sky::{SkyRequest, SkyResponse};
+use crate::sky::{HostDiscsDto, HostDiscsRequest, SkyRequest, SkyResponse};
 use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
 use crate::surface::{SurfaceFieldDto, SurfaceFieldRequest, SurveyPassDto, SurveyPassRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
@@ -362,6 +362,8 @@ pub enum RequestBody {
     ViewerRandomize(ViewerRandomizeRequest),
     /// A served planet's inputs, read back (the planet viewer, rendering plan R15).
     ViewerInputs(ViewerInputsRequest),
+    /// A system's stars as discs at a time, on their own (rendering plans R06 and R07).
+    HostDiscs(HostDiscsRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -437,6 +439,8 @@ pub enum ResponseBody {
     ViewerRandomize(Box<ViewerDrawDto>),
     /// The planet's inputs read.
     ViewerInputs(Box<ViewerReadDto>),
+    /// The system's stars' discs.
+    HostDiscs(HostDiscsDto),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -476,6 +480,7 @@ pub const REQUEST_KINDS: &[&str] = &[
     "viewer_planet",
     "viewer_randomize",
     "viewer_inputs",
+    "host_discs",
 ];
 
 #[cfg(test)]
@@ -817,7 +822,12 @@ mod tests {
                     body: BodyIdHex::from_parts(system().to_u64(), 0x0100),
                 }))
             }
-            Some(RequestBody::ViewerInputs(_)) => None,
+            Some(RequestBody::ViewerInputs(_)) => Some(RequestBody::HostDiscs(HostDiscsRequest {
+                universe,
+                system: system(),
+                time: UniverseTime::default(),
+            })),
+            Some(RequestBody::HostDiscs(_)) => None,
         }
     }
 
@@ -1066,7 +1076,13 @@ mod tests {
                     multiple_stars: false,
                 })))
             }
-            Some(ResponseBody::ViewerInputs(_)) => None,
+            Some(ResponseBody::ViewerInputs(_)) => Some(ResponseBody::HostDiscs(HostDiscsDto {
+                universe,
+                system: system(),
+                time: UniverseTime::default(),
+                hosts: Vec::new(),
+            })),
+            Some(ResponseBody::HostDiscs(_)) => None,
         }
     }
 
@@ -1369,6 +1385,7 @@ mod tests {
                 "viewer_planet",
                 "viewer_randomize",
                 "viewer_inputs",
+                "host_discs",
             ]
         );
     }
@@ -1518,6 +1535,40 @@ mod tests {
         assert_wire_form(
             &ResponseBody::SceneCameras,
             json!({ "kind": "scene_cameras" }),
+        );
+    }
+
+    /// `host_discs`, answered in JSON alone: its body is its request's or its discs' beside `kind`.
+    #[test]
+    fn host_discs_wire_forms() {
+        let system = SystemIdHex::from_u64(0x0200_0800_2000_0000);
+        assert_wire_form(
+            &RequestBody::HostDiscs(HostDiscsRequest {
+                universe: universe(),
+                system: system.clone(),
+                time: UniverseTime::default(),
+            }),
+            json!({
+                "kind": "host_discs",
+                "universe": "000000000000002a",
+                "system": "0200080020000000",
+                "time": { "seconds": 0, "nanos": 0 },
+            }),
+        );
+        assert_wire_form(
+            &ResponseBody::HostDiscs(HostDiscsDto {
+                universe: universe(),
+                system,
+                time: UniverseTime::default(),
+                hosts: Vec::new(),
+            }),
+            json!({
+                "kind": "host_discs",
+                "universe": "000000000000002a",
+                "system": "0200080020000000",
+                "time": { "seconds": 0, "nanos": 0 },
+                "hosts": [],
+            }),
         );
     }
 

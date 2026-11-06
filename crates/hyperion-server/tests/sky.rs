@@ -7,7 +7,9 @@
 //! and started when its universe is opened, the fields a request it cannot serve names, the switch
 //! turned off (it is on by default since rendering plan R13's R13.T2), under which `sky` is
 //! `unsupported`, and a sky arriving nearest first, each reply the census to its stated radii and
-//! the last the census of its whole plan.
+//! the last the census of its whole plan. Beside it, a system's discs on their own (`host_discs`):
+//! a sky's `hosts` byte for byte, answered before a census under way, and refused as a sky's
+//! `exclude_system` is; and a viewer system left out of a sky, which leaves out no star.
 //!
 //! Every sky's query states RM3's synthetic ceiling, V 5.0 (rendering plan R13, R13.T2.b), its cut
 //! being deep enough here, so layers C, D and E list only within their caps towards each star's
@@ -44,10 +46,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use common::{BinaryHeader, Frame, RawFrame, TestClient, TestServer};
 use hyperion_protocol::{
-    ConeDto, ErrorCode, EyeDto, GalacticPosition, HostDiscDto, MAX_SKY_STARS, MassLayer,
-    OpenUniverseRequest, RequestBody, RequestError, RequestId, ResponseBody, SKY_STAR_BYTES,
-    SKY_TEXEL_BYTES, ServerMessage, SkyGapDto, SkyRequest, SkyResponse, SystemIdHex,
-    SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+    ConeDto, ErrorCode, EyeDto, GalacticPosition, HostDiscDto, HostDiscsDto, HostDiscsRequest,
+    MAX_SKY_STARS, MassLayer, OpenUniverseRequest, PlanetInputsDto, RequestBody, RequestError,
+    RequestId, ResponseBody, SKY_STAR_BYTES, SKY_TEXEL_BYTES, SeedHex, ServerMessage, SkyGapDto,
+    SkyRequest, SkyResponse, SystemIdHex, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+    ViewerPlanetRequest,
 };
 use hyperion_server::compute::{BulkGate, SkyCaps, SkyCellCounters};
 use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
@@ -2994,4 +2997,264 @@ async fn final_sky_replies_after_a_launch_and_a_relaunch() {
             "the relaunched final reply's payload"
         );
     }
+}
+
+/// The first record of `layer`'s cells about the Sun, walking out along x from the Sun's own, whose
+/// stars are `count` discs at the epoch: a single star's at 1, a binary's at 2.
+fn record_of_discs(layer: Layer, count: usize) -> SystemRecord {
+    let at = SimPosition::from_light_years(SUN_LY.map(f64::from)).expect("in the cube");
+    let sun = CellKey::containing(layer, &at).expect("in the cube");
+    let size = i32::try_from(sun.size_ly()).expect("a cell's side fits an i32");
+    let [x, y, z] = sun.origin_ly().map(|ly| ly.div_euclid(size));
+    let mut cell = Vec::new();
+    (0..64)
+        .find_map(|step| {
+            generate_cell(
+                galaxy(),
+                CellKey::new(layer, [x + step, y, z]).ok()?,
+                &mut cell,
+            );
+            cell.iter().copied().find(|record| {
+                let stars = SystemStars::generate(galaxy(), record);
+                host_discs(galaxy(), &stars, hyperion_sim::time::UniverseTime::EPOCH).len() == count
+            })
+        })
+        .unwrap_or_else(|| panic!("a system of {count} discs about the Sun in layer {layer:?}"))
+}
+
+/// A viewer planet generated on `client`'s server in `universe`: an Earth about a Sun, its system
+/// at the viewer's Sun-like point.
+async fn viewer_system(client: &mut TestClient, universe: &UniverseIdHex) -> SystemIdHex {
+    let inputs = PlanetInputsDto {
+        seed: SeedHex::from_u64(0x0e15_0002),
+        star_mass_msun: 1.0,
+        fe_h_dex: 0.0,
+        age_gyr: 4.57,
+        mass_mearth: 1.0,
+        semi_major_axis_au: 1.0,
+        eccentricity: 0.0167,
+        formed_at_au: None,
+        day_hours: Some(24.0),
+        tilt_deg: Some(23.4),
+        water_rank: None,
+        carbon_rank: None,
+        nitrogen_rank: None,
+    };
+    match client
+        .request(RequestBody::ViewerPlanet(ViewerPlanetRequest {
+            universe: universe.clone(),
+            inputs,
+        }))
+        .await
+    {
+        Ok(ResponseBody::ViewerPlanet(planet)) => planet.system,
+        other => panic!("expected the viewer's planet, got {other:?}"),
+    }
+}
+
+/// A `host_discs` request for `system` of `universe` at `time`.
+fn discs_request(universe: &UniverseIdHex, system: SystemIdHex, time: UniverseTime) -> RequestBody {
+    RequestBody::HostDiscs(HostDiscsRequest {
+        universe: universe.clone(),
+        system,
+        time,
+    })
+}
+
+/// The discs `client`'s server answers for `request`, a `host_discs` it must serve.
+async fn discs_served(client: &mut TestClient, request: RequestBody) -> HostDiscsDto {
+    match client.request(request).await {
+        Ok(ResponseBody::HostDiscs(discs)) => discs,
+        other => panic!("expected the system's discs, got {other:?}"),
+    }
+}
+
+/// The discs on their own are the bytes a sky that leaves the system out carries as its `hosts` at
+/// the same time (rendering plans R06 and R07), for a single star, a binary and a viewer system; and
+/// a viewer system, which is no record of the galaxy, leaves no star out of a sky's census, so that
+/// such a sky's census and payload are byte for byte the sky's that leaves out none (R15).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_systems_discs_on_their_own_are_its_skys_hosts() {
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
+    let (mut client, universe) = opened(&server).await;
+    let viewer = viewer_system(&mut client, &universe).await;
+    let time = UniverseTime {
+        seconds: 3_600,
+        nanos: 0,
+    };
+    let systems = [
+        ("a single star", record_of_discs(Layer::E, 1).id().raw(), 1),
+        ("a binary", record_of_discs(Layer::E, 2).id().raw(), 2),
+    ];
+    let galaxy_systems =
+        systems.map(|(what, raw, count)| (what, SystemIdHex::from_u64(raw), count));
+    for (what, system, count) in
+        galaxy_systems
+            .into_iter()
+            .chain([("a viewer system", viewer.clone(), 1)])
+    {
+        let sky = served(
+            &mut client,
+            SkyRequest {
+                time,
+                exclude_system: Some(system.clone()),
+                ..sky(&universe)
+            },
+        )
+        .await;
+        let discs = discs_served(&mut client, discs_request(&universe, system.clone(), time)).await;
+        assert_eq!(
+            (&discs.universe, &discs.system, discs.time),
+            (&universe, &system, time),
+            "{what}"
+        );
+        assert_eq!(discs.hosts.len(), count, "{what}");
+        assert_eq!(
+            serde_json::to_string(&discs.hosts).unwrap(),
+            serde_json::to_string(&sky.response.hosts).unwrap(),
+            "{what}'s discs are its sky's hosts, byte for byte"
+        );
+    }
+
+    // The premise of one sky for every viewer planet: leaving a viewer system out leaves out no star.
+    let none = served(&mut client, sky(&universe)).await;
+    let left_out = served(
+        &mut client,
+        SkyRequest {
+            exclude_system: Some(viewer),
+            ..sky(&universe)
+        },
+    )
+    .await;
+    assert!(none.response.listed > 0, "the sky lists stars");
+    assert_eq!(left_out.payload(), none.payload(), "the stars and the band");
+    assert_eq!(left_out.response.hosts.len(), 1);
+    let unhosted = SkyResponse {
+        hosts: Vec::new(),
+        ..left_out.response
+    };
+    assert_eq!(
+        serde_json::to_string(&unhosted).unwrap(),
+        serde_json::to_string(&none.response).unwrap(),
+        "the census, but for the hosts"
+    );
+    client.close().await;
+    server.stop().await;
+}
+
+/// `host_discs` is served with the sky's switch off, since it reads no census: a rogue planet has no
+/// disc, and the request is refused field by field as a sky's `exclude_system` is, `unknown_system`
+/// naming `system` for bits no grid places, an index past its cell's candidates and a viewer system
+/// the server does not hold, and `bad_request` naming `time` outside the clock window.
+#[tokio::test]
+async fn host_discs_are_refused_as_a_skys_exclude_system_is() {
+    let (server, _data_dir) = sky_off_server().await;
+    let (mut client, universe) = opened(&server).await;
+    let at_sun = SimPosition::from_light_years(SUN_LY.map(f64::from)).expect("in the cube");
+    let mut cell = Vec::new();
+    generate_cell(
+        galaxy(),
+        CellKey::containing(Layer::RoguePlanet, &at_sun).expect("in the cube"),
+        &mut cell,
+    );
+    let rogue = cell
+        .first()
+        .expect("a rogue planet about the Sun")
+        .id()
+        .raw();
+    let discs = discs_served(
+        &mut client,
+        discs_request(
+            &universe,
+            SystemIdHex::from_u64(rogue),
+            UniverseTime::default(),
+        ),
+    )
+    .await;
+    assert_eq!(
+        discs.hosts,
+        Vec::<HostDiscDto>::new(),
+        "a rogue planet has no star"
+    );
+
+    let missing = CellKey::new(Layer::C, [0, 812, 0])
+        .unwrap()
+        .candidate_id(60_000)
+        .expect("an index the layer's IDs can hold")
+        .raw();
+    // A viewer system's number (bit 57 of the pinned half) that the server never generated.
+    let held = viewer_system(&mut client, &universe).await.to_u64();
+    let unheld = held ^ 1;
+    for raw in [u64::MAX, missing, unheld] {
+        let error = client
+            .request(discs_request(
+                &universe,
+                SystemIdHex::from_u64(raw),
+                UniverseTime::default(),
+            ))
+            .await
+            .expect_err("refused");
+        assert_eq!(
+            (error.code, error.field.as_deref()),
+            (ErrorCode::UnknownSystem, Some("system")),
+            "{raw:#018x}: {error:?}"
+        );
+    }
+    let error = client
+        .request(discs_request(
+            &universe,
+            SystemIdHex::from_u64(held),
+            UniverseTime {
+                seconds: i64::MAX,
+                nanos: 0,
+            },
+        ))
+        .await
+        .expect_err("refused");
+    assert_eq!(
+        (error.code, error.field.as_deref()),
+        (ErrorCode::BadRequest, Some("time")),
+        "{error:?}"
+    );
+    client.close().await;
+    server.stop().await;
+}
+
+/// `host_discs` sent while a sky's census runs is answered first: its lookup and its discs are
+/// interactive jobs, which the pool's one worker takes before the census's next bulk job, so that a
+/// view lights a new system before its sky's first reply.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn host_discs_sent_while_a_skys_census_runs_are_answered_first() {
+    let (server, _data_dir) = sky_server(LONG_CAP_LY, 1).await;
+    let (mut client, universe) = opened(&server).await;
+    let host = SystemIdHex::from_u64(host_record().id().raw());
+    let sky_id = client
+        .send_request(RequestBody::Sky(SkyRequest {
+            exclude_system: Some(host.clone()),
+            ..sky(&universe)
+        }))
+        .await;
+    census_under_way(&server).await;
+    let discs_id = client
+        .send_request(discs_request(&universe, host, UniverseTime::default()))
+        .await;
+    match client.next_message().await {
+        ServerMessage::Response {
+            id,
+            body: ResponseBody::HostDiscs(discs),
+        } => {
+            assert_eq!(id, discs_id);
+            assert_ne!(discs.hosts, Vec::<HostDiscDto>::new());
+        }
+        other => panic!("expected the discs before the sky's answer, got {other:?}"),
+    }
+    let pool = server.stats().pool();
+    assert!(
+        pool.running() + pool.queued_bulk() > 0,
+        "the sky was still being censused when the discs were answered: {pool:?}"
+    );
+    client.cancel(sky_id).await;
+    expect_cancelled(&mut client, sky_id).await;
+    client.close().await;
+    server.stop().await;
 }

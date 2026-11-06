@@ -127,9 +127,9 @@ pub use scene::{
     SeenPositionDto, SystemPlaceDto,
 };
 pub use sky::{
-    BandSpecDto, ConeDto, EyeDto, HostDiscDto, MAX_CUT_V, MAX_SKY_STARS, PowerTwoDto,
-    SKY_BAKE_BINS, SKY_STAR_BYTES, SKY_TEXEL_BYTES, SkyGapDto, SkyLayerCensusDto, SkyRequest,
-    SkyResponse,
+    BandSpecDto, ConeDto, EyeDto, HostDiscDto, HostDiscsDto, HostDiscsRequest, MAX_CUT_V,
+    MAX_SKY_STARS, PowerTwoDto, SKY_BAKE_BINS, SKY_STAR_BYTES, SKY_TEXEL_BYTES, SkyGapDto,
+    SkyLayerCensusDto, SkyRequest, SkyResponse,
 };
 pub use stellar::{
     BinaryClassDto, CataclysmicKindDto, HighMassXrayBinaryKindDto, KickModeDto, NatalKickDto,

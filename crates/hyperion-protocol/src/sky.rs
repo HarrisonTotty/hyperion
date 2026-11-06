@@ -358,6 +358,40 @@ pub struct HostDiscDto {
     pub bake_spectrum: [f64; SKY_BAKE_BINS],
 }
 
+/// A system's stars as discs at a time, on their own (`host_discs`; rendering plan R06, R07): the
+/// discs a `sky` whose `exclude_system` is the system carries as its `hosts`, with no census.
+///
+/// A view lights a new system's bodies by them at once, where its sky's first reply may take tens
+/// of seconds. The server answers it in the interactive queue, and refuses a system as it refuses a
+/// sky's `exclude_system`: `unknown_system`, naming `system`. It is additive (plan 04's
+/// convention, `PROTOCOL_VERSION` stays): an older server answers `unsupported`, and the view then
+/// waits for its sky's `hosts`, as before.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HostDiscsRequest {
+    /// The universe.
+    pub universe: UniverseIdHex,
+    /// The system whose stars are drawn as discs: a galaxy system or a viewer system.
+    pub system: SystemIdHex,
+    /// The time, within the clock window: the stars' state then, as a sky's discs are at its time.
+    pub time: UniverseTime,
+}
+
+/// The discs of a system's stars at a time (`host_discs`): each as a sky's [`SkyResponse::hosts`]
+/// holds it, in the same order, empty for a system whose stars are not generated (a rogue planet's).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HostDiscsDto {
+    /// The universe.
+    pub universe: UniverseIdHex,
+    /// The system.
+    pub system: SystemIdHex,
+    /// The time the discs are for.
+    pub time: UniverseTime,
+    /// The system's stars' discs.
+    pub hosts: Vec<HostDiscDto>,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -566,6 +600,45 @@ mod tests {
             assert!(written.get(key).is_none(), "{key}");
         }
         assert!(written["census"][0].get("bright_beyond").is_none());
+    }
+
+    #[test]
+    fn host_discs_request_wire_form() {
+        assert_wire_form(
+            &HostDiscsRequest {
+                universe: UniverseIdHex::from_u64(42),
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime {
+                    seconds: 3_600,
+                    nanos: 0,
+                },
+            },
+            json!({
+                "universe": "000000000000002a",
+                "system": "0200080020000000",
+                "time": { "seconds": 3_600, "nanos": 0 },
+            }),
+        );
+    }
+
+    /// The discs on their own are each a sky's host disc, in the same wire form.
+    #[test]
+    fn host_discs_wire_form() {
+        let host_wire = response_wire()["hosts"][0].clone();
+        assert_wire_form(
+            &HostDiscsDto {
+                universe: UniverseIdHex::from_u64(42),
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime::default(),
+                hosts: vec![host()],
+            },
+            json!({
+                "universe": "000000000000002a",
+                "system": "0200080020000000",
+                "time": { "seconds": 0, "nanos": 0 },
+                "hosts": [host_wire],
+            }),
+        );
     }
 
     #[test]

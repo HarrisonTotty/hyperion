@@ -196,6 +196,8 @@ import type { BandSpecDto } from "./generated/BandSpecDto";
 import type { ConeDto } from "./generated/ConeDto";
 import type { EyeDto } from "./generated/EyeDto";
 import type { HostDiscDto } from "./generated/HostDiscDto";
+import type { HostDiscsDto } from "./generated/HostDiscsDto";
+import type { HostDiscsRequest } from "./generated/HostDiscsRequest";
 import type { PowerTwoDto } from "./generated/PowerTwoDto";
 import type { SkyGapDto } from "./generated/SkyGapDto";
 import type { SkyLayerCensusDto } from "./generated/SkyLayerCensusDto";
@@ -563,6 +565,8 @@ export type {
   ConeDto,
   EyeDto,
   HostDiscDto,
+  HostDiscsDto,
+  HostDiscsRequest,
   PowerTwoDto,
   SkyGapDto,
   SkyLayerCensusDto,

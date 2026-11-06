@@ -328,6 +328,11 @@ impl Handler for Handlers {
             RequestBody::ViewerInputs(request) => {
                 Box::pin(viewer::inputs(state, request, token).map(answered))
             }
+            // A system's discs on their own (rendering plans R06 and R07): served whether or not
+            // the sky is, since they read no census.
+            RequestBody::HostDiscs(request) => {
+                Box::pin(sky::host_discs_answer(state, request, token).map(answered))
+            }
         }
     }
 
@@ -392,6 +397,7 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::ViewerPlanet(_) => "viewer_planet",
         RequestBody::ViewerRandomize(_) => "viewer_randomize",
         RequestBody::ViewerInputs(_) => "viewer_inputs",
+        RequestBody::HostDiscs(_) => "host_discs",
     }
 }
 
@@ -411,7 +417,8 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// `features_in_range` can, as `systems_in_range` can, and so can its `galaxy_features`, a list
 /// over the whole galaxy; one feature's detail and the black hole's state cannot. Plan 10's
 /// `global_features` can, a list over the whole galaxy too; one stream's track, at most 256 points,
-/// cannot. The planet viewer's answers (rendering plan R15) are one planet's inputs each.
+/// cannot. The planet viewer's answers (rendering plan R15) are one planet's inputs each, and
+/// `host_discs`' a system's few stars' discs.
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
@@ -447,6 +454,7 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::ViewerPlanet(_)
         | ResponseBody::ViewerRandomize(_)
         | ResponseBody::ViewerInputs(_)
+        | ResponseBody::HostDiscs(_)
         | ResponseBody::StreamTrack(_) => false,
     }
 }
@@ -1297,11 +1305,11 @@ mod tests {
         ExtinctionMapRequest, ExtinctionRequest, ExtinctionResult, ExtinctionTarget,
         FeatureDetailRequest, FeatureIdHex, FeatureKindWire, FeaturesInRangeRequest,
         FramePositionDto, GalacticPosition, GalaxyFeaturesRequest, GalaxyParametersRequest,
-        GlobalFeaturesRequest, KinematicsDto, MapFeatureKindWire, MapPopulation, MapView,
-        MassLayer, OpenUniverseRequest, PlanetInputsDto, SceneCamerasRequest, SceneClockDto,
-        SceneClockStateDto, SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest,
-        SkyRequest, StreamTrackRequest, SubscribeRequest, Subscribed, SubscriptionTopic,
-        SurfaceFieldRequest, SurveyPassRequest, SurveyScopeDto, SurveySourceDto,
+        GlobalFeaturesRequest, HostDiscsRequest, KinematicsDto, MapFeatureKindWire, MapPopulation,
+        MapView, MassLayer, OpenUniverseRequest, PlanetInputsDto, SceneCamerasRequest,
+        SceneClockDto, SceneClockStateDto, SceneShipRequest, SceneShipSet, SceneStateDto,
+        SceneSubscribeRequest, SkyRequest, StreamTrackRequest, SubscribeRequest, Subscribed,
+        SubscriptionTopic, SurfaceFieldRequest, SurveyPassRequest, SurveyScopeDto, SurveySourceDto,
         SystemBodiesRequest, SystemIdHex, SystemSummaryRequest, SystemsInRangeRequest,
         TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest, ViewerInputsRequest,
         ViewerPlanetRequest, ViewerRandomizeRequest,
@@ -1499,6 +1507,11 @@ mod tests {
             RequestBody::ViewerInputs(ViewerInputsRequest {
                 universe: UniverseIdHex::from_u64(42),
                 body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
+            }),
+            RequestBody::HostDiscs(HostDiscsRequest {
+                universe: UniverseIdHex::from_u64(42),
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime::default(),
             }),
         ]
     }
