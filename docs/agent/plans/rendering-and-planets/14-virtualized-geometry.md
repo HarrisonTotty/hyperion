@@ -2757,4 +2757,6 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     (`checkTerrainFrameSymbology`), its relief settled again, holds the datum check, the marks and
     lines over the image, the grazing and ridge checks, R14.T3.d over a ridge and R14.T1.e; part 21
     holds `R10.T16 the shared pass`. The two frame checks make their world by `openFrameWorld`.
+  - `view/engine/wgslParse.test.ts` parses and validates every shipped module with naga (`naga-wasm`
+    30.2.0, naga 30.0.1): a module the engine makes outside `WGSL_CATALOGUE` joins its `MODULES`.
   - `testRender.sh` launches with `--disable-gpu-watchdog` (`gpu_watchdog_switches`).
