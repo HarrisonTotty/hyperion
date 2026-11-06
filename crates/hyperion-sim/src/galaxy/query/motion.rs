@@ -139,6 +139,25 @@ pub(crate) enum SpeedCut {
     Pad,
 }
 
+#[cfg(test)]
+impl SpeedCut {
+    /// What bounds `record`'s speed, from its placement class: its layer's pad for a member of a
+    /// class the escape cut exempts, as the candidate's pick says before its marks; for the tests
+    /// of the walks that read it.
+    pub(crate) fn of_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
+        use crate::galaxy::displaced::PlacementClass;
+        use crate::galaxy::kinematics::is_exempt;
+        match (record.placement_class(), galaxy.fields().displaced()) {
+            (PlacementClass::Displaced { class, .. }, Some(displaced))
+                if is_exempt(displaced.class(class).key()) =>
+            {
+                Self::Pad
+            }
+            _ => Self::Escape,
+        }
+    }
+}
+
 /// How far a sphere must be padded to hold everything that could reach it by `t` at `speed`,
 /// light-years: `speed ÷ c × |t|`.
 ///
@@ -226,7 +245,21 @@ pub fn kepler_pad_for(
     radius: LightYears,
     t: UniverseTime,
 ) -> LightYears {
-    let speed = pad_speed(layer);
+    kepler_pad_below(galaxy, pad_speed(layer), centre, radius, t)
+}
+
+/// [`kepler_pad_for`] for records that move below `speed` at the epoch, ly: its bound with `speed`
+/// as V, which the derivation needs of a record's speed and nothing more. So it pads the records
+/// of a layer that [`SpeedCut::Escape`] bounds, below [`PAD_SPEED`], more tightly than their
+/// layer's pad: the range query's walk of a cell read in part reads it (P08.T12).
+#[must_use]
+pub(crate) fn kepler_pad_below(
+    galaxy: &Galaxy,
+    speed: KilometresPerSecond,
+    centre: &GalacticPosition,
+    radius: LightYears,
+    t: UniverseTime,
+) -> LightYears {
     let straight = pad_for(t, speed).value();
     if t == UniverseTime::EPOCH {
         return LightYears::new(straight);

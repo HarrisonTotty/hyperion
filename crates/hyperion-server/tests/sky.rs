@@ -1718,7 +1718,8 @@ async fn expect_range_answer(client: &mut TestClient, id: RequestId) {
 
 /// A range query sent while a sky's census runs is answered before the sky, and within a bounded
 /// wait: the census is bulk work, the pool's workers take interactive work first, and a census job
-/// runs for about 50 ms before it hands the rest of its cells back (R06.T11.d).
+/// runs for about 50 ms before it hands the rest of its cells back (R06.T11.d). The queries after
+/// the first find its layer-E cells kept whole, and so queue no background job (P08.T12).
 ///
 /// The wait is counted in jobs and held to an order, not to a margin of time. The server's one
 /// worker holds each bulk job it takes at the test's gate ([`BulkGate`]), and the test lets one
@@ -1756,7 +1757,9 @@ async fn a_range_query_sent_while_a_skys_jobs_run_is_answered_first() {
         "the first server's envelopes read back: {:?}",
         server.stats().envelope_files()
     );
-    let idle = server.stats().pool().completed();
+    // It read its layer-E cells in part, and background jobs keep them whole once it is answered
+    // (P08.T12), so the second is counted from a pool that is idle again.
+    let idle = server.pool_idle().await.pool().completed();
     let alone = client.send_request(range_query(&universe)).await;
     expect_range_answer(&mut client, alone).await;
     let own = server.stats().pool().completed() - idle;

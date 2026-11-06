@@ -2348,3 +2348,17 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
   - _Rebase onto a96b75cc._ A C/O survivor's `dead_age` gives the table-read case's `None`, and
     `check_survivor` takes that `None` as the table's read under the fitted arm. The figures above
     are unchanged on the rebased tree.
+- **P08.T12, the range walk reads a cold layer-E cell in part (lane `perf-range-layer-e-in-part`,
+  2026-11-05; no output moves).**
+  - `RangePlan::walk_cells` and `finish` ask `CellCache::with_cell_if_held` for a layer-E cell; a
+    `None` walks it through `visit_cell`, reading a candidate whose epoch position lies within the
+    radius, `kepler_pad_below` at its cut's speed and 10⁻⁶ ly (`query::parts::Reach`).
+  - `query::motion::kepler_pad_below(galaxy, speed, …)` is `kepler_pad_for`'s bound at a given
+    speed; `kepler_pad_for` calls it with the layer's pad speed, bit for bit.
+  - Server: only `SharedCellCache::handle_reading_in_part` (the served query's jobs) and the cell
+    jobs' `Generating` answer `None`; the plain handle still generates and stores. After the answer,
+    `served_range_query` queues the cells read in part, in at most 64 background jobs, to
+    `generate_whole`. `lacking_grid_cells` looks up every layer-E cell, and a lacking one always
+    sends the query's cells ahead.
+  - Lean (2026-11-05): the background jobs keep warm queries as they were; storing nothing made
+    the warm Sun-like 50 ly query 7 → 24 ms and the 500 ly one 0.26 → 2.4 s (pod, 16 vCPU).

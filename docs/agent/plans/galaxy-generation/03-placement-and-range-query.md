@@ -1148,3 +1148,7 @@ Reserved so that later plans move no star they need not:
     bits (`the_densities_read_one_at_a_time_are_the_densities_bit_for_bit`).
   - A galaxy holds its mass function as `imf::Kept<F>`, each stellar band's draw kept
     (`RangeDraw`). A new mass-function kind implements `imf::Pieces` to be held.
+- **The range walk reads a cold layer-E cell in part (P03.T9 with P08.T12, lane
+  `perf-range-layer-e-in-part`, 2026-11-05; no output moves).** `CellCache::with_cell_if_held`, a
+  default method that lends through `with_cell`, is the walk's question for a layer-E cell; a cache
+  that answers `None` has the cell walked through `visit_cell`. The records are in plan 08's Risks.

@@ -141,7 +141,8 @@ pub fn generate_cell_where(
 
 /// Hands `visit` every system of one generation cell, in candidate-index order: whole, as
 /// [`generate_cell`] places it, where `reads` asks for it by its epoch position and what bounds its
-/// speed ([`SpeedCut`]), and otherwise by its ID alone (plan 12's lens walk, ruling 143.3).
+/// speed ([`SpeedCut`]), and otherwise by its ID alone (plan 12's lens walk, ruling 143.3; the
+/// range query's walk of a layer-E cell its cache does not hold, P08.T12).
 ///
 /// A walk that reads only the systems near what it looks for, and counts the rest, pays for the
 /// rest no more than decides that they are systems: no record outside the black hole's Kepler
@@ -184,9 +185,7 @@ pub fn cell_heap_bytes(systems: &[SystemRecord]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::galaxy::displaced::PlacementClass;
     use crate::galaxy::displaced::hold::held;
-    use crate::galaxy::kinematics::is_exempt;
     use crate::galaxy::params::GalaxyParams;
     use crate::id::SystemId;
     use hyperion_testkit::float::assert_same_bits;
@@ -361,19 +360,6 @@ mod tests {
         out
     }
 
-    /// What bounds `record`'s speed, from its placement class: the layer's pad for a member of a
-    /// class the escape cut exempts.
-    fn cut_of(galaxy: &Galaxy, record: &SystemRecord) -> SpeedCut {
-        match (record.placement_class(), galaxy.fields().displaced()) {
-            (PlacementClass::Displaced { class, .. }, Some(displaced))
-                if is_exempt(displaced.class(class).key()) =>
-            {
-                SpeedCut::Pad
-            }
-            _ => SpeedCut::Escape,
-        }
-    }
-
     /// Plan 12's lens walk (ruling 143.3): `visit_cell` hands over `generate_cell`'s systems, in
     /// its order, whichever it reads, and the records it reads bit for bit, with the speed cut of
     /// their placement. The cells run through the bulge, where layer E's dead records are counted
@@ -413,7 +399,12 @@ mod tests {
                     for ((_, seen), record) in systems.iter().zip(&cell) {
                         if let Some((seen, cut)) = seen {
                             assert_eq!(seen, record, "{:?}", record.id());
-                            assert_eq!(*cut, cut_of(galaxy, record), "{:?}", record.id());
+                            assert_eq!(
+                                *cut,
+                                SpeedCut::of_record(galaxy, record),
+                                "{:?}",
+                                record.id()
+                            );
                             read += 1;
                         } else {
                             counted += 1;

@@ -35,7 +35,7 @@ pub use motion::{
     PAD_SPEED, UNBOUND_PAD_SPEED, epoch_velocity, escape_cut_holds, hit_at, kepler_pad_for,
     pad_for, pad_speed, position_at,
 };
-pub(crate) use motion::{SpeedCut, drifted, walk_pad};
+pub(crate) use motion::{SpeedCut, drifted, kepler_pad_below, walk_pad};
 pub use parts::{SourceHits, WalkedCells};
 pub use request::{
     DEFAULT_CELL_BUDGET, DEFAULT_CENSUS_LIMIT, MassFloor, RangeQuery, RangeQueryBuilder,

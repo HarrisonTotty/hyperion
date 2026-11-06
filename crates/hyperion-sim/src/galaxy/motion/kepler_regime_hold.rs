@@ -31,9 +31,10 @@ use crate::galaxy::placement::{
     generate_cell, resolve,
 };
 use crate::galaxy::query::{
-    LayerCounts, LayerSet, QuerySphere, RangeQuery, SubstellarRequest, SystemHit, cells_in_sphere,
-    count_cells_in_sphere, decide_census, expected_counts, kepler_pad_for, pad_for, pad_speed,
-    position_at, range_query, sphere_for_layer, walk_pad,
+    LayerCounts, LayerSet, PAD_SPEED, QuerySphere, RangeQuery, SpeedCut, SubstellarRequest,
+    SystemHit, cells_in_sphere, count_cells_in_sphere, decide_census, expected_counts,
+    kepler_pad_below, kepler_pad_for, pad_for, pad_speed, position_at, range_query,
+    sphere_for_layer, walk_pad,
 };
 use crate::galaxy::rules::GalaxyRules;
 use crate::id::{Layer, SystemId, SystemIdKind};
@@ -692,15 +693,7 @@ fn census_of_the_layer(unmoving: &Galaxy, galaxy: &Galaxy, layer: Layer) {
                 slot.movers += 1;
                 slot.largest = slot.largest.max(apart(&straight, &b));
             }
-            // The walk's pad holds the record from where it ends, for a sphere of 0.01 ly about it
-            // there.
-            let from_epoch = apart(&epoch, &b);
-            let room = 0.01 + walk_pad(galaxy, layer, &b, LightYears::new(0.01), t).value();
-            assert!(
-                from_epoch <= room,
-                "{:?} at {y} yr: {from_epoch} ly from its epoch position, beyond {room}",
-                record.id()
-            );
+            let from_epoch = assert_the_pads_hold(galaxy, record, &b, y);
             if from_epoch > 0.01 + pad_for(t, pad_speed(layer)).value() {
                 slot.beyond_straight += 1;
             }
@@ -737,6 +730,36 @@ fn census_of_the_layer(unmoving: &Galaxy, galaxy: &Galaxy, layer: Layer) {
             record.layer()
         );
     }
+}
+
+/// How far `record` is from its epoch position at `y` years, where it is `b`, ly, once the
+/// walk's pad is checked to hold it from there, for a sphere of 0.01 ly about it; and, where the
+/// escape cut bounds it below plan 03's speed, the pad at that speed, by which the range query's
+/// walk of a layer-E cell read in part reads it (P08.T12).
+fn assert_the_pads_hold(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    b: &GalacticPosition,
+    y: i64,
+) -> f64 {
+    let (t, near) = (years(y), LightYears::new(0.01));
+    let from_epoch = apart(record.epoch_position(), b);
+    let room = 0.01 + walk_pad(galaxy, record.layer(), b, near, t).value();
+    assert!(
+        from_epoch <= room,
+        "{:?} at {y} yr: {from_epoch} ly from its epoch position, beyond {room}",
+        record.id()
+    );
+    if SpeedCut::of_record(galaxy, record) == SpeedCut::Escape {
+        let room = 0.01 + kepler_pad_below(galaxy, PAD_SPEED, b, near, t).value();
+        assert!(
+            from_epoch <= room,
+            "{:?} at {y} yr: {from_epoch} ly from its epoch position, beyond the escape cut's \
+             {room}",
+            record.id()
+        );
+    }
+    from_epoch
 }
 
 /// The range query's census near the black hole under the Kepler pad against the straight
@@ -820,9 +843,14 @@ fn census_of_the_pad(galaxy: &Galaxy) {
 /// [`position_at`] puts inside the sphere at the time. The scan takes every record that starts in
 /// the regime, wherever it is, and the straight-regime records within the radius and the layer's
 /// straight pad, which their speeds, below the layer's pad speed, cannot leave (plan 03's premise,
-/// asserted by `epoch_velocity` in debug builds). The Kepler pad chooses the walk's cells.
+/// asserted by `epoch_velocity` in debug builds). The Kepler pad chooses the walk's cells. The
+/// queries about the two spheres nearest the black hole at ±1,000 yr, where the Kepler pad is
+/// widest, answer the same with their layer-E cells read in part, where the escape cut's pad
+/// departs from the straight lines' (P08.T12): each such walk takes some 37 s in a release build
+/// (pod, 16 vCPU), so the others are left whole; all sixteen passed so on 2026-11-05.
 #[test]
-#[ignore = "slow: generates layer E's eight central cells, some 1.7 million records, some minutes"]
+#[ignore = "slow: generates layer E's eight central cells, some 1.7 million records, and reads \
+            them in part four times, some 30 minutes"]
 fn a_range_query_near_the_black_hole_finds_what_a_scan_finds() {
     let spheres = [
         (ly(0.5, 0.3, 0.2), 0.5),
@@ -834,8 +862,8 @@ fn a_range_query_near_the_black_hole_finds_what_a_scan_finds() {
     let edge = galaxy.centre_motion().influence_radius().value();
     let mut cells = KeepCells::default();
     let mut in_regime: BTreeMap<Layer, Vec<SystemRecord>> = BTreeMap::new();
-    let (mut hits, mut moved_in) = (0_usize, 0_usize);
-    for (centre, radius) in spheres {
+    let (mut hits, mut moved_in, mut read_in_part) = (0_usize, 0_usize, 0_usize);
+    for (index, (centre, radius)) in spheres.into_iter().enumerate() {
         for y in TIMES {
             let t = years(y);
             let query = RangeQuery::builder(centre, LightYears::new(radius))
@@ -844,6 +872,14 @@ fn a_range_query_near_the_black_hole_finds_what_a_scan_finds() {
                 .expect("a valid query");
             let result = range_query(galaxy, &mut cells, &[], &query);
             let layers: LayerSet = result.census().layers();
+            if layers.contains(Layer::E) && [0, 3].contains(&index) && y.abs() == 1_000 {
+                let in_part = range_query(galaxy, &mut LayerEInPart(&mut cells), &[], &query);
+                assert_eq!(
+                    in_part, result,
+                    "{radius} ly at {centre:?}, {y:+} yr, in part"
+                );
+                read_in_part += 1;
+            }
             let mut want: Vec<SystemHit> = Vec::new();
             for layer in layers.iter() {
                 let regime = in_regime.entry(layer).or_insert_with(|| {
@@ -888,7 +924,33 @@ fn a_range_query_near_the_black_hole_finds_what_a_scan_finds() {
         }
     }
     println!(
-        "{hits} hits over {} queries, {moved_in} of them from beyond the straight pad",
+        "{hits} hits over {} queries, {moved_in} of them from beyond the straight pad; {read_in_part} \
+         read layer E in part",
         spheres.len() * TIMES.len()
     );
+    assert_eq!(read_in_part, 4, "the queries that read layer E in part");
+}
+
+/// [`KeepCells`], saying it holds no layer-E cell, so that a range query through it reads those in
+/// part (P08.T12).
+struct LayerEInPart<'a>(&'a mut KeepCells);
+
+impl CellCache for LayerEInPart<'_> {
+    fn with_cell<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        key: CellKey,
+        f: impl FnOnce(&[SystemRecord]) -> R,
+    ) -> R {
+        self.0.with_cell(galaxy, key, f)
+    }
+
+    fn with_cell_if_held<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        key: CellKey,
+        f: impl FnOnce(&[SystemRecord]) -> R,
+    ) -> Option<R> {
+        (key.layer() != Layer::E).then(|| self.0.with_cell(galaxy, key, f))
+    }
 }

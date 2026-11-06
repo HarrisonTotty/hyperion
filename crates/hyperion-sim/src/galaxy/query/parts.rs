@@ -8,6 +8,15 @@
 //! gives, bit for bit: a cell's part is what the walk of that cell finds, in record order, so taken
 //! in walk order the hits are collected in the order `run` collects them, before the sort.
 //!
+//! A cell of layer E that the cache does not hold is read in part, by either walk: only the systems
+//! whose epoch positions let them reach the sphere by its time, by what bounds their speeds, are
+//! made whole and tested, and the rest are counted ([`visit_cell`]), since their records are most
+//! of a layer-E cell's cost (the exact fates and lifetimes of its dead and its living, P08.T12) and
+//! a 50 ly sphere holds some 2% of its eight cells' systems. The hits and the records examined are
+//! those of the whole cell. What is read in part is never stored, and a cell the cache holds
+//! ([`CellCache::with_cell_if_held`], every cell for a cache that does not say) is walked from its
+//! records.
+//!
 //! A part is taken only where it holds what the plan's own walk would find: a cell of a layer the
 //! plan walks with the very sphere the part was walked with, met in walk order. Any other cell of a
 //! part is passed over and walked again, so no choice of parts changes an answer, only how long it
@@ -15,14 +24,17 @@
 //! each cell as [`generate_cell`](crate::galaxy::placement::generate_cell) makes it, as every
 //! [`CellCache`] does, and they were walked with sources that suppress as the plan's do.
 
+use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
-use crate::galaxy::placement::{CellCache, CellKey, SystemRecord};
+use crate::galaxy::placement::{CellCache, CellKey, SystemRecord, Visited, visit_cell};
 use crate::id::Layer;
 use crate::rng::Seed;
+use crate::units::{LightYears, MetresPerSecond};
 
 use super::{
-    LayerSet, QuerySphere, QueryStats, RangePlan, RangeResult, SystemHit, SystemSource,
-    cells_in_sphere, hit_at, ids_are_unique, reserve_for, sort_hits, suppressed,
+    LayerSet, PAD_SPEED, QuerySphere, QueryStats, RangePlan, RangeResult, SpeedCut, SystemHit,
+    SystemSource, cells_in_sphere, epoch_velocity, hit_at, ids_are_unique, kepler_pad_below,
+    pad_speed, reserve_for, sort_hits, suppressed,
 };
 
 /// One cell of a [`WalkedCells`]: its key, the end of its hits among the part's, and the records
@@ -135,9 +147,7 @@ impl RangePlan {
             if part.sphere_of(layer).is_none() {
                 part.spheres.push((layer, *sphere));
             }
-            let examined = cache.with_cell(galaxy, key, |records| {
-                walk_records(galaxy, sources, sphere, records, &mut part.hits)
-            });
+            let examined = walk_cell(galaxy, cache, sources, sphere, key, &mut part.hits);
             part.cells.push(WalkedCell {
                 key,
                 hits_end: part.hits.len(),
@@ -246,9 +256,7 @@ impl RangePlan {
                         systems.extend_from_slice(hits);
                         examined
                     }
-                    None => cache.with_cell(galaxy, key, |records| {
-                        walk_records(galaxy, sources, sphere, records, &mut systems)
-                    }),
+                    None => walk_cell(galaxy, cache, sources, sphere, key, &mut systems),
                 };
             }
         }
@@ -285,10 +293,33 @@ impl RangePlan {
     }
 }
 
+/// The walk of the cell `key` through `cache`, the same whether [`RangePlan::walk_cells`] or
+/// [`RangePlan::finish`] makes it: [`walk_records`] of the cell's systems, or, for a cell of layer
+/// E that `cache` does not hold, the cell read in part ([`walk_in_part`]), which finds the same
+/// hits and examines the same number of records (module documentation).
+fn walk_cell<C: CellCache>(
+    galaxy: &Galaxy,
+    cache: &mut C,
+    sources: &[&dyn SystemSource],
+    sphere: &QuerySphere,
+    key: CellKey,
+    hits: &mut Vec<SystemHit>,
+) -> u64 {
+    if key.layer() != Layer::E {
+        return cache.with_cell(galaxy, key, |records| {
+            walk_records(galaxy, sources, sphere, records, hits)
+        });
+    }
+    cache
+        .with_cell_if_held(galaxy, key, |records| {
+            walk_records(galaxy, sources, sphere, records, hits)
+        })
+        .unwrap_or_else(|| walk_in_part(galaxy, sources, sphere, key, hits))
+}
+
 /// The hits among `records`, the systems of one cell, that `sphere` holds and no source of
 /// `sources` suppresses, appended to `hits` in record order; and the records examined, all of
-/// them: the walk of one cell, the same whether [`RangePlan::walk_cells`] or
-/// [`RangePlan::finish`] makes it.
+/// them.
 fn walk_records(
     galaxy: &Galaxy,
     sources: &[&dyn SystemSource],
@@ -304,6 +335,101 @@ fn walk_records(
         }
     }
     u64::try_from(records.len()).expect("a cell's record count fits in 64 bits on every target")
+}
+
+/// [`walk_records`] of the systems of the cell `key`, bit for bit, the cell read in part
+/// ([`visit_cell`]): only a system whose epoch position lets it reach `sphere` by its time
+/// ([`Reach`]) is made whole and tested, and the others are counted as examined from what decides
+/// that they are systems. Nothing is generated whole, so nothing is left to store.
+fn walk_in_part(
+    galaxy: &Galaxy,
+    sources: &[&dyn SystemSource],
+    sphere: &QuerySphere,
+    key: CellKey,
+    hits: &mut Vec<SystemHit>,
+) -> u64 {
+    let reach = Reach::of(galaxy, key.layer(), sphere);
+    let mut examined = 0_u64;
+    visit_cell(
+        galaxy,
+        key,
+        |position, cut| reach.reads(sphere, position, cut),
+        |system| {
+            examined += 1;
+            let Visited::Read(record, cut) = system else {
+                return;
+            };
+            debug_assert!(
+                cut == SpeedCut::Pad
+                    || epoch_velocity(galaxy, &record).speed().value()
+                        < MetresPerSecond::from(PAD_SPEED).value(),
+                "{:?} moves at the escape cut's speed or faster, which its reach reads it by",
+                record.id()
+            );
+            if let Some(hit) = hit_at(galaxy, &record, sphere)
+                && !suppressed(sources, galaxy, &record, sphere.time())
+            {
+                hits.push(hit);
+            }
+        },
+    );
+    examined
+}
+
+/// What a walk of a cell read in part adds to a system's reach beyond the sphere's radius and pad,
+/// light-years: 10⁻⁶ ly, some 0.06 AU, far above the rounding of the distances, drifts and pads it
+/// compares (parts in 10¹⁵ of at most a few hundred thousand light-years), so that the epoch
+/// position's test reads every system [`hit_at`] can find in the sphere.
+const READ_MARGIN_LY: f64 = 1e-6;
+
+/// How far from a sphere's centre the epoch position of a system of one layer may lie for the
+/// system to be in the sphere at its time, light-years, by what bounds its speed ([`SpeedCut`]):
+/// the radius, the pad of the Kepler regime's bound at that speed ([`kepler_pad_below`], at least
+/// the straight lines' speed times |t|), and [`READ_MARGIN_LY`].
+///
+/// Plan 08 draws every grid velocity below [`PAD_SPEED`] but for the classes the escape cut
+/// exempts, which are below their layer's [`pad_speed`] (Design note 7; P08.T17), and the Kepler
+/// regime's bound holds of any record below the speed it is given. So a system the test refuses
+/// cannot be in the sphere at its time: [`hit_at`] would find no hit in it. At the epoch both pads
+/// are nothing and the test is [`hit_at`]'s own distance, with the margin.
+#[derive(Debug, Clone, Copy)]
+struct Reach {
+    /// The reach of a system below the escape speed and [`PAD_SPEED`], ly.
+    escape_ly: f64,
+    /// The reach of a system below its layer's [`pad_speed`] alone, ly.
+    pad_ly: f64,
+}
+
+impl Reach {
+    /// The reaches of `layer`'s systems about `sphere`.
+    #[must_use]
+    fn of(galaxy: &Galaxy, layer: Layer, sphere: &QuerySphere) -> Self {
+        let reach = |speed| {
+            let pad = kepler_pad_below(
+                galaxy,
+                speed,
+                sphere.centre(),
+                sphere.radius(),
+                sphere.time(),
+            );
+            sphere.radius().value() + pad.value() + READ_MARGIN_LY
+        };
+        Self {
+            escape_ly: reach(PAD_SPEED),
+            pad_ly: reach(pad_speed(layer)),
+        }
+    }
+
+    /// Whether a system at the epoch position `position`, whose speed `cut` bounds, may be in
+    /// `sphere` at its time.
+    #[must_use]
+    fn reads(&self, sphere: &QuerySphere, position: &GalacticPosition, cut: SpeedCut) -> bool {
+        let reach_ly = match cut {
+            SpeedCut::Escape => self.escape_ly,
+            SpeedCut::Pad => self.pad_ly,
+        };
+        LightYears::from(sphere.centre().distance_to(position)).value() <= reach_ly
+    }
 }
 
 /// The parts a plan's [`finish`](RangePlan::finish) takes cells from: a cursor on each part, at the
@@ -372,16 +498,30 @@ impl<'a> Merge<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::num::NonZeroU32;
+    use std::sync::{Arc, Mutex, OnceLock};
 
     use super::*;
-    use crate::coords::GalacticPosition;
+    use crate::coords::{GalacticDisplacement, GalacticPosition};
+    use crate::galaxy::catalogue_classes::{
+        CatalogueCellKey, CatalogueClassCellCache, CatalogueClassSource, ClassCellSystems,
+    };
+    use crate::galaxy::features::FeatureProcess;
+    use crate::galaxy::features::catalogue::{
+        FeatureCatalogue, FeatureCellCache, FeatureCellContents, FeatureRecord,
+    };
+    use crate::galaxy::features::members::FeatureInterior;
+    use crate::galaxy::features::members::source::{FeatureMemberSource, KeepInteriors};
+    use crate::galaxy::imf::MassFunctionKind;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::{NoCache, generate_cell};
-    use crate::galaxy::query::{LayerCounts, RangeQuery, SubstellarRequest};
+    use crate::galaxy::query::{LayerCounts, RangeQuery, SubstellarRequest, position_at};
+    use crate::galaxy::rules::GalaxyRules;
+    use crate::id::FeatureCell;
     use crate::rng::Seed;
     use crate::time::UniverseTime;
-    use crate::units::LightYears;
+    use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
     fn galaxy() -> Galaxy {
         Galaxy::from_params(
@@ -628,5 +768,354 @@ mod tests {
             plan.walk_cells(&galaxy, &mut NoCache::new(), &[], [unwalked])
                 .is_empty()
         );
+    }
+
+    /// The parts tests' Milky Way fixture with its kinematic tables, so that its systems move away
+    /// from the epoch, built once.
+    fn moving() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| galaxy().with_full_potential())
+    }
+
+    /// A cache that holds no cell and says so, as a server's that is cold does: it generates whole
+    /// any cell it is asked for whole, and counts the layer-E cells it is asked for each way.
+    #[derive(Debug, Default)]
+    struct Lacking {
+        /// The layer-E cells it was asked to lend whole, and generated.
+        whole_e: usize,
+        /// The layer-E cells it was asked for if held.
+        asked_e: usize,
+    }
+
+    impl CellCache for Lacking {
+        fn with_cell<R>(
+            &mut self,
+            galaxy: &Galaxy,
+            key: CellKey,
+            f: impl FnOnce(&[SystemRecord]) -> R,
+        ) -> R {
+            self.whole_e += usize::from(key.layer() == Layer::E);
+            let mut records = Vec::new();
+            generate_cell(galaxy, key, &mut records);
+            f(&records)
+        }
+
+        fn with_cell_if_held<R>(
+            &mut self,
+            _galaxy: &Galaxy,
+            key: CellKey,
+            _f: impl FnOnce(&[SystemRecord]) -> R,
+        ) -> Option<R> {
+            self.asked_e += usize::from(key.layer() == Layer::E);
+            None
+        }
+    }
+
+    /// A cache that holds every other layer-E cell, by the parity of its coordinates' sum, as a
+    /// server's does with some evicted or some not yet kept: it lends those whole, and says it
+    /// lacks the rest.
+    #[derive(Debug, Default)]
+    struct Partly {
+        /// The layer-E cells it lent whole and those it said it lacks.
+        held_and_lacking: [usize; 2],
+    }
+
+    impl CellCache for Partly {
+        fn with_cell<R>(
+            &mut self,
+            galaxy: &Galaxy,
+            key: CellKey,
+            f: impl FnOnce(&[SystemRecord]) -> R,
+        ) -> R {
+            NoCache::new().with_cell(galaxy, key, f)
+        }
+
+        fn with_cell_if_held<R>(
+            &mut self,
+            galaxy: &Galaxy,
+            key: CellKey,
+            f: impl FnOnce(&[SystemRecord]) -> R,
+        ) -> Option<R> {
+            let held = key.gen_cell().to_array().iter().sum::<i32>().rem_euclid(2) == 0;
+            self.held_and_lacking[usize::from(!held)] += 1;
+            held.then(|| self.with_cell(galaxy, key, f))
+        }
+    }
+
+    /// `plan`'s answer walked through [`Lacking`], by its own walk and by parts dealt out in turn
+    /// among three, each finished with the sources' hits `hits`: each the answer `expected`, and no
+    /// layer-E cell generated whole.
+    fn assert_read_in_part(
+        galaxy: &Galaxy,
+        plan: &RangePlan,
+        sources: &[&dyn SystemSource],
+        hits: &SourceHits,
+        expected: &RangeResult,
+        label: &str,
+    ) {
+        let layer_e = plan.cells().filter(|cell| cell.layer() == Layer::E).count();
+        assert!(layer_e > 0, "{label}: the plan walks layer E");
+        let mut lacking = Lacking::default();
+        assert_eq!(
+            &plan.finish(galaxy, &mut lacking, sources, &[], hits.clone()),
+            expected,
+            "{label}: the plan's walk"
+        );
+        assert_eq!(
+            (lacking.whole_e, lacking.asked_e),
+            (0, layer_e),
+            "{label}: each layer-E cell asked for if held, and read in part"
+        );
+        let cells: Vec<_> = plan.cells().collect();
+        let parts: Vec<_> = (0..3)
+            .map(|first| {
+                let share = cells.iter().skip(first).step_by(3).copied();
+                plan.walk_cells(galaxy, &mut Lacking::default(), sources, share)
+            })
+            .collect();
+        assert_eq!(
+            &plan.finish(galaxy, &mut Refusing, sources, &parts, hits.clone()),
+            expected,
+            "{label}: the parts' walks"
+        );
+        let mut partly = Partly::default();
+        assert_eq!(
+            &plan.finish(galaxy, &mut partly, sources, &[], hits.clone()),
+            expected,
+            "{label}: every other layer-E cell held"
+        );
+        assert_eq!(partly.held_and_lacking.iter().sum::<usize>(), layer_e);
+    }
+
+    /// A layer-E cell the cache lacks is read in part, by the plan's walk and by its parts', and
+    /// none is generated whole: each answer is the plan's through no cache, which walks every cell
+    /// whole, bit for bit, hits and statistics, at the epoch and either side of it, with and
+    /// without a source that suppresses (P08.T12).
+    #[test]
+    fn a_layer_e_cell_the_cache_lacks_is_read_in_part_for_the_whole_cell_s_answer() {
+        let galaxy = moving();
+        let suppressing = OddOut::new(galaxy, LayerCounts::ZERO);
+        let with: [&dyn SystemSource; 1] = [&suppressing];
+        for (query, sources) in [
+            (query(50.0, 0), &[][..]),
+            (query(50.0, -1_000), &with[..]),
+            (query(50.0, 700), &with[..]),
+        ] {
+            let plan = RangePlan::new(galaxy, sources, &query);
+            let expected = plan.run(galaxy, &mut NoCache::new(), sources);
+            assert_ne!(expected.systems(), &[]);
+            let hits = plan.source_hits(galaxy, sources);
+            let label = format!("{} yr", query.time());
+            assert_read_in_part(galaxy, &plan, sources, &hits, &expected, &label);
+        }
+    }
+
+    /// The epoch position's test reads every system that can be in a sphere at its time: for each
+    /// system of four layer-E cells at the Sun-like point, and each of a class the escape cut
+    /// exempts in 96 more along the solar circle and 12 in the bulge, at ±100 and ±1,000 yr, a sphere of 0.5 or 50 ly
+    /// whose edge passes through where the system is then, on the side away from its epoch
+    /// position, so that its epoch position is the farthest from the centre it can be, reads it
+    /// wherever it is a hit; and the test reads none whose epoch position is beyond the reach by a
+    /// light-year (P08.T12).
+    #[test]
+    fn the_epoch_position_s_test_reads_every_system_a_sphere_can_hold() {
+        let galaxy = moving();
+        let mut records = Vec::new();
+        let mut cell = Vec::new();
+        for x in -1..=1 {
+            for y in (195..=210).chain([23, 24]) {
+                for z in [-1, 0] {
+                    generate_cell(
+                        galaxy,
+                        CellKey::new(Layer::E, [x, y, z]).unwrap(),
+                        &mut cell,
+                    );
+                    let near = (0..=1).contains(&x) && y == 203;
+                    records.extend(cell.iter().filter(|record| {
+                        near || SpeedCut::of_record(galaxy, record) == SpeedCut::Pad
+                    }));
+                }
+            }
+        }
+        let exempt = records
+            .iter()
+            .filter(|record| SpeedCut::of_record(galaxy, record) == SpeedCut::Pad)
+            .count();
+        let (mut hits, mut pads) = (0_u32, [0_u32; 2]);
+        for record in &records {
+            let cut = SpeedCut::of_record(galaxy, record);
+            let epoch = record.epoch_position();
+            for years in [-1_000, -100, 100, 1_000] {
+                let t = UniverseTime::from_julian_years(years).unwrap();
+                let there = position_at(galaxy, record, t);
+                let away = epoch.displacement_to(&there).metres();
+                let moved_m = epoch.displacement_to(&there).length().value();
+                assert!(moved_m > 0.0, "{:?} moves", record.id());
+                for radius in [0.5, 50.0] {
+                    let out = radius * METRES_PER_LIGHT_YEAR / moved_m;
+                    let centre = there
+                        .translated(GalacticDisplacement::new(away.map(|m| m * out)))
+                        .unwrap();
+                    let sphere =
+                        QuerySphere::new(centre, LightYears::new(radius), t, LightYears::ZERO)
+                            .unwrap();
+                    let reach = Reach::of(galaxy, Layer::E, &sphere);
+                    if hit_at(galaxy, record, &sphere).is_some() {
+                        hits += 1;
+                        pads[usize::from(cut == SpeedCut::Pad)] += 1;
+                        assert!(
+                            reach.reads(&sphere, epoch, cut),
+                            "{:?} at {years} yr, {radius} ly: {} ly from its epoch position",
+                            record.id(),
+                            moved_m / METRES_PER_LIGHT_YEAR
+                        );
+                    }
+                    let beyond_ly = match cut {
+                        SpeedCut::Escape => reach.escape_ly,
+                        SpeedCut::Pad => reach.pad_ly,
+                    } + 1.0;
+                    let far = sphere
+                        .centre()
+                        .translated(GalacticDisplacement::new([
+                            beyond_ly * METRES_PER_LIGHT_YEAR,
+                            0.0,
+                            0.0,
+                        ]))
+                        .unwrap();
+                    assert!(!reach.reads(&sphere, &far, cut));
+                }
+            }
+        }
+        println!(
+            "{hits} hits of {} records, {pads:?} bounded by the escape cut and by the pad, of \
+             {exempt} records the escape cut exempts",
+            records.len()
+        );
+        assert!(
+            hits > 500 && pads.iter().all(|&n| n > 0),
+            "{hits} hits, {pads:?}"
+        );
+        assert!(exempt > 2, "{exempt} records the escape cut exempts");
+    }
+
+    /// The point of the Sun-like queries.
+    fn sun_like() -> GalacticPosition {
+        GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap()
+    }
+
+    /// The core of the globular with members nearest the Sun-like point, as the server's benches
+    /// choose it.
+    fn globular_core(galaxy: &Galaxy) -> GalacticPosition {
+        let sun = sun_like();
+        let mut globulars: Vec<FeatureRecord> =
+            FeatureCatalogue::walk_process(galaxy, FeatureProcess::Globular).collect();
+        globulars.sort_by(|a, b| {
+            let away = |f: &FeatureRecord| f.position().distance_to(&sun).value();
+            away(a).total_cmp(&away(b))
+        });
+        *globulars
+            .iter()
+            .find_map(|feature| FeatureInterior::of(galaxy, feature))
+            .expect("the galaxy has a globular with members")
+            .feature()
+            .position()
+    }
+
+    /// A feature-cell cache that keeps every cell whole, for one galaxy.
+    #[derive(Debug, Default)]
+    struct KeepFeatureCells(Mutex<BTreeMap<[i32; 3], Arc<FeatureCellContents>>>);
+
+    impl FeatureCellCache for KeepFeatureCells {
+        fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
+            let mut cells = self.0.lock().unwrap();
+            Arc::clone(
+                cells
+                    .entry(cell.to_array())
+                    .or_insert_with(|| Arc::new(FeatureCatalogue::cell(galaxy, cell))),
+            )
+        }
+    }
+
+    /// A class-cell cache that keeps every cell's systems, for one galaxy.
+    #[derive(Debug, Default)]
+    struct KeepClassCells(Mutex<BTreeMap<CatalogueCellKey, Arc<ClassCellSystems>>>);
+
+    impl CatalogueClassCellCache for KeepClassCells {
+        fn systems(
+            &self,
+            _galaxy: &Galaxy,
+            key: CatalogueCellKey,
+            make: &mut dyn FnMut() -> ClassCellSystems,
+        ) -> Arc<ClassCellSystems> {
+            let mut kept = self.0.lock().unwrap();
+            Arc::clone(kept.entry(key).or_insert_with(|| Arc::new(make())))
+        }
+    }
+
+    /// The server's galaxy, of its tests' seed, under `rules`, with its kinematic tables: the
+    /// galaxy of the queries the server's benches time.
+    fn served_under(rules: GalaxyRules) -> Galaxy {
+        let seed = Seed::new(0x4d2);
+        Galaxy::from_params_with_rules(
+            seed,
+            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+            rules,
+        )
+        .expect("the server's galaxy builds")
+        .with_full_potential()
+    }
+
+    /// The fifteen whole queries of P08.T12's walk read in part, as the server's benches ask them,
+    /// in its galaxy: the core of the globular nearest the Sun-like point at 1 and 50 ly with
+    /// every source a served query takes beside the grid (the members' and the catalogue
+    /// classes') and with none, and the Sun-like point's at 50 ly with them, each at the epoch, 700
+    /// years before it and 400 after under the generator version's rules, the tree holding no
+    /// galaxy-side hold. Each layer-E cell is read in part, by the plan's walk and by its parts',
+    /// and each answer, hits and statistics, is the plan's through no cache, bit for bit:
+    /// [`range_query`](super::super::range_query)'s.
+    #[test]
+    #[ignore = "slow: fifteen queries with the globular's members and the classes, each walked \
+                thrice, some minutes"]
+    fn fifteen_whole_queries_read_layer_e_in_part_for_the_whole_answer() {
+        let at_version = served_under(GalaxyRules::of_version(crate::GENERATOR_VERSION));
+        let mut queries = 0;
+        for (galaxy, years, rules) in [(&at_version, [0, -700, 400].as_slice(), "at the version")] {
+            let core = globular_core(galaxy);
+            let (features, interiors) = (KeepFeatureCells::default(), KeepInteriors::new(galaxy));
+            let members = FeatureMemberSource::new(&features, &interiors);
+            let class_cells = KeepClassCells::default();
+            let classes = CatalogueClassSource::registered_in(galaxy)
+                .map(|classes| classes.with_cells(&class_cells));
+            let mut served: Vec<&dyn SystemSource> = vec![&members];
+            served.extend(classes.as_ref().map(|classes| classes as &dyn SystemSource));
+            for &years in years {
+                for (name, centre, radius, sources) in [
+                    ("globular core 1 ly", core, 1.0, &served[..]),
+                    ("globular core 1 ly, no members", core, 1.0, &[][..]),
+                    ("globular core 50 ly", core, 50.0, &served[..]),
+                    ("globular core 50 ly, no members", core, 50.0, &[][..]),
+                    ("Sun-like 50 ly", sun_like(), 50.0, &served[..]),
+                ] {
+                    let query = RangeQuery::builder(centre, LightYears::new(radius))
+                        .limit(NonZeroU32::new(20_000).unwrap())
+                        .time(UniverseTime::from_julian_years(years).unwrap())
+                        .build()
+                        .unwrap();
+                    let plan = RangePlan::new(galaxy, sources, &query);
+                    let hits = plan.source_hits(galaxy, sources);
+                    let expected =
+                        plan.finish(galaxy, &mut NoCache::new(), sources, &[], hits.clone());
+                    let label = format!("{name} at {years} yr {rules}");
+                    println!(
+                        "{label}: {} hits, {:?}",
+                        expected.systems().len(),
+                        expected.stats()
+                    );
+                    assert_read_in_part(galaxy, &plan, sources, &hits, &expected, &label);
+                    queries += 1;
+                }
+            }
+        }
+        assert_eq!(queries, 15);
     }
 }

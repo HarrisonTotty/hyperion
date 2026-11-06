@@ -13,6 +13,9 @@
 //!
 //! [`SharedCellCache::handle`] gives one query its [`CellCacheHandle`], which is what plan 03's
 //! [`CellCache`] wants: a `&mut` value for the length of one query, over a cache many queries share.
+//! A served range query's jobs take one that lends no layer-E cell it lacks, so that their walks
+//! read such a cell in part, and the query keeps it whole afterwards
+//! ([`SharedCellCache::generate_whole`]; P08.T12).
 //! Two threads may generate one cell at the same time; the second insert replaces an equal value,
 //! which is cheaper than coordinating (the same ruling as [`SharedByteLru`]'s).
 
@@ -103,6 +106,19 @@ impl SharedCellCache {
             cells: &self.cells,
             galaxy,
             scratch: Vec::new(),
+            unheld: Unheld::Generated,
+        }
+    }
+
+    /// A handle for one served range query's job: [`handle`](Self::handle)'s, but a layer-E cell
+    /// the query's walk asks for that the cache lacks it lends not at all, so that the walk reads
+    /// it in part, and the query keeps it whole later, off its path
+    /// ([`served_range_query`](super::served_range_query); P08.T12).
+    #[must_use]
+    pub(crate) fn handle_reading_in_part(&self, galaxy: GalaxyKey) -> CellCacheHandle<'_> {
+        CellCacheHandle {
+            unheld: Unheld::ReadInPart,
+            ..self.handle(galaxy)
         }
     }
 
@@ -168,6 +184,36 @@ impl SharedCellCache {
         generating.store();
         walked
     }
+
+    /// Generates each cell of `cells` of `galaxy`, the galaxy `key` names, that the cache lacks,
+    /// whole, and stores them 128 at a time: what a served query queues in the background for the
+    /// layer-E cells its walk read in part, so that the next query near them finds them held and
+    /// walks them from their records ([`served_range_query`](super::served_range_query); P08.T12).
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not the seed of `key`, as a handle's lookup.
+    pub(crate) fn generate_whole(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        cells: impl IntoIterator<Item = CellKey>,
+    ) {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a cell cache stores the cells of one galaxy under its key, and this is another's"
+        );
+        let mut generating = Generating {
+            cells: &self.cells,
+            galaxy: key,
+            made: Vec::new(),
+        };
+        for cell in self.lacking(key, cells) {
+            generating.with_cell(galaxy, cell, |_| ());
+        }
+        generating.store();
+    }
 }
 
 /// One job's view of the cell cache for cells nobody holds: plan 03's [`CellCache`], which
@@ -205,6 +251,27 @@ impl CellCache for Generating<'_> {
         }
         result
     }
+
+    /// Lends no cell: a job is handed the cells the cache lacks, so the walk reads a layer-E cell
+    /// in part rather than generating it whole, and nothing of it is stored (P08.T12).
+    fn with_cell_if_held<R>(
+        &mut self,
+        _galaxy: &Galaxy,
+        _key: CellKey,
+        _f: impl FnOnce(&[SystemRecord]) -> R,
+    ) -> Option<R> {
+        None
+    }
+}
+
+/// What a [`CellCacheHandle`] does with a cell a range query's walk asks for if it is held
+/// ([`CellCache::with_cell_if_held`]), and that the cache lacks: a cell of layer E (P08.T12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unheld {
+    /// It generates the cell whole, lends and stores it, as any cell asked for.
+    Generated,
+    /// It lends nothing, so that the walk reads the cell in part.
+    ReadInPart,
 }
 
 /// One query's view of the cell cache: plan 03's [`CellCache`], over the cache queries share.
@@ -217,6 +284,8 @@ pub struct CellCacheHandle<'a> {
     /// The buffer a missing cell is generated into. It is moved into the cache with the cell, and a
     /// cell the cache refuses hands it back.
     scratch: Vec<SystemRecord>,
+    /// What it does with a cell asked for if held that the cache lacks.
+    unheld: Unheld,
 }
 
 impl CellCacheHandle<'_> {
@@ -268,6 +337,35 @@ impl CellCache for CellCacheHandle<'_> {
             self.scratch = refused.into_systems();
         }
         result
+    }
+
+    /// Lends the systems of `key` as [`with_cell`](Self::with_cell) does, but for a handle that
+    /// reads in part, the one a served range query's jobs take: it lends them if the cache holds
+    /// the cell, counting the lookup's hit or miss, and otherwise generates and stores nothing, so
+    /// that the range query's walk reads the layer-E cell in part (P08.T12).
+    ///
+    /// # Panics
+    ///
+    /// As [`with_cell`](Self::with_cell).
+    fn with_cell_if_held<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        key: CellKey,
+        f: impl FnOnce(&[SystemRecord]) -> R,
+    ) -> Option<R> {
+        match self.unheld {
+            Unheld::Generated => Some(self.with_cell(galaxy, key, f)),
+            Unheld::ReadInPart => {
+                assert_eq!(
+                    galaxy.seed().get(),
+                    self.galaxy.seed(),
+                    "a cell cache handle lends the cells of one galaxy, and this is another's"
+                );
+                self.cells
+                    .get(&(self.galaxy, key))
+                    .map(|cell| f(cell.systems()))
+            }
+        }
     }
 }
 
@@ -388,7 +486,9 @@ mod tests {
 
     /// A whole range query, census included, through the handle equals the same query through
     /// plan 03's `NoCache`, with a roomy budget cold and warm and with a budget of 1 KiB, which
-    /// evicts on almost every cell (P04.T12; `range_query` has been in the tree since T14.d).
+    /// evicts on almost every cell (P04.T12; `range_query` has been in the tree since T14.d); and
+    /// so does it through a handle that reads layer E's cells in part where they are not held
+    /// (P08.T12).
     #[test]
     fn a_range_query_through_the_handle_answers_as_no_cache_does() {
         let centre = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the cube");
@@ -405,6 +505,9 @@ mod tests {
             for pass in ["cold", "warm"] {
                 let cached = range_query(galaxy(), &mut cache.handle(key()), &[], &query);
                 assert_eq!(cached, uncached, "{pass}, with a budget of {budget} bytes");
+                let in_part = &mut cache.handle_reading_in_part(key());
+                let cached = range_query(galaxy(), in_part, &[], &query);
+                assert_eq!(cached, uncached, "{pass}, read in part, {budget} bytes");
             }
             assert!(cache.counters().misses() > 0);
         }
@@ -663,5 +766,98 @@ mod tests {
         // The stored records carry no spare capacity, which is what `cell_heap_bytes` assumes.
         assert_eq!(stored.0.capacity(), stored.0.len());
         assert_eq!(stored.heap_bytes(), cell_heap_bytes(stored.systems()));
+    }
+
+    /// The layer-E cells of a 50 ly sphere at the Sun-like point at the epoch.
+    fn layer_e_cells() -> Vec<CellKey> {
+        let cells = walk(
+            Layer::E,
+            &sphere([0.0, 26_000.0, 0.0], 50.0, UniverseTime::EPOCH),
+        );
+        assert!(cells.len() > 1, "{} cells", cells.len());
+        cells
+    }
+
+    /// A handle that reads in part, asked for a cell if held, lends one it holds, counting the
+    /// hit, and for one it lacks generates and stores nothing, counting the miss, where a plain
+    /// handle generates and stores it; `generate_whole` stores whole each cell the cache lacks, as
+    /// `generate_cell` makes it, and makes none it holds again (P08.T12).
+    #[test]
+    fn a_cell_asked_for_if_held_is_lent_only_if_held_and_is_kept_whole_when_asked() {
+        let cells = layer_e_cells();
+        let n = count(cells.len());
+        let cache = SharedCellCache::new(ROOMY);
+        let mut handle = cache.handle_reading_in_part(key());
+        for &cell in &cells {
+            assert_eq!(
+                handle.with_cell_if_held(galaxy(), cell, <[SystemRecord]>::len),
+                None
+            );
+        }
+        let counters = cache.counters();
+        assert_eq!(
+            (counters.entries(), counters.hits(), counters.misses()),
+            (0, 0, n)
+        );
+        cache.generate_whole(key(), galaxy(), [cells[0]]);
+        let first = cache
+            .cells
+            .get(&(key(), cells[0]))
+            .expect("the first is held");
+        cache.generate_whole(key(), galaxy(), cells.iter().copied());
+        let again = cache
+            .cells
+            .get(&(key(), cells[0]))
+            .expect("the first is held");
+        assert!(Arc::ptr_eq(&first, &again), "a cell held is not made again");
+        assert_eq!(cache.counters().entries(), cells.len());
+        let expected = uncached(&cells);
+        for &cell in &cells {
+            assert_eq!(
+                handle.with_cell_if_held(galaxy(), cell, <[SystemRecord]>::to_vec),
+                Some(expected[&cell].clone())
+            );
+        }
+        let counters = cache.counters();
+        // The two lookups above count as hits.
+        assert_eq!((counters.hits(), counters.misses()), (n + 2, n));
+        let plain = SharedCellCache::new(ROOMY);
+        let lent =
+            plain
+                .handle(key())
+                .with_cell_if_held(galaxy(), cells[0], <[SystemRecord]>::to_vec);
+        assert_eq!(lent, Some(expected[&cells[0]].clone()));
+        assert_eq!(plain.counters().entries(), 1, "a plain handle stores it");
+    }
+
+    /// A served query's cell jobs read the layer-E cells they are handed in part: the walk is the
+    /// sim's through no cache, bit for bit, and none of them is stored, while the other layers'
+    /// cells are (P08.T12).
+    #[test]
+    fn a_job_s_walk_reads_layer_e_in_part_and_stores_the_rest() {
+        let centre = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in the cube");
+        let query = RangeQuery::builder(centre, LightYears::new(50.0))
+            .build()
+            .expect("a valid query");
+        let plan = RangePlan::new(galaxy(), &[], &query);
+        let cells: Vec<_> = plan.cells().collect();
+        let layer_e = cells.iter().filter(|cell| cell.layer() == Layer::E).count();
+        assert!(layer_e > 0);
+        let cache = SharedCellCache::new(ROOMY);
+        let part = cache.walk_generated(key(), galaxy(), &plan, &[], cells.iter().copied());
+        let hits = plan.source_hits(galaxy(), &[]);
+        assert_eq!(
+            plan.finish(galaxy(), &mut cache.handle(key()), &[], &[part], hits),
+            range_query(galaxy(), &mut NoCache::new(), &[], &query)
+        );
+        let counters = cache.counters();
+        assert_eq!(
+            (counters.entries(), counters.hits(), counters.misses()),
+            (cells.len() - layer_e, 0, 0),
+            "the finish takes every cell from the part"
+        );
+        let lacking = cache.lacking(key(), cells.iter().copied());
+        assert_eq!(lacking.len(), layer_e);
+        assert!(lacking.iter().all(|cell| cell.layer() == Layer::E));
     }
 }

@@ -343,6 +343,20 @@ impl TestServer {
         })
     }
 
+    /// Waits until the running server's pool is idle, no job running and none queued, and returns
+    /// the snapshot that was: for a test that counts the pool's jobs from a query on, after one
+    /// that read layer-E cells in part, which background jobs then keep whole (P08.T12).
+    pub async fn pool_idle(&self) -> ServerStats {
+        self.stats_until("the pool is idle", |stats| {
+            let pool = stats.pool();
+            pool.running() == 0
+                && pool.queued_interactive() == 0
+                && pool.queued_bulk() == 0
+                && pool.queued_background() == 0
+        })
+        .await
+    }
+
     /// Stops the serving task and waits for it, which every teardown here does first. Serving ends
     /// without waiting for the connections it upgraded, which is why the server needs a teardown of
     /// its own (P04.T13).

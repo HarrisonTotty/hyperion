@@ -111,6 +111,84 @@ pub trait CellCache {
         key: CellKey,
         f: impl FnOnce(&[SystemRecord]) -> R,
     ) -> R;
+
+    /// Calls `f` with the systems of `key` in `galaxy` if the cache holds the cell, and otherwise
+    /// returns `None` without generating it, so that the caller may read the cell in part instead:
+    /// the walk of a layer-E cell by [`range_query`](crate::galaxy::query::range_query) and
+    /// [`RangePlan`](crate::galaxy::query::RangePlan), whose records' exact fates are most of a
+    /// cold query's cost, though a sphere of tens of light-years holds a few hundredths of its
+    /// cells' systems (P08.T12).
+    ///
+    /// The default lends every cell through [`with_cell`](Self::with_cell), generating it if it
+    /// must, so a cache that does not say what it holds, [`NoCache`] among them, has its cells
+    /// walked whole. Either way the caller finds the same systems; only the time differs.
+    ///
+    /// # Examples
+    ///
+    /// A cache that keeps every cell it is lent whole and says which it holds, so that a range
+    /// query reads the layer-E cells it lacks in part rather than generating them: the answer is
+    /// the one through [`NoCache`], which walks every cell whole.
+    ///
+    /// ```
+    /// use std::collections::BTreeMap;
+    ///
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::placement::{
+    ///     CellCache, CellKey, NoCache, SystemRecord, generate_cell,
+    /// };
+    /// use hyperion_sim::galaxy::query::{RangeQuery, range_query};
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// /// Every cell lent whole, keyed by galaxy and cell.
+    /// #[derive(Debug, Default)]
+    /// struct Kept(BTreeMap<(Seed, CellKey), Vec<SystemRecord>>);
+    ///
+    /// impl CellCache for Kept {
+    ///     fn with_cell<R>(
+    ///         &mut self,
+    ///         galaxy: &Galaxy,
+    ///         key: CellKey,
+    ///         f: impl FnOnce(&[SystemRecord]) -> R,
+    ///     ) -> R {
+    ///         f(self.0.entry((galaxy.seed(), key)).or_insert_with(|| {
+    ///             let mut systems = Vec::new();
+    ///             generate_cell(galaxy, key, &mut systems);
+    ///             systems
+    ///         }))
+    ///     }
+    ///
+    ///     fn with_cell_if_held<R>(
+    ///         &mut self,
+    ///         galaxy: &Galaxy,
+    ///         key: CellKey,
+    ///         f: impl FnOnce(&[SystemRecord]) -> R,
+    ///     ) -> Option<R> {
+    ///         self.0.get(&(galaxy.seed(), key)).map(|systems| f(systems))
+    ///     }
+    /// }
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(42));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).ok_or("in range")?;
+    /// let query = RangeQuery::builder(sun, LightYears::new(20.0)).build()?;
+    /// let mut kept = Kept::default();
+    /// let answer = range_query(&galaxy, &mut kept, &[], &query);
+    /// assert_eq!(answer, range_query(&galaxy, &mut NoCache::new(), &[], &query));
+    /// // The other layers' cells were lent whole and kept; layer E's were read in part.
+    /// assert!(!kept.0.is_empty());
+    /// assert!(kept.0.keys().all(|(_, key)| key.layer() != Layer::E));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    fn with_cell_if_held<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        key: CellKey,
+        f: impl FnOnce(&[SystemRecord]) -> R,
+    ) -> Option<R> {
+        Some(self.with_cell(galaxy, key, f))
+    }
 }
 
 /// The cache that caches nothing: it regenerates each cell into a scratch buffer.

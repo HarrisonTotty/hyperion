@@ -327,7 +327,9 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
         .request(Query::around([0, 26_000, 0]).body(&universe.id))
         .await;
     assert!(warm.is_ok(), "the warming query is answered: {warm:?}");
-    let warmed = server.stats().pool().completed();
+    // It read its layer-E cells in part, and background jobs keep them whole once it is answered
+    // (P08.T12): they are warming too, and the queries below find the cells held.
+    let warmed = server.pool_idle().await.pool().completed();
 
     client
         .send_request(map_body(&universe.id, MapView::EdgeOn, 1_024))

@@ -29,6 +29,18 @@
 //! 3. The last job merges the grid's walked parts and the sources' hits into the answer
 //!    ([`RangePlan::finish`]).
 //!
+//! **Layer E is read in part.** A layer-E cell the cell cache lacks is not generated whole: its
+//! walk reads only the systems that can reach the sphere, and counts the rest (P08.T12), since the
+//! exact fates and lifetimes of its records were most of a cold query's grid, 85 of 110 ms in one
+//! thread at the Sun-like point, where 9 of its 384 records are hits; read in part its eight cells
+//! take some 18 ms, the grid 43 (measured 2026-11-05, pod, 16 vCPU). So any such cell is worth
+//! walking ahead, and is: its walk finds the same hits, and stores nothing, every job reading the
+//! cell cache through a handle that lends no layer-E cell it lacks
+//! ([`SharedCellCache::handle_reading_in_part`]). Once the query is answered, background jobs
+//! ([`Priority::Background`]), a cell each up to [`KEEP_WHOLE_JOBS`] of them, generate those cells
+//! whole into the cell cache, off every query's path, so that the queries after it near the same
+//! place find them held and walk them from their records, as a warm query did before.
+//!
 //! **No job waits on another.** The pool's queues are plain first-in, first-out, and a worker runs
 //! one job to its end: a job that queued its cells and blocked on their replies would hold its
 //! worker, and with every worker so held the cells would never run, so the pool would stall. So
@@ -60,7 +72,7 @@ use hyperion_sim::galaxy::placement::CellKey;
 use hyperion_sim::galaxy::query::{
     RangePlan, RangeQuery, RangeResult, SourceHits, SystemSource, WalkedCells,
 };
-use hyperion_sim::id::FeatureCell;
+use hyperion_sim::id::{FeatureCell, Layer};
 
 use super::{
     CancelToken, CentreOrbitHandle, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver,
@@ -94,6 +106,13 @@ const GRID_JOBS_PER_WORKER: usize = 2;
 /// grid without asking for every cell: 16, 109 of the Sun-like 50 ly query's 1,732 cells. Asking for
 /// all of them took 0.13 ms, a tenth of the warm query (measured 2026-10-31, pod, 16 vCPU).
 const LACKING_SAMPLE_STRIDE: usize = 16;
+
+/// The most background jobs a query queues to keep the layer-E cells it read in part
+/// ([`keep_whole`]): 64, a quarter of the background queue, which is as deep as the bulk queue
+/// ([`BULK_QUEUE_CAPACITY`](crate::limits::BULK_QUEUE_CAPACITY)), so that the 412 cells of a 500 ly
+/// query about the Sun-like point are all kept, some seven a job, and three such queries at once
+/// leave room for the surface prefetch's passes.
+const KEEP_WHOLE_JOBS: usize = 64;
 
 /// The caches a served range query reads: the grid's cells, the feature cells, the features'
 /// interiors, the catalogue classes' cells and the galactic centre's orbits, shared with the jobs
@@ -286,6 +305,12 @@ where
         Asked::Answered(answered) => return Ok(answered),
         Asked::Lacking(lacking) => *lacking,
     };
+    let read_in_part: Vec<CellKey> = grid
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|cell| cell.layer() == Layer::E)
+        .collect();
     let ahead = ahead(
         pool,
         caches,
@@ -305,7 +330,35 @@ where
         )
         .await
         .map_err(ComputeError::Submit)?;
-    reply(finished).await
+    let answered = reply(finished).await?;
+    keep_whole(pool, caches, served, &read_in_part);
+    Ok(answered)
+}
+
+/// Queues in the background `cells`, the layer-E cells a query's walk read in part, to be generated
+/// whole into the cell cache ([`SharedCellCache::generate_whole`]; module documentation): a job a
+/// cell, so that one cell's generation is the most a request that finds every worker busy waits for
+/// one, as it waited for one before P08.T12, but never more jobs than [`KEEP_WHOLE_JOBS`], each
+/// taking every so many cells in turn. A queue that is full, or a pool shutting down, leaves the
+/// rest to be read in part again by the next query: only time is lost.
+fn keep_whole(pool: &CpuPool, caches: &RangeCaches, served: &ServedQuery, cells: &[CellKey]) {
+    for share in shares(KEEP_WHOLE_JOBS, cells) {
+        let (cache, galaxy, key) = (
+            Arc::clone(&caches.cells),
+            Arc::clone(&served.galaxy),
+            served.key,
+        );
+        let job = move |_: &CancelToken| cache.generate_whole(key, &galaxy, share);
+        match pool.try_submit(Priority::Background, CancelToken::new(), job) {
+            // Nobody waits on the reply: the cell is the cache's once made.
+            Ok(_) => {}
+            // The query is answered: a queue full or a pool shutting down costs the next query
+            // the cells' reading in part again, and a pool faulted refuses that query itself.
+            Err(SubmitJobError::QueueFull | SubmitJobError::ShutDown | SubmitJobError::Faulted) => {
+                break;
+            }
+        }
+    }
 }
 
 /// What a query's job sent back, or why it sent nothing.
@@ -530,11 +583,17 @@ where
         // sources, and so is the walk's. Such a query, its feature cells held and its grid warm,
         // was asked before, and its class cells with it, so they are not listed: some 8,700 about
         // the Sun-like point, 0.28 ms of a warm query's 4.5 (measured 2026-11-01, pod, 16 vCPU).
-        // Any its hits lack, evicted since, they make.
+        // Any its hits lack, evicted since, they make. A layer-E cell lacking is worth walking
+        // ahead alone, some 2.2 ms read in part at the Sun-like point (module documentation).
         if let Planned::WithSources = planned
             && grid.len() < AHEAD_GRID_CELLS
+            && grid.iter().all(|cell| cell.layer() != Layer::E)
         {
-            let result = plan.run(galaxy, &mut caches.cells.handle(key), sources);
+            let result = plan.run(
+                galaxy,
+                &mut caches.cells.handle_reading_in_part(key),
+                sources,
+            );
             return Asked::Answered(answer(galaxy, result, reads));
         }
         let classes = lacking_class_cells(caches, served, &plan);
@@ -584,7 +643,8 @@ where
                 (plan, hits)
             }
         };
-        let result = plan.finish(galaxy, &mut caches.cells.handle(key), sources, &parts, hits);
+        let cells = &mut caches.cells.handle_reading_in_part(key);
+        let result = plan.finish(galaxy, cells, sources, &parts, hits);
         answer(galaxy, result, reads)
     })
 }
@@ -597,11 +657,16 @@ fn feature_parts(workers: NonZeroUsize) -> NonZeroU32 {
     NonZeroU32::new(workers.min(FEATURE_CELL_PARTS)).expect("a pool has a worker")
 }
 
-/// The grid cells `plan` walks that `cells` lacks, in walk order, sampled ([`sampled_lacking`]):
-/// one taken as held that the cache lacks is the finish's to walk, as every cell was before
-/// P09.T40.a.
+/// The grid cells `plan` walks that `cells` lacks, in walk order: layer E's each asked for, since
+/// one lacking is read in part and kept whole only if it is found lacking (module documentation),
+/// and the rest sampled ([`sampled_lacking`]), one taken as held that the cache lacks being the
+/// finish's to walk, as every cell was before P09.T40.a. Layer E is walked first, so the order
+/// holds.
 fn lacking_grid_cells(cells: &SharedCellCache, key: GalaxyKey, plan: &RangePlan) -> Vec<CellKey> {
-    sampled_lacking(plan.cells().collect(), |asked| cells.lacking(key, asked))
+    let (layer_e, rest): (Vec<_>, Vec<_>) = plan.cells().partition(|cell| cell.layer() == Layer::E);
+    let mut lacking = cells.lacking(key, layer_e);
+    lacking.extend(sampled_lacking(rest, |asked| cells.lacking(key, asked)));
+    lacking
 }
 
 /// The class cells `served`'s sources' hits read in `plan`'s layers
@@ -780,6 +845,7 @@ mod tests {
     use hyperion_sim::{GENERATOR_VERSION, Seed};
 
     use super::*;
+    use crate::compute::BulkGate;
     use crate::convert::origins::{SEED, galaxy};
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 
@@ -801,6 +867,45 @@ mod tests {
             BULK_QUEUE_CAPACITY,
         )
         .expect("the pool starts")
+    }
+
+    /// A pool of `workers` whose bulk and background jobs `gate` may hold, with the server's room
+    /// for queued jobs.
+    fn gated_pool(workers: usize, gate: &BulkGate) -> CpuPool {
+        CpuPool::with_bulk_gate(
+            NonZeroUsize::new(workers).expect("at least one worker"),
+            INTERACTIVE_QUEUE_CAPACITY,
+            BULK_QUEUE_CAPACITY,
+            gate.clone(),
+        )
+        .expect("the pool starts")
+    }
+
+    /// Returns once every job `pool`, of `workers` workers, took before it has ended: one
+    /// background job a worker at the back of the queue, each held until all are taken, so that
+    /// each worker is through what it took before them, the background jobs that keep a query's
+    /// layer-E cells whole among them.
+    async fn drained(pool: &CpuPool, workers: usize) {
+        let barrier = Arc::new(std::sync::Barrier::new(workers));
+        let mut held = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            let barrier = Arc::clone(&barrier);
+            let job = move |_: &CancelToken| {
+                barrier.wait();
+            };
+            held.push(
+                pool.submit(Priority::Background, CancelToken::new(), job)
+                    .await
+                    .expect("room for the job"),
+            );
+        }
+        for receiver in held {
+            tokio::time::timeout(Duration::from_secs(60), receiver)
+                .await
+                .expect("the pool does not stall")
+                .expect("the job replies")
+                .expect("the job runs");
+        }
     }
 
     /// Fresh caches of `bytes` each.
@@ -863,6 +968,9 @@ mod tests {
     /// takes every grid cell it reads from the cell jobs' walks, of the plan without the sources,
     /// whose cells hold the plan's with them, and asks the cell cache for none (P09.T40.a). One
     /// worker runs every cell job and then the finish in turn, so no job ever waits on another.
+    /// The cell jobs read layer E's cells in part and store none of them; once the query is
+    /// answered, background jobs, held here until it is, keep them whole, and the warm query finds
+    /// them held (P08.T12).
     #[tokio::test]
     async fn a_served_query_is_the_sim_s_at_one_and_eight_workers() {
         for (query, members) in [
@@ -883,22 +991,39 @@ mod tests {
             });
             let ahead: std::collections::BTreeSet<_> = unsourced.cells().collect();
             assert!(walked.iter().all(|cell| ahead.contains(cell)));
+            let layer_e = ahead.iter().filter(|cell| cell.layer() == Layer::E).count();
+            assert!(layer_e > 0, "the query reads layer E");
             for workers in [1, 8] {
-                let pool = pool(workers, INTERACTIVE_QUEUE_CAPACITY);
+                let gate = BulkGate::default();
+                let pool = gated_pool(workers, &gate);
                 let caches = caches(64 << 20);
+                gate.close();
                 assert_eq!(served_on(&pool, &caches, &served).await, expected, "cold");
                 let cold = caches.cells.counters();
                 assert_eq!(
                     cold.entries(),
-                    ahead.len(),
-                    "every cell generated ahead, once"
+                    ahead.len() - layer_e,
+                    "every cell generated ahead, once, but layer E's, read in part"
                 );
                 assert_eq!(
                     (cold.hits(), cold.misses()),
                     (0, 0),
                     "the finish takes every cell it reads from a cell job's walk"
                 );
+                gate.open();
+                drained(&pool, workers).await;
+                let kept = caches.cells.counters();
+                assert_eq!(
+                    (kept.entries(), kept.hits(), kept.misses()),
+                    (ahead.len(), 0, 0),
+                    "layer E's cells kept whole in the background"
+                );
                 assert_eq!(served_on(&pool, &caches, &served).await, expected, "warm");
+                assert_eq!(
+                    caches.cells.counters().misses(),
+                    0,
+                    "the warm query finds every cell held"
+                );
                 pool.shutdown().await.unwrap();
             }
         }
@@ -973,9 +1098,10 @@ mod tests {
     }
 
     /// With its feature cells held, a query plans with its sources at once and generates ahead
-    /// only the grid cells that plan walks; and over a grid held in part, by a smaller query about
-    /// the same centre, the rest are generated ahead (P09.T40.a). Each answer is the sim's, and
-    /// each finish reads every cell it walks from the cache or a cell job's walk, generating none.
+    /// only the grid cells that plan walks, layer E's read in part and kept whole after the answer
+    /// (P08.T12); and over a grid held in part, by a smaller query about the same centre, the rest
+    /// are generated ahead (P09.T40.a). Each answer is the sim's, and each finish reads every cell
+    /// it walks from the cache or a cell job's walk, generating none.
     #[tokio::test]
     async fn only_what_the_caches_lack_is_generated_ahead() {
         let query = sun_like(0);
@@ -986,13 +1112,20 @@ mod tests {
             query.clone(),
             FeatureMembers::Served,
         );
-        let walked = with_sources(FeatureMembers::Served, |sources| {
-            RangePlan::new(galaxy(), sources, &query).cells().count()
+        let (walked, layer_e) = with_sources(FeatureMembers::Served, |sources| {
+            let plan = RangePlan::new(galaxy(), sources, &query);
+            let layer_e = plan.cells().filter(|cell| cell.layer() == Layer::E).count();
+            (plan.cells().count(), layer_e)
         });
-        let walked = u64::try_from(walked).unwrap();
-        let pool = pool(8, INTERACTIVE_QUEUE_CAPACITY);
+        let (walked, layer_e) = (
+            u64::try_from(walked).unwrap(),
+            u64::try_from(layer_e).unwrap(),
+        );
+        let gate = BulkGate::default();
+        let pool = gated_pool(8, &gate);
         let warm = caches(64 << 20);
         assert_eq!(served_on(&pool, &warm, &served).await, expected);
+        drained(&pool, 8).await;
         // The feature cells and the interiors held, the grid not.
         let grid_cold = RangeCaches::new(
             Arc::new(SharedCellCache::new(64 << 20)),
@@ -1000,6 +1133,7 @@ mod tests {
             Arc::clone(&warm.interiors),
             (Arc::clone(&warm.classes), Arc::clone(&warm.centre)),
         );
+        gate.close();
         assert_eq!(served_on(&pool, &grid_cold, &served).await, expected);
         let counters = grid_cold.cells.counters();
         assert_eq!(
@@ -1008,8 +1142,16 @@ mod tests {
                 counters.hits(),
                 counters.misses()
             ),
-            (walked, 0, 0),
-            "the cells of the plan with the sources, each generated and walked ahead"
+            (walked - layer_e, 0, 0),
+            "the cells of the plan with the sources, each generated and walked ahead, but layer \
+             E's, read in part"
+        );
+        gate.open();
+        drained(&pool, 8).await;
+        assert_eq!(
+            u64::try_from(grid_cold.cells.counters().entries()).unwrap(),
+            walked,
+            "layer E's cells kept whole in the background"
         );
         let in_part = caches(64 << 20);
         let smaller = RangeQuery::builder(*query.centre(), LightYears::new(30.0))
@@ -1017,6 +1159,7 @@ mod tests {
             .expect("a query in the clock window");
         let smaller = ServedQuery::new(shared_galaxy(), key(), smaller, FeatureMembers::Served);
         drop(served_on(&pool, &in_part, &smaller).await);
+        drained(&pool, 8).await;
         let before = in_part.cells.counters();
         assert_eq!(served_on(&pool, &in_part, &served).await, expected);
         let after = in_part.cells.counters();
@@ -1029,6 +1172,49 @@ mod tests {
         assert!(
             0 < held && held < walked,
             "{held} of {walked} cells held before, the rest walked ahead"
+        );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A query whose grid is held but for some of its layer-E cells, fewer than are worth
+    /// generating ahead and missed by the sample of the grid (its first cell, of layer E, held),
+    /// still walks them ahead, read in part, and finds the rest held, and once answered keeps them
+    /// whole; the answer is the sim's (P08.T12).
+    #[tokio::test]
+    async fn a_grid_held_but_for_layer_e_walks_it_ahead_and_keeps_it_whole() {
+        let query = sun_like(0);
+        let expected = uncached(&query, FeatureMembers::Held);
+        let served = ServedQuery::new(shared_galaxy(), key(), query.clone(), FeatureMembers::Held);
+        let cells: Vec<_> = RangePlan::new(galaxy(), &[], &query).cells().collect();
+        let layer_e = cells.iter().filter(|cell| cell.layer() == Layer::E).count();
+        assert!((2..AHEAD_GRID_CELLS).contains(&layer_e), "{layer_e} cells");
+        assert_eq!(cells[0].layer(), Layer::E, "layer E is walked first");
+        let gate = BulkGate::default();
+        let pool = gated_pool(8, &gate);
+        let caches = caches(64 << 20);
+        let held = cells.len() - layer_e + 1;
+        let held_cells = cells[..1].iter().chain(&cells[layer_e..]).copied();
+        caches.cells.generate_whole(key(), galaxy(), held_cells);
+        assert_eq!(caches.cells.counters().entries(), held);
+        gate.close();
+        assert_eq!(served_on(&pool, &caches, &served).await, expected);
+        let counters = caches.cells.counters();
+        assert_eq!(
+            (counters.entries(), counters.misses()),
+            (held, 0),
+            "the lacking layer-E cells walked ahead, read in part, none asked for and missed"
+        );
+        assert_eq!(
+            counters.hits(),
+            u64::try_from(held).unwrap(),
+            "the finish finds the rest held"
+        );
+        gate.open();
+        drained(&pool, 8).await;
+        assert_eq!(
+            caches.cells.counters().entries(),
+            cells.len(),
+            "and keeps them whole once answered"
         );
         pool.shutdown().await.unwrap();
     }
