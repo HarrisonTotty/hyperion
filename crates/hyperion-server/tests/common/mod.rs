@@ -27,6 +27,7 @@ use hyperion_protocol::{
     ClientMessage, CreateUniverseRequest, NotificationBody, RequestBody, RequestError, RequestId,
     ResponseBody, SeedHex, ServerMessage, UniverseIdHex, UniverseInfo,
 };
+use hyperion_server::compute::TwinPriority;
 use hyperion_server::universe::SequenceEntropy;
 use hyperion_server::{
     GlobalListWarmUp, Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService,
@@ -215,11 +216,17 @@ impl TestServer {
     /// every tube table, some minutes of CPU (plan 10, P10.T10.b).
     ///
     /// Its pool has [`TEST_SERVER_WORKERS`] workers, not the server's default, which is sized from
-    /// the machine; a test's own [`workers`](ServerConfigBuilder::workers) after it wins.
+    /// the machine; a test's own [`workers`](ServerConfigBuilder::workers) after it wins. Its
+    /// workers' twins run the bulk and background jobs at the workers' own priority
+    /// ([`TwinPriority::Workers`]), not lowered as the server's are: lowered, they take about a
+    /// tenth of a core they share with a neighbouring test's thread, and under a gate's load the
+    /// galaxy walks, coarse passes and sky tables a test waits on ran past [`DEFAULT_PATIENCE`]
+    /// (pod, 2026-11-06). It changes no answer, nor the order the workers take jobs in.
     pub fn config(data_dir: &Path) -> ServerConfigBuilder {
         ServerConfig::builder()
             .data_dir(data_dir)
             .workers(TEST_SERVER_WORKERS)
+            .twin_priority(TwinPriority::Workers)
             .entropy(SequenceEntropy::new(test_entropy()))
             .sky_service(SkyService::Unsupported)
             .global_list_warm_up(GlobalListWarmUp::Off)

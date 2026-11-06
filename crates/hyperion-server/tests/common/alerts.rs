@@ -1,6 +1,6 @@
 //! The alerts' helpers, shared by the alerts' integration tests (plan 12, P12.T8.b and P12.T8.c):
 //! a pinned supernova, its light as an observer receives it, and subscribing, moving and reading
-//! contacts over a socket.
+//! contacts over a socket, and the server a class's walk across the whole galaxy runs on.
 //!
 //! P12.T9.b's test is to watch a pinned recurrent nova. Plan 11's novae are not walked yet (their
 //! registry row waits on P11.T9), so a supernova stands in: seed 9's core collapse that goes off in
@@ -31,8 +31,10 @@ use hyperion_sim::observe::light_time;
 use hyperion_sim::time::{Span, UniverseTime as SimTime};
 use hyperion_sim::units::WattsPerSquareMetre;
 use serde_json::Value;
+use std::num::NonZeroUsize;
+use std::path::Path;
 
-use super::TestClient;
+use super::{TestClient, TestServer};
 
 /// The galaxy of the pinned supernova.
 pub const SEED: u64 = 9;
@@ -45,6 +47,20 @@ pub const FAR_LY: f64 = 0.2;
 
 /// A day, s.
 pub const DAY: i64 = 86_400;
+
+/// The workers of the server a class's walk across the whole galaxy runs on ([`walking_server`]):
+/// four, the slots each of those tests takes (`.config/nextest.toml`).
+///
+/// On the harness's two, a test build's walk of the core collapses across the root cube took
+/// 101.6 s in one wait, 43.4 s counting the cells of its 256 slabs and 58.2 s walking its 44,840
+/// pieces, and the whole test 170.1 s beside 32 busy threads, against the harness's 180 s patience
+/// (pod, 2026-11-06).
+pub const WALK_WORKERS: NonZeroUsize = NonZeroUsize::new(4).expect("4 is not zero");
+
+/// A server over `data_dir` of [`WALK_WORKERS`] workers, for a class walked across the galaxy.
+pub async fn walking_server(data_dir: &Path) -> TestServer {
+    TestServer::start_with(TestServer::config(data_dir).workers(WALK_WORKERS).build()).await
+}
 
 /// The pinned supernova: the latest death of [`PINNED_CELL`] in the clock window's future.
 pub fn pinned(galaxy: &Galaxy) -> OneShotEvent {

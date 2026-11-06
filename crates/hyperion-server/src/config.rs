@@ -94,7 +94,7 @@ use clap::builder::{BoolishValueParser, TypedValueParser};
 use clap::{ArgAction, Parser, ValueEnum};
 
 use crate::DEFAULT_ADDR;
-use crate::compute::{BulkGate, SkyCaps};
+use crate::compute::{BulkGate, SkyCaps, TwinPriority};
 use crate::stop::StdinStop;
 use crate::surface::{InputsSource, RecordInputs};
 use crate::universe::{Entropy, OsEntropy};
@@ -519,8 +519,8 @@ pub enum HeldSkies {
 /// at the quality-of-service class utility, which leans to the efficiency cores but may take the
 /// performance cores the client draws with. Background holds the census's jobs after its first
 /// reply, the one the player waits for, to the efficiency cores. Only macOS's twins follow a job's
-/// class, job by job; on Linux and Windows either value runs every bulk job at the twin's own
-/// level, as before.
+/// class, job by job, and only lowered ones ([`TwinPriority::Lowered`]); on Linux and Windows
+/// either value runs every bulk job at the twin's own level, as before.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, ValueEnum)]
 pub enum SkyQos {
     /// Every job at the twins' own class, utility on macOS: the default elsewhere.
@@ -777,6 +777,8 @@ pub struct ServerConfig {
     surface_inputs: Arc<dyn InputsSource>,
     /// A test's hold on the pool's bulk jobs; none by default.
     bulk_gate: Option<BulkGate>,
+    /// The priority the pool's twins run its bulk and background jobs at; lowered by default.
+    twin_priority: TwinPriority,
 }
 
 impl ServerConfig {
@@ -1006,6 +1008,13 @@ impl ServerConfig {
     pub fn bulk_gate(&self) -> Option<&BulkGate> {
         self.bulk_gate.as_ref()
     }
+
+    /// The priority the pool's twins run its bulk and background jobs at:
+    /// [`TwinPriority::Lowered`] unless a test keeps its workers'.
+    #[must_use]
+    pub fn twin_priority(&self) -> TwinPriority {
+        self.twin_priority
+    }
 }
 
 /// Builds a [`ServerConfig`], starting from the defaults.
@@ -1052,6 +1061,7 @@ impl Default for ServerConfigBuilder {
                 sky_caps: SkyCaps::DERIVED,
                 surface_inputs: Arc::new(RecordInputs),
                 bulk_gate: None,
+                twin_priority: TwinPriority::default(),
             },
         }
     }
@@ -1335,6 +1345,17 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// The priority the pool's twins run its bulk and background jobs at:
+    /// [`TwinPriority::Lowered`], the server's, by default.
+    ///
+    /// A test that runs beside other tests keeps its workers' ([`TwinPriority::Workers`]), so that
+    /// its bulk work does not wait on theirs under load; no option or variable sets it.
+    #[must_use]
+    pub fn twin_priority(mut self, twins: TwinPriority) -> Self {
+        self.config.twin_priority = twins;
+        self
+    }
+
     /// The configuration.
     #[must_use]
     pub fn build(self) -> ServerConfig {
@@ -1613,6 +1634,12 @@ mod tests {
                 },
                 HeldSkies::Held,
             )
+        );
+        // No option sets the twins' priority: the server's are lowered, whoever starts it.
+        assert_eq!(config.twin_priority(), TwinPriority::Lowered);
+        assert_eq!(
+            ServerConfig::builder().build().twin_priority(),
+            TwinPriority::Lowered
         );
     }
 

@@ -10159,3 +10159,13 @@ CensusCost)`.
   - _Left._ The warm-up's budget counts no table built beside it once it has begun (as before).
     A relaunched range test that stops before its first launch's tables are written rebuilds them
     beside its query.
+
+- **R06, the server's tests' twins at their workers' priority (lane `fix-server-test-timeouts`,
+  2026-11-06; no output moved).**
+  - `compute::TwinPriority::{Lowered, Workers}` (`Lowered` by default), the crate's
+    `CpuPool::with_twins`, and `ServerConfig{,Builder}::twin_priority` (no option or variable).
+    `TestServer::config` and the pool helpers of `lib.rs`'s, `compute/sky.rs`'s and
+    `surface/service.rs`'s tests keep the workers'; a test of the lowering builds its pool with
+    `CpuPool::new`.
+  - `tests/common/alerts.rs`'s `walking_server` (`WALK_WORKERS`, 4) for the two whole-galaxy walks,
+    which take four nextest slots, and the caps' rays test three.

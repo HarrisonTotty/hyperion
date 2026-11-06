@@ -1400,6 +1400,7 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::atomic::AtomicUsize;
     use std::sync::{Condvar, OnceLock, mpsc};
+    use std::time::Duration;
 
     use futures_util::FutureExt;
     use futures_util::future::join3;
@@ -1434,7 +1435,7 @@ mod tests {
 
     use super::*;
     use crate::compute::sky::bulk;
-    use crate::compute::{FlushProbe, GalaxyKey, JobReceiver, Priority};
+    use crate::compute::{FlushProbe, GalaxyKey, JobReceiver, Priority, TwinPriority};
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
     use crate::testing::WAIT;
 
@@ -1491,14 +1492,7 @@ mod tests {
 
     /// A pool of one worker, which takes its jobs in order.
     fn one_worker() -> Arc<CpuPool> {
-        Arc::new(
-            CpuPool::new(
-                NonZeroUsize::MIN,
-                INTERACTIVE_QUEUE_CAPACITY,
-                BULK_QUEUE_CAPACITY,
-            )
-            .unwrap(),
-        )
+        workers(1)
     }
 
     /// A source that gives every body the reference Ceres, a level-5 field, counting its calls.
@@ -1564,11 +1558,17 @@ mod tests {
             .unwrap();
     }
 
-    /// Yields until `ready` holds.
+    /// How often [`until`] looks again: short beside every state it waits for, a pass entering, a
+    /// job queued or a field held, and long enough that the looking costs nothing measurable. It
+    /// yielded at once before, which spun the test's runtime thread beside the pool's workers: the
+    /// 8.4 s prefetch test took 21.4 CPU-s spinning and 14.8 polling (pod, 2026-11-06).
+    const UNTIL_POLL: Duration = Duration::from_millis(1);
+
+    /// Waits until `ready` holds, looking every [`UNTIL_POLL`].
     async fn until(what: &str, ready: impl Fn() -> bool) {
         timeout(WAIT, async {
             while !ready() {
-                tokio::task::yield_now().await;
+                tokio::time::sleep(UNTIL_POLL).await;
             }
         })
         .await
@@ -1926,14 +1926,7 @@ mod tests {
 
     /// A pool of two workers, so that a job can run beside a pass.
     fn two_workers() -> Arc<CpuPool> {
-        Arc::new(
-            CpuPool::new(
-                NonZeroUsize::new(2).unwrap(),
-                INTERACTIVE_QUEUE_CAPACITY,
-                BULK_QUEUE_CAPACITY,
-            )
-            .unwrap(),
-        )
+        workers(2)
     }
 
     /// A source that holds each body's pass in its inputs until the test opens the body's gate,
@@ -2232,13 +2225,16 @@ mod tests {
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
-    /// A pool of `n` workers.
+    /// A pool of `n` workers, its twins at their workers' priority, so that its passes do not
+    /// wait on the neighbouring tests' threads ([`TwinPriority`]).
     fn workers(n: usize) -> Arc<CpuPool> {
         Arc::new(
-            CpuPool::new(
+            CpuPool::with_twins(
                 NonZeroUsize::new(n).unwrap(),
                 INTERACTIVE_QUEUE_CAPACITY,
                 BULK_QUEUE_CAPACITY,
+                TwinPriority::Workers,
+                None,
             )
             .unwrap(),
         )

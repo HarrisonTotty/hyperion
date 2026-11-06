@@ -47,7 +47,7 @@ use crate::compute::{
     SharedBriefCache, SharedCellCache, SharedCentreOrbitCache, SharedClassCellCache,
     SharedClusterModelCache, SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache,
     SharedSprayForces, SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTableFiles,
-    SkyTablesService, SkyTablesSource, StartPoolError, TubeTableCache,
+    SkyTablesService, SkyTablesSource, StartPoolError, TubeTableCache, TwinPriority,
 };
 use crate::connections::Connections;
 use crate::limits::{
@@ -244,8 +244,9 @@ impl Server {
         // Starting the pool waits for every worker to probe its floating-point mode, so it runs
         // off the runtime.
         let (workers, gate) = (config.workers(), config.bulk_gate().cloned());
+        let twins = config.twin_priority();
         let pool = Arc::new(
-            tokio::task::spawn_blocking(move || start_pool(workers, gate))
+            tokio::task::spawn_blocking(move || start_pool(workers, twins, gate))
                 .await
                 .map_err(|_| StartServerError::Interrupted)?
                 .map_err(StartServerError::StartPool)?,
@@ -446,22 +447,25 @@ pub fn tap_socket(tcp: &tokio::net::TcpStream) {
     let _ = tcp;
 }
 
-/// The server's CPU pool of `workers`, its bulk jobs held at `gate` if a test gave one
+/// The server's CPU pool of `workers`, its twins at `twins`
+/// ([`ServerConfigBuilder::twin_priority`]) and its bulk jobs held at `gate` if a test gave one
 /// ([`ServerConfigBuilder::bulk_gate`]).
 ///
 /// # Errors
 ///
 /// As [`CpuPool::new`].
-fn start_pool(workers: NonZeroUsize, gate: Option<BulkGate>) -> Result<CpuPool, StartPoolError> {
-    match gate {
-        Some(gate) => CpuPool::with_bulk_gate(
-            workers,
-            INTERACTIVE_QUEUE_CAPACITY,
-            BULK_QUEUE_CAPACITY,
-            gate,
-        ),
-        None => CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY),
-    }
+fn start_pool(
+    workers: NonZeroUsize,
+    twins: TwinPriority,
+    gate: Option<BulkGate>,
+) -> Result<CpuPool, StartPoolError> {
+    CpuPool::with_twins(
+        workers,
+        INTERACTIVE_QUEUE_CAPACITY,
+        BULK_QUEUE_CAPACITY,
+        twins,
+        gate,
+    )
 }
 
 /// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a),
@@ -750,7 +754,8 @@ mod tests {
                 .sky_service(service)
                 .sky_caps(caps)
                 .build();
-            let pool = Arc::new(start_pool(NonZeroUsize::MIN, None).unwrap());
+            let pool =
+                Arc::new(start_pool(NonZeroUsize::MIN, TwinPriority::Lowered, None).unwrap());
             let tables = sky_tables_service(&config, Arc::clone(&pool));
             assert_eq!(
                 tables.counters().files().budget(),
@@ -928,11 +933,15 @@ mod tests {
         use crate::compute::GalaxyKey;
         use crate::compute::sky::tests::{an_ageing_nursery, feature_gas_at};
 
+        // Its twins at its worker's priority, so that the tables' bulk jobs do not wait on the
+        // neighbouring tests' threads (`TwinPriority`).
         let pool = Arc::new(
-            CpuPool::new(
+            CpuPool::with_twins(
                 std::num::NonZeroUsize::MIN,
                 INTERACTIVE_QUEUE_CAPACITY,
                 BULK_QUEUE_CAPACITY,
+                TwinPriority::Workers,
+                None,
             )
             .unwrap(),
         );

@@ -178,6 +178,23 @@ filter = "package(hyperion-server) & test(=compute::sky::tests::at_the_ceiling_t
 threads-required = 4
 priority = 50
 
+# R13.T2.b's caps in jobs measure and count their rays on a pool of three workers, between the
+# sim's references on the test's own thread, so the test takes three slots, starting as early as the
+# group: 75 s alone (pod, 2026-11-06).
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & test(=compute::sky::tests::the_caps_rays_measured_in_jobs_are_the_sims_caps)"
+threads-required = 3
+priority = 50
+
+# P12.T8.b.2's walks of a class across the whole galaxy run on a server of four workers
+# (`common::alerts::WALK_WORKERS`): the core collapses' 101.6 s on two, and the X-ray binaries'
+# 52.7 s, in one wait each (pod, 2026-11-06). So each takes four slots, starting as early as the
+# group.
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & binary(=alerts_scans) & (test(=alerts_scans_walk_a_galaxy_wide_class_to_complete) | test(=alerts_scans_walk_a_recurrent_class_in_the_background_and_deliver_its_detections))"
+threads-required = 4
+priority = 50
+
 # The group's tests start first. They are the fast tier's longest (40–160 s each natively, up to
 # about 300 s on wasip1, where most tests take seconds), and in binary order they started after most
 # of the sim's tests and ran on alone at the end of each run (`perf-sim-sky.md`, 2026-10-10).

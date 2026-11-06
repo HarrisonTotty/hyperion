@@ -24,8 +24,33 @@
 //! its own class up as well as down there (`pthread_set_qos_class_self_np`, libpthread's `qos.h`),
 //! where Linux never lets an unprivileged thread lower its nice again, so Linux, and Windows, keep
 //! their twins' one level.
+//!
+//! A test's pool may keep its twins at their workers' priority instead ([`TwinPriority`]).
 
 use gdt_cpus::{AppliedPriority, ThreadPriority, set_thread_priority};
+
+/// The OS priority a pool's twins run its bulk and background jobs at: lowered, the server's, or
+/// their workers' own, a test's.
+///
+/// A test runs beside other tests at the default priority, all in nextest's one session, so a
+/// lowered twin's job takes about a tenth of a core it shares with one of their threads: Linux
+/// weighs a thread at nice 10 as 110 against 1,024 at nice 0 (`sched_prio_to_weight`,
+/// `kernel/sched/core.c`). Beside 32 busy threads at nice 0 on a pod's 32 CPUs, five of six server
+/// tests that wait on bulk work ran past their patience with lowered twins, and all six passed
+/// with their workers' (pod, 2026-11-06). It is scheduling only: no job's value, and not the order
+/// the workers take jobs in, changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum TwinPriority {
+    /// Lowered from the twin's start, the server's.
+    ///
+    /// Nice 10 on Linux, the class utility on macOS, where it also follows each job's class, and
+    /// below normal on Windows.
+    #[default]
+    Lowered,
+    /// The priority the twin started with, its worker's, for every job: a test's, whose bulk work
+    /// would otherwise wait on the neighbouring tests' threads under load.
+    Workers,
+}
 
 /// The priority a worker's twin runs at: gdt-cpus's `Lowest`, which is macOS's `QOS_CLASS_UTILITY`
 /// and Linux's nice 10 (its table calls it "E-core-leaning" on Apple silicon); on Windows its
@@ -47,7 +72,9 @@ pub(crate) const FOLLOWS_EACH_JOB: bool = cfg!(target_os = "macos");
 
 /// A twin's priority job by job: [`LOWERED`], as [`lower_this_thread`] left it, or [`BACKGROUND`]
 /// for a job whose token is lowered, set only when it changes and only where
-/// [`FOLLOWS_EACH_JOB`]. A refusal is logged at `warn`, and the twin then keeps the level it has.
+/// [`FOLLOWS_EACH_JOB`] for a lowered twin. A refusal is logged at `warn`, and the twin then keeps
+/// the level it has. A twin at its worker's priority ([`TwinPriority::Workers`]) never follows, so
+/// its `current` is never read.
 #[derive(Debug)]
 pub(crate) struct TwinLevel {
     current: ThreadPriority,
@@ -58,13 +85,17 @@ pub(crate) struct TwinLevel {
 }
 
 impl TwinLevel {
-    /// A twin's level after [`lower_this_thread`].
+    /// A twin's level from its start at `twins`: after [`lower_this_thread`] where they are
+    /// [`TwinPriority::Lowered`]; its worker's, never changed, where they are the workers'.
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(twins: TwinPriority) -> Self {
         Self {
             current: LOWERED,
             applied: None,
-            follows: FOLLOWS_EACH_JOB,
+            follows: match twins {
+                TwinPriority::Lowered => FOLLOWS_EACH_JOB,
+                TwinPriority::Workers => false,
+            },
         }
     }
 
@@ -174,6 +205,21 @@ mod tests {
         assert_eq!(LOWERED, expected);
     }
 
+    /// A twin at its worker's priority follows no job's class, on any platform: it changes nothing
+    /// for a lowered job or the next.
+    #[test]
+    fn a_twin_at_its_workers_priority_follows_no_jobs_class() {
+        let applied = std::thread::spawn(|| {
+            let mut level = TwinLevel::new(TwinPriority::Workers);
+            level.follow(true);
+            level.follow(false);
+            level.applied
+        })
+        .join()
+        .unwrap();
+        assert!(applied.is_none(), "{applied:?}");
+    }
+
     /// On Linux a twin keeps nice 10 whatever its jobs' class, and changes nothing.
     #[cfg(target_os = "linux")]
     #[test]
@@ -181,7 +227,7 @@ mod tests {
         let started = nice_of_this_thread();
         let (nices, applied) = std::thread::spawn(|| {
             lower_this_thread();
-            let mut level = TwinLevel::new();
+            let mut level = TwinLevel::new(TwinPriority::Lowered);
             level.follow(true);
             let lowered = nice_of_this_thread();
             level.follow(false);
@@ -200,7 +246,7 @@ mod tests {
     fn on_macos_a_twin_follows_each_jobs_class() {
         let given = std::thread::spawn(|| {
             lower_this_thread();
-            let mut level = TwinLevel::new();
+            let mut level = TwinLevel::new(TwinPriority::Lowered);
             level.follow(false);
             let unchanged = level.applied.take();
             level.follow(true);

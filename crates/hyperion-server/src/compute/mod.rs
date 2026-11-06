@@ -99,6 +99,7 @@ pub use sky_table_files::SkyTableFileCounters;
 pub(crate) use sky_table_files::{SKY_TABLE_FILES_DIR, SkyTableFiles};
 pub use sky_tables::SkyTablesCounters;
 pub use systems::{SharedBriefCache, SharedSystemCache, SystemStarsHandle};
+pub use thread_priority::TwinPriority;
 pub use tube_tables::{ListedTubes, Listing, TubeKey, TubeTableCache};
 pub use viewer::{DENSITY_GRIDS, VIEWER_SYSTEMS_PER_GALAXY, ViewerSystems};
 

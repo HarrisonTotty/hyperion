@@ -15,6 +15,7 @@ use common::TestServer;
 use common::alerts::{
     DAY, FAR_LY, SEED, after, arrival, beside, contacts_until, contacts_until_answered, light_at,
     move_to, opened, opened_with, peak, pinned, subscribe, subscribe_in, subscribe_to, v_sensor,
+    walking_server,
 };
 use hyperion_protocol::{
     AlertBandDto, CatalogueClassWire, ClassCensusStatusDto, ContactDto, NotificationBody,
@@ -178,12 +179,13 @@ async fn alerts_scans_give_up_a_background_walk_and_deliver_nothing() {
 /// collapses, too many cells to count interactively, open `pending` with no count of hosts, are
 /// walked in the background over every slab of the root cube, and read `complete` with the
 /// candidates the walk drew, hundreds of thousands (P12.T8.b.2; research's 5.0 × 10⁵ for the Milky
-/// Way fixture).
+/// Way fixture). The walk runs on a server of four workers ([`walking_server`]).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alerts_scans_walk_a_galaxy_wide_class_to_complete() {
     let sun =
         hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).unwrap();
-    let server = TestServer::start().await;
+    let data_dir = tempfile::tempdir().unwrap();
+    let server = walking_server(data_dir.path()).await;
     let mut client = server.connected().await;
     let universe = client.create_universe("Alerts: the galaxy", SEED).await.id;
     let start = hyperion_sim::time::UniverseTime::EPOCH;
@@ -278,7 +280,7 @@ async fn alerts_scans_yield_nothing_of_a_background_class_over_its_host_limit() 
 /// Sun-like point, more cells than an interactive walk takes, open `pending`, are walked in the
 /// background to `complete`, and a day on, the outbursts and bursts lit at the start or crossing
 /// the limit that day are the subscriber's contacts (some 3,600 detections over the year, measured
-/// 2026-11-01).
+/// 2026-11-01). The walks run on a server of four workers ([`walking_server`]).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alerts_scans_walk_a_recurrent_class_in_the_background_and_deliver_its_detections() {
     let sun =
@@ -295,7 +297,8 @@ async fn alerts_scans_walk_a_recurrent_class_in_the_background_and_deliver_its_d
     .unwrap();
     let ratio = class_reach(ClassId::XRAY_BINARY, &xray).value() / 30_000.0;
     let detect = probe * ratio * ratio;
-    let server = TestServer::start().await;
+    let data_dir = tempfile::tempdir().unwrap();
+    let server = walking_server(data_dir.path()).await;
     let mut client = server.connected().await;
     let universe = client
         .create_universe("Alerts: X-ray binaries", SEED)

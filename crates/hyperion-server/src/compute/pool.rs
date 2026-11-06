@@ -32,6 +32,10 @@
 //! nice but never lower it again (`RLIMIT_NICE`, 0 by default; setpriority(2)), so the restore
 //! would fail there.
 //!
+//! A test's pool may keep its twins at their workers' priority ([`TwinPriority::Workers`],
+//! [`CpuPool::with_twins`]), so that its bulk work does not wait on the neighbouring tests'
+//! threads.
+//!
 //! Each queue is bounded by a [`Semaphore`]. A job holds a permit while it waits, and the permit
 //! is released the moment a worker takes the job. Jobs run under `catch_unwind`, so a panic costs
 //! one request and not a worker. A job's result, or why it has none, arrives on a
@@ -60,7 +64,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError, oneshot};
 
-use super::thread_priority::{TwinLevel, lower_this_thread};
+use super::thread_priority::{TwinLevel, TwinPriority, lower_this_thread};
 use super::{CancelToken, FlushProbe, probe_flush_to_zero};
 
 /// Where a job waits for a worker.
@@ -398,7 +402,14 @@ impl CpuPool {
         bulk_capacity: NonZeroUsize,
         probe: fn() -> FlushProbe,
     ) -> Result<Self, StartPoolError> {
-        Self::start(workers, interactive_capacity, bulk_capacity, probe, None)
+        Self::start(
+            workers,
+            interactive_capacity,
+            bulk_capacity,
+            probe,
+            TwinPriority::Lowered,
+            None,
+        )
     }
 
     /// [`CpuPool::new`] with every bulk or background job, once a worker has taken it, waiting at
@@ -419,17 +430,44 @@ impl CpuPool {
             interactive_capacity,
             bulk_capacity,
             probe_flush_to_zero,
+            TwinPriority::Lowered,
             Some(gate),
         )
     }
 
-    /// Starts the workers, probing each with `probe`, their bulk jobs held at `gate` if there is
-    /// one.
+    /// [`CpuPool::new`] with its twins at `twins`, and its bulk and background jobs held at `gate`
+    /// if there is one ([`CpuPool::with_bulk_gate`]): the server's pool as its configuration gives
+    /// them ([`ServerConfigBuilder::twin_priority`](crate::ServerConfigBuilder::twin_priority)), or
+    /// a test's.
+    ///
+    /// # Errors
+    ///
+    /// As [`CpuPool::new`].
+    pub(crate) fn with_twins(
+        workers: NonZeroUsize,
+        interactive_capacity: NonZeroUsize,
+        bulk_capacity: NonZeroUsize,
+        twins: TwinPriority,
+        gate: Option<BulkGate>,
+    ) -> Result<Self, StartPoolError> {
+        Self::start(
+            workers,
+            interactive_capacity,
+            bulk_capacity,
+            probe_flush_to_zero,
+            twins,
+            gate,
+        )
+    }
+
+    /// Starts the workers, probing each with `probe`, their twins at `twins` and their bulk jobs
+    /// held at `gate` if there is one.
     fn start(
         workers: NonZeroUsize,
         interactive_capacity: NonZeroUsize,
         bulk_capacity: NonZeroUsize,
         probe: fn() -> FlushProbe,
+        twins: TwinPriority,
         gate: Option<BulkGate>,
     ) -> Result<Self, StartPoolError> {
         for capacity in [interactive_capacity, bulk_capacity] {
@@ -439,7 +477,7 @@ impl CpuPool {
                 });
             }
         }
-        let shared = Arc::new(Shared::new(workers, probe, gate));
+        let shared = Arc::new(Shared::new(workers, probe, twins, gate));
         let mut handles = Vec::with_capacity(workers.get());
         // Bounded by the threads, a worker and its twin for each, each of which sends exactly one
         // report.
@@ -883,6 +921,8 @@ struct Shared {
     workers: NonZeroUsize,
     /// Checks a worker's floating-point mode: [`probe_flush_to_zero`] except in tests.
     probe: fn() -> FlushProbe,
+    /// The priority the twins run their jobs at.
+    twins: TwinPriority,
     /// Where a taken bulk or background job waits before it runs: a test's, or none.
     gate: Option<BulkGate>,
 }
@@ -936,12 +976,18 @@ impl State {
 }
 
 impl Shared {
-    fn new(workers: NonZeroUsize, probe: fn() -> FlushProbe, gate: Option<BulkGate>) -> Self {
+    fn new(
+        workers: NonZeroUsize,
+        probe: fn() -> FlushProbe,
+        twins: TwinPriority,
+        gate: Option<BulkGate>,
+    ) -> Self {
         Self {
             state: Mutex::default(),
             available: Condvar::new(),
             workers,
             probe,
+            twins,
             gate,
         }
     }
@@ -1296,9 +1342,9 @@ fn start_worker(index: usize, shared: &Shared, report: mpsc::SyncSender<Probed>,
     twin.stop();
 }
 
-/// A twin's life: lower its priority, probe the thread, report to the constructor, and if the
-/// probe passed run each job its worker hands it, at its job's class on macOS, until the worker
-/// stops.
+/// A twin's life: lower its priority unless its pool keeps the workers', probe the thread, report
+/// to the constructor, and if the probe passed run each job its worker hands it, at its job's class
+/// on macOS where it is lowered, until the worker stops.
 fn start_twin(
     index: usize,
     shared: &Shared,
@@ -1307,7 +1353,12 @@ fn start_twin(
     finished: &mpsc::SyncSender<()>,
 ) {
     // Before the probe, so that the probe follows all the twin does before its first job.
-    lower_this_thread();
+    match shared.twins {
+        TwinPriority::Lowered => {
+            lower_this_thread();
+        }
+        TwinPriority::Workers => {}
+    }
     let probe = (shared.probe)();
     // As the worker's own report.
     let _ = report.send(Probed {
@@ -1319,7 +1370,7 @@ fn start_twin(
     if probe.flushes() {
         return;
     }
-    let mut level = TwinLevel::new();
+    let mut level = TwinLevel::new(shared.twins);
     while let Ok(job) = taken.recv() {
         let lowered = job.job.is_lowered();
         if lowered {
@@ -2402,6 +2453,38 @@ mod tests {
         }
         let lowered = started.max(10);
         assert_eq!(nices, [started, lowered, started, lowered, started]);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// On Linux a pool whose twins keep their workers' priority, a test's, still runs its bulk and
+    /// background jobs on the twins, at the nice the workers started with ([`TwinPriority`]).
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn on_linux_twins_kept_at_the_workers_priority_run_their_jobs_at_the_workers_nice() {
+        use super::super::thread_priority::nice_of_this_thread;
+
+        let started = nice_of_this_thread();
+        let n = |value| NonZeroUsize::new(value).unwrap();
+        let pool = CpuPool::with_twins(n(1), n(4), n(4), TwinPriority::Workers, None).unwrap();
+        let mut ran = Vec::new();
+        for priority in ONE_AFTER_ANOTHER {
+            ran.push(
+                read_on_the_thread_of(&pool, priority, || {
+                    (
+                        thread::current().name().map(str::to_owned),
+                        nice_of_this_thread(),
+                    )
+                })
+                .await,
+            );
+        }
+        let (worker, twin) = (Some("hyperion-cpu-0"), Some("hyperion-low-0"));
+        assert_eq!(
+            ran.iter()
+                .map(|(name, nice)| (name.as_deref(), *nice))
+                .collect::<Vec<_>>(),
+            [worker, twin, worker, twin, worker].map(|thread| (thread, started))
+        );
         pool.shutdown().await.unwrap();
     }
 

@@ -2082,7 +2082,7 @@ pub(crate) mod tests {
     use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
 
     use super::*;
-    use crate::compute::SkyCellCounters;
+    use crate::compute::{SkyCellCounters, TwinPriority};
     use crate::limits::INTERACTIVE_QUEUE_CAPACITY;
     use crate::testing::WAIT;
 
@@ -2091,11 +2091,15 @@ pub(crate) mod tests {
         Observer::new(at, UniverseTime::EPOCH).unwrap()
     }
 
+    /// A pool of `workers`, its twins at their workers' priority, so that its bulk jobs do not
+    /// wait on the neighbouring tests' threads ([`TwinPriority`]).
     fn pool(workers: usize) -> CpuPool {
-        CpuPool::new(
+        CpuPool::with_twins(
             NonZeroUsize::new(workers).unwrap(),
             INTERACTIVE_QUEUE_CAPACITY,
             BULK_QUEUE_CAPACITY,
+            TwinPriority::Workers,
+            None,
         )
         .unwrap()
     }
