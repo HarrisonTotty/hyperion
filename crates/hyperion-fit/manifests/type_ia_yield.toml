@@ -1,0 +1,16 @@
+# The Type Ia explosion mark's yield (plan 15, P15.T9.b; read by plan 11's P11.T6 mark through
+# `tables::binary::IA_YIELD`), fitted against plan 11's engine at generator version 30's rules,
+# every hold at 30 in force (P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass among them),
+# through the sim's own census of the Type Ia pool (`stellar::binary::testing::ia_pool_census_in`):
+# each grid record's first attempt's pairs run over a Hubble time, on the Milky Way fixture. The
+# slab's census is 10^7 records of layers C–E about the solar circle in the band shares'
+# proportion; the fit takes parts 0–31 of 64 of its cells, and checks η on the even parts against
+# the odd. The target is the delay-time distribution's yield by bin (`type_ia_delay`).
+task = "type_ia_yield"
+
+[params]
+seed = 0x0b17_15a0_0000_0001
+generator_version = 30
+records = 10_000_000
+parts = 32
+part_count = 64

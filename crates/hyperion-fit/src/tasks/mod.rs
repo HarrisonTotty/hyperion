@@ -41,4 +41,5 @@ pub mod stripping_helium;
 pub mod substance_albedos;
 pub mod thermo_equilibrium;
 pub mod type_ia_delay;
+pub mod type_ia_yield;
 pub mod wd_cooling;

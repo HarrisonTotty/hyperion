@@ -13,8 +13,8 @@
 //! ([`tags::BINARY_IA_MARK`]), at word 64n of redraw attempt n and keyed by the star the pair's
 //! orbit brings in
 //! ([`SystemHierarchy::pair_key`](crate::stellar::multiplicity::SystemHierarchy::pair_key)), falls
-//! under η of the event's delay bin and channel ([`IaYieldTable`]; the scratch
-//! [`IA_YIELD`](crate::tables::binary::IA_YIELD) until P15.T9.b fits it). An unexploded pooled
+//! under η of the event's delay bin and channel ([`IaYieldTable`]; plan 15's P15.T9.b fit,
+//! [`IA_YIELD`](crate::tables::binary::IA_YIELD)). An unexploded pooled
 //! event, every merger too light to detonate among them (most helium-bearing ones), stays what the
 //! engine made it: a massive white dwarf, an R Coronae Borealis star, a hot subdwarf.
 //!

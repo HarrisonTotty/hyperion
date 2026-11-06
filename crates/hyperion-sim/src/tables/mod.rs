@@ -476,6 +476,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: false,
     },
     TableInfo {
+        name: "type_ia_yield",
+        revision: 0,
+        since_generator_version: 28,
+        provisional: false,
+    },
+    TableInfo {
         name: "wd_cooling",
         revision: 0,
         since_generator_version: 11,

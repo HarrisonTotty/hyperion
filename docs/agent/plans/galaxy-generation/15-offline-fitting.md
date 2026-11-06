@@ -1918,7 +1918,8 @@ galaxy train after its gate. Built: T1, T2, T4, T5.a (its production run is P06.
 T6.a–g, T7.a, T7.b's first landing (the table still P06.T17's identity, its fit to scratch;
 Risks, "T7.b as built") and its swap, held for 26 (`tables::helium_26` behind `HELIUM_VERSION`;
 Risks, "T7.b's swap as built"), T8.a–c (production at their committed values by
-decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a, T10.a (fitted at P09.T43's
+decision-p15-t8-blocks, adopted by T8.d; no bump), T8.d, T9.a, T9.b (every bin capped, so no
+bump; Risks, "T9.b as built"), T10.a (fitted at P09.T43's
 scratch bits, no bump; Risks, "T10.a as built"), T10.b's accreting white dwarfs and X-ray
 binaries (held for 27, refitted at 27; Risks, "T10.b as built" and "T10.b's refit at 27"), T11.a (`streams` registered, provisional; Risks,
 "T11.a as built"), T11.b (fitted, held for 27; Risks, "T11.b as built") and T12's tools
@@ -1959,7 +1960,7 @@ galaxy train after its lane's gate, as decision-bump-plan-after-22 does for its 
 - T3.c, at 25 (S1), as an anchor;
 - T7.b's swap, at 25 as a rider if ready when its wiring starts, else the next train;
 - T10.a, at the first train after P09.T43 and its own gate (the bump plan lists 28);
-- T9.b and T10.b, with P11.T15, whose swap they are, at 28;
+- T10.b, with P11.T15, whose swap it is, at 28; T9.b took no bump, every bin capped;
 - T11.b, if its value moves, at the first train after P10.T5–T6 and its gate (expected 28);
 - a default of T5.b that a later ruling moves, at the first train after its gate.
 
@@ -3580,3 +3581,15 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
   `provisional` flags" leaves only `binary.rs`'s own header.
 - (lean, 2026-11-05) Runtime is the class's bound, `TaskClass::runtime`: `< 1 min` for fast, `-`
   for slow, which bounds none; no header or lock entry records a time. Acceptance is the lock's.
+- **T9.b as built (lane `p15-t9b-ia-yield`, 2026-11-05, at 28; fitted at 30's rules, no output
+  moves).** Task `type_ia_yield` (slow, revision 0) writes block `IA_YIELD_ETA` of `tables/binary.rs`,
+  registered and not provisional. `IA_YIELD` reads it; all 24 bins are capped at 1, so the scratch is kept.
+  - _The census._ `stellar::binary::testing::ia_pool_census_in`, on `class_census_in`'s records
+    (walk: `for_census_records`), runs each first attempt's pairs to 13.7 Gyr
+    (`stellar::system::first_attempt_pairs_to`). The manifest takes 10⁷ records, parts 0–31 of 64.
+  - _Lean (2026-11-05)._ The target is per bin, not per channel, so both channels of a bin share one
+    η = min(1, target ÷ both channels' pool). The "rerun" is η of the even parts against the odd.
+  - _As measured._ Each bin's pool ÷ target and the contacts' present rate are in the block's
+    header and lock entry (the pool 0.239 of the yield; contacts 0.567 × the Ia rate against 4.5–7).
+  - _Run size._ 10⁷ records of C–E, not the body's 10⁷ binaries: 2.96 × 10⁶ pairs that can
+    interact by 13.7 Gyr. Every bin is capped either way.

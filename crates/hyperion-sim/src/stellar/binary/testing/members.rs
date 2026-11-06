@@ -584,6 +584,33 @@ pub fn class_census_in(
     records: u64,
     part: CensusPart,
 ) -> ClassCensus {
+    let mut members = Vec::new();
+    let scanned = for_census_records(galaxy, band, site, whose, records, part, |record| {
+        members_of(galaxy, record, &CENSUS_CLASSES, &mut members);
+    });
+    ClassCensus {
+        band,
+        scanned,
+        members,
+    }
+}
+
+/// Calls `visit` on each of `records` grid records of `band`'s layer at `site`, of the populations
+/// `whose`, from the cells of `part`, in [`class_census_in`]'s order: the records it took, by
+/// population.
+///
+/// # Panics
+///
+/// If `band` is substellar or the site's cells leave the root cube.
+pub(super) fn for_census_records(
+    galaxy: &Galaxy,
+    band: MassBand,
+    site: CensusSite,
+    whose: CensusRecords,
+    records: u64,
+    part: CensusPart,
+    mut visit: impl FnMut(&SystemRecord),
+) -> [u64; 7] {
     assert!(band.is_stellar(), "a census runs a stellar layer");
     let layer = Layer::from(band);
     let (first, [nx, ny, nz]) = site.cells(layer);
@@ -591,7 +618,6 @@ pub fn class_census_in(
     let n = nx * ny * nz;
     let stride = coprime_stride(n);
     let mut scanned = [0_u64; 7];
-    let mut members = Vec::new();
     let mut cell = Vec::new();
     let mut ran = 0_u64;
     let mut position = part.index;
@@ -619,14 +645,10 @@ pub fn class_census_in(
             }
             scanned[record.population().index()] += 1;
             ran += 1;
-            members_of(galaxy, record, &CENSUS_CLASSES, &mut members);
+            visit(record);
         }
     }
-    ClassCensus {
-        band,
-        scanned,
-        members,
-    }
+    scanned
 }
 
 /// The stride a census walks `n` cells by: ⌊φ⁻¹ n⌋, lowered until it is prime to `n`, so that it

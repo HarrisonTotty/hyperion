@@ -704,6 +704,18 @@ provisional = false
 acceptance = "the yield integrates to 1.000000 of 1.3 × 10⁻³ per M☉ (passes); 0.187 of delays under 0.1 Gyr (a fifth, passes) and 0.617 under 1 Gyr (about 62%, passes); the lightest primary 2.500 M☉ and layer C's largest share 0.0e0 (passes); at Milky Way values 0.465 Type Ia a century (0.42–0.53, ruling 141.4; passes) and the old populations' exploded share of layer D 0.0360–0.0407 (2–4.5%; passes); primary white dwarfs 0.667–1.266 M☉ (Kalirai et al. 2008); the primaries' 17-point quantiles within 0.0155 of the exact mixture's CDF"
 
 [[table]]
+name = "type_ia_yield"
+path = "binary.rs"
+task = "type_ia_yield"
+revision = 0
+inputs_sha256 = "0b5130f58884e9100b6eccb687a764380233a9e38bcb6917afd3ed1f1ffb448a"
+body_sha256 = "b1c9ec5e1cde8f41acc5e366d483b653322d7840363838c94c7555998c9c8d3a"
+fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 1.0960630250705998, 0.00007045175165970433, 0.0000687768912141925, 0.0000671418474864471, 0.00006554567390744563, 0.00006398744641109867, 0.00006246626289928335, 0.00006098124271959729, 0.00005953152615552191, 0.00005811627392871585, 0.00005673466671313003, 0.00005538590466068287, 0.00005406920693820183, 0.00005278381127539033, 0.00005152897352351225, 0.00005030396722460306, 0.00004910808319089251, 0.00004794062909424209, 0.000046800929065338604, 0.00004568832330241403, 0.00004460216768927103, 0.00004354183342238668, 0.000042506706646881515, 0.00004149618810114428, 0.00004050969276990198, 120.0, 69.0, 2.0, 228623318.61134434, 1.0, 1.44, 1.0, 375197383.3958119, 1.0, 1.2730355319210962, 0.0]
+since_generator_version = 28
+provisional = false
+acceptance = "24 of 24 bins capped at η 1, every short bin among them (passes), the pool ÷ target by bin 0.005/0.110/0.431/0.390/0.510/0.648/0.761/0.587/0.135/0.012/0.025/0.110/0.225/0.423/0.079/0.094/0.098/0.106/0.104/0.108/0.105/0.094/0.093/0.099; the pool 3.1053e-4 per M☉ formed, 0.239 of the yield (mergers 0.056, accretions 0.183); exploded 3.1053e-4, min(pool, target) in every bin within 0.00 σ (passes); η of the even and odd parts within 0.00 σ (passes; both under 4.098 σ, α = 10⁻³ over the bins); 16173 detonatable candidates (mergers 3802, accretions 12371) of 41655; records C/D/E 7924768/1625728/449568, pairs 1709089/951509/301363; recorded, not asserted: the double white dwarfs' contacts over the last Gyr 4.092e-14 per M☉ formed a year, 0.567 × the delay-time distribution's 7.221e-14 at the same ages (Maoz, Hallakoun and Badenes 2018: 4.5–7)"
+
+[[table]]
 name = "wd_cooling"
 path = "wd_cooling.rs"
 task = "wd_cooling"

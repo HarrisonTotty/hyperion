@@ -2271,7 +2271,7 @@ impl SystemStars {
     /// The first pair, depth first, whose pooled Type Ia candidate its explosion mark explodes,
     /// with that candidate (plan 11, P11.T6): an explosion at or before +H, the age the pairs are
     /// run to. The mark is the pair's at the system's attempt ([`IaExplosionMark`], read from the
-    /// pair's key), against the scratch [`IA_YIELD`]. `None` for a system with no pooled
+    /// pair's key), against plan 15's fitted [`IA_YIELD`]. `None` for a system with no pooled
     /// candidate.
     ///
     /// A grid system redraws an attempt for which it is `Some`, as for a carved pair
@@ -3094,31 +3094,8 @@ fn run_pairs(
     hierarchy
         .pairs()
         .filter_map(|(node, orbit)| {
-            let HierarchyNode::Pair { inner, outer, .. } = *hierarchy.node(node) else {
-                unreachable!("pairs are pairs");
-            };
-            let (HierarchyNode::Star(a), HierarchyNode::Star(b)) =
-                (*hierarchy.node(inner), *hierarchy.node(outer))
-            else {
-                return None;
-            };
-            if [a, b]
-                .iter()
-                .any(|&s| hierarchy.star(s).kind() == SlotKind::BrownDwarf)
-            {
-                return None;
-            }
+            let (input, [a, b]) = star_pair_input(hierarchy, stars, node, orbit, rules)?;
             let [first, second] = [a, b].map(|s| &stars[usize::from(s.get())]);
-            let input = BinaryInput::new(
-                first.initial_mass(),
-                second.initial_mass(),
-                *first.composition(),
-                *orbit,
-                [first.draws().clone(), second.draws().clone()],
-                first.age_at_epoch(),
-            )
-            .expect("a pair's stars are of 0.08-150 M_sun with a finite age")
-            .with_rules(rules);
             let until = Years::new(first.age_at(ClockWindow::END).value().max(0.0));
             let tracks = [first.shared_track(), second.shared_track()];
             // A pair that cannot interact by +H is two single stars on their orbit, and with no
@@ -3135,6 +3112,79 @@ fn run_pairs(
                 stars: [a, b],
                 timeline,
             })
+        })
+        .collect()
+}
+
+/// The binary engine's input for `hierarchy`'s pair `node` on `orbit`, of two stars of `stars`
+/// (none with a brown dwarf or a member that is itself a pair), with the two stars, under the
+/// stellar stage's `rules` ([`run_pairs`]).
+#[must_use]
+fn star_pair_input(
+    hierarchy: &SystemHierarchy,
+    stars: &[StarModel],
+    node: NodeIndex,
+    orbit: &KeplerElements,
+    rules: StellarRules,
+) -> Option<(BinaryInput, [StarIndex; 2])> {
+    let HierarchyNode::Pair { inner, outer, .. } = *hierarchy.node(node) else {
+        unreachable!("pairs are pairs");
+    };
+    let (HierarchyNode::Star(a), HierarchyNode::Star(b)) =
+        (*hierarchy.node(inner), *hierarchy.node(outer))
+    else {
+        return None;
+    };
+    if [a, b]
+        .iter()
+        .any(|&s| hierarchy.star(s).kind() == SlotKind::BrownDwarf)
+    {
+        return None;
+    }
+    let [first, second] = [a, b].map(|s| &stars[usize::from(s.get())]);
+    let input = BinaryInput::new(
+        first.initial_mass(),
+        second.initial_mass(),
+        *first.composition(),
+        *orbit,
+        [first.draws().clone(), second.draws().clone()],
+        first.age_at_epoch(),
+    )
+    .expect("a pair's stars are of 0.08-150 M_sun with a finite age")
+    .with_rules(rules);
+    Some((input, [a, b]))
+}
+
+/// The pairs of two stars of grid record `record`'s first attempt under `ctx`, each with its key
+/// (`SystemHierarchy::pair_key`, which its Type Ia explosion mark reads), run through the binary
+/// engine to the pair's age `until` rather than to +H: plan 15's census of the engine's Type Ia
+/// pool over a Hubble time (P15.T9.b, `stellar::binary::testing::ia_pool_census_in`). The stars
+/// are [`SystemStars::generate_at`]'s at the first attempt, and a pair that cannot interact by
+/// `until` is left out, as its timeline would pool no candidate.
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub(crate) fn first_attempt_pairs_to(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    ctx: MultiplicityContext,
+    until: Years,
+) -> Vec<(BodyId, BinaryTimeline)> {
+    let composition = draw_metallicity(galaxy, record);
+    let (primary, _) = primary_model(galaxy, record, composition);
+    let (hierarchy, stars) = models_at(galaxy, record, &primary, ctx, RedrawAttempt::FIRST);
+    let rules = galaxy.rules().stellar;
+    hierarchy
+        .pairs()
+        .filter_map(|(node, orbit)| {
+            let (input, [a, b]) = star_pair_input(&hierarchy, &stars, node, orbit, rules)?;
+            let tracks = [a, b].map(|s| stars[usize::from(s.get())].shared_track());
+            if !can_interact_with_tracks(&input, until, tracks.clone()) {
+                return None;
+            }
+            let key = hierarchy
+                .pair_key(node)
+                .expect("a pair of the hierarchy has a key");
+            Some((key, evolve_with_tracks(&input, until, tracks)))
         })
         .collect()
 }

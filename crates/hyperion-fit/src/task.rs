@@ -158,7 +158,7 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 60] = [
+pub static REGISTRY: [&dyn FitTask; 61] = [
     &tasks::binary_classes::BinaryAwdTask,
     &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
     &tasks::binary_pair_light::C_TASK,
@@ -218,6 +218,7 @@ pub static REGISTRY: [&dyn FitTask; 60] = [
     &tasks::thermo_equilibrium::ThermoEquilibriumTask,
     &tasks::thermo_equilibrium::ThermoEquilibrium27Task,
     &tasks::type_ia_delay::TypeIaDelayTask,
+    &tasks::type_ia_yield::TypeIaYieldTask,
     &tasks::wd_cooling::WdCoolingTask,
 ];
 
@@ -360,6 +361,7 @@ mod tests {
                 "thermo_equilibrium",
                 "thermo_equilibrium_27",
                 "type_ia_delay",
+                "type_ia_yield",
                 "wd_cooling"
             ]
         );

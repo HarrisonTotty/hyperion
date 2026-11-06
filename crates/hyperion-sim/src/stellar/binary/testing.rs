@@ -2,18 +2,22 @@
 //! `pair_light`), a splitmix64 stream and the generator's own star–star pairs; and, with the
 //! `testing` feature for other crates' tests too, the binary classes' prior members
 //! ([`brute_force_class_members`], P11.T8.a) and the engine's own mergers
-//! ([`brute_force_merger_members_in`], P11.T8.c), which plan 15's P15.T10.b fits the samplers to.
+//! ([`brute_force_merger_members_in`], P11.T8.c), which plan 15's P15.T10.b fits the samplers to,
+//! and the engine's Type Ia pool ([`ia_pool_census_in`]), which P15.T9.b fits the explosion mark's
+//! yield to.
 //!
 //! The census bounds' helpers serve this crate's own tests alone, so they are built for tests
 //! only; the splitmix64 stream serves both.
 
 #[cfg(test)]
 pub(crate) mod census;
+mod ia_pool;
 mod members;
 mod mergers;
 #[cfg(test)]
 pub(crate) mod remnant_pair;
 
+pub use ia_pool::{IaPoolCensus, IaPoolMember, ia_pool_census_in};
 pub use mergers::{MergerMember, brute_force_merger_members_in};
 
 pub use members::{
