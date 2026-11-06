@@ -233,9 +233,9 @@ export class ResourceRegistry {
    */
   writeBuffer(handle: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     const { buffer } = this.bufferOf(handle);
-    if (this.#staged.open) {
-      this.#staged.buffer(buffer, offsetBytes, data);
-    } else {
+    if (!(this.#staged.open && this.#staged.buffer(buffer, offsetBytes, data))) {
+      // A write the copies cannot make goes to the queue after what is staged, as before.
+      this.#staged.flush();
       this.#device.queue.writeBuffer(
         buffer,
         offsetBytes,
@@ -263,9 +263,10 @@ export class ResourceRegistry {
     const { texture, spec } = this.textureOf(handle);
     const extent = extentOf(size);
     const rowBytes = extent.width * bytesPerTexel(spec.format);
-    if (this.#staged.open) {
-      this.#staged.texture(texture, origin, mipLevel, extent, rowBytes, data);
-    } else {
+    if (!(
+      this.#staged.open && this.#staged.texture(texture, origin, mipLevel, extent, rowBytes, data)
+    )) {
+      this.#staged.flush();
       this.#device.queue.writeTexture(
         { texture, origin, mipLevel },
         data,

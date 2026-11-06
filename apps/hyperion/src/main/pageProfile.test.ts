@@ -35,7 +35,12 @@ function fakeDebugger(
   return {
     debugger: {
       attach: () => {
+        sent.push("attach");
         attached = true;
+      },
+      detach: () => {
+        sent.push("detach");
+        attached = false;
       },
       isAttached: () => attached,
       sendCommand: (method) => {
@@ -79,21 +84,33 @@ describe("the page's CPU profile over the run (lane perf-page-long-tasks)", () =
     ).toEqual([null, null, null, null]);
   });
 
-  it("starts once at one sample a millisecond, and stops and reads the page's clock first", async () => {
+  it("starts once at one sample a millisecond, stops and reads the page's clock first, and releases the debugger it attached", async () => {
     const { debugger: page, sent } = fakeDebugger(STOPPED);
     const profiler = new PageProfiler(page, () => undefined);
     await profiler.start();
     await profiler.start();
     const profile = await profiler.stop();
     expect(sent).toEqual([
+      "attach",
       "Profiler.enable",
       "Profiler.setSamplingInterval",
       "Profiler.start",
       "Runtime.evaluate",
       "Profiler.stop",
+      "Profiler.disable",
+      "detach",
     ]);
     expect(profile?.sampleAtMs.at(0)).toBe(500);
     expect(await profiler.stop()).toBeNull();
+  });
+
+  it("leaves a debugger attached before it attached, its profiler disabled", async () => {
+    const { debugger: page, sent } = fakeDebugger(STOPPED);
+    page.attach();
+    const profiler = new PageProfiler(page, () => undefined);
+    await profiler.start();
+    await profiler.stop();
+    expect([sent.at(-1), page.isAttached()]).toEqual(["Profiler.disable", true]);
   });
 
   it("has none, and says why, where it does not start or does not read", async () => {
@@ -102,6 +119,7 @@ describe("the page's CPU profile over the run (lane perf-page-long-tasks)", () =
       attach: () => {
         throw new Error("another debugger is attached");
       },
+      detach: () => undefined,
       isAttached: () => false,
       sendCommand: () => Promise.resolve({}),
     };

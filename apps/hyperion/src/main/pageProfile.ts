@@ -28,6 +28,7 @@ const FUNCTION_NAME_CHARS = 120;
 /** The debugger's part the profile uses: Electron's `webContents.debugger`. */
 export interface PageDebugger {
   attach(protocolVersion?: string): void;
+  detach(): void;
   isAttached(): boolean;
   sendCommand(method: string, commandParams?: unknown): Promise<unknown>;
 }
@@ -240,6 +241,8 @@ export class PageProfiler {
   readonly #debugger: PageDebugger;
   readonly #log: (line: string) => void;
   #started: Promise<boolean> | null = null;
+  /** Whether the profiler attached the debugger itself, and so detaches it as it stops. */
+  #attached = false;
 
   constructor(pageDebugger: PageDebugger, log: (line: string) => void) {
     this.#debugger = pageDebugger;
@@ -252,6 +255,7 @@ export class PageProfiler {
       try {
         if (!this.#debugger.isAttached()) {
           this.#debugger.attach("1.3");
+          this.#attached = true;
         }
         await this.#debugger.sendCommand("Profiler.enable");
         await this.#debugger.sendCommand("Profiler.setSamplingInterval", {
@@ -269,13 +273,20 @@ export class PageProfiler {
 
   /**
    * Stops the profile and reads it, or `null` where none was started, or it did not stop or read;
-   * a failure is logged.
+   * a failure is logged. The profiler is disabled, and the debugger detached where the profiler
+   * attached it, however the stop went; a run that ends without its timing file ends the process,
+   * and the profile with it.
    */
   async stop(): Promise<PageProfile | null> {
-    if (this.#started === null || !(await this.#started)) {
+    const started = this.#started;
+    this.#started = null;
+    if (started === null) {
       return null;
     }
-    this.#started = null;
+    if (!(await started)) {
+      await this.#release();
+      return null;
+    }
     try {
       const pageNowMs = pageNowOf(
         await this.#debugger.sendCommand("Runtime.evaluate", {
@@ -292,6 +303,25 @@ export class PageProfiler {
     } catch (error: unknown) {
       this.#log(`views check: the page's CPU profile did not stop: ${String(error)}`);
       return null;
+    } finally {
+      await this.#release();
+    }
+  }
+
+  /** Disables the profiler, then detaches the debugger where the profiler attached it. */
+  async #release(): Promise<void> {
+    if (!this.#debugger.isAttached()) {
+      this.#attached = false;
+      return;
+    }
+    try {
+      await this.#debugger.sendCommand("Profiler.disable");
+    } catch (error: unknown) {
+      this.#log(`views check: the page's CPU profiler was not disabled: ${String(error)}`);
+    }
+    if (this.#attached) {
+      this.#attached = false;
+      this.#debugger.detach();
     }
   }
 }

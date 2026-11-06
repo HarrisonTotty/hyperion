@@ -4,7 +4,12 @@ import type { InspectionAttachmentSlot, InspectionGpuAttachment } from "../../..
 import { FakeAdapter, FakeGpu, FakeTexture, SWIFTSHADER_INFO } from "../../../test/fakeGpu";
 import type { CanvasContexts } from "../../../view/spike/capture";
 import { wrapGpu } from "../../../view/spike/pipelineShim";
-import { AFTER_LAST_PASS, bufferWriteBytes, GpuCallCounter } from "./gpuCallCounter";
+import {
+  AFTER_LAST_PASS,
+  bufferWriteBytes,
+  GpuCallCounter,
+  stagedUploadBytes,
+} from "./gpuCallCounter";
 
 /**
  * A counted device on a fake adapter, through the seam the views probe's engine source uses, its
@@ -264,5 +269,14 @@ describe("the frame profile's count of WebGPU calls (plan R14)", () => {
       bufferWriteBytes(new ArrayBuffer(10), 2, undefined),
       bufferWriteBytes(new DataView(new ArrayBuffer(12)), undefined, undefined),
     ]).toEqual([64, 48, 8, 8, 12]);
+  });
+
+  it("counts a staging buffer mapped for writing at its creation as its size uploaded (lane perf-page-long-tasks)", () => {
+    expect([
+      stagedUploadBytes({ size: 4096, usage: 0x2 | 0x4, mappedAtCreation: true }),
+      stagedUploadBytes({ size: 4096, usage: 0x4 | 0x8, mappedAtCreation: true }),
+      stagedUploadBytes({ size: 4096, usage: 0x2 | 0x4 }),
+      stagedUploadBytes(null),
+    ]).toEqual([4096, 0, 0, 0]);
   });
 });

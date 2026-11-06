@@ -230,6 +230,29 @@ export function bufferWriteBytes(data: unknown, dataOffset: unknown, size: unkno
   return length - (typeof dataOffset === "number" ? dataOffset : 0) * element;
 }
 
+/** `GPUBufferUsage.MAP_WRITE`. */
+const MAP_WRITE = 0x2;
+
+/**
+ * The bytes a buffer made mapped for writing at its creation uploads, its size: the engine's staged
+ * writes' staging buffer (lane perf-page-long-tasks), whose bytes no queue write carries; 0 for
+ * any other buffer.
+ */
+export function stagedUploadBytes(descriptor: unknown): number {
+  if (typeof descriptor !== "object" || descriptor === null) {
+    return 0;
+  }
+  const mapped: unknown = Reflect.get(descriptor, "mappedAtCreation");
+  const usage: unknown = Reflect.get(descriptor, "usage");
+  const size: unknown = Reflect.get(descriptor, "size");
+  return mapped === true &&
+    typeof usage === "number" &&
+    (usage & MAP_WRITE) !== 0 &&
+    typeof size === "number"
+    ? size
+    : 0;
+}
+
 /** The bytes a `writeTexture` hands over: its data's, whatever its layout reads of them. */
 function textureWriteBytes(data: unknown): number {
   return ArrayBuffer.isView(data) || data instanceof ArrayBuffer ? data.byteLength : 0;
@@ -549,13 +572,17 @@ export class GpuCallCounter {
       return;
     }
     const bytes =
-      kind !== "queue"
-        ? 0
-        : method === "writeBuffer"
-          ? bufferWriteBytes(args[2], args[3], args[4])
-          : method === "writeTexture"
-            ? textureWriteBytes(args[1])
-            : 0;
+      kind === "device"
+        ? method === "createBuffer"
+          ? stagedUploadBytes(args[0])
+          : 0
+        : kind !== "queue"
+          ? 0
+          : method === "writeBuffer"
+            ? bufferWriteBytes(args[2], args[3], args[4])
+            : method === "writeTexture"
+              ? textureWriteBytes(args[1])
+              : 0;
     this.#count(label, call, 1, bytes);
   }
 

@@ -21,11 +21,16 @@
  * command that reads them. A texture's rows are laid out 256-byte aligned for
  * `copyBufferToTexture`; the bytes that reach the texture are the rows given.
  *
+ * A write the copies cannot make (unaligned, out of bounds, to a resource without `COPY_DST`, of a
+ * depth or stencil format) is not staged: the registry submits what is staged and hands it to the
+ * queue, which writes it, or refuses it alone, as before, rather than in a copy that would void the
+ * submission.
+ *
  * The staging buffer is transient, made and destroyed by each submission, and is not GPU memory a
  * view keeps, so it raises no allocation event, as a readback's staging buffer raises none.
  */
 
-import { BUFFER_USAGE } from "../gpuFlags";
+import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import type { Extent } from "../memory";
 
 /** The alignment `copyBufferToTexture` asks of a staged texture's rows, bytes. */
@@ -60,7 +65,7 @@ type StagedCopy =
       readonly kind: "texture";
       readonly fromBytes: number;
       readonly texture: GPUTexture;
-      readonly origin: GPUOrigin3D;
+      readonly origin: GPUOrigin3DDict;
       readonly mipLevel: number;
       readonly extent: Extent;
       readonly bytesPerRow: number;
@@ -69,6 +74,36 @@ type StagedCopy =
 /** `bytes` rounded up to a multiple of `alignment`. */
 function aligned(bytes: number, alignment: number): number {
   return Math.ceil(bytes / alignment) * alignment;
+}
+
+/** An origin as `{ x, y, z }`, copied as the write is made; `null` for a coordinate not whole. */
+function originOf(origin: GPUOrigin3D): Required<GPUOrigin3DDict> | null {
+  const [x = 0, y = 0, z = 0] =
+    Symbol.iterator in origin ? [...origin] : [origin.x ?? 0, origin.y ?? 0, origin.z ?? 0];
+  return [x, y, z].every((each) => Number.isInteger(each) && each >= 0) ? { x, y, z } : null;
+}
+
+/** Whether a region lies within a texture's level (a 3D texture's depth halves with its level). */
+function fitsLevel(
+  texture: GPUTexture,
+  mipLevel: number,
+  origin: Required<GPUOrigin3DDict>,
+  extent: Extent,
+): boolean {
+  if (!Number.isInteger(mipLevel) || mipLevel < 0 || mipLevel >= texture.mipLevelCount) {
+    return false;
+  }
+  const width = Math.max(1, texture.width >> mipLevel);
+  const height = Math.max(1, texture.height >> mipLevel);
+  const layers =
+    texture.dimension === "3d"
+      ? Math.max(1, texture.depthOrArrayLayers >> mipLevel)
+      : texture.depthOrArrayLayers;
+  return (
+    origin.x + extent.width <= width &&
+    origin.y + extent.height <= height &&
+    origin.z + extent.depthOrArrayLayers <= layers
+  );
 }
 
 /** A view's bytes, as bytes. */
@@ -111,32 +146,67 @@ export class StagedWrites {
       this.#label = label;
     }
     this.#depth += 1;
+    let threw = false;
     try {
       return write();
+    } catch (error: unknown) {
+      threw = true;
+      throw error;
     } finally {
       this.#depth -= 1;
       if (this.#depth === 0) {
-        this.flush();
+        if (threw) {
+          // The scope's own error is the one thrown; a submission that fails after it is said.
+          try {
+            this.flush();
+          } catch (flushError: unknown) {
+            console.error(
+              `the staged writes of ${this.#label} could not be submitted:`,
+              flushError,
+            );
+          }
+        } else {
+          this.flush();
+        }
       }
     }
   }
 
-  /** Stages a buffer write of `data` at `offsetBytes`. */
-  buffer(buffer: GPUBuffer, offsetBytes: number, data: ArrayBufferView): void {
+  /**
+   * Stages a buffer write of `data` at `offsetBytes`, where it is one the copy can make.
+   *
+   * @returns `false`, staging nothing, for a write whose offset or size is not a multiple of 4,
+   *   that passes the buffer's end, or to a buffer without `COPY_DST` or mapped: the caller hands
+   *   it to the queue, whose write refuses it, as before, alone, rather than in a copy that would
+   *   void the submission's every write.
+   */
+  buffer(buffer: GPUBuffer, offsetBytes: number, data: ArrayBufferView): boolean {
     const bytes = data.byteLength;
-    if (bytes === 0) {
-      return;
+    if (
+      bytes === 0 ||
+      !Number.isInteger(offsetBytes) ||
+      offsetBytes < 0 ||
+      offsetBytes % COPY_ALIGNMENT !== 0 ||
+      bytes % COPY_ALIGNMENT !== 0 ||
+      offsetBytes + bytes > buffer.size ||
+      (buffer.usage & BUFFER_USAGE.COPY_DST) === 0 ||
+      buffer.mapState !== "unmapped"
+    ) {
+      return false;
     }
-    const fromBytes = this.#reserve(aligned(bytes, COPY_ALIGNMENT), COPY_ALIGNMENT);
+    const fromBytes = this.#reserve(bytes, COPY_ALIGNMENT);
     this.#scratch.set(bytesOf(data), fromBytes);
     this.#copies.push({ kind: "buffer", fromBytes, buffer, offsetBytes, bytes });
+    return true;
   }
 
   /**
    * Stages a texture write of `data`, its rows of `rowBytes` tightly packed, `extent.height` rows
-   * an image and `extent.depthOrArrayLayers` images.
+   * an image and `extent.depthOrArrayLayers` images, where it is one the copy can make.
    *
-   * @throws RangeError for data shorter than its rows.
+   * @returns `false`, staging nothing, for a write of no texels, of a depth or stencil format, of
+   *   too few bytes, outside the level or to a texture without `COPY_DST`, single-sampled, or with
+   *   the level: the caller hands it to the queue, as {@link StagedWrites.buffer}'s.
    */
   texture(
     texture: GPUTexture,
@@ -145,15 +215,22 @@ export class StagedWrites {
     extent: Extent,
     rowBytes: number,
     data: ArrayBufferView,
-  ): void {
+  ): boolean {
     const rows = extent.height * extent.depthOrArrayLayers;
-    if (rows === 0 || rowBytes === 0) {
-      return;
-    }
-    if (data.byteLength < rows * rowBytes) {
-      throw new RangeError(
-        `${texture.label}: ${String(data.byteLength)} B written, where its ${String(rows)} rows hold ${String(rows * rowBytes)} B`,
-      );
+    const at = originOf(origin);
+    if (
+      rows === 0 ||
+      rowBytes === 0 ||
+      extent.width === 0 ||
+      data.byteLength < rows * rowBytes ||
+      at === null ||
+      !fitsLevel(texture, mipLevel, at, extent) ||
+      texture.format.startsWith("depth") ||
+      texture.format.startsWith("stencil") ||
+      texture.sampleCount !== 1 ||
+      (texture.usage & TEXTURE_USAGE.COPY_DST) === 0
+    ) {
+      return false;
     }
     const bytesPerRow = aligned(rowBytes, ROW_ALIGNMENT);
     const fromBytes = this.#reserve(bytesPerRow * rows, ROW_ALIGNMENT);
@@ -172,11 +249,12 @@ export class StagedWrites {
       kind: "texture",
       fromBytes,
       texture,
-      origin,
+      origin: at,
       mipLevel,
       extent,
       bytesPerRow,
     });
+    return true;
   }
 
   /**

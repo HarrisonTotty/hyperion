@@ -2284,7 +2284,11 @@ export interface InspectionGpuCall {
   /** The call, `<object>.<method>`: `render pass.setBindGroup`, `queue.writeBuffer`. */
   readonly call: string;
   readonly count: number;
-  /** The bytes its calls wrote, for `queue.writeBuffer` and `queue.writeTexture`; 0 otherwise. */
+  /**
+   * The bytes its calls wrote, for `queue.writeBuffer` and `queue.writeTexture`, and for
+   * `device.createBuffer` the staged writes' staging buffers' (a buffer mapped for writing at its
+   * creation); 0 otherwise.
+   */
   readonly bytes: number;
 }
 

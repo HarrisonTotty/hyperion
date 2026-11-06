@@ -513,9 +513,24 @@ export class GpuCapture {
       const buffer = createBuffer(
         mappable ? descriptor : { ...descriptor, usage: descriptor.usage | BUFFER_COPY_SRC },
       );
-      this.#log(DEVICE_ID, "createBuffer", [descriptor], buffer);
+      // A buffer mapped at its creation to upload bytes (the engine's staged writes, lane
+      // perf-page-long-tasks) is logged as a copy source, unmapped, and its mapped bytes as a queue
+      // write at its unmap, which a replayer makes as any other: the log sees no mapping.
+      const uploading =
+        descriptor.mappedAtCreation === true && (descriptor.usage & BUFFER_MAP_READ) === 0;
+      const logged: GPUBufferDescriptor = uploading
+        ? {
+            ...(descriptor.label === undefined ? {} : { label: descriptor.label }),
+            size: descriptor.size,
+            usage: (descriptor.usage & ~BUFFER_MAP_WRITE) | BUFFER_COPY_SRC,
+          }
+        : descriptor;
+      this.#log(DEVICE_ID, "createBuffer", [logged], buffer);
       this.#live.set(this.#id(buffer), { kind: "buffer", object: buffer, descriptor });
       this.#instrument(buffer, "buffer");
+      if (uploading) {
+        this.#logMappedUpload(buffer);
+      }
       return buffer;
     };
     const createTexture = device.createTexture.bind(device);
@@ -613,6 +628,32 @@ export class GpuCapture {
   }
 
   /** Replaces `object[op]` on the instance with `wrap` of its bound original. */
+  /** Logs the bytes written into `buffer`'s mapped ranges as queue writes, as it is unmapped. */
+  #logMappedUpload(buffer: GPUBuffer): void {
+    const ranges: Array<{ readonly offset: number; readonly range: ArrayBuffer }> = [];
+    this.#replace(buffer, "getMappedRange", (original) => (...args: unknown[]) => {
+      const range = original(...args);
+      if (range instanceof ArrayBuffer) {
+        const [offset] = args;
+        ranges.push({ offset: typeof offset === "number" ? offset : 0, range });
+      }
+      return range;
+    });
+    this.#replace(buffer, "unmap", (original) => (...args: unknown[]) => {
+      // Read before the unmap, which detaches each range.
+      for (const { offset, range } of ranges.splice(0)) {
+        this.#log(QUEUE_ID, "writeBuffer", [
+          buffer,
+          offset,
+          new Uint8Array(range),
+          0,
+          range.byteLength,
+        ]);
+      }
+      return original(...args);
+    });
+  }
+
   #replace(
     object: object,
     op: string,

@@ -520,6 +520,31 @@ describe("a device loss", () => {
     ).toThrow(EngineUnavailable);
   });
 
+  it("runs a staged scope on the current engine, and returns what it returns (lane perf-page-long-tasks)", async () => {
+    const { engine, module } = await load([adapter()]);
+    const staged = vi.spyOn(nth(module, 0), "stagedWrites");
+    expect(engine.stagedWrites("terrain upload", () => 7)).toBe(7);
+    expect(staged.mock.calls.map(([label]) => label)).toEqual(["terrain upload"]);
+  });
+
+  it("runs a staged scope while there is no device, its writes dropped (lane perf-page-long-tasks)", async () => {
+    const gpu = new HeldGpu([adapter()]);
+    const { engine, module } = await load([], {}, gpu);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(gpu.waiting).toBe(1);
+    });
+    const staged = vi.spyOn(nth(module, 0), "stagedWrites");
+    const buffer = { kind: "buffer", name: "b", bytes: 4 } as const;
+    expect(
+      engine.stagedWrites("terrain upload", () => {
+        engine.writeBuffer(buffer, 0, new Float32Array(1));
+        return 3;
+      }),
+    ).toBe(3);
+    expect(staged).not.toHaveBeenCalled();
+  });
+
   it("makes depth layers on the current engine, and on the new one after a restore (R10.T9.b)", async () => {
     const { engine, module } = await load([adapter(), adapter()]);
     const first = engine.createDepthLayers(LAYERS);

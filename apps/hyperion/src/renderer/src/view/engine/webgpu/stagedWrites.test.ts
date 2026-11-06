@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   FakeAdapter,
@@ -405,26 +405,75 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
     expect(new Set(staged.memory.operations)).toEqual(new Set(["submit upload"]));
   });
 
-  it("refuses texture data shorter than its rows", async () => {
+  it("declines a write the copies cannot make: unaligned, out of bounds, short, outside the level or of a depth format", async () => {
     const gpu = await device();
     const staged = new StagedWrites(gpu);
-    const texture = gpu.createTexture({
-      label: "mask",
-      size: [4, 4, 1],
-      format: "r8unorm",
-      usage: TEXTURE_USAGE.COPY_DST,
+    const usage = BUFFER_USAGE.COPY_DST;
+    const buffer = gpu.createBuffer({ label: "b", size: 16, usage });
+    const readOnly = gpu.createBuffer({ label: "r", size: 16, usage: BUFFER_USAGE.STORAGE });
+    const texture = (format: GPUTextureFormat): GPUTexture =>
+      gpu.createTexture({
+        label: format,
+        size: [4, 4, 1],
+        format,
+        mipLevelCount: 2,
+        usage: TEXTURE_USAGE.COPY_DST,
+      });
+    const mask = texture("r8unorm");
+    const whole = { width: 4, height: 4, depthOrArrayLayers: 1 };
+    const results = staged.run("upload", () => [
+      staged.buffer(buffer, 0, new Uint8Array(3)),
+      staged.buffer(buffer, 2, new Uint8Array(4)),
+      staged.buffer(buffer, 8, new Uint8Array(12)),
+      staged.buffer(readOnly, 0, new Uint8Array(4)),
+      staged.texture(mask, [0, 0, 0], 0, whole, 4, new Uint8Array(15)),
+      staged.texture(mask, [0, 0, 0], 1, whole, 4, new Uint8Array(16)),
+      staged.texture(mask, [1, 0, 0], 0, whole, 4, new Uint8Array(16)),
+      staged.texture(texture("depth16unorm"), [0, 0, 0], 0, whole, 8, new Uint8Array(32)),
+      staged.buffer(buffer, 12, new Uint8Array(4)),
+      staged.texture(mask, [0, 0, 0], 0, whole, 4, new Uint8Array(16)),
+    ]);
+    expect(results).toEqual([false, false, false, false, false, false, false, false, true, true]);
+  });
+
+  it("hands a declined write to the queue after what is staged, and stages what follows", async () => {
+    const staged = await registry();
+    staged.resources.staged("upload", () => {
+      staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
+      staged.resources.writeBuffer(staged.a, 16, counting(3, 2));
+      staged.resources.writeBuffer(staged.a, 20, counting(8, 3));
     });
+    expect(staged.memory.operations).toEqual(["submit upload", "write", "submit upload"]);
+    expect(staged.memory.buffer(staged.resources.bufferOf(staged.a).buffer).slice(0, 28)).toEqual(
+      Uint8Array.from([...counting(16, 1), ...counting(3, 2), 0, ...counting(8, 3)]),
+    );
+  });
+
+  it("copies a texture write's origin as it is made", async () => {
+    const direct = await registry();
+    const origin = { x: 1, y: 2, z: 0 };
+    direct.resources.writeTexture(direct.normals, origin, [3, 2, 1], counting(48, 5));
+    const staged = await registry();
+    const moving = { x: 1, y: 2, z: 0 };
+    staged.resources.staged("upload", () => {
+      staged.resources.writeTexture(staged.normals, moving, [3, 2, 1], counting(48, 5));
+      moving.x = 4;
+    });
+    expect(contents(staged)).toEqual(contents(direct));
+  });
+
+  it("throws the scope's own error where its submission then fails too", async () => {
+    const staged = await registry();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    staged.gpu.queue.submit = () => {
+      throw new Error("the device was lost");
+    };
     expect(() =>
-      staged.run("upload", () => {
-        staged.texture(
-          texture,
-          [0, 0, 0],
-          0,
-          { width: 4, height: 4, depthOrArrayLayers: 1 },
-          4,
-          new Uint8Array(15),
-        );
+      staged.resources.staged("upload", () => {
+        staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
+        throw new Error("a bake that did not fit");
       }),
-    ).toThrow(RangeError);
+    ).toThrow("a bake that did not fit");
+    expect(error).toHaveBeenCalledTimes(1);
   });
 });
