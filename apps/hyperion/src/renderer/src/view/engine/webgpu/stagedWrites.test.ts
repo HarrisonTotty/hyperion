@@ -1,0 +1,430 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  FakeAdapter,
+  FakeBuffer,
+  FakeCommandBuffer,
+  type FakeDevice,
+  FakeTexture,
+  INTEL_UHD_620_INFO,
+} from "../../../test/fakeGpu";
+import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
+import { bytesPerTexel, extentOf } from "../memory";
+import type { BufferHandle, TextureHandle } from "../types";
+import { ResourceRegistry } from "./resources";
+import { StagedWrites } from "./stagedWrites";
+
+async function device(): Promise<FakeDevice> {
+  const adapter = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] });
+  await adapter.requestDevice();
+  const made = adapter.devices.at(0);
+  if (made === undefined) {
+    throw new Error("the fake adapter made no device");
+  }
+  return made;
+}
+
+function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
+}
+
+function numberOr(value: unknown, otherwise: number): number {
+  return typeof value === "number" ? value : otherwise;
+}
+
+/** An origin, as the registry or its copies give it, as three numbers. */
+function originOf(origin: unknown): [number, number, number] {
+  if (Array.isArray(origin)) {
+    return [numberOr(origin[0], 0), numberOr(origin[1], 0), numberOr(origin[2], 0)];
+  }
+  if (isObject(origin)) {
+    return [
+      numberOr(Reflect.get(origin, "x"), 0),
+      numberOr(Reflect.get(origin, "y"), 0),
+      numberOr(Reflect.get(origin, "z"), 0),
+    ];
+  }
+  return [0, 0, 0];
+}
+
+/**
+ * A fake device's memory as its queue's writes and the copies of its submissions leave it, byte
+ * for byte: buffers whole, each texture level's texels rows tightly packed, layer after layer.
+ */
+class SimulatedMemory {
+  readonly #buffers = new Map<GPUBuffer, Uint8Array>();
+  readonly #levels = new Map<GPUTexture, Uint8Array[]>();
+  /** Every queue operation, in order: `write`, or `submit <label>`. */
+  readonly operations: string[] = [];
+
+  constructor(gpu: FakeDevice) {
+    const queue = gpu.queue;
+    const writeBuffer = queue.writeBuffer.bind(queue);
+    queue.writeBuffer = (buffer, offset, data, dataOffset, size) => {
+      this.operations.push("write");
+      if (!(data instanceof ArrayBuffer)) {
+        throw new Error("the registry writes an ArrayBuffer with its offset and size in bytes");
+      }
+      this.#bufferBytes(buffer).set(
+        new Uint8Array(data, dataOffset ?? 0, size ?? data.byteLength - (dataOffset ?? 0)),
+        offset,
+      );
+      return writeBuffer(buffer, offset, data, dataOffset, size);
+    };
+    const writeTexture = queue.writeTexture.bind(queue);
+    // As WebGPU's queue takes it, with its size, which the fake's own leaves out.
+    const asQueue: GPUQueue = queue;
+    asQueue.writeTexture = (destination, data, layout, size) => {
+      this.operations.push("write");
+      if (!ArrayBuffer.isView(data)) {
+        throw new Error("the registry writes a view");
+      }
+      this.#toTexture(
+        new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+        layout,
+        destination,
+        size,
+      );
+      return writeTexture(destination, data, layout);
+    };
+    const submit = queue.submit.bind(queue);
+    queue.submit = (buffers) => {
+      for (const buffer of buffers) {
+        if (!(buffer instanceof FakeCommandBuffer)) {
+          throw new Error("the fake device submits its own command buffers");
+        }
+        this.operations.push(`submit ${buffer.label}`);
+        for (const { op, args } of buffer.commands) {
+          this.#run(op, args);
+        }
+      }
+      return submit(buffers);
+    };
+  }
+
+  /** A buffer's bytes as they stand. */
+  buffer(buffer: GPUBuffer): Uint8Array {
+    return this.#bufferBytes(buffer);
+  }
+
+  /** A texture level's texels as they stand. */
+  level(texture: GPUTexture, mipLevel = 0): Uint8Array {
+    return this.#levelBytes(texture, mipLevel);
+  }
+
+  #bufferBytes(buffer: GPUBuffer): Uint8Array {
+    let bytes = this.#buffers.get(buffer);
+    if (bytes === undefined) {
+      bytes = new Uint8Array(buffer.size);
+      this.#buffers.set(buffer, bytes);
+    }
+    return bytes;
+  }
+
+  #levelBytes(texture: GPUTexture, mipLevel: number): Uint8Array {
+    let levels = this.#levels.get(texture);
+    if (levels === undefined) {
+      levels = [];
+      this.#levels.set(texture, levels);
+    }
+    let bytes = levels[mipLevel];
+    if (bytes === undefined) {
+      const width = Math.max(1, texture.width >> mipLevel);
+      const height = Math.max(1, texture.height >> mipLevel);
+      bytes = new Uint8Array(
+        width * height * texture.depthOrArrayLayers * bytesPerTexel(texture.format),
+      );
+      levels[mipLevel] = bytes;
+    }
+    return bytes;
+  }
+
+  #toTexture(
+    source: Uint8Array,
+    layout: GPUTexelCopyBufferLayout,
+    destination: GPUTexelCopyTextureInfo,
+    size: GPUExtent3D | Iterable<number>,
+  ): void {
+    const { texture } = destination;
+    const mipLevel = destination.mipLevel ?? 0;
+    const level = this.#levelBytes(texture, mipLevel);
+    const texel = bytesPerTexel(texture.format);
+    const width = Math.max(1, texture.width >> mipLevel);
+    const height = Math.max(1, texture.height >> mipLevel);
+    const extent = extentOf(Symbol.iterator in size ? [...size] : size);
+    const [x, y, z] = originOf(destination.origin);
+    const offset = layout.offset ?? 0;
+    const rowBytes = extent.width * texel;
+    const bytesPerRow = layout.bytesPerRow ?? rowBytes;
+    const rowsPerImage = layout.rowsPerImage ?? extent.height;
+    for (let layer = 0; layer < extent.depthOrArrayLayers; layer += 1) {
+      for (let row = 0; row < extent.height; row += 1) {
+        const from = offset + (layer * rowsPerImage + row) * bytesPerRow;
+        const to = (((z + layer) * height + y + row) * width + x) * texel;
+        level.set(source.subarray(from, from + rowBytes), to);
+      }
+    }
+  }
+
+  #run(op: string, args: ReadonlyArray<unknown>): void {
+    if (op === "copyBufferToBuffer") {
+      const [source, sourceOffset, destination, destinationOffset, size] = args;
+      if (
+        !(source instanceof FakeBuffer) ||
+        !(destination instanceof FakeBuffer) ||
+        typeof sourceOffset !== "number" ||
+        typeof destinationOffset !== "number" ||
+        typeof size !== "number"
+      ) {
+        throw new Error("a buffer copy of an unexpected shape");
+      }
+      this.#bufferBytes(destination).set(
+        this.#sourceBytes(source).subarray(sourceOffset, sourceOffset + size),
+        destinationOffset,
+      );
+    } else if (op === "copyBufferToTexture") {
+      const [source, destination, size] = args;
+      const buffer: unknown = isObject(source) ? Reflect.get(source, "buffer") : undefined;
+      const texture: unknown = isObject(destination)
+        ? Reflect.get(destination, "texture")
+        : undefined;
+      if (
+        !(buffer instanceof FakeBuffer) ||
+        !(texture instanceof FakeTexture) ||
+        !isObject(source) ||
+        !isObject(destination) ||
+        !isObject(size)
+      ) {
+        throw new Error("a texture copy of an unexpected shape");
+      }
+      this.#toTexture(
+        this.#sourceBytes(buffer),
+        {
+          offset: numberOr(Reflect.get(source, "offset"), 0),
+          bytesPerRow: numberOr(Reflect.get(source, "bytesPerRow"), 0),
+          rowsPerImage: numberOr(Reflect.get(source, "rowsPerImage"), 0),
+        },
+        {
+          texture,
+          origin: originOf(Reflect.get(destination, "origin") ?? undefined),
+          mipLevel: numberOr(Reflect.get(destination, "mipLevel"), 0),
+        },
+        {
+          width: numberOr(Reflect.get(size, "width"), 1),
+          height: numberOr(Reflect.get(size, "height"), 1),
+          depthOrArrayLayers: numberOr(Reflect.get(size, "depthOrArrayLayers"), 1),
+        },
+      );
+    } else {
+      throw new Error(`the simulation does not run ${op}`);
+    }
+  }
+
+  /** A copy's source: a buffer mapped at its creation holds what was written into its range. */
+  #sourceBytes(buffer: FakeBuffer): Uint8Array {
+    return (this.#buffers.get(buffer) ?? buffer.mappedBytes).slice();
+  }
+}
+
+/** The same buffers and textures on a registry of their own device, with its memory simulated. */
+async function registry(partBytes?: number): Promise<{
+  readonly gpu: FakeDevice;
+  readonly memory: SimulatedMemory;
+  readonly resources: ResourceRegistry;
+  readonly a: BufferHandle;
+  readonly b: BufferHandle;
+  readonly mask: TextureHandle;
+  readonly normals: TextureHandle;
+}> {
+  const gpu = await device();
+  const memory = new SimulatedMemory(gpu);
+  const resources = new ResourceRegistry(gpu, () => undefined, partBytes);
+  const usage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST;
+  return {
+    gpu,
+    memory,
+    resources,
+    a: resources.createBuffer({ name: "a", bytes: 4096, usage, category: "other" }),
+    b: resources.createBuffer({ name: "b", bytes: 256, usage, category: "other" }),
+    // A cube's mask of 20-byte rows, and a two-level tile of 8-byte texels, each row shorter than
+    // a copy's 256-byte alignment.
+    mask: resources.createTexture({
+      name: "mask",
+      size: [20, 20, 6],
+      dimension: "2d",
+      format: "r8unorm",
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "other",
+    }),
+    normals: resources.createTexture({
+      name: "normals",
+      size: [8, 8, 1],
+      dimension: "2d",
+      format: "rgba16float",
+      mips: 2,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "other",
+    }),
+  };
+}
+
+/** Bytes counting up from `start`. */
+function counting(bytes: number, start: number): Uint8Array {
+  return Uint8Array.from({ length: bytes }, (_, i) => (start + 7 * i) % 251);
+}
+
+/**
+ * A run of writes as an upload makes them: overlapping writes, the later one standing; a scratch
+ * array written, refilled and written again; and texture regions with narrow rows.
+ */
+function writeAll(made: Awaited<ReturnType<typeof registry>>): void {
+  const { resources, a, b, mask, normals } = made;
+  resources.writeBuffer(a, 0, counting(1000, 1));
+  resources.writeBuffer(a, 512, counting(256, 99));
+  const scratch = new Float32Array([1, 2, 3, 4]);
+  resources.writeBuffer(b, 16, scratch);
+  scratch.set([5, 6, 7, 8]);
+  resources.writeBuffer(b, 64, scratch);
+  resources.writeTexture(mask, [0, 0, 0], [20, 20, 6], counting(2400, 3));
+  resources.writeTexture(normals, [1, 2, 0], [3, 2, 1], counting(48, 5));
+  resources.writeTexture(normals, [0, 0, 0], [4, 4, 1], counting(128, 11), 1);
+}
+
+/** Every buffer's and texture level's bytes of a registry's device. */
+function contents(made: Awaited<ReturnType<typeof registry>>): ReadonlyArray<Uint8Array> {
+  const { resources, memory, a, b, mask, normals } = made;
+  return [
+    memory.buffer(resources.bufferOf(a).buffer),
+    memory.buffer(resources.bufferOf(b).buffer),
+    memory.level(resources.textureOf(mask).texture),
+    memory.level(resources.textureOf(normals).texture),
+    memory.level(resources.textureOf(normals).texture, 1),
+  ];
+}
+
+describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
+  it("leaves every buffer and texture as the queue's writes do, byte for byte", async () => {
+    const direct = await registry();
+    writeAll(direct);
+    const staged = await registry();
+    staged.resources.staged("upload", () => {
+      writeAll(staged);
+    });
+    expect(contents(staged)).toEqual(contents(direct));
+    expect(contents(direct)[0]?.some((byte) => byte !== 0)).toBe(true);
+  });
+
+  it("makes no queue write, and submits one command buffer as the scope ends", async () => {
+    const staged = await registry();
+    staged.resources.staged("upload", () => {
+      writeAll(staged);
+      expect(staged.memory.operations).toEqual([]);
+    });
+    expect(staged.memory.operations).toEqual(["submit upload"]);
+    const staging = staged.gpu.buffers.at(-1);
+    expect([staging?.usage, staging?.destroyed]).toEqual([
+      BUFFER_USAGE.MAP_WRITE | BUFFER_USAGE.COPY_SRC,
+      true,
+    ]);
+  });
+
+  it("lays a texture's rows out 256 bytes apart in the staging buffer", async () => {
+    const staged = await registry();
+    staged.resources.staged("mask", () => {
+      staged.resources.writeTexture(staged.mask, [0, 0, 0], [20, 20, 6], counting(2400, 3));
+    });
+    const [command] = staged.gpu.queue.submitted.flatMap((buffer) =>
+      buffer instanceof FakeCommandBuffer ? buffer.commands : [],
+    );
+    expect(command?.op).toBe("copyBufferToTexture");
+    expect(command?.args[0]).toMatchObject({ offset: 0, bytesPerRow: 256, rowsPerImage: 20 });
+  });
+
+  it("joins a scope inside another, and submits nothing for a scope that writes nothing", async () => {
+    const staged = await registry();
+    staged.resources.staged("outer", () => {
+      staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
+      staged.resources.staged("inner", () => {
+        staged.resources.writeBuffer(staged.b, 0, counting(16, 2));
+      });
+      expect(staged.memory.operations).toEqual([]);
+    });
+    staged.resources.staged("empty", () => undefined);
+    expect(staged.memory.operations).toEqual(["submit outer"]);
+  });
+
+  it("submits the writes made before a throw, and throws on", async () => {
+    const staged = await registry();
+    expect(() =>
+      staged.resources.staged("upload", () => {
+        staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
+        throw new Error("a bake that did not fit");
+      }),
+    ).toThrow("a bake that did not fit");
+    expect(staged.memory.operations).toEqual(["submit upload"]);
+    expect(staged.memory.buffer(staged.resources.bufferOf(staged.a).buffer).slice(0, 16)).toEqual(
+      counting(16, 1),
+    );
+  });
+
+  it("submits what is staged before a destruction inside the scope", async () => {
+    const staged = await registry();
+    const buffer = staged.resources.bufferOf(staged.b).buffer;
+    let destroyedAtSubmit: boolean | null = null;
+    const submit = staged.gpu.queue.submit.bind(staged.gpu.queue);
+    staged.gpu.queue.submit = (buffers) => {
+      destroyedAtSubmit = buffer instanceof FakeBuffer ? buffer.destroyed : null;
+      return submit(buffers);
+    };
+    staged.resources.staged("upload", () => {
+      staged.resources.writeBuffer(staged.b, 0, counting(16, 1));
+      staged.resources.destroyBuffer(staged.b);
+    });
+    expect([destroyedAtSubmit, staged.gpu.queue.submitted.length]).toEqual([false, 1]);
+  });
+
+  it("drops what a disposal inside the scope leaves unsubmitted", async () => {
+    const staged = await registry();
+    staged.resources.staged("upload", () => {
+      staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
+      staged.resources.dispose();
+    });
+    expect(staged.memory.operations).toEqual([]);
+  });
+
+  it("submits a scope past a part's bytes in parts, in order, with the same bytes", async () => {
+    const direct = await registry();
+    writeAll(direct);
+    const staged = await registry(1024);
+    staged.resources.staged("upload", () => {
+      writeAll(staged);
+    });
+    expect(contents(staged)).toEqual(contents(direct));
+    expect(staged.memory.operations.length).toBeGreaterThan(2);
+    expect(new Set(staged.memory.operations)).toEqual(new Set(["submit upload"]));
+  });
+
+  it("refuses texture data shorter than its rows", async () => {
+    const gpu = await device();
+    const staged = new StagedWrites(gpu);
+    const texture = gpu.createTexture({
+      label: "mask",
+      size: [4, 4, 1],
+      format: "r8unorm",
+      usage: TEXTURE_USAGE.COPY_DST,
+    });
+    expect(() =>
+      staged.run("upload", () => {
+        staged.texture(
+          texture,
+          [0, 0, 0],
+          0,
+          { width: 4, height: 4, depthOrArrayLayers: 1 },
+          4,
+          new Uint8Array(15),
+        );
+      }),
+    ).toThrow(RangeError);
+  });
+});

@@ -24,6 +24,7 @@ import {
 } from "../memory";
 import type { BufferHandle, TexelRect, TextureHandle } from "../types";
 import { paddedBytesPerRow } from "./readback";
+import { StagedWrites } from "./stagedWrites";
 
 /** A buffer the registry made. */
 export interface BufferRecord {
@@ -109,15 +110,38 @@ export class ResourceRegistry {
   readonly #querySets = new Map<GPUQuerySet, string>();
   /** Every handle destroyed before disposal, so that a later use names the release. */
   readonly #released = new WeakSet<BufferHandle | TextureHandle>();
+  /** The writes of the open staged scopes ({@link ResourceRegistry.staged}). */
+  readonly #staged: StagedWrites;
 
   /**
    * Makes a registry on `device`.
    *
    * @param emit - Called once for every creation, destruction and upload.
+   * @param stagingPartBytes - The most bytes one staging buffer of a staged scope holds
+   *   (`stagedWrites.ts`' `STAGING_PART_BYTES` but in a test).
    */
-  constructor(device: GPUDevice, emit: (event: AllocationEvent) => void) {
+  constructor(
+    device: GPUDevice,
+    emit: (event: AllocationEvent) => void,
+    stagingPartBytes?: number,
+  ) {
     this.#device = device;
     this.#emit = emit;
+    this.#staged = new StagedWrites(device, stagingPartBytes);
+  }
+
+  /**
+   * Runs `write` with every buffer and texture write made through the registry staged
+   * (`stagedWrites.ts`; lane perf-page-long-tasks), submitted as the outermost scope ends or before
+   * the engine's next submission ({@link ResourceRegistry.flushStaged}).
+   */
+  staged<T>(label: string, write: () => T): T {
+    return this.#staged.run(label, write);
+  }
+
+  /** Submits the writes staged so far, before a submission of the engine's; nothing with none. */
+  flushStaged(): void {
+    this.#staged.flush();
   }
 
   /** Makes a buffer of `spec`. */
@@ -199,25 +223,32 @@ export class ResourceRegistry {
   }
 
   /**
-   * Writes `data` into a buffer at `offsetBytes`, through the queue.
+   * Writes `data` into a buffer at `offsetBytes`, through the queue, or staged inside a staged
+   * scope ({@link ResourceRegistry.staged}).
    *
    * @remarks
-   * A queue write takes effect before any command submitted after it, as WebGPU orders them.
+   * A queue write takes effect before any command submitted after it, as WebGPU orders them; a
+   * staged write is submitted before any of the engine's submissions after it, which orders it the
+   * same.
    */
   writeBuffer(handle: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     const { buffer } = this.bufferOf(handle);
-    this.#device.queue.writeBuffer(
-      buffer,
-      offsetBytes,
-      data.buffer,
-      data.byteOffset,
-      data.byteLength,
-    );
+    if (this.#staged.open) {
+      this.#staged.buffer(buffer, offsetBytes, data);
+    } else {
+      this.#device.queue.writeBuffer(
+        buffer,
+        offsetBytes,
+        data.buffer,
+        data.byteOffset,
+        data.byteLength,
+      );
+    }
     this.#emit({ kind: "uploaded", name: handle.name, bytes: data.byteLength });
   }
 
   /**
-   * Writes `data` into a region of a texture, through the queue.
+   * Writes `data` into a region of a texture, through the queue, or staged inside a staged scope.
    *
    * @remarks
    * Rows of `data` are tightly packed: `size.width` texels of the format each.
@@ -231,16 +262,17 @@ export class ResourceRegistry {
   ): void {
     const { texture, spec } = this.textureOf(handle);
     const extent = extentOf(size);
-    this.#device.queue.writeTexture(
-      { texture, origin, mipLevel },
-      data,
-      {
-        offset: 0,
-        bytesPerRow: extent.width * bytesPerTexel(spec.format),
-        rowsPerImage: extent.height,
-      },
-      extent,
-    );
+    const rowBytes = extent.width * bytesPerTexel(spec.format);
+    if (this.#staged.open) {
+      this.#staged.texture(texture, origin, mipLevel, extent, rowBytes, data);
+    } else {
+      this.#device.queue.writeTexture(
+        { texture, origin, mipLevel },
+        data,
+        { offset: 0, bytesPerRow: rowBytes, rowsPerImage: extent.height },
+        extent,
+      );
+    }
     this.#emit({ kind: "uploaded", name: handle.name, bytes: data.byteLength });
   }
 
@@ -321,9 +353,13 @@ export class ResourceRegistry {
     );
   }
 
-  /** Destroys one buffer, raising its `destroyed` event. */
+  /**
+   * Destroys one buffer, raising its `destroyed` event, the writes staged so far submitted first,
+   * as a queue write made before the destruction would have been.
+   */
   destroyBuffer(handle: BufferHandle): void {
     const { spec, buffer } = this.bufferOf(handle);
+    this.#staged.flush();
     buffer.destroy();
     this.#buffers.delete(handle);
     this.#released.add(handle);
@@ -335,17 +371,22 @@ export class ResourceRegistry {
     });
   }
 
-  /** Destroys one texture, raising its `destroyed` event. */
+  /** Destroys one texture, raising its `destroyed` event, the writes staged so far submitted first. */
   destroyTexture(handle: TextureHandle): void {
     const { spec, texture, bytes } = this.textureOf(handle);
+    this.#staged.flush();
     texture.destroy();
     this.#textures.delete(handle);
     this.#released.add(handle);
     this.#emit({ kind: "destroyed", name: handle.name, bytes, category: spec.category });
   }
 
-  /** Destroys every buffer, texture and query set, raising each one's `destroyed` event. */
+  /**
+   * Destroys every buffer, texture and query set, raising each one's `destroyed` event; writes
+   * staged and not yet submitted are dropped with them.
+   */
   dispose(): void {
+    this.#staged.discard();
     for (const [querySet, name] of this.#querySets) {
       querySet.destroy();
       this.#emit({ kind: "destroyed", name, bytes: querySet.count * 8, category: "other" });

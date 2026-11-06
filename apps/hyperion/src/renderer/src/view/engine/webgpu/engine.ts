@@ -928,6 +928,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
   }
 
+  stagedWrites<T>(label: string, write: () => T): T {
+    this.#assertLive();
+    return this.#resources.staged(label, write);
+  }
+
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     this.#assertLive();
     this.#resources.writeBuffer(buffer, offsetBytes, data);
@@ -1138,6 +1143,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       }
     }
     const read = resolves() ? this.#timer.resolve(encoder) : null;
+    // The writes a staged scope holds go first, as queue writes made before would have.
+    this.#resources.flushStaged();
     this.device.queue.submit([encoder.finish()]);
     read?.();
   }

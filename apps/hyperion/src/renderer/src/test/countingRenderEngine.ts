@@ -129,6 +129,15 @@ export interface RecordedWrite {
   readonly data: Uint8Array;
 }
 
+/** One outermost staged scope (`RenderEngine.stagedWrites`; lane perf-page-long-tasks). */
+export interface RecordedStagedScope {
+  readonly label: string;
+  /** The buffer writes made inside it: {@link CountingRenderEngine.writes}' indices, end excluded. */
+  readonly writes: readonly [from: number, to: number];
+  /** The texture writes made inside it, as {@link RecordedStagedScope.writes}. */
+  readonly textureWrites: readonly [from: number, to: number];
+}
+
 /** One recorded texture write. */
 export interface RecordedTextureWrite {
   readonly texture: string;
@@ -219,6 +228,9 @@ export class CountingRenderEngine implements RenderEngine {
   readonly writes: RecordedWrite[] = [];
   /** Every texture write, first first. */
   readonly textureWritten: RecordedTextureWrite[] = [];
+  /** Every outermost staged scope, first first: its label and the writes made inside it. */
+  readonly staged: RecordedStagedScope[] = [];
+  #stagedDepth = 0;
   /** Every texture made, render targets' included, first first. */
   readonly textureSpecs: TextureSpec[] = [];
   /** Every frame submitted to a render target, first first (views record their own). */
@@ -733,6 +745,25 @@ export class CountingRenderEngine implements RenderEngine {
       framesBefore: this.targetFrames.length,
       writesBefore: this.writes.length,
     });
+  }
+
+  stagedWrites<T>(label: string, write: () => T): T {
+    const outermost = this.#stagedDepth === 0;
+    const writesFrom = this.writes.length;
+    const textureWritesFrom = this.textureWritten.length;
+    this.#stagedDepth += 1;
+    try {
+      return write();
+    } finally {
+      this.#stagedDepth -= 1;
+      if (outermost) {
+        this.staged.push({
+          label,
+          writes: [writesFrom, this.writes.length],
+          textureWrites: [textureWritesFrom, this.textureWritten.length],
+        });
+      }
+    }
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {

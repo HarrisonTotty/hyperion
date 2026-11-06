@@ -414,6 +414,12 @@ export class ResilientEngine implements RenderEngine {
     this.#inner?.dispatch(kernel, bindings, workgroups, pass);
   }
 
+  stagedWrites<T>(label: string, write: () => T): T {
+    // With no device the writes inside are dropped, as each is outside a scope.
+    const inner = this.#inner;
+    return inner === null ? write() : inner.stagedWrites(label, write);
+  }
+
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     this.#inner?.writeBuffer(buffer, offsetBytes, data);
   }

@@ -109,7 +109,11 @@ function mappingAborted(label: string): DOMException {
   return new DOMException(`${label}: the device was lost`, "AbortError");
 }
 
-/** A buffer that records its destruction, and maps to zeros, since nothing ran on it. */
+/**
+ * A buffer that records its destruction, and maps to zeros, since nothing ran on it: one range a
+ * buffer, which keeps what is written into it, so that a test may read what a buffer mapped at its
+ * creation was given.
+ */
 export class FakeBuffer implements GPUBuffer {
   readonly size: number;
   readonly usage: GPUFlagsConstant;
@@ -117,6 +121,7 @@ export class FakeBuffer implements GPUBuffer {
   label: string;
   destroyed = false;
   readonly #maps: HeldMaps | null;
+  #range: ArrayBuffer | null = null;
 
   constructor(descriptor: GPUBufferDescriptor, maps: HeldMaps | null = null) {
     this.size = descriptor.size;
@@ -154,7 +159,12 @@ export class FakeBuffer implements GPUBuffer {
     });
   }
   getMappedRange(): ArrayBuffer {
-    return new ArrayBuffer(this.size);
+    this.#range ??= new ArrayBuffer(this.size);
+    return this.#range;
+  }
+  /** What was written into its mapped range, or zeros where nothing was. */
+  get mappedBytes(): Uint8Array {
+    return new Uint8Array(this.getMappedRange());
   }
   unmap(): undefined {
     this.mapState = "unmapped";

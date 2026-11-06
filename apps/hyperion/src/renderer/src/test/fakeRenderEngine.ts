@@ -297,6 +297,9 @@ export class FakeRenderEngine implements RenderEngine {
   dispatch(): never {
     throw notFaked("dispatch");
   }
+  stagedWrites<T>(_label: string, write: () => T): T {
+    return write();
+  }
   writeBuffer(): never {
     throw notFaked("writeBuffer");
   }

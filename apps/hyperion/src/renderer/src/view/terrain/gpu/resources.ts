@@ -127,6 +127,13 @@ const QUADS = PATCH_VERTICES_PER_SIDE - 1;
 export const GRID_VERTICES = PATCH_VERTICES_PER_SIDE * PATCH_VERTICES_PER_SIDE;
 /** The skirts' vertices: 65 along each of the four edges, after the grid's. */
 export const SKIRT_VERTICES = 4 * PATCH_VERTICES_PER_SIDE;
+
+/** The staged scope's label of a bake's upload (`RenderEngine.stagedWrites`). */
+export const TERRAIN_UPLOAD_LABEL = "terrain upload";
+
+/** The staged scope's label of a refined normals tile's upload. */
+export const TERRAIN_NORMALS_LABEL = "terrain normals upload";
+
 /** Bytes of a horizon map's far field: 9 × 9 points of four `u32` words. */
 const HORIZON_FAR_BYTES = HORIZON_FAR_SIDE * HORIZON_FAR_SIDE * HORIZON_WORDS_PER_TEXEL * 4;
 /** Indices of the grid's triangles: 64 × 64 quads of two. */
@@ -1575,7 +1582,8 @@ export class TerrainResources {
    * the offsets on their path, the record and the survey mask alone: the bake's normals are not
    * kept. On a clustered layout (plan R14, R14.T1.b) it writes the slot's cluster records last,
    * from the bake's key, origin, height range and skirt depth (`clusters/terrain.ts`), each
-   * classified by the slot's survey mask (R14.T1.g).
+   * classified by the slot's survey mask (R14.T1.g). Every write is made in one staged scope
+   * ({@link TERRAIN_UPLOAD_LABEL}; `RenderEngine.stagedWrites`, lane perf-page-long-tasks).
    *
    * @returns `refused` with nothing written for a bake that no longer fits the layout: one baked
    * before a restore re-derived it ({@link TerrainResources.onRebuilt}), whose slot is past the new
@@ -1653,102 +1661,107 @@ export class TerrainResources {
         throw new RangeError(`${patch.normals.length / 2} normals, where a tile holds ${n} × ${n}`);
       }
     }
-    this.#writeField("heights", slot, patch.heights);
-    if (patch.offsets !== null) {
-      this.#writeField("offsets", slot, patch.offsets);
-    }
-    writeSlotRecord(
-      this.#slotRecord,
-      0,
-      patchTerms(patch.key, this.#figure, patch.originHeightM),
-      patch.skirtDepthM,
-      patch.clusterErrors ?? null,
-    );
-    this.#engine.writeBuffer(
-      this.#made.slotRecords,
-      slot * SLOT_RECORD_BYTES,
-      this.#slotRecordBytes,
-    );
-    const made = this.#made;
-    if (made.normals !== null) {
-      this.#writeNormals(slot, made, patch.normals);
-    }
-    const lit = this.#made.lit;
-    if (lit !== null && layers !== null) {
-      const { weights } = layers;
-      // The slot's class layers: its weights (zeros where the bake skipped them), then its laws,
-      // then, with a maturity layer, its codes and its nodes. Without one nothing more is written:
-      // the laws' flags are clear, so a reused slot's stale codes and nodes are never read.
-      this.#writeField(
-        "class-layers",
-        slot,
-        weights.length === 0 ? new Uint8Array(CLASS_WEIGHTS_BYTES) : weights,
-      );
-      const { equatorialRadiusM: a, polarRadiusM: c } = this.#figure;
-      this.#writeField(
-        "class-layers",
-        slot,
-        packClassLaws(
-          layers.photometry,
-          this.#rows,
-          c / a,
-          maturity !== undefined,
-          paletteMeltSlots(layers.palette),
-        ),
-        CLASS_WEIGHTS_BYTES,
-      );
-      if (maturity !== undefined) {
-        // Little-endian, as every target of the client is: vertex v's word holds its code at n in
-        // its low half and at n − 1 in its high half, as `unpack2x16unorm` reads them.
-        this.#writeField(
-          "class-layers",
-          slot,
-          maturity.codes,
-          CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES,
-        );
-        this.#writeField(
-          "class-layers",
-          slot,
-          packClassNodes(maturity.nodes, layers.photometry, c / a),
-          CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES,
-        );
+    // In one staged scope, so that a bake's bytes never wait on the GPU process's command stream
+    // (lane perf-page-long-tasks): they reach the slot before any later submission, as before.
+    const opaqueBlocks = this.#engine.stagedWrites(TERRAIN_UPLOAD_LABEL, () => {
+      let blocks: TerrainOpaqueBlocks | null = null;
+      this.#writeField("heights", slot, patch.heights);
+      if (patch.offsets !== null) {
+        this.#writeField("offsets", slot, patch.offsets);
       }
-      this.#writeTable(lit);
-      this.#writeHorizon(slot, layers);
-    }
-    if (surveyMask !== null) {
-      this.#writeField("survey-mask", slot, surveyMask);
-    }
-    const clusterRecords = this.#made.clusterRecords;
-    let opaqueBlocks: TerrainOpaqueBlocks | null = null;
-    if (
-      clusterRecords !== null &&
-      patch.originM !== undefined &&
-      patch.heightRangeM !== undefined
-    ) {
-      opaqueBlocks = writeTerrainClusterRecords(
-        this.#planet,
-        {
-          key: patch.key,
-          originM: patch.originM,
-          heightRangeM: patch.heightRangeM,
-          skirtDepthM: patch.skirtDepthM,
-          ...(patch.clusterErrors === undefined ? {} : { clusterErrors: patch.clusterErrors }),
-          ...(surveyMask === null ? {} : { surveyMask }),
-        },
-        new DataView(this.#clusterRecord),
+      writeSlotRecord(
+        this.#slotRecord,
         0,
+        patchTerms(patch.key, this.#figure, patch.originHeightM),
+        patch.skirtDepthM,
+        patch.clusterErrors ?? null,
       );
       this.#engine.writeBuffer(
-        clusterRecords,
-        slot * CLUSTER_RECORDS_SLOT_BYTES,
-        new Uint8Array(this.#clusterRecord),
+        this.#made.slotRecords,
+        slot * SLOT_RECORD_BYTES,
+        this.#slotRecordBytes,
       );
-      // The slot's new clusters were seen in no view's last frame (plan R14, R14.T3.d).
-      for (const buffers of made.clusters.values()) {
-        this.#engine.writeBuffer(buffers.history, slot * CLUSTER_HISTORY_SLOT_BYTES, NO_HISTORY);
+      const made = this.#made;
+      if (made.normals !== null) {
+        this.#writeNormals(slot, made, patch.normals);
       }
-    }
+      const lit = this.#made.lit;
+      if (lit !== null && layers !== null) {
+        const { weights } = layers;
+        // The slot's class layers: its weights (zeros where the bake skipped them), then its laws,
+        // then, with a maturity layer, its codes and its nodes. Without one nothing more is written:
+        // the laws' flags are clear, so a reused slot's stale codes and nodes are never read.
+        this.#writeField(
+          "class-layers",
+          slot,
+          weights.length === 0 ? new Uint8Array(CLASS_WEIGHTS_BYTES) : weights,
+        );
+        const { equatorialRadiusM: a, polarRadiusM: c } = this.#figure;
+        this.#writeField(
+          "class-layers",
+          slot,
+          packClassLaws(
+            layers.photometry,
+            this.#rows,
+            c / a,
+            maturity !== undefined,
+            paletteMeltSlots(layers.palette),
+          ),
+          CLASS_WEIGHTS_BYTES,
+        );
+        if (maturity !== undefined) {
+          // Little-endian, as every target of the client is: vertex v's word holds its code at n in
+          // its low half and at n − 1 in its high half, as `unpack2x16unorm` reads them.
+          this.#writeField(
+            "class-layers",
+            slot,
+            maturity.codes,
+            CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES,
+          );
+          this.#writeField(
+            "class-layers",
+            slot,
+            packClassNodes(maturity.nodes, layers.photometry, c / a),
+            CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES,
+          );
+        }
+        this.#writeTable(lit);
+        this.#writeHorizon(slot, layers);
+      }
+      if (surveyMask !== null) {
+        this.#writeField("survey-mask", slot, surveyMask);
+      }
+      const clusterRecords = this.#made.clusterRecords;
+      if (
+        clusterRecords !== null &&
+        patch.originM !== undefined &&
+        patch.heightRangeM !== undefined
+      ) {
+        blocks = writeTerrainClusterRecords(
+          this.#planet,
+          {
+            key: patch.key,
+            originM: patch.originM,
+            heightRangeM: patch.heightRangeM,
+            skirtDepthM: patch.skirtDepthM,
+            ...(patch.clusterErrors === undefined ? {} : { clusterErrors: patch.clusterErrors }),
+            ...(surveyMask === null ? {} : { surveyMask }),
+          },
+          new DataView(this.#clusterRecord),
+          0,
+        );
+        this.#engine.writeBuffer(
+          clusterRecords,
+          slot * CLUSTER_RECORDS_SLOT_BYTES,
+          new Uint8Array(this.#clusterRecord),
+        );
+        // The slot's new clusters were seen in no view's last frame (plan R14, R14.T3.d).
+        for (const buffers of made.clusters.values()) {
+          this.#engine.writeBuffer(buffers.history, slot * CLUSTER_HISTORY_SLOT_BYTES, NO_HISTORY);
+        }
+      }
+      return blocks;
+    });
     return opaqueBlocks === null ? UPLOADED : { kind: "uploaded", opaqueBlocks };
   }
 
@@ -1774,7 +1787,9 @@ export class TerrainResources {
     if (normals.length !== n * n * 2) {
       throw new RangeError(`${normals.length / 2} normals, where a tile holds ${n} × ${n}`);
     }
-    this.#writeNormals(slot, made, normals);
+    this.#engine.stagedWrites(TERRAIN_NORMALS_LABEL, () => {
+      this.#writeNormals(slot, made, normals);
+    });
     return UPLOADED;
   }
 

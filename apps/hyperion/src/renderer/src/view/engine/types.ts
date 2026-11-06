@@ -803,6 +803,21 @@ export interface RenderEngine {
     workgroups: readonly [number, number, number] | IndirectArgs,
     pass?: string,
   ): void;
+  /**
+   * Runs `write` with its buffer and texture writes staged (lane perf-page-long-tasks): their
+   * bytes copied, as each is made, into one buffer mapped at its creation, and copied from it on
+   * the GPU in the order made, submitted as `write` returns or throws, or before any submission the
+   * engine makes inside it, so that each takes effect before anything submitted after it, as a
+   * queue write does; a scope inside another joins it.
+   *
+   * @remarks
+   * A queue write passes its bytes through the GPU process's command stream, which the page's
+   * thread waits on once it is full, until a GPU frame of the GPU process's ends: behind frames of
+   * seconds, a patch's uploads stopped the page's thread for up to 48 s (`stagedWrites.ts`). A
+   * mapped buffer's bytes go through shared memory, so a staged write never waits. It is for the
+   * bulk uploads outside the frame (a baked patch, a coverage mask, an atmosphere's tables).
+   */
+  stagedWrites<T>(label: string, write: () => T): T;
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void;
   /** Each write raises an `uploaded` event. */
   writeTexture(

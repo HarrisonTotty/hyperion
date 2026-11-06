@@ -579,6 +579,10 @@ export class ProbedEngine implements RenderEngine {
     }
   }
 
+  stagedWrites<T>(label: string, write: () => T): T {
+    return this.#inner.stagedWrites(label, write);
+  }
+
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     this.#inner.writeBuffer(buffer, offsetBytes, data);
   }

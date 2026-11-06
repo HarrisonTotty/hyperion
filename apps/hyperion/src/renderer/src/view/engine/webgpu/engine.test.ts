@@ -219,6 +219,26 @@ describe("the readback guard", () => {
   });
 });
 
+describe("staged writes (lane perf-page-long-tasks)", () => {
+  it("submits a scope's writes before a submission the engine makes inside it, and after it nothing more", async () => {
+    const { engine, gpu } = await engineOn();
+    const usage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC | BUFFER_USAGE.COPY_DST;
+    const heights = engine.createBuffer({ name: "heights", bytes: 64, usage, category: "other" });
+    const counts = engine.createBuffer({ name: "counts", bytes: 16, usage, category: "other" });
+    const read = engine.stagedWrites("terrain upload", () => {
+      engine.writeBuffer(heights, 0, new Float32Array(16).fill(2));
+      const reading = engine.readBuffer(counts);
+      engine.writeBuffer(heights, 0, new Float32Array(4).fill(3));
+      return reading;
+    });
+    await read;
+    expect([gpu.queue.writes, gpu.queue.submitted.map((buffer) => buffer.label)]).toEqual([
+      [],
+      ["terrain upload", "counts readback", "terrain upload"],
+    ]);
+  });
+});
+
 describe("releases (R06.T13.h)", () => {
   it("raise one destroyed event and refuse the handle afterwards", async () => {
     const { engine } = await engineOn();

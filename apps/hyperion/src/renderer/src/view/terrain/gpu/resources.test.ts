@@ -66,6 +66,8 @@ import {
   surveyCellCode,
   surveyedAt,
   type TerrainLayout,
+  TERRAIN_NORMALS_LABEL,
+  TERRAIN_UPLOAD_LABEL,
   type TerrainLimits,
   TerrainResources,
   terrainLayout,
@@ -847,6 +849,30 @@ describe("the terrain's resources", () => {
       atlas.columns * DOUBLE_NORMALS_BYTES,
     );
     tally.dispose();
+    resources.dispose();
+  });
+
+  it("make every write of a bake's upload, and of a refined tile's, in one staged scope (lane perf-page-long-tasks)", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84);
+    const writes = engine.writes.length;
+    const textureWrites = engine.textureWritten.length;
+    resources.upload(upload(5, 65, false, 1));
+    const uploaded = [engine.writes.length, engine.textureWritten.length] as const;
+    resources.uploadNormals(5, new Float16Array(65 * 65 * 2));
+    expect(engine.staged).toEqual([
+      {
+        label: TERRAIN_UPLOAD_LABEL,
+        writes: [writes, uploaded[0]],
+        textureWrites: [textureWrites, uploaded[1]],
+      },
+      {
+        label: TERRAIN_NORMALS_LABEL,
+        writes: [uploaded[0], uploaded[0]],
+        textureWrites: [uploaded[1], uploaded[1] + 1],
+      },
+    ]);
+    expect([uploaded[0] - writes, uploaded[1] - textureWrites]).toEqual([2, 1]);
     resources.dispose();
   });
 
