@@ -8665,3 +8665,121 @@ fn the_co_chandrasekhar_arm_is_deterministic() {
         assert_eq!(evolve(&input, until), evolve(&input, until));
     }
 }
+
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a pinned primary's merged dwarf (the
+/// path `PinnedMerger`): two carbon–oxygen dwarfs of 0.8 M☉ in the 17 + 12 M☉ pinned pair's places,
+/// its pin pending, merge (`Engine::mix`) into a 1.6 M☉ dwarf, which pools the pair's `Merger`
+/// candidate and ends at once: under every 29 hold by accretion-induced collapse into the 1.26 M☉
+/// neutron star, under every 30 hold by a disruption that leaves nothing, the pair's candidate still
+/// the merger's, its first.
+#[test]
+fn a_pinned_primary_s_merged_dwarf_disrupts_from_30() {
+    use super::star::{Member, Path};
+    use crate::stellar::remnant::RemnantKind;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+
+    let merged = |rules: StellarRules| {
+        let (input, pin) = untouched_pinned_pair();
+        let input = input.with_rules(rules);
+        let age = 1.0e6;
+        assert!(age < pin, "the pin is still to come");
+        let mut engine = engine_with_its_pin(&input, age, 10.0);
+        for i in 0..2 {
+            engine.members[i] = Member::Remnant {
+                phase: Phase::CarbonOxygenWhiteDwarf,
+                birth: 0.5 * age,
+                origin: crate::units::Megayears::ZERO,
+                mass: Path::starting(age, 0.8),
+            };
+        }
+        assert!(engine.pin_pending(0));
+        engine.mix();
+        engine
+    };
+    let held = merged(StellarRules::of_version(crate::GENERATOR_VERSION));
+    let [collapse] = held.supernovae.as_slice() else {
+        panic!("every 29 hold: one collapse, not {:?}", held.supernovae);
+    };
+    assert_eq!(collapse.remnant(), electron_capture_remnant());
+    let disrupted = merged(StellarRules::every_30_hold());
+    let [death] = disrupted.supernovae.as_slice() else {
+        panic!("every 30 hold: one death, not {:?}", disrupted.supernovae);
+    };
+    assert_eq!(death.remnant().kind(), RemnantKind::None);
+    let left = disrupted.members[0].state_at(&disrupted.ctx, 0, disrupted.age);
+    assert_eq!(left.phase(), Phase::NoRemnant, "{left:?}");
+    for engine in [&held, &disrupted] {
+        let pooled = engine.pooled.expect("the merger's candidate");
+        assert_eq!(pooled.channel(), IaPoolChannel::Merger);
+    }
+    assert_eq!(disrupted.pooled, held.pooled, "the same, first, candidate");
+}
+
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a kept core's own carbon ignition (the
+/// path `KeptCoreIgnition`, which no built track reaches: none of 3–9 M☉ at Z 0.0001–0.02, nor a
+/// helium star of 1.40–1.69 M☉, dies by carbon ignition): where a giant whose core is a carbon–oxygen
+/// dwarf's dies by its own track's thermonuclear disruption, `Engine::own_carbon_ignition` pools a
+/// candidate of its core, 1.38 M☉, beside its companion under every 30 hold, and none under every
+/// 29 hold or for any other death.
+#[test]
+fn a_kept_core_s_own_carbon_ignition_pools_a_candidate_from_30() {
+    use crate::stellar::remnant::DeathKind;
+
+    let (core, before) = (SolarMasses::new(1.38), 1.9);
+    let ignited = |rules: StellarRules, death: DeathKind| {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+        engine.own_carbon_ignition(0, death, core, before);
+        engine.pooled
+    };
+    let every_30 = StellarRules::every_30_hold();
+    let pooled = ignited(every_30, DeathKind::ThermonuclearDisruption).expect("a candidate");
+    assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
+    assert_eq!(pooled.masses(), [core, SolarMasses::new(2.5)]);
+    assert!(super::ia::is_detonatable(&pooled), "{pooled:?}");
+    assert_eq!(
+        ignited(
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+            DeathKind::ThermonuclearDisruption
+        ),
+        None
+    );
+    assert_eq!(ignited(every_30, DeathKind::EnvelopeLoss), None);
+}
+
+/// P11.T4's merged capture: under every 30 hold a coalescence around a 1.53 M☉ core of an
+/// oxygen–neon dwarf's (`CoreSource::OxygenNeonDwarf`), research-leans-45's early-AGB product of
+/// 1.78 M☉, is an electron capture where no pin is pending (`fed_dwarf_engine`), and a star left
+/// to its pin where the primary's is (the 17 + 12 M☉ pinned pair); under every 29 hold a star.
+#[test]
+fn a_pinned_primary_s_oxygen_neon_coalescence_is_left_to_its_pin() {
+    use super::common_envelope::{CoalescedProduct, Product};
+    use super::dwarf_limit::CoreSource;
+    use super::star::Kind;
+
+    let product = CoalescedProduct::Star {
+        kind: Kind::EarlyAgb,
+        mass: 1.78,
+        core: 1.53,
+        burnt: 1.0,
+        fraction: 0.0,
+    };
+    let unpinned = |rules: StellarRules| {
+        fed_dwarf_engine(0.6, 0.02, rules).product_member(product, CoreSource::OxygenNeonDwarf)
+    };
+    assert!(matches!(
+        unpinned(StellarRules::every_30_hold()),
+        Product::ElectronCapture { .. }
+    ));
+    assert!(matches!(
+        unpinned(StellarRules::of_version(crate::GENERATOR_VERSION)),
+        Product::Member(..)
+    ));
+    let (input, _) = untouched_pinned_pair();
+    let input = input.with_rules(StellarRules::every_30_hold());
+    let engine = engine_with_its_pin(&input, 1.0e6, 10.0);
+    assert!(engine.pin_pending(0));
+    assert!(matches!(
+        engine.product_member(product, CoreSource::OxygenNeonDwarf),
+        Product::Member(..)
+    ));
+}

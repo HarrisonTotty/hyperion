@@ -17,23 +17,28 @@
 //!   reaches the Chandrasekhar mass (`dwarf_limit::Unplaced::Disruption`), disrupts with no
 //!   candidate.
 //!
-//! All three are a carbon–oxygen core reaching the Chandrasekhar mass, the single-degenerate
-//! channel. In BSE such a dwarf, and a helium one, is destroyed with no remnant, and only an
-//! oxygen–neon one leaves a neutron star (Hurley, Tout and Pols 2002, MNRAS 329, 897, section 2.6;
-//! BSE's `evolv2.f`: "If the Chandrasekhar limit is exceeded for a white dwarf then destroy the
-//! white dwarf in a supernova. If the WD is `ONe` then a neutron star will survive the supernova",
-//! its type set to 15, a massless remnant, for a helium or carbon–oxygen dwarf). The source was
-//! read in BSE's code as COSMIC carries it, not in the paper, which the pod could not reach.
+//! All three are a carbon–oxygen core reaching the Chandrasekhar mass: the single-degenerate
+//! channel for a fed dwarf, the double-degenerate one for two dwarfs' merger product (Claeys et al.
+//! 2014, A&A 563, A83, whose abstract defines the two), and a dwarf's core inside a merger product
+//! otherwise. Hurley, Tout and Pols 2002 (MNRAS 329, 897) destroy such a dwarf with no remnant:
+//! §2.6.5 for two carbon–oxygen dwarfs' coalescence over the Chandrasekhar mass ("it explodes as a
+//! possible type Ia SN … leaving no remnant (k2 = 15)"), §2.6.6 for a fed one ("we annihilate it in
+//! a type Ia SN, unless it is an `ONeWD` (k2 = 12) which undergoes AIC leaving a NS remnant");
+//! Hurley's BSE codes it so (`evolv2.f`: "If the Chandrasekhar limit is exceeded for a white dwarf
+//! then destroy the white dwarf in a supernova. If the WD is `ONe` then a neutron star will survive
+//! the supernova", its type set to 15, a massless remnant, for a helium or carbon–oxygen dwarf).
 //!
 //! From 30 ([`CoChandrasekharRules::Disrupted`]) every one of them disrupts and leaves nothing, its
 //! companion going on alone as after a thermally pulsing AGB star's carbon ignition, and pools one
 //! Type Ia candidate on [`IaPoolChannel::Accretion`] (lean, 2026-11-05: the brief's; a pair that
-//! pooled one before, a white dwarfs' merger's, keeps it, the pool holding a pair's first). The
+//! pooled one before, a white dwarfs' merger's or an edge-lit detonation's, keeps it, P11.T6's pool
+//! holding a pair's first event, so that its mark alone decides the pair). The
 //! candidate's masses are the dwarf's or the core's at ignition and its companion's then, none after
 //! a merger, so that it can detonate (`ia::is_detonatable`); the paths that pooled under the held
 //! arm keep their masses but the merger's dwarf product, which took the two stars' before the
 //! merger. A helium dwarf at its collapse mass disrupts as a carbon–oxygen one does, as BSE's does
-//! (none reaches it: one fed helium ignites at 0.7 M☉, and one fed hydrogen swells into a giant).
+//! (none reaches it in the engine: one fed helium ignites at 0.7 M☉, HTP §2.6.6, and one fed
+//! hydrogen swells into a giant or keeps it).
 //! An oxygen–neon dwarf keeps its accretion-induced collapse, with no candidate. A track's own
 //! carbon ignition in a star whose core is no dwarf's, a thermally pulsing AGB star's or a helium
 //! star's, pools none: plan 09 rules that a single star's thermonuclear disruption is in no Type Ia
@@ -41,6 +46,7 @@
 //! star alone does not (lean, 2026-11-05).
 
 use crate::GeneratorVersion;
+use crate::stellar::Phase;
 use crate::stellar::remnant::{CompactRemnant, DeathKind, RemnantKind};
 use crate::stellar::rules::StellarRules;
 use crate::units::{SolarMasses, Years};
@@ -183,43 +189,43 @@ impl Engine {
     /// carbon–oxygen core does not survive the Chandrasekhar mass, reached by `path`, ends now
     /// under the stellar rules' `co_chandrasekhar` arm (the module documentation): a Type Ia
     /// candidate of `masses` pooled where the arm pools one
-    /// ([`Engine::chandrasekhar_candidate`]), then the member, of `m` M☉ with any envelope it keeps,
-    /// collapses by accretion-induced collapse or disrupts and leaves nothing, the pair unbound and
-    /// its companion alone. The caller has closed the segment.
+    /// ([`Engine::chandrasekhar_candidate`]), then the member, of `m_msun` M☉ with any envelope it
+    /// keeps, collapses by accretion-induced collapse or disrupts and leaves nothing, the pair
+    /// unbound and its companion alone. The caller has closed the segment.
     pub(super) fn end_at_the_chandrasekhar_mass(
         &mut self,
         i: usize,
-        m: f64,
+        m_msun: f64,
         path: ChandrasekharPath,
         masses: [SolarMasses; 2],
     ) {
         self.chandrasekhar_candidate(path, masses);
         match self.ctx.rules().co_chandrasekhar.ending(path) {
-            ChandrasekharEnding::Collapse => self.accretion_induced_collapse(i, m),
+            ChandrasekharEnding::Collapse => self.accretion_induced_collapse(i, m_msun),
             ChandrasekharEnding::Disruption => {
                 self.set_member(i, Member::Gone);
                 let nothing = CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO);
-                self.explode(i, m, nothing, None);
+                self.explode(i, m_msun, nothing, None);
             }
         }
     }
 
-    /// The masses of the Type Ia candidate of member `i`, of `before` M☉, whose carbon–oxygen core
-    /// of `core` ignites carbon: the core, held to the member's mass, and its companion's now.
+    /// The masses of the Type Ia candidate of member `i`, of `before_msun` M☉, whose carbon–oxygen
+    /// core of `core` ignites carbon: the core, held to the member's mass, and its companion's now.
     #[must_use]
     pub(super) fn ignition_masses(
         &self,
         i: usize,
         core: SolarMasses,
-        before: f64,
+        before_msun: f64,
     ) -> [SolarMasses; 2] {
         [
-            SolarMasses::new(core.value().min(before)),
+            SolarMasses::new(core.value().min(before_msun)),
             SolarMasses::new(self.current(1 - i).0),
         ]
     }
 
-    /// Member `i`, of `before` M☉, a giant whose core of `core` is a carbon–oxygen dwarf's
+    /// Member `i`, of `before_msun` M☉, a giant whose core of `core` is a carbon–oxygen dwarf's
     /// (`Engine::dwarf_cores`), dies by its own track's `death`: where that is the track's carbon
     /// ignition (a thermally pulsing AGB star's or a helium star's,
     /// [`DeathKind::ThermonuclearDisruption`]), its candidate is pooled as the stellar rules'
@@ -230,34 +236,36 @@ impl Engine {
         i: usize,
         death: DeathKind,
         core: SolarMasses,
-        before: f64,
+        before_msun: f64,
     ) {
         if death == DeathKind::ThermonuclearDisruption {
-            let masses = self.ignition_masses(i, core, before);
+            let masses = self.ignition_masses(i, core, before_msun);
             self.chandrasekhar_candidate(ChandrasekharPath::KeptCoreIgnition, masses);
         }
     }
 
-    /// Member `i`, a white dwarf of `m` M☉ at its collapse mass, ends now: by accretion-induced
-    /// collapse with no candidate where it is oxygen–neon (`path` `None`), and otherwise as
-    /// [`Engine::end_at_the_chandrasekhar_mass`] ends it by `path`, with a candidate of `masses`.
+    /// Member `i`, a white dwarf of `phase` and `m_msun` M☉ at its collapse mass, reached by `path`,
+    /// ends now: an oxygen–neon one by accretion-induced collapse with no candidate, and any other as
+    /// [`Engine::end_at_the_chandrasekhar_mass`] ends it, with a candidate of `masses`.
     pub(super) fn end_dwarf_at_its_collapse(
         &mut self,
         i: usize,
-        m: f64,
-        path: Option<ChandrasekharPath>,
+        (phase, m_msun): (Phase, f64),
+        path: ChandrasekharPath,
         masses: [SolarMasses; 2],
     ) {
-        match path {
-            None => self.accretion_induced_collapse(i, m),
-            Some(path) => self.end_at_the_chandrasekhar_mass(i, m, path, masses),
+        if phase == Phase::OxygenNeonWhiteDwarf {
+            self.accretion_induced_collapse(i, m_msun);
+        } else {
+            self.end_at_the_chandrasekhar_mass(i, m_msun, path, masses);
         }
     }
 
     /// Pools the Type Ia candidate of a dwarf or core at the Chandrasekhar mass reached by `path`,
     /// of `masses`, where the stellar rules' `co_chandrasekhar` arm pools one
     /// ([`CoChandrasekharRules::pools`]), on [`IaPoolChannel::Accretion`]: the pair's first
-    /// candidate unless it has one. The caller ends the member.
+    /// candidate unless it has one (P11.T6's pool holds a pair's first event). The caller ends the
+    /// member.
     pub(super) fn chandrasekhar_candidate(
         &mut self,
         path: ChandrasekharPath,
@@ -268,25 +276,24 @@ impl Engine {
             .pools(path)
             .then(|| PooledIaEvent::new(Years::new(self.age), IaPoolChannel::Accretion, masses));
         #[cfg(test)]
-        count_chandrasekhar_ending(
-            path,
-            rules.ending(path),
-            event.filter(|_| self.pooled.is_none()),
-        );
+        count_chandrasekhar_ending(path, rules.ending(path), event, self.pooled);
         if let Some(event) = event {
             self.pool(event);
         }
     }
 }
 
-/// Counts an ending by `path` on this thread ([`chandrasekhar_endings`]), with the candidate it
-/// pooled first for its pair, if any.
+/// Counts an ending by `path` on this thread ([`chandrasekhar_endings`]): its `event`, if it pools
+/// one, and the pair's candidate `before` it, if it has one.
 #[cfg(test)]
 fn count_chandrasekhar_ending(
     path: ChandrasekharPath,
     ending: ChandrasekharEnding,
-    first: Option<PooledIaEvent>,
+    event: Option<PooledIaEvent>,
+    before: Option<PooledIaEvent>,
 ) {
+    use super::ia::is_detonatable;
+
     let k = ChandrasekharPath::ALL
         .iter()
         .position(|&p| p == path)
@@ -298,9 +305,15 @@ fn count_chandrasekhar_ending(
             ChandrasekharEnding::Collapse => 1,
             ChandrasekharEnding::Disruption => 2,
         }] += 1;
-        if let Some(event) = first {
-            c[k][3] += 1;
-            c[k][4] += usize::from(super::ia::is_detonatable(&event));
+        match (event, before) {
+            (Some(event), None) => {
+                c[k][3] += 1;
+                c[k][4] += usize::from(is_detonatable(&event));
+            }
+            (Some(event), Some(before)) => {
+                c[k][5] += usize::from(is_detonatable(&event) && !is_detonatable(&before));
+            }
+            (None, _) => {}
         }
         counts.set(c);
     });
@@ -309,17 +322,18 @@ fn count_chandrasekhar_ending(
 #[cfg(test)]
 thread_local! {
     /// This thread's endings at the Chandrasekhar mass since it started ([`chandrasekhar_endings`]).
-    static CHANDRASEKHAR_ENDINGS: core::cell::Cell<[[usize; 5]; 7]> =
-        const { core::cell::Cell::new([[0; 5]; 7]) };
+    static CHANDRASEKHAR_ENDINGS: core::cell::Cell<[[usize; 6]; 7]> =
+        const { core::cell::Cell::new([[0; 6]; 7]) };
 }
 
 /// The endings of carbon–oxygen and helium white dwarfs and cores at the Chandrasekhar mass this
 /// thread's engines have made since it started, by path ([`ChandrasekharPath::ALL`]'s order): each
-/// path's endings, its accretion-induced collapses and its disruptions, and the Type Ia candidates
-/// it pooled first for their pairs, with those that can detonate (`ia::is_detonatable`): a test
-/// build's counter for the census.
+/// path's endings, its accretion-induced collapses and its disruptions, the Type Ia candidates it
+/// pooled first for their pairs, with those that can detonate (`ia::is_detonatable`), and the
+/// candidates that can detonate but sit behind an earlier one of their pair's that cannot, which
+/// the pool keeps: a test build's counter for the census.
 #[cfg(test)]
 #[must_use]
-pub(crate) fn chandrasekhar_endings() -> [[usize; 5]; 7] {
+pub(crate) fn chandrasekhar_endings() -> [[usize; 6]; 7] {
     CHANDRASEKHAR_ENDINGS.with(core::cell::Cell::get)
 }

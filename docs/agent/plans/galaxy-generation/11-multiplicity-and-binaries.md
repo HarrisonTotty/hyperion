@@ -7754,7 +7754,15 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     track's own carbon ignition in a core that is no dwarf's pools none (plan 09's single-star rule).
   - _Lean (2026-11-05): research-leans-38 kept._ A kept core whose track collapses an iron core still
     collapses. That is P15.T9.b's 1.12 M☉ dwarf (golden `0x62005957fe000024`, galaxy 1234): a CO
-    dwarf merged with a helium star, a neutron star at 28, 29 and 30 alike.
+    dwarf merged with a helium star. It is a neutron star at 28 and 29 by that collapse, and at 30
+    by `merged_capture`'s electron capture at the merger (1.26 M☉; record below).
+  - _Lean (2026-11-06): a pair's first candidate wins._ P11.T6's pool keeps a pair's first event,
+    so most endings at M_Ch at 30 pool none of their own (layer D: 40 of 194). Of those, 11 could
+    detonate behind one that cannot (D 9, E 2; `chandrasekhar_endings`' last column).
+  - _P11.T6's slow tests._ None remain (`ia_hold.rs` went with the 27 fold). The by-path census's
+    candidate column stands in at 30; layer D's redraw share is not re-measured.
+  - _Tests._ `PinnedMerger` and `KeptCoreIgnition` have constructed cases only; no census pair
+    takes either path.
   - _For the bump to 30._ Delete `Held`, `ChandrasekharPath::held_ending`, the field, the brief's
     read and the tripwire; refit the pair-light and reach tables. The census figures are in
     `co_chandrasekhar_hold.rs` and `ns_accretion_hold.rs` (members 1,834 → 1,658 at 30).
@@ -7769,6 +7777,10 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     product is left to its pin.
   - _Measured._ Layer E's probe (`the_merged_channel_s_pairs_against_e_s_table`, against 28's
     table): 164 pairs past under every 29 hold, none under every 30 hold, so no ONe slice is
-    needed. The dwarf-limit census's new arm collapses 261 coalescences in D and 24 in E.
+    needed. The dwarf-limit census's new arm collapses 261 coalescences in D and 24 in E; the NS
+    accretion census at 30 is unchanged.
+  - _Lean (2026-11-06): its reach._ The source is ONe where either parent's core is, a partner's
+    own ONe-typing track included (research-leans-35 §7). So a CO dwarf that coalesces with such a
+    star collapses too: the golden pair above, a bump mover. Movers were not surveyed.
   - _For the bump to 30._ Delete `Held`, the field, the brief's read and the tripwire; the 30
     refit of the pair-light tables then takes the channel (P11.T17.b's two slow tests at 30).

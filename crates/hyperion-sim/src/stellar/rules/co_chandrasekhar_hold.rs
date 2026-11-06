@@ -8,15 +8,17 @@
 //! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
 //! - The server golden's carbon–oxygen dwarf of 1.12 M☉ (alone) that its pair ends as a neutron star
 //!   (plan 15's P15.T9.b, from P11.T11.a's records) takes none of the paths: its dwarf merges with
-//!   a helium star, and the product's track, keeping the dwarf's core, collapses an iron core
-//!   (research-leans-38's kept core), under every 29 hold and every 30 hold alike.
+//!   a helium star, and the product, keeping the dwarf's core, collapses an iron core at its
+//!   track's death under every 29 hold (research-leans-38's kept core), and by electron capture at
+//!   the merger under every 30 hold (P11.T4's `merged_capture`).
 //! - Slow: the dwarf-limit census's 6 × 10⁴ pairs of layers C, D and E near the Sun under every 29
 //!   hold and every 30 hold: each path's endings and first candidates, the pairs' candidates by
 //!   channel, and the pairs that show a neutron star at their age.
 //!
-//! The movers, at the bump: none of the version's (nothing moves at 24–29, the held arm being the
-//! version's code); the pair-light and reach tables, which the engine's runs fit, are refitted under
-//! the version's rules, and `type_ia_yield`'s pool is this arm's (plan 15's P15.T9.b).
+//! Nothing moves at 24–29, the held arm being the version's code. The movers at the bump were not
+//! surveyed by turning the hold on at the version; they hold at least the pair-light and reach
+//! tables, which the engine's runs fit and the bump refits, and `type_ia_yield`'s pool is this
+//! arm's (plan 15's P15.T9.b).
 
 use crate::planetary::testing::in_shares;
 
@@ -94,6 +96,7 @@ fn the_co_chandrasekhar_ending_is_held_only_until_the_30_bump() {
     assert_eq!(
         StellarRules {
             co_chandrasekhar: CoChandrasekharRules::Held,
+            merged_capture: crate::stellar::binary::merged_capture::MergedCaptureRules::Held,
             ..StellarRules::every_30_hold()
         },
         version()
@@ -137,18 +140,25 @@ fn every_path_disrupts_and_pools_from_30() {
 /// (`systems_in_range_briefs`, GPF 000N1Z D-36), whose 5.71 M☉ primary alone leaves a carbon–oxygen
 /// white dwarf of 1.12 M☉, and its pair a neutron star (P11.T11.a's records; plan 15's P15.T9.b):
 /// the primary, stripped to a helium star, leaves a 0.94 M☉ carbon–oxygen dwarf, which merges with
-/// the 1.64 M☉ helium star its companion's common envelope leaves; the product, a helium giant of
-/// 2.34 M☉ placed around the dwarf, collapses an iron core at its track's death into a 1.45 M☉
-/// neutron star, with no Type Ia candidate pooled. Its track's `Mc,BAGB`, its mass, passes 2.25 M☉
-/// (HPT section 6.1), and a kept core ends as its track does there (research-leans-38, P11.T4's
-/// kept-core endings): no path to the Chandrasekhar mass, so under the version's rules and every 30
-/// hold alike.
+/// the 1.64 M☉ helium star its companion's common envelope leaves, with no Type Ia candidate pooled.
+/// The product's core is oxygen–neon, the helium star's own track typing its core so (HPT section
+/// 6.1; `Engine::coalesced_source`), and no carbon–oxygen dwarf or core reaches the Chandrasekhar
+/// mass:
+///
+/// - under the version's rules the product, a helium giant of 2.34 M☉ placed around the dwarf,
+///   collapses an iron core at its track's death into a neutron star of over 1.4 M☉ (its
+///   `Mc,BAGB`, its mass, passes 2.25 M☉, and a kept core ends as its track does there:
+///   research-leans-38, P11.T4's kept-core endings);
+/// - under every 30 hold its core already holds the capture mass at the merger, where it collapses
+///   by electron capture into Mandel and Müller's 1.26 M☉ neutron star (P11.T4's `merged_capture`).
 #[test]
-fn the_golden_s_carbon_oxygen_dwarf_ends_a_neutron_star_by_its_kept_core() {
+fn the_golden_s_carbon_oxygen_dwarf_ends_a_neutron_star() {
     use crate::galaxy::imf::MassFunctionKind;
     use crate::galaxy::placement::{CellKey, generate_cell};
     use crate::stellar::binary::SegmentKind;
+    use crate::stellar::binary::merged_capture::MergedCaptureRules;
     use crate::stellar::remnant::RemnantKind;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
     use crate::stellar::system::SystemStars;
 
     let seed = Seed::new(0x4d2);
@@ -157,7 +167,7 @@ fn the_golden_s_carbon_oxygen_dwarf_ends_a_neutron_star_by_its_kept_core() {
         GalaxyRules::of_version(GENERATOR_VERSION),
         GalaxyRules::every_30_hold(),
     ] {
-        let case = format!("{:?}", rules.stellar.co_chandrasekhar);
+        let case = format!("{:?}", rules.stellar.merged_capture);
         let galaxy = Galaxy::from_params_with_rules(
             seed,
             GalaxyParams::from_seed(seed, MassFunctionKind::default()),
@@ -183,24 +193,36 @@ fn the_golden_s_carbon_oxygen_dwarf_ends_a_neutron_star_by_its_kept_core() {
             RemnantKind::NeutronStar,
             "{case}"
         );
-        assert!(
-            collapse.remnant().mass().value() > 1.4,
-            "{case}: {collapse:?}"
-        );
         assert!(timeline.pooled_ia().is_none(), "{case}");
-        // The merger of the dwarf and the helium star comes before the collapse.
+        // The merger of the dwarf and the helium star comes at or before the collapse.
         let merged = timeline
             .segments()
             .iter()
             .find(|s| s.kind() == SegmentKind::Merged)
             .expect("the pair merges");
-        assert!(merged.start() <= collapse.age(), "{case}");
         let before = timeline.state_at(Years::new(merged.start().value() * (1.0 - 1e-6)));
         let phases = before.stars().map(|s| s.phase());
         assert!(
             phases.contains(&Phase::CarbonOxygenWhiteDwarf),
             "{case}: {phases:?}"
         );
+        match rules.stellar.merged_capture {
+            MergedCaptureRules::Held => {
+                assert!(merged.start() < collapse.age(), "{case}");
+                assert!(
+                    collapse.remnant().mass().value() > 1.4,
+                    "{case}: {collapse:?}"
+                );
+            }
+            MergedCaptureRules::Captured => {
+                assert_eq!(
+                    collapse.age().value().total_cmp(&merged.start().value()),
+                    core::cmp::Ordering::Equal,
+                    "{case}: {collapse:?} at the merger"
+                );
+                assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
+            }
+        }
     }
 }
 
@@ -211,9 +233,10 @@ struct Figures {
     run: [usize; 3],
     /// The endings at the Chandrasekhar mass by path ([`ChandrasekharPath::ALL`]'s order;
     /// `co_chandrasekhar::chandrasekhar_endings`): each path's endings, its accretion-induced
-    /// collapses and disruptions, and the candidates it pooled first for their pairs, with those
-    /// that can detonate.
-    paths: [[[usize; 5]; 7]; 3],
+    /// collapses and disruptions, the candidates it pooled first for their pairs, with those that
+    /// can detonate, and the candidates that can detonate but sit behind an earlier one of their
+    /// pair's that cannot.
+    paths: [[[usize; 6]; 7]; 3],
     /// The pairs' Type Ia candidates (P11.T6's pool) by channel, the merger first: those pooled,
     /// and those that can detonate (`ia::is_detonatable`).
     candidates: [[[usize; 2]; 2]; 3],
@@ -225,7 +248,7 @@ struct Figures {
 fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
     let mut figures = Figures {
         run: [0; 3],
-        paths: [[[0; 5]; 7]; 3],
+        paths: [[[0; 6]; 7]; 3],
         candidates: [[[0; 2]; 2]; 3],
         neutron_stars: [0; 3],
     };
@@ -260,7 +283,7 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
                 );
             }
             let after = chandrasekhar_endings();
-            let paths: [[usize; 5]; 7] =
+            let paths: [[usize; 6]; 7] =
                 core::array::from_fn(|p| core::array::from_fn(|j| after[p][j] - before[p][j]));
             (counts, paths)
         });
@@ -291,29 +314,32 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
 /// so that layer D pools 319 accretions, not 284 (234 detonatable, not 199). Of layer D's pairs
 /// 1,987 rather than 2,127 show a neutron star at their age with this hold alone, and 2,072 with
 /// every 30 hold, whose oxygen–neon dwarfs' coalescences collapse at once (P11.T4's
-/// `merged_capture`, 2026-11-06); layer E's 11,193 become 11,187 and 11,190.
+/// `merged_capture`, 2026-11-06); layer E's 11,193 become 11,187 and 11,190. Behind an earlier
+/// candidate of their pair's that cannot detonate, 9 of layer D's fed dwarfs and, under every 30
+/// hold, 2 of layer E's kept cores could have detonated, which the pool, holding a pair's first,
+/// does not record (2026-11-06, 141 s).
 const CENSUS_FIGURES: [Figures; 2] = [
     Figures {
         run: [8_519, 17_814, 19_213],
         paths: [
-            [[0; 5]; 7],
+            [[0; 6]; 7],
             [
-                [148, 148, 0, 5, 5],
-                [0; 5],
-                [10, 10, 0, 0, 0],
-                [0; 5],
-                [0; 5],
-                [36, 0, 36, 0, 0],
-                [0; 5],
+                [148, 148, 0, 5, 5, 9],
+                [0; 6],
+                [10, 10, 0, 0, 0, 0],
+                [0; 6],
+                [0; 6],
+                [36, 0, 36, 0, 0, 0],
+                [0; 6],
             ],
             [
-                [11, 11, 0, 0, 0],
-                [0; 5],
-                [0; 5],
-                [0; 5],
-                [0; 5],
-                [2, 0, 2, 0, 0],
-                [0; 5],
+                [11, 11, 0, 0, 0, 0],
+                [0; 6],
+                [0; 6],
+                [0; 6],
+                [0; 6],
+                [2, 0, 2, 0, 0, 0],
+                [0; 6],
             ],
         ],
         candidates: [
@@ -326,24 +352,24 @@ const CENSUS_FIGURES: [Figures; 2] = [
     Figures {
         run: [8_519, 17_814, 19_213],
         paths: [
-            [[0; 5]; 7],
+            [[0; 6]; 7],
             [
-                [148, 0, 148, 5, 5],
-                [0; 5],
-                [10, 0, 10, 0, 0],
-                [0; 5],
-                [0; 5],
-                [36, 0, 36, 35, 35],
-                [0; 5],
+                [148, 0, 148, 5, 5, 9],
+                [0; 6],
+                [10, 0, 10, 0, 0, 0],
+                [0; 6],
+                [0; 6],
+                [36, 0, 36, 35, 35, 0],
+                [0; 6],
             ],
             [
-                [11, 0, 11, 0, 0],
-                [0; 5],
-                [0; 5],
-                [0; 5],
-                [0; 5],
-                [2, 0, 2, 0, 0],
-                [0; 5],
+                [11, 0, 11, 0, 0, 0],
+                [0; 6],
+                [0; 6],
+                [0; 6],
+                [0; 6],
+                [2, 0, 2, 0, 0, 2],
+                [0; 6],
             ],
         ],
         candidates: [
@@ -369,7 +395,7 @@ fn every_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_under_every_30_h
         figures
     });
     for (layer, paths) in figures[1].paths.iter().enumerate() {
-        for (path, [events, collapses, disruptions, first, detonatable]) in
+        for (path, [events, collapses, disruptions, first, detonatable, _]) in
             ChandrasekharPath::ALL.iter().zip(paths)
         {
             let case = format!("layer {layer}, {path:?}");

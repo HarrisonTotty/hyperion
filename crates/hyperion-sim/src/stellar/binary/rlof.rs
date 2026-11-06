@@ -71,7 +71,9 @@
 //!   are plan 11's pooled Type Ia candidates (`pooled_ia`); the engine continues as if they did
 //!   not explode (P11.T6's mark decides): the helium dwarf ignites as a helium star, the edge-lit
 //!   detonation leaves the dwarf accreting, and a dwarf at the Chandrasekhar mass collapses to a
-//!   neutron star, as an oxygen–neon dwarf does by accretion-induced collapse (section 2.6.5).
+//!   neutron star, as an oxygen–neon dwarf does by accretion-induced collapse (section 2.6.5); from
+//!   generator version 30 a helium or carbon–oxygen one disrupts and leaves nothing instead
+//!   ([`co_chandrasekhar`](super::co_chandrasekhar), P11.T4's fix).
 //! - **Contact.** An accretor that fills its own lobe brings the pair into contact (section
 //!   2.6.6). Two main-sequence stars stay in contact (ruling 108.1; see `Engine::contact`), and
 //!   any other pair collides: a common envelope where either star is giant-like, a coalescence
@@ -1238,8 +1240,8 @@ impl Engine {
                 );
                 false
             }
-            // A dwarf at the Chandrasekhar mass collapses below, edge-lit or not (`dwarf_limit`,
-            // P11.T4's fix), but for a pinned primary's, which is left to its pin.
+            // A dwarf at the Chandrasekhar mass ends below, edge-lit or not (`dwarf_limit`, P11.T4's
+            // fix), but for a pinned primary's, which is left to its pin.
             Kind::CarbonOxygenWhiteDwarf
                 if kd.surface() == Surface::Helium
                     && self.accreted_helium[a_idx] >= EDGE_LIT_HELIUM
@@ -1259,11 +1261,16 @@ impl Engine {
                 if white_dwarf_phase(ka)
                     .is_some_and(|phase| ma >= self.collapse_mass(phase).value()) =>
             {
-                let masses = masses_now(self);
+                let (masses, phase) = (masses_now(self), white_dwarf_phase(ka));
+                let phase = phase.expect("the arm's dwarf has a white dwarf's phase");
                 self.close_segment();
-                let oxygen_neon = ka == Kind::OxygenNeonWhiteDwarf;
-                let path = (!oxygen_neon).then_some(ChandrasekharPath::Transfer);
-                self.end_dwarf_at_its_collapse(a_idx, ma, path, [masses[a_idx], masses[d]]);
+                let fed = [masses[a_idx], masses[d]];
+                self.end_dwarf_at_its_collapse(
+                    a_idx,
+                    (phase, ma),
+                    ChandrasekharPath::Transfer,
+                    fed,
+                );
                 true
             }
             Kind::NeutronStar if ma > MAX_NEUTRON_STAR_MASS.value() => {
@@ -1469,16 +1476,19 @@ impl Engine {
     pub(super) fn collapse_fed_dwarf(&mut self, i: usize) {
         let (m, _) = self.current(i);
         let (other, _) = self.current(1 - i);
-        let oxygen_neon = matches!(
-            &self.members[i],
-            Member::Remnant {
-                phase: Phase::OxygenNeonWhiteDwarf,
-                ..
-            }
-        );
+        // `Stop::Chandrasekhar` acts on a white dwarf the binary carries alone.
+        let phase = match &self.members[i] {
+            Member::Remnant { phase, .. } => *phase,
+            Member::MainSequence { .. }
+            | Member::Track { .. }
+            | Member::Shaped { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Gone => Phase::CarbonOxygenWhiteDwarf,
+        };
         self.close_segment();
-        let path = (!oxygen_neon).then_some(ChandrasekharPath::Wind);
-        self.end_dwarf_at_its_collapse(i, m, path, [m, other].map(SolarMasses::new));
+        let fed = [m, other].map(SolarMasses::new);
+        self.end_dwarf_at_its_collapse(i, (phase, m), ChandrasekharPath::Wind, fed);
     }
 
     /// Member `i`, a white dwarf of mass `m` at the Chandrasekhar mass, collapses to a neutron star

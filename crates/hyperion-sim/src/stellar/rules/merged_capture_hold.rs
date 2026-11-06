@@ -10,9 +10,12 @@
 //! - Slow: the research's probe, 44,550 drawn pairs of layer E's lowest masses through
 //!   `pair_light::pair_rows`, against the version's E table, under every 29 hold and every 30 hold.
 //!
-//! The movers, at the bump: none of the version's (nothing moves at 24–29, the held arm being the
-//! version's code); the pair-light and reach tables, which the engine's runs fit, are refitted under
-//! the version's rules.
+//! Nothing moves at 24–29, the held arm being the version's code. The movers at the bump were not
+//! surveyed by turning the hold on at the version; they hold at least the pair-light and reach
+//! tables, which the engine's runs fit and the bump refits, and the server golden
+//! `systems_in_range_briefs`' GPF 000N1Z D-36, whose carbon–oxygen dwarf's coalescence with a helium
+//! star that its own track types oxygen–neon collapses at the merger into a 1.26 M☉ neutron star,
+//! not later into one of 1.45 M☉ (`co_chandrasekhar_hold`'s golden test).
 
 use super::*;
 use crate::GENERATOR_VERSION;
@@ -155,6 +158,30 @@ fn an_oxygen_neon_dwarf_s_coalescence_past_the_capture_mass_collapses_from_30() 
         );
         assert_eq!(state.stars()[0].phase(), Phase::NeutronStar, "{state:?}");
     }
+}
+
+/// P11.T4's merged capture: the arm of 30 is deterministic. research-leans-45's pair, which reaches
+/// it, evolved twice under every 30 hold gives the same timeline, and its coalescence is collapsed
+/// at once both times (`merged_capture::merged_captures` rises by one a run).
+#[test]
+fn the_merged_capture_arm_is_deterministic() {
+    use crate::stellar::binary::merged_capture::merged_captures;
+
+    let input = probe_pair(
+        [8.03, 2.00],
+        0.086,
+        650.0,
+        0.7,
+        [StarDraws::median(), StarDraws::median()],
+        StellarRules::every_30_hold(),
+    );
+    let runs = [(), ()].map(|()| {
+        let before = merged_captures();
+        let timeline = evolve(&input, Years::new(1.6e9));
+        (timeline, merged_captures() - before)
+    });
+    assert_eq!(runs[0], runs[1]);
+    assert_eq!(runs[0].1, 1, "the arm is taken once a run");
 }
 
 /// research-leans-45's probe: 44,550 drawn pairs over 11 primaries of 8.0–8.2 M☉, 9 companions of

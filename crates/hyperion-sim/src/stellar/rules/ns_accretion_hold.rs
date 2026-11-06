@@ -297,8 +297,10 @@ fn assert_the_figures(f: CompactFigures, pinned: CompactFigures) {
 /// under every 29 hold; 432 s, pod, 16 vCPU), against [`CENSUS_FIGURES`]: 1,834 → 1,658 members
 /// (1,818 → 1,642 neutron stars), −176, P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass
 /// (`co_chandrasekhar`), which disrupt and leave nothing where under the version's rules they
-/// collapse into the 1.26 M☉ neutron stars of accretion-induced collapses beside their donors. The
-/// black holes, the grown, the median black hole and the most gained stay the version's.
+/// collapse into the 1.26 M☉ neutron stars of accretion-induced collapses beside their donors;
+/// P11.T4's `merged_capture`, added to every 30 hold on 2026-11-06, moves none of them (measured
+/// again then, 380 s). The black holes, the grown, the median black hole and the most gained stay
+/// the version's.
 const CENSUS_FIGURES_30: CompactFigures = CompactFigures {
     members: 1_658,
     black_holes: 12,

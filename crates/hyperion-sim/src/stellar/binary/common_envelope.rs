@@ -547,12 +547,18 @@ impl Engine {
         }
     }
 
-    /// The product of a coalescence of `mass` M☉ around a core of `core` M☉ from `source` where it
-    /// collapses at once by electron capture: from version 30 (P11.T4's `merged_capture`) one whose
-    /// core is an oxygen–neon dwarf's and holds its limit (`supernova::core_limit`), unless the
-    /// primary's pin is pending; `None` otherwise.
+    /// The product of a coalescence of `mass_msun` M☉ around a core of `core_msun` M☉ from `source`
+    /// where it collapses at once by electron capture: from version 30 (P11.T4's `merged_capture`)
+    /// one whose core is an oxygen–neon dwarf's ([`Engine::coalesced_source`], which is where either
+    /// parent's core is, a giant's own track typing it so included) and holds its limit
+    /// (`supernova::core_limit`), unless the primary's pin is pending; `None` otherwise.
     #[must_use]
-    fn merged_capture(&self, source: CoreSource, mass: f64, core: f64) -> Option<Product> {
+    fn merged_capture(
+        &self,
+        source: CoreSource,
+        mass_msun: f64,
+        core_msun: f64,
+    ) -> Option<Product> {
         if self.ctx.rules().merged_capture != MergedCaptureRules::Captured
             || source != CoreSource::OxygenNeonDwarf
             || self.pin_pending(0)
@@ -560,14 +566,14 @@ impl Engine {
             return None;
         }
         let limit = core_limit(source, self.ctx.track_options().remnant())?;
-        if core < limit.value() {
+        if core_msun < limit.value() {
             return None;
         }
         #[cfg(test)]
         super::merged_capture::count_merged_capture();
         Some(Product::ElectronCapture {
-            co_core: SolarMasses::new(core.min(mass)),
-            mass: SolarMasses::new(mass),
+            co_core: SolarMasses::new(core_msun.min(mass_msun)),
+            mass: SolarMasses::new(mass_msun),
         })
     }
 }
