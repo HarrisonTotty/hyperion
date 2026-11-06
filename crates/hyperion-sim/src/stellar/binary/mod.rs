@@ -46,6 +46,7 @@ pub mod ia;
 mod light;
 pub mod light_curves;
 mod marks;
+pub(crate) mod merged_capture;
 pub(crate) mod ns_accretion;
 pub mod pair_light;
 mod params;

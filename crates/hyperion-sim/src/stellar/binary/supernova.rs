@@ -218,7 +218,7 @@ pub(super) fn first_age_at(
 /// core that is no dwarf's, and for a carbon–oxygen one, which ends as its track does (P11.T4's
 /// kept-core endings, [`SwollenDeath::of`]).
 #[must_use]
-fn core_limit(source: CoreSource, recipe: RemnantRecipe) -> Option<SolarMasses> {
+pub(super) fn core_limit(source: CoreSource, recipe: RemnantRecipe) -> Option<SolarMasses> {
     match (source, recipe) {
         (CoreSource::Other | CoreSource::CarbonOxygenDwarf, _) => None,
         (CoreSource::OxygenNeonDwarf, RemnantRecipe::MandelMuller2020) => Some(capture_mass()),

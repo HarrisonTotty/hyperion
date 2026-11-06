@@ -7761,3 +7761,14 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   - _Landed over 29's folds (land-pod-r2, 2026-11-06)._ No `KeptCoreAtLimit` path: since the 29
     folds a kept carbon–oxygen core has no limit of its own, so seven paths; the tests' "every 29
     hold" is the version's rules.
+- **P11.T4: an ONe dwarf's coalescence past the capture mass collapses at once, held at 30** (lane
+  `p15-t9b-ia-yield`, 2026-11-06; research-leans-45 item 1; nothing moves at 28–29).
+  - _The hold._ `MERGED_CAPTURE_VERSION` = 30, `StellarRules::merged_capture`, read by
+    `Engine::product_member` (`merged_capture`): a coalescence whose `coalesced_source` is ONe and
+    whose core holds `supernova::core_limit` becomes `Product::ElectronCapture`; a pinned primary's
+    product is left to its pin.
+  - _Measured._ Layer E's probe (`the_merged_channel_s_pairs_against_e_s_table`, against 28's
+    table): 164 pairs past under every 29 hold, none under every 30 hold, so no ONe slice is
+    needed. The dwarf-limit census's new arm collapses 261 coalescences in D and 24 in E.
+  - _For the bump to 30._ Delete `Held`, the field, the brief's read and the tripwire; the 30
+    refit of the pair-light tables then takes the channel (P11.T17.b's two slow tests at 30).

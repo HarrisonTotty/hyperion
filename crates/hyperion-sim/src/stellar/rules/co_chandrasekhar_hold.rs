@@ -133,15 +133,16 @@ fn every_path_disrupts_and_pools_from_30() {
     }
 }
 
-/// The server golden's grid record `0x6200_5957_fe00_0024` of the galaxy of seed 1234 (`systems_in_range_briefs`,
-/// GPF 000N1Z D-36), whose 5.71 M☉ primary alone leaves a carbon–oxygen white dwarf of 1.12 M☉,
-/// and its pair a neutron star (P11.T11.a's records; plan 15's P15.T9.b): the primary, stripped to a
-/// helium star, leaves a 0.94 M☉ carbon–oxygen dwarf, which merges with the 1.64 M☉ helium star its
-/// companion's common envelope leaves; the product, a helium giant of 2.34 M☉ placed around the
-/// dwarf, collapses an iron core at its track's death into a 1.45 M☉ neutron star, with no Type Ia
-/// candidate pooled. Its track's `Mc,BAGB`, its mass, passes 2.25 M☉ (HPT section 6.1), and a kept
-/// core ends as its track does there (research-leans-38, P11.T4's kept-core endings): no path to the
-/// Chandrasekhar mass, so under the version's rules and every 30 hold alike.
+/// The server golden's grid record `0x6200_5957_fe00_0024` of the galaxy of seed 1234
+/// (`systems_in_range_briefs`, GPF 000N1Z D-36), whose 5.71 M☉ primary alone leaves a carbon–oxygen
+/// white dwarf of 1.12 M☉, and its pair a neutron star (P11.T11.a's records; plan 15's P15.T9.b):
+/// the primary, stripped to a helium star, leaves a 0.94 M☉ carbon–oxygen dwarf, which merges with
+/// the 1.64 M☉ helium star its companion's common envelope leaves; the product, a helium giant of
+/// 2.34 M☉ placed around the dwarf, collapses an iron core at its track's death into a 1.45 M☉
+/// neutron star, with no Type Ia candidate pooled. Its track's `Mc,BAGB`, its mass, passes 2.25 M☉
+/// (HPT section 6.1), and a kept core ends as its track does there (research-leans-38, P11.T4's
+/// kept-core endings): no path to the Chandrasekhar mass, so under the version's rules and every 30
+/// hold alike.
 #[test]
 fn the_golden_s_carbon_oxygen_dwarf_ends_a_neutron_star_by_its_kept_core() {
     use crate::galaxy::imf::MassFunctionKind;
@@ -287,8 +288,10 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
 /// before, and its 36 kept cores disrupt with none; layer E's 11 fed dwarfs collapse and its 2 kept
 /// cores disrupt. Under every 30 hold every one of them
 /// disrupts: 35 of layer D's kept cores pool their pair's first candidate, every one detonatable,
-/// so that layer D pools 319 accretions, not 284 (234 detonatable, not 199), and 1,987 of its pairs
-/// show a neutron star at their age, not 2,127; layer E's 11,193 such pairs become 11,187.
+/// so that layer D pools 319 accretions, not 284 (234 detonatable, not 199). Of layer D's pairs
+/// 1,987 rather than 2,127 show a neutron star at their age with this hold alone, and 2,072 with
+/// every 30 hold, whose oxygen–neon dwarfs' coalescences collapse at once (P11.T4's
+/// `merged_capture`, 2026-11-06); layer E's 11,193 become 11,187 and 11,190.
 const CENSUS_FIGURES: [Figures; 2] = [
     Figures {
         run: [8_519, 17_814, 19_213],
@@ -348,7 +351,7 @@ const CENSUS_FIGURES: [Figures; 2] = [
             [[124, 55], [319, 234]],
             [[5, 5], [25, 21]],
         ],
-        neutron_stars: [1, 1_987, 11_187],
+        neutron_stars: [1, 2_072, 11_190],
     },
 ];
 

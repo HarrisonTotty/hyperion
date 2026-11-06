@@ -10,7 +10,10 @@
 //!   Chandrasekhar mass (under version 25's rules some did) but a pinned primary's (design note
 //!   16), counted apart, which `Engine::held_product` takes as at 27; the merger products no star
 //!   holds, by what they leave; the swollen dwarfs and placed products of dwarfs that come back
-//!   the other kind, none; and the deaths of giants whose cores are dwarfs', by ending.
+//!   the other kind, none; and the deaths of giants whose cores are dwarfs', by ending. Under
+//!   every 30 hold too, which adds P11.T4's holds at 30: the carbon–oxygen dwarfs at the
+//!   Chandrasekhar mass and the oxygen–neon dwarfs' coalescences that collapse at once
+//!   (`merged_capture`), counted.
 
 use crate::planetary::testing::in_shares;
 
@@ -21,6 +24,7 @@ use crate::id::Layer;
 use crate::rng::Seed;
 use crate::stellar::Phase;
 use crate::stellar::binary::dwarf_limit::{dwarf_core_deaths, unplaced_counts};
+use crate::stellar::binary::merged_capture::merged_captures;
 use crate::stellar::binary::testing::{
     dwarfs_above_the_limit, generated_pairs, oxygen_neon_dwarfs_above_the_capture_mass,
     pinned_primary, swollen_dwarf_kinds,
@@ -79,6 +83,9 @@ struct Figures {
     /// 1.37 M☉ (`testing::oxygen_neon_dwarfs_above_the_capture_mass`): other than a pinned
     /// primary's, and a pinned primary's.
     oxygen_neon_above: [[usize; 2]; 3],
+    /// The coalescences of an oxygen–neon dwarf that collapse at once by electron capture
+    /// (`merged_capture::merged_captures`, from every 30 hold).
+    captured: [usize; 3],
 }
 
 /// The census of [`PAIRS`] pairs of each of layers C, D and E in `galaxy`, each run under `rules`.
@@ -93,6 +100,7 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
         merged: [[0; 2]; 3],
         endings: [[0; 5]; 3],
         oxygen_neon_above: [[0; 2]; 3],
+        captured: [0; 3],
     };
     for (k, layer) in [Layer::C, Layer::D, Layer::E].into_iter().enumerate() {
         let seed = CELLS_SEED + u64::try_from(k).expect("a small index");
@@ -102,6 +110,7 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
             // The share runs on one thread, whose counters it reads before and after.
             let unplaced_before = unplaced_counts();
             let endings_before = dwarf_core_deaths();
+            let captured_before = merged_captures();
             let mut counts = [0_usize; 10];
             for (input, age) in pairs.iter().skip(share).step_by(SHARES) {
                 let input = input.clone().with_rules(rules);
@@ -136,9 +145,15 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
             let endings_after = dwarf_core_deaths();
             let endings: [usize; 5] =
                 core::array::from_fn(|j| endings_after[j] - endings_before[j]);
-            (counts, unplaced, endings)
+            (
+                counts,
+                unplaced,
+                endings,
+                merged_captures() - captured_before,
+            )
         });
-        for (counts, unplaced, endings) in shares {
+        for (counts, unplaced, endings, captured) in shares {
+            figures.captured[k] += captured;
             figures.run[k] += counts[0];
             figures.above[k] += counts[1];
             figures.pinned[k] += counts[2];
@@ -167,42 +182,70 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
 /// placed product changes kind; a kept core ends as its track does, its carbon–oxygen core
 /// disrupting where its track captures electrons, most on the tracks of helium stars of
 /// 1.6–2.25 M☉ (research-leans-40), and the disruptions leave both members `NoRemnant`; no
-/// oxygen–neon dwarf passes the capture mass, and no unplaced product captures electrons).
-const CENSUS_FIGURES: Figures = Figures {
-    run: [8_519, 17_814, 19_213],
-    above: [0; 3],
-    pinned: [0; 3],
-    massless: [174, 56, 12],
-    unplaced: [[0; 8], [0, 1, 0, 6, 0, 0, 0, 0], [0, 0, 0, 0, 0, 109, 0, 0]],
-    swollen: [[0; 2]; 3],
-    merged: [[0; 2]; 3],
-    endings: [[25, 0, 0, 0, 0], [848, 45, 0, 36, 11], [69, 4, 0, 2, 0]],
-    oxygen_neon_above: [[0; 2]; 3],
-};
+/// oxygen–neon dwarf passes the capture mass, and no unplaced product captures electrons); and
+/// under every 30 hold, as measured (2026-11-06, at generator version 28 under every 30 hold;
+/// 349 s for three arms, pod, 16 vCPU): 261 coalescences of an oxygen–neon dwarf in layer D and
+/// 24 in E collapse at once by electron capture (P11.T4's `merged_capture`), so that fewer giants
+/// with a dwarf's core die later, and 8 more of layer D's pairs leave both members `NoRemnant`,
+/// the carbon–oxygen dwarfs at the Chandrasekhar mass disrupting (P11.T4's `co_chandrasekhar`).
+const CENSUS_FIGURES: [Figures; 2] = [
+    Figures {
+        run: [8_519, 17_814, 19_213],
+        above: [0; 3],
+        pinned: [0; 3],
+        massless: [174, 56, 12],
+        unplaced: [[0; 8], [0, 1, 0, 6, 0, 0, 0, 0], [0, 0, 0, 0, 0, 109, 0, 0]],
+        swollen: [[0; 2]; 3],
+        merged: [[0; 2]; 3],
+        endings: [[25, 0, 0, 0, 0], [848, 45, 0, 36, 11], [69, 4, 0, 2, 0]],
+        oxygen_neon_above: [[0; 2]; 3],
+        captured: [0; 3],
+    },
+    Figures {
+        run: [8_519, 17_814, 19_213],
+        above: [0; 3],
+        pinned: [0; 3],
+        massless: [174, 64, 12],
+        unplaced: [[0; 8], [0, 1, 0, 6, 0, 0, 0, 0], [0, 0, 0, 0, 0, 109, 0, 0]],
+        swollen: [[0; 2]; 3],
+        merged: [[0; 2]; 3],
+        endings: [[25, 0, 0, 0, 0], [705, 25, 0, 36, 0], [51, 1, 0, 2, 0]],
+        oxygen_neon_above: [[0; 2]; 3],
+        captured: [0, 261, 24],
+    },
+];
 
-/// A census of 6 × 10⁴ generated pairs ([`census`]) under the version's rules: none shows a white
-/// dwarf above the Chandrasekhar mass.
+/// A census of 6 × 10⁴ generated pairs ([`census`]) under the version's rules and every 30 hold:
+/// none shows a white dwarf above the Chandrasekhar mass.
 #[test]
-#[ignore = "slow: 6 × 10⁴ generated pairs run through the binary engine to 13.8 Gyr"]
+#[ignore = "slow: 6 × 10⁴ generated pairs run through the binary engine to 13.8 Gyr, twice"]
 fn no_white_dwarf_passes_the_chandrasekhar_mass_under_every_27_hold() {
     let galaxy = Galaxy::from_params(Seed::new(CENSUS_SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture's gas is mostly neutral");
-    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
-    let figures = census(&galaxy, rules);
-    println!("{rules:?}: {figures:?}");
-    assert_eq!(figures.above, [0; 3], "{figures:?}");
-    assert_eq!(figures.swollen, [[0; 2]; 3], "{figures:?}");
+    let figures = [
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+        StellarRules::every_30_hold(),
+    ]
+    .map(|rules| {
+        let figures = census(&galaxy, rules);
+        println!("{rules:?}: {figures:?}");
+        assert_eq!(figures.above, [0; 3], "{figures:?}");
+        figures
+    });
+    assert_eq!(figures[0].swollen, [[0; 2]; 3], "{:?}", figures[0]);
     // Carbon burning is not undone: no oxygen–neon core comes back carbon–oxygen.
     assert!(
-        figures.merged.iter().all(|[_, back]| *back == 0),
-        "{figures:?}"
+        figures[0].merged.iter().all(|[_, back]| *back == 0),
+        "{:?}",
+        figures[0]
     );
     assert!(
-        figures
+        figures[0]
             .oxygen_neon_above
             .iter()
             .all(|[other, _]| *other == 0),
-        "{figures:?}"
+        "{:?}",
+        figures[0]
     );
     assert_eq!(figures, CENSUS_FIGURES);
 }

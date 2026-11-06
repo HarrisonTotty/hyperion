@@ -35,9 +35,13 @@
 //!   disruption that leaves nothing with one Type Ia candidate from 30, read by the binary engine
 //!   through its input's rules (`Engine::end_at_the_chandrasekhar_mass`). The fitted tables keep
 //!   the version's rules until the bump refits them (`stellar/rules/co_chandrasekhar_hold.rs`).
+//! - [`merged_capture`](StellarRules::merged_capture), at `MERGED_CAPTURE_VERSION` (plan 11,
+//!   P11.T4's fix): whether an oxygen–neon dwarf's coalescence that holds the capture mass
+//!   collapses at once by electron capture, from 30, read by `Engine::product_member` through the
+//!   engine's input's rules (`stellar/rules/merged_capture_hold.rs`).
 //!
 //! The 27 folds put P11's 27 holds on the record, and the 29 folds P11.T4's white-dwarf union and
-//! P11.T12's wind reach; `co_chandrasekhar` is at 30.
+//! P11.T12's wind reach; `co_chandrasekhar` and `merged_capture` are at 30.
 //!
 //! [`CO_CHANDRASEKHAR_VERSION`]: crate::stellar::binary::co_chandrasekhar::CO_CHANDRASEKHAR_VERSION
 //!
@@ -47,6 +51,7 @@
 
 use crate::GeneratorVersion;
 use crate::stellar::binary::co_chandrasekhar::CoChandrasekharRules;
+use crate::stellar::binary::merged_capture::MergedCaptureRules;
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -60,6 +65,10 @@ pub(crate) struct StellarRules {
     /// How a carbon–oxygen white dwarf or core at the Chandrasekhar mass ends, the hold of
     /// [`CO_CHANDRASEKHAR_VERSION`](crate::stellar::binary::co_chandrasekhar::CO_CHANDRASEKHAR_VERSION).
     pub(crate) co_chandrasekhar: CoChandrasekharRules,
+    /// Whether an oxygen–neon dwarf's coalescence that holds the capture mass collapses at once,
+    /// the hold of
+    /// [`MERGED_CAPTURE_VERSION`](crate::stellar::binary::merged_capture::MERGED_CAPTURE_VERSION).
+    pub(crate) merged_capture: MergedCaptureRules,
 }
 
 impl StellarRules {
@@ -72,12 +81,14 @@ impl StellarRules {
         Self {
             kick_rank: KickRankRules::Committed,
             co_chandrasekhar: CoChandrasekharRules::of_version(version),
+            merged_capture: MergedCaptureRules::of_version(version),
         }
     }
 
     /// Every stellar hold at 30 in force, for a test that asserts a 30 figure without a galaxy:
-    /// P11.T4's `co_chandrasekhar`. The stellar part of `GalaxyRules::every_30_hold()`, so a later
-    /// hold at 30 joins both with nothing to edit; the 30 bump deletes it with it.
+    /// P11.T4's `co_chandrasekhar` and `merged_capture`. The stellar part of
+    /// `GalaxyRules::every_30_hold()`, so a later hold at 30 joins both with nothing to edit; the 30
+    /// bump deletes it with it.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_30_hold() -> Self {
@@ -113,6 +124,8 @@ mod dwarf_limit_hold;
 mod events_hold;
 #[cfg(test)]
 mod heavy_donor_hold;
+#[cfg(test)]
+mod merged_capture_hold;
 #[cfg(test)]
 mod merger_mass_hold;
 #[cfg(test)]

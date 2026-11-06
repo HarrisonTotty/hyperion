@@ -47,9 +47,11 @@ use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years
 use super::co_chandrasekhar::{ChandrasekharPath, CoChandrasekharRules};
 use super::dwarf_limit::{self, CoreSource, ProductTyping, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
+use super::merged_capture::MergedCaptureRules;
 use super::params::BinaryParams;
 use super::rlof::kelvin_helmholtz;
 use super::star::{G, Kind, Member, Path, cooling_origin, moment_of_inertia, positive};
+use super::supernova::core_limit;
 use super::timeline::{IaPoolChannel, PooledIaEvent, SegmentKind};
 
 /// BSE's collision matrix (their table 2, as their code's `instar` sets it): the type of the
@@ -539,8 +541,34 @@ impl Engine {
                 core,
                 burnt,
                 fraction,
-            } => self.new_star_around(kind, mass, core, burnt, fraction, source),
+            } => self
+                .merged_capture(source, mass, core)
+                .unwrap_or_else(|| self.new_star_around(kind, mass, core, burnt, fraction, source)),
         }
+    }
+
+    /// The product of a coalescence of `mass` M☉ around a core of `core` M☉ from `source` where it
+    /// collapses at once by electron capture: from version 30 (P11.T4's `merged_capture`) one whose
+    /// core is an oxygen–neon dwarf's and holds its limit (`supernova::core_limit`), unless the
+    /// primary's pin is pending; `None` otherwise.
+    #[must_use]
+    fn merged_capture(&self, source: CoreSource, mass: f64, core: f64) -> Option<Product> {
+        if self.ctx.rules().merged_capture != MergedCaptureRules::Captured
+            || source != CoreSource::OxygenNeonDwarf
+            || self.pin_pending(0)
+        {
+            return None;
+        }
+        let limit = core_limit(source, self.ctx.track_options().remnant())?;
+        if core < limit.value() {
+            return None;
+        }
+        #[cfg(test)]
+        super::merged_capture::count_merged_capture();
+        Some(Product::ElectronCapture {
+            co_core: SolarMasses::new(core.min(mass)),
+            mass: SolarMasses::new(mass),
+        })
     }
 }
 
