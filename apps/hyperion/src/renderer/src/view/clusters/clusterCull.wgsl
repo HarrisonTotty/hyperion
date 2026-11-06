@@ -188,7 +188,7 @@ const STRIDE_LEVELS : u32 = 4u;
 // on its own grid at its cap (`INSTANCE_SUB_GRID_STRIDES`).
 const STRIDE_BAND_FRACTION : f32 = 0.002;
 // `strides.ts`' STRIDE_MASK_BAND_FRACTION: a stand-in's mask's β, its own.
-const STRIDE_MASK_BAND_FRACTION : f32 = 0.2;
+const STRIDE_MASK_BAND_FRACTION : f32 = 0.15;
 const INSTANCE_FINEST : u32 = 0x40000u;
 const INSTANCE_SUB_GRID_STRIDES : u32 = 0x80000u;
 // The threads of a workgroup, each taking every 64th cluster of its instance's page.

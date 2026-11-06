@@ -2758,6 +2758,9 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     the bits. Probe knob `SEAM_EDGE_STAND_INS`; `BudgetFrame.litMeshStandInsBy`, `edgeStandInsBy`.
   - (lean, 2026-11-05) Step 0's gate (level-1 mixed under a tenth of `litMeshStandIns`: 0.4% on
     high) said skip the masks; they were built first, and they take level-1 no-cluster areas (39%).
+  - (lean, 2026-11-05) Step 3: a mask's β, `STRIDE_MASK_BAND_FRACTION`, is 0.15 (0.2 before) in
+    both twins: high's probe moved 0.727 px at most (keep-bound 0.8), and with the lookahead off
+    the masks drew 2.1% fewer of high's mean lit triangles.
   - Not built: levels 2–3 and low's no-cluster parts across the edge stay on the lit mesh.
   - Pending: the owner's Mac (`views-check --terrain --hidden --setting high|low`, with and without
     `--geometry edgeStandIns=off`), the RTX lit pass, TERRAIN TEST mid-survey; Windows NOT RUN.

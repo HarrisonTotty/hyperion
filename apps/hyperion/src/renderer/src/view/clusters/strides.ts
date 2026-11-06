@@ -100,10 +100,12 @@ export const STRIDE_BAND_FRACTION = 0.002;
  * patch's {@link STRIDE_BAND_FRACTION}, since a mask's bands move with its view's slewed τ′ as a
  * whole patch's do, by up to `BAND_SLEW_PER_STEP` (2%) a step, and at β = 0.002 such a step swept a
  * mask's vertex from k = 1 to 0 in one frame: 4.85 px on high's seamless probe at τ′ near 80 px,
- * against T3.c's 1 px. At 0.2 a step moves its k by at most 0.1 (a hand value, lean, 2026-11-05).
+ * against T3.c's 1 px. At 0.15 a step moves its k by at most 0.13 (a hand value, lean, 2026-11-05):
+ * high's probe moved 0.727 px at most against the lane's 0.8 px keep-bound, and its masks drew 2.1%
+ * fewer of high's mean lit triangles than at 0.2 (0.536 px; R14.T3.c's edge stand-ins' step 3).
  * A mask places no vertex alike with another instance, so its own β breaks no shared place.
  */
-export const STRIDE_MASK_BAND_FRACTION = 0.2;
+export const STRIDE_MASK_BAND_FRACTION = 0.15;
 
 /** β of an instance of sub-patch word `subWord`: a mask's {@link STRIDE_MASK_BAND_FRACTION}, else
  * {@link STRIDE_BAND_FRACTION}. */

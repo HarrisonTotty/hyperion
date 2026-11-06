@@ -662,15 +662,19 @@ describe("the cull's camera strides", () => {
 
   it("takes a mask's strides and its vertices' morph over its own wider band, a whole patch's over β (R14.T3.c's stand-ins)", () => {
     const levels: StrideBandsM = [100, 200, 400];
+    const beta = strideBandFractionOf(MASK);
     expect([
       cameraStrideLevel(levels, 3, 1_000),
-      cameraStrideLevel(levels, 3, 1_000, strideBandFractionOf(MASK)),
-      cameraStrideLevel(levels, 3, 450, strideBandFractionOf(MASK)),
-      cameraStrideLevel(levels, 3, 470, strideBandFractionOf(MASK)),
+      cameraStrideLevel(levels, 3, 1_000, beta),
+      cameraStrideLevel(levels, 3, 450, beta),
+      // Short of the stride-8 band by a metre at the mask's β, past it by far at a whole patch's.
+      cameraStrideLevel(levels, 3, 400 * (1 + beta) - 1, beta),
+      cameraStrideLevel(levels, 3, 400 * (1 + beta) - 1),
       strideBandFractionOf(subPatchWord(1, 1, 0)),
       strideMorphFactor(100, 110),
-      strideMorphFactor(100, 110, strideBandFractionOf(MASK)),
-    ]).toEqual([3, 3, 2, 2, STRIDE_BAND_FRACTION, 1, 0.5]);
+      // Half across the mask's band, which a whole patch's has long passed.
+      strideMorphFactor(100, 100 + 50 * beta, beta),
+    ]).toEqual([3, 3, 2, 2, 3, STRIDE_BAND_FRACTION, 1, 0.5]);
   });
 
   it("holds an edge's band in a half float of kilometres rounded up, none and +∞ as they are", () => {

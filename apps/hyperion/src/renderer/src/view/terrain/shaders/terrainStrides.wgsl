@@ -26,7 +26,7 @@
 // `strides.ts`' STRIDE_BAND_FRACTION, STRIDE_MORPH_LEVELS and STRIDE_NODES.
 const STRIDE_BAND_FRACTION : f32 = 0.002;
 // `strides.ts`' STRIDE_MASK_BAND_FRACTION: a stand-in's mask's β, its own.
-const STRIDE_MASK_BAND_FRACTION : f32 = 0.2;
+const STRIDE_MASK_BAND_FRACTION : f32 = 0.15;
 const STRIDE_MORPH_LEVELS : u32 = 3u;
 const STRIDE_NODES : u32 = 9u;
 const STRIDE_NO_NODE : u32 = 0xffffffffu;

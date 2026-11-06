@@ -206,19 +206,19 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
   // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "c72c5b0ec075a626"],
-    ["terrain-lit-face-differences", "928f1168533651f7"],
+    ["terrain-lit-baked-offsets", "373ffd36bfd535da"],
+    ["terrain-lit-face-differences", "91ffff9999a4772b"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "7fca84d8acacdbe3"],
-    ["terrain-depth-face-differences", "42f5ffa1832507ce"],
-    ["terrain-shadow-baked-offsets", "8c7f4ec14e884501"],
-    ["terrain-shadow-face-differences", "35fa8d09d59d98a4"],
-    ["terrain-lit-baked-offsets-still", "eb64c535839cffe9"],
-    ["terrain-lit-face-differences-still", "88552ef80416d6bc"],
-    ["terrain-depth-baked-offsets-still", "cf57a3ca5d4058d6"],
-    ["terrain-depth-face-differences-still", "6e739b0172e44b67"],
-    ["terrain-shadow-baked-offsets-still", "b72c831c6aa40376"],
-    ["terrain-shadow-face-differences-still", "383dd0b98be90cc7"],
+    ["terrain-depth-baked-offsets", "5cd00e7577554097"],
+    ["terrain-depth-face-differences", "504e69f3a5ff7d02"],
+    ["terrain-shadow-baked-offsets", "e87b15d47d4754b5"],
+    ["terrain-shadow-face-differences", "454cab72ef336f18"],
+    ["terrain-lit-baked-offsets-still", "a99c1a8101858e7f"],
+    ["terrain-lit-face-differences-still", "40d863342ceb4dfa"],
+    ["terrain-depth-baked-offsets-still", "86a711dc2a6c5c08"],
+    ["terrain-depth-face-differences-still", "44e94b91abd04391"],
+    ["terrain-shadow-baked-offsets-still", "d476b3a718b5e4c4"],
+    ["terrain-shadow-face-differences-still", "c4f19cd8082dfeed"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [
