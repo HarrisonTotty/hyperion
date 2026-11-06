@@ -463,19 +463,31 @@ fn serve(
         match op {
             Op::Get { key, reply } => {
                 let found = files.read(&key);
+                // Before the reply, so that whoever has it reads counters that count it.
+                publish(&files.counters, counters);
                 // The tables' build may have been given up, and then nobody wants them.
                 let _ = reply.send(found);
             }
-            Op::Bad { key } => files.remove_bad(&key),
-            Op::Keep { key, tables } => files.write(&key, &tables),
+            Op::Bad { key } => {
+                files.remove_bad(&key);
+                publish(&files.counters, counters);
+            }
+            Op::Keep { key, tables } => {
+                files.write(&key, &tables);
+                publish(&files.counters, counters);
+            }
         }
-        // `keep` counts the tables it drops itself, while the thread is busy.
-        let mut shared = lock(counters);
-        *shared = SkyTableFileCounters {
-            dropped: shared.dropped,
-            ..files.counters
-        };
     }
+}
+
+/// Copies the store's `counters` to the `shared` ones the server reads, but for the tables
+/// dropped, which `keep` counts there itself while the thread is busy.
+fn publish(counters: &SkyTableFileCounters, shared: &Mutex<SkyTableFileCounters>) {
+    let mut shared = lock(shared);
+    *shared = SkyTableFileCounters {
+        dropped: shared.dropped,
+        ..*counters
+    };
 }
 
 /// A file held: its bytes, and when it was last used, in the order of uses.

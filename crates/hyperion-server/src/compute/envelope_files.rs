@@ -385,18 +385,27 @@ fn serve(
                     .into_iter()
                     .filter_map(|(number, key)| Some((number, files.read(&key)?)))
                     .collect();
+                // Before the reply, so that whoever has it reads counters that count it.
+                publish(&files.counters, counters);
                 // The list's build may have been given up, and then nobody wants them.
                 let _ = reply.send(found);
             }
-            Op::Keep { key, envelope } => files.write(&key, &envelope),
+            Op::Keep { key, envelope } => {
+                files.write(&key, &envelope);
+                publish(&files.counters, counters);
+            }
         }
-        // `keep` counts the envelopes it drops itself, while the thread is busy.
-        let mut shared = lock(counters);
-        *shared = EnvelopeFileCounters {
-            dropped: shared.dropped,
-            ..files.counters
-        };
     }
+}
+
+/// Copies the store's `counters` to the `shared` ones the server reads, but for the envelopes
+/// dropped, which `keep` counts there itself while the thread is busy.
+fn publish(counters: &EnvelopeFileCounters, shared: &Mutex<EnvelopeFileCounters>) {
+    let mut shared = lock(shared);
+    *shared = EnvelopeFileCounters {
+        dropped: shared.dropped,
+        ..*counters
+    };
 }
 
 /// A file held: its bytes, and when it was last used, in the order of uses.
