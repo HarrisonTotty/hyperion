@@ -10,7 +10,9 @@
  * occultation through the photorealistic frame onto a canvas, as meshes and as discs, for the
  * owner's check by eye. Every mesh frame of the group is drawn once more by the figures' instanced
  * draws and on the cluster path (plan R14, R14.T4.a), in one run, and held byte for byte, colour
- * and depth.
+ * and depth; and shaded once a pixel, its figures' raster into figure IDs and their resolve (plan
+ * R07, `GeometrySettings.figureShading` `screen`), both ways, held byte for byte to its forward
+ * draws in colour and depth.
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
@@ -59,6 +61,7 @@ import { WIREFRAME_MATERIALS } from "../view/wireframe/submit";
 import { base64Of, type CapturedImage } from "./atmosphere";
 import { addCanvas } from "./frames";
 import { ClusterStats } from "../view/clusters/stats";
+import { VisibilityBuffer } from "../view/clusters/visibility";
 import { GEOMETRY_BEFORE_R14, SETTINGS } from "../view/quality/qualitySetting";
 import { PATCH_INDICES } from "../view/terrain/gpu/resources";
 import { smokeGeometry } from "./geometry";
@@ -267,9 +270,173 @@ export async function checkMeshBodies(engine: RenderEngine, checks: Checks): Pro
     await checkPromotedCells(engine, renderer, checks);
     await checkOccultation(engine, renderer, checks);
     await checkFigureClusters(engine, renderer, checks);
+    await checkFigureScreen(engine, renderer, checks);
   } finally {
     renderer.dispose();
   }
+}
+
+/**
+ * A plan's figures shaded once a pixel (plan R07, `figureShading` `screen`), and its discs, into a
+ * scene target, as the photorealistic frame draws them: the target cleared, the figures' raster
+ * into figure IDs on its depth, their resolve, then the discs; its colour and depth read back.
+ */
+async function drawScreenFigureFrame(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  plan: BodyFramePlan,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): Promise<{ readonly colour: ArrayBuffer; readonly depth: ArrayBuffer }> {
+  const target = createSceneTarget(engine, "smoke figure screen", viewport);
+  const ids = new VisibilityBuffer(engine, "smoke figure screen", target, viewport);
+  try {
+    const viewRotation = viewRotation4(camera.orientation);
+    const projection = perspectiveReversedInfinite(
+      camera.fovXRad,
+      viewport.widthPx / viewport.heightPx,
+      NEAR_PLANE_M,
+    );
+    const frame = { viewRotation, projection, postProcesses: [] };
+    // Cleared as the forward frame's bodies pass clears it, which draws first.
+    target.render({ ...frame, label: PHOTOREAL_PASS_LABELS.bodies, draws: [] });
+    ids.target.render({
+      ...frame,
+      label: PHOTOREAL_PASS_LABELS.figureIds,
+      draws: renderer.meshDraws(plan, "ids"),
+    });
+    target.render({
+      ...frame,
+      label: PHOTOREAL_PASS_LABELS.figureResolve,
+      draws: renderer.figureResolveDraws(plan, ids.ids),
+      colourLoad: "load",
+    });
+    target.render({
+      ...frame,
+      label: PHOTOREAL_PASS_LABELS.discs,
+      draws: renderer.draws(plan),
+      colourLoad: "load",
+    });
+    const [colour, depth] = await Promise.all([
+      engine.readTexture(target.colour),
+      engine.readTexture(target.depth ?? target.colour),
+    ]);
+    return { colour, depth };
+  } finally {
+    ids.dispose();
+    target.dispose();
+  }
+}
+
+/**
+ * Plan R07's figures shaded once a pixel (`GeometrySettings.figureShading` `screen`): each mesh
+ * frame of {@link checkFigureClusters}' kinds, drawn forward and once a pixel, on the cluster path
+ * and by the instanced draws, the same plan each way, byte for byte in colour and depth; the
+ * screen path's pipelines prepared first, as the renderer waits for them.
+ */
+async function checkFigureScreen(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  checks: Checks,
+): Promise<void> {
+  const straight: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+  const lowOrbit: ProjectionCamera = {
+    orientation: lookAlong(vec3(0, -Math.sin(15 * RAD), -Math.cos(15 * RAD)), vec3(0, 1, 0)),
+    fovXRad: Math.PI / 3,
+  };
+  const viewport: Viewport = { widthPx: 96, heightPx: 80 };
+  const earth: BodyFigure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6, pole: null };
+  const saturn: BodyFigure = {
+    equatorialRadiusM: 6.0268e7,
+    polarRadiusM: 6.0268e7 * (1 - 0.098),
+    pole: normalise(vec3(0, 1, 0.4)),
+  };
+  const atPhase = (deg: number): Vec3 => vec3(Math.sin(deg * RAD), 0, Math.cos(deg * RAD));
+  const frames = [
+    {
+      name: "Earth 20 px",
+      plan: () =>
+        planOfOne(
+          earth,
+          ahead(earth, 20, straight, viewport),
+          atPhase(80),
+          true,
+          straight,
+          viewport,
+        ),
+      camera: straight,
+    },
+    {
+      name: "Saturn-like 64 px",
+      plan: () =>
+        planOfOne(
+          saturn,
+          ahead(saturn, 64, straight, viewport),
+          atPhase(60),
+          true,
+          straight,
+          viewport,
+        ),
+      camera: straight,
+    },
+    {
+      name: "Earth from 400 km",
+      plan: () =>
+        planOfOne(
+          earth,
+          vec3(0, -(6.371e6 + 4e5), 0),
+          vec3(0.2, 0.9, -0.4),
+          true,
+          lowOrbit,
+          viewport,
+        ),
+      camera: lowOrbit,
+    },
+  ];
+  const ways = [
+    ["clusters", SETTINGS.high.geometry],
+    ["instanced", GEOMETRY_BEFORE_R14],
+  ] as const;
+  let ready = true;
+  const differing: string[] = [];
+  const digests: string[] = [];
+  try {
+    for (const [way, geometry] of ways) {
+      for (const { name, plan, camera } of frames) {
+        renderer.setGeometry(geometry);
+        const forwardPlan = plan();
+        // Each frame drawn and read back forward, then once a pixel, before the next.
+        // oxlint-disable-next-line no-await-in-loop
+        const forward = await drawFigureFrame(engine, renderer, forwardPlan, camera, viewport);
+        const screenPlan = plan();
+        let prepared = renderer.screenReady(screenPlan);
+        for (let round = 0; round < 600 && !prepared; round += 1) {
+          // Its pipelines compile off the frame, as the renderer's wait for them.
+          // oxlint-disable-next-line no-await-in-loop
+          await pause(50);
+          prepared = renderer.screenReady(screenPlan);
+        }
+        ready &&= prepared;
+        // oxlint-disable-next-line no-await-in-loop
+        const screen = await drawScreenFigureFrame(engine, renderer, screenPlan, camera, viewport);
+        const colourSame = bytesDigest(forward.colour) === bytesDigest(screen.colour);
+        const depthSame = bytesDigest(forward.depth) === bytesDigest(screen.depth);
+        if (!(colourSame && depthSame)) {
+          differing.push(
+            `${name} ${way} (colour ${String(colourSame)}, depth ${String(depthSame)})`,
+          );
+        }
+        digests.push(`${name} ${way} ${bytesDigest(screen.colour)}/${bytesDigest(screen.depth)}`);
+      }
+    }
+  } finally {
+    renderer.setGeometry(smokeGeometry("high"));
+  }
+  checks.check(
+    "plan R07's mesh regime's figures shaded once a pixel, their raster into figure IDs and their resolve, draw the frames their forward draws draw, byte for byte in colour and depth, on the cluster path and instanced",
+    ready && differing.length === 0,
+    `screen pipelines prepared ${String(ready)}; ${String(frames.length * ways.length)} frames, ${differing.length === 0 ? "every one the same" : `differing ${differing.join(", ")}`}; digests ${digests.join(", ")}`,
+  );
 }
 
 /** A plan's figures and discs drawn into a scene target, its colour and depth read back. */
@@ -753,6 +920,9 @@ export async function captureOccultation(engine: RenderEngine): Promise<Captured
           previousRegimes: previous,
           overlay: null,
           meter: null,
+          // The page's geometry, so that a run's `--geometry` draws its levers here too (plan R07's
+          // figures and cells among them).
+          geometry: smokeGeometry("high"),
         });
         previous = plan?.regimes ?? previous;
         // The canvas is read back in the task that drew it, each step before the next.

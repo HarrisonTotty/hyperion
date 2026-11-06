@@ -153,8 +153,10 @@ import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import bodyDiscCellsWgsl from "../shaders/bodyDiscCells.wgsl?raw";
 import bodyDiscCellsPackedWgsl from "../shaders/bodyDiscCellsPacked.wgsl?raw";
 import bodyDiscDrawWgsl from "../shaders/bodyDiscDraw.wgsl?raw";
+import figureResolveWgsl from "../shaders/figureResolve.wgsl?raw";
 import smoothMeshWgsl from "../shaders/smoothMesh.wgsl?raw";
 import smoothMeshClusterWgsl from "../shaders/smoothMeshCluster.wgsl?raw";
+import smoothMeshIdsWgsl from "../shaders/smoothMeshIds.wgsl?raw";
 import { sphereOutsideView, sphereScreenRect, WIREFRAME_MESHES } from "../wireframe/submit";
 import {
   type DiscCellJobs,
@@ -1533,6 +1535,124 @@ export const SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL = figureClusterMaterial(
   "GLOWING MESH CLUSTERS",
 );
 
+/** smoothMesh.wgsl's fragment stage's head, whose place the figure's raster takes. */
+const FIGURE_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(v : MeshVarying) -> @location(0) vec4f {";
+
+/** bodyDiscDraw.wgsl's fragment stage's head, whose place the figure's resolve takes. */
+const DISC_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(v : DiscVarying) -> @location(0) vec4f {";
+
+/**
+ * `source` with its fragment stage, from `head` to the source's end, where it is last, replaced by
+ * `stage`'s source.
+ *
+ * @throws Error unless `head` occurs once in `source`.
+ */
+function withFragmentStage(source: string, head: string, stage: string): string {
+  const parts = source.split(head);
+  const [kept] = parts;
+  if (parts.length !== 2 || kept === undefined) {
+    throw new Error(
+      `a figure's screen form needs its fragment stage once, found ${String(parts.length - 1)}`,
+    );
+  }
+  return `${kept}${stage}`;
+}
+
+/** The figure's raster's source: the mesh regime's vertex stage, then `smoothMeshIds.wgsl`. */
+const SMOOTH_MESH_IDS_SOURCE = withFragmentStage(
+  SMOOTH_MESH_SOURCE,
+  FIGURE_FRAGMENT_HEAD,
+  smoothMeshIdsWgsl,
+);
+
+/**
+ * The mesh regime's figure's raster (plan R07, the owner's Mac; `GeometrySettings.figureShading`
+ * `screen`, `shaders/smoothMeshIds.wgsl`): {@link SMOOTH_MESH_MATERIAL}'s vertex stage, bindings,
+ * uniforms and states, its fragment stage writing the record's index into the view's `r32uint`
+ * figure IDs wherever the forward draw's would shade, and discarding where it discards, so that it
+ * writes the forward draw's depth; one form for every record, since it forms no light.
+ */
+export const SMOOTH_MESH_IDS_MATERIAL: WgslMaterialSpec = {
+  ...SMOOTH_MESH_MATERIAL,
+  name: "bodies:smoothMeshIds",
+  displayName: "BODY MESH IDS",
+  vertexWgsl: SMOOTH_MESH_IDS_SOURCE,
+  fragmentWgsl: SMOOTH_MESH_IDS_SOURCE,
+};
+
+/** Its form on the cluster path (plan R14, R14.T4.a). */
+export const SMOOTH_MESH_IDS_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_IDS_MATERIAL,
+  "MESH ID CLUSTERS",
+);
+
+/** The group 2 binding of the view's figure IDs (`figureResolve.wgsl`), past every other. */
+const FIGURE_IDS_BINDING = 18;
+
+/** The figure IDs' entry in the resolve's layouts: an `r32uint` read by `textureLoad`. */
+const FIGURE_IDS_TEXTURE: TextureBindingSpec = {
+  name: "figureIds",
+  binding: FIGURE_IDS_BINDING,
+  sampleType: "uint",
+};
+
+/** The figure's resolve's source: the disc's vertex stage, then `figureResolve.wgsl`. */
+const FIGURE_RESOLVE_SOURCE = withFragmentStage(DISC_SOURCE, DISC_FRAGMENT_HEAD, figureResolveWgsl);
+
+/**
+ * The mesh regime's figure's resolve (plan R07, the owner's Mac; `GeometrySettings.figureShading`
+ * `screen`, `shaders/figureResolve.wgsl`), in each form: the disc's interior draw over the body's
+ * rectangle, its corners at depth 1 (`FIGURE_RESOLVE_DEPTHS`), shading each pixel whose figure ID is
+ * its record's as the forward draw does and discarding the rest; the disc's interior's uniforms,
+ * storage and states, its form's textures and the figure IDs at binding 18.
+ */
+export const FIGURE_RESOLVE_MATERIALS: Readonly<Record<"plain" | FormKind, WgslMaterialSpec>> =
+  (() => {
+    const plain: WgslMaterialSpec = {
+      ...BODY_DISC_MATERIALS.interior,
+      name: "bodies:figureResolve",
+      displayName: "BODY FIGURE RESOLVE",
+      vertexWgsl: FIGURE_RESOLVE_SOURCE,
+      fragmentWgsl: FIGURE_RESOLVE_SOURCE,
+      textures: [...DISC_DRAW_TEXTURES, FIGURE_IDS_TEXTURE],
+    };
+    const emissive = withDiscEmission(FIGURE_RESOLVE_SOURCE);
+    const air = withDiscAir(FIGURE_RESOLVE_SOURCE);
+    const emissiveAir = withDiscEmissionAndAir(FIGURE_RESOLVE_SOURCE);
+    return {
+      plain,
+      emissive: {
+        ...plain,
+        name: "bodies:figureResolveEmissive",
+        displayName: "EMISSIVE FIGURE RESOLVE",
+        vertexWgsl: emissive,
+        fragmentWgsl: emissive,
+      },
+      air: {
+        ...plain,
+        name: "bodies:figureResolveAir",
+        displayName: "ATMOSPHERIC FIGURE RESOLVE",
+        vertexWgsl: air,
+        fragmentWgsl: air,
+        textures: [...DISC_AIR_TEXTURES, FIGURE_IDS_TEXTURE],
+      },
+      emissiveAir: {
+        ...plain,
+        name: "bodies:figureResolveEmissiveAir",
+        displayName: "GLOWING FIGURE RESOLVE",
+        vertexWgsl: emissiveAir,
+        fragmentWgsl: emissiveAir,
+        textures: [...DISC_AIR_TEXTURES, FIGURE_IDS_TEXTURE],
+      },
+    };
+  })();
+
+/**
+ * The figure's resolve's rectangle's corner depths: the near plane's, 1 under reversed-Z, so that
+ * the `greater-equal` test passes every pixel whatever was drawn; it writes none.
+ */
+const FIGURE_RESOLVE_DEPTHS: LimbDepths = [1, 1, 1, 1];
+
 /** The figure's cluster mesh and its templates (plan R14, R14.T4.a). */
 export const FIGURE_CLUSTER_MESH = smoothFigureClusterMesh();
 
@@ -1768,6 +1888,15 @@ interface DeviceResources {
   readonly mesh: MaterialHandle;
   readonly patch: MeshHandle;
   /**
+   * The figure shaded once a pixel (plan R07, the owner's Mac; `GeometrySettings.figureShading`
+   * `screen`): its raster into the view's figure IDs, instanced and on the cluster path, one for
+   * every form, and its plain resolve; made with the rest, their pipelines prepared at the first
+   * plan that asks for them (`LitBodyRenderer.screenReady`).
+   */
+  readonly meshIds: MaterialHandle;
+  readonly meshClusterIds: MaterialHandle;
+  readonly resolve: MaterialHandle;
+  /**
    * The figures' cluster path (plan R14, R14.T4.a): its material, its cluster mesh, its path's
    * buckets, the frame's records, and the cull's kernel once compiled, `null` before and where it
    * could not be, when every figure draws instanced.
@@ -1812,6 +1941,11 @@ interface FormMaterials {
   readonly mesh: MaterialHandle;
   /** The mesh's form on the cluster path (plan R14, R14.T4.a). */
   readonly meshCluster: MaterialHandle;
+  /**
+   * The figure's resolve in this form (`figureShading` `screen`), made with the rest but prepared
+   * only where a plan asks for it (`LitBodyRenderer.screenReady`); `ready` does not wait on it.
+   */
+  readonly resolve: MaterialHandle;
   ready: boolean;
   /** Settles once their pipelines are prepared, or could not be. */
   prepared: Promise<void>;
@@ -1905,8 +2039,8 @@ function withoutAir(record: DiscRecord): DiscRecord {
 function formsOf(
   record: DiscRecord,
   drawn: DrawnPlan,
-  plain: Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster">,
-): Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster"> {
+  plain: Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster" | "resolve">,
+): Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster" | "resolve"> {
   if (record.air !== undefined && record.emission !== undefined && drawn.emissiveAir !== null) {
     return drawn.emissiveAir;
   }
@@ -1957,6 +2091,12 @@ export class LitBodyRenderer {
   #geometry: GeometrySettings = SETTINGS.high.geometry;
   /** Settles once the current device's cull kernel is made, or could not be (R14.T4.a). */
   #cullReady: Promise<boolean> = Promise.resolve(false);
+  /**
+   * The figure's screen path's pipelines by their material (`figureShading` `screen`): absent
+   * before the first ask, `true` once prepared, and `false` while preparing and after a failure,
+   * which is reported and not asked again, its figures drawn forward.
+   */
+  readonly #screenPrepared = new WeakMap<MaterialHandle, boolean>();
   #disposed = false;
   readonly #unsubscribe: () => void;
 
@@ -2090,6 +2230,9 @@ export class LitBodyRenderer {
         attributes: {},
       }),
       meshCluster: engine.createMaterial(SMOOTH_MESH_CLUSTER_MATERIAL),
+      meshIds: engine.createMaterial(SMOOTH_MESH_IDS_MATERIAL),
+      meshClusterIds: engine.createMaterial(SMOOTH_MESH_IDS_CLUSTER_MATERIAL),
+      resolve: engine.createMaterial(FIGURE_RESOLVE_MATERIALS.plain),
       clusterMesh: engine.createMesh(FIGURE_CLUSTER_MESH.mesh),
       clusters: new ClusterConsumerPath(engine, FIGURE_CLUSTER_CONSUMER),
       clusterRecords: this.#clusterBuffer("bodies:figure cluster records", MIN_BUFFER_BYTES),
@@ -2131,6 +2274,7 @@ export class LitBodyRenderer {
     const limb = engine.createMaterial(specs.limb);
     const mesh = engine.createMaterial(specs.mesh);
     const meshCluster = engine.createMaterial(specs.meshCluster);
+    const resolve = engine.createMaterial(FIGURE_RESOLVE_MATERIALS[kind]);
     const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
     const prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]> = [
       [mesh, resources.patch],
@@ -2143,6 +2287,7 @@ export class LitBodyRenderer {
       limb,
       mesh,
       meshCluster,
+      resolve,
       ready: false,
       prepared: Promise.resolve(),
     };
@@ -2559,7 +2704,7 @@ export class LitBodyRenderer {
    * (plan R14, R14.T4.a) the draws of its pass's stride-1 buckets, one a template, its clusters
    * kept by the cull's frustum ({@link LitBodyRenderer.cullFigures}).
    */
-  meshDraws(plan: BodyFramePlan): DrawItem[] {
+  meshDraws(plan: BodyFramePlan, shading: "forward" | "ids" = "forward"): DrawItem[] {
     const firstInstance = this.#upload(plan);
     const resources = this.#resources;
     const drawn = this.#drawnPlan(plan);
@@ -2598,12 +2743,13 @@ export class LitBodyRenderer {
         instances: resources.instances,
         cellSums: resources.cellSums,
       };
+      const ids = shading === "ids";
       if (pass !== undefined && lists !== undefined) {
         return resources.clusters.drawItems(
           pass,
           resources.clusterMesh,
           {
-            material: forms.meshCluster,
+            material: ids ? resources.meshClusterIds : forms.meshCluster,
             offsetFromCameraM: new Float32Array(3),
             uniforms,
             textures,
@@ -2615,12 +2761,95 @@ export class LitBodyRenderer {
       return [
         {
           mesh: resources.patch,
-          material: forms.mesh,
+          material: ids ? resources.meshIds : forms.mesh,
           offsetFromCameraM: new Float32Array(3),
           uniforms,
           textures,
           storageBuffers,
           instanceCount: body.mesh.patches.length,
+        },
+      ];
+    });
+  }
+
+  /**
+   * Whether a plan's figures can be shaded once a pixel (plan R07, the owner's Mac;
+   * `GeometrySettings.figureShading` `screen`): the raster's pipelines for the view's figure IDs
+   * with the scene's depth, and each mesh body's form's resolve for the scene target, prepared,
+   * their preparing begun at the first call off the frame, as the forms' are, so that no frame
+   * stalls on their compile. Until they are its figures are drawn forward, the same bits.
+   */
+  screenReady(plan: BodyFramePlan): boolean {
+    const resources = this.#resources;
+    const drawn = this.#drawnPlan(plan);
+    const ids = [{ colour: "r32uint", depth: true }] as const;
+    const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
+    const wanted: Array<readonly [MaterialHandle, MeshHandle, ReadonlyArray<PreparedTarget>]> = [
+      [resources.meshIds, resources.patch, ids],
+      [resources.meshClusterIds, resources.clusterMesh, ids],
+    ];
+    for (const body of plan.meshes) {
+      const record = drawn.records[body.index];
+      if (record !== undefined) {
+        wanted.push([formsOf(record, drawn, resources).resolve, resources.quad, scene]);
+      }
+    }
+    let ready = true;
+    for (const [material, mesh, targets] of wanted) {
+      const state = this.#screenPrepared.get(material);
+      if (state === undefined) {
+        this.#screenPrepared.set(material, false);
+        void this.#prepareScreen(material, mesh, targets);
+      }
+      ready &&= state === true;
+    }
+    return ready;
+  }
+
+  /**
+   * Prepares one of the figure's screen pipelines (`figureShading` `screen`) and marks it so once
+   * prepared; a failure is reported, a loss's not, and it never rejects.
+   */
+  async #prepareScreen(
+    material: MaterialHandle,
+    mesh: MeshHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+  ): Promise<void> {
+    try {
+      await this.#engine.prepareMaterial(material, targets, [mesh]);
+      this.#screenPrepared.set(material, true);
+    } catch (error: unknown) {
+      // A loss meanwhile is no failure: the restore makes the materials again.
+      if (!(error instanceof EngineUnavailable)) {
+        console.error(`the pipelines of ${material.name} could not be prepared:`, error);
+      }
+    }
+  }
+
+  /**
+   * The figures' resolve draws (plan R07, the owner's Mac; `GeometrySettings.figureShading`
+   * `screen`), after their raster ({@link LitBodyRenderer.meshDraws}' `ids`) into `ids`: one a
+   * mesh body with patches, its form's resolve over its disc's rectangle at the near plane, which
+   * shades each pixel whose ID is its record's as the forward draw does.
+   */
+  figureResolveDraws(plan: BodyFramePlan, ids: TextureHandle): DrawItem[] {
+    this.#upload(plan);
+    const resources = this.#resources;
+    const drawn = this.#drawnPlan(plan);
+    return plan.meshes.flatMap((body, i) => {
+      const record = drawn.records[body.index];
+      if (record === undefined) {
+        throw new Error(`the plan's mesh ${i} has no record ${body.index}`);
+      }
+      if (body.mesh.patches.length === 0) {
+        return [];
+      }
+      const draw = this.#discDraw(body.index, record, 0, FIGURE_RESOLVE_DEPTHS, drawn, null);
+      return [
+        {
+          ...draw,
+          material: formsOf(record, drawn, resources).resolve,
+          textures: { ...draw.textures, figureIds: ids },
         },
       ];
     });

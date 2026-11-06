@@ -55,8 +55,12 @@ describe("photorealisticPasses", () => {
       const passes = photorealisticPasses(setting).passes;
       const labels = passes.map((pass) => pass.label);
       const at = labels.indexOf("terrain id raster");
-      expect(passes.slice(at, at + 4)).toEqual([
+      // The figures' raster and resolve between them where the figures are shaded once a pixel
+      // (plan R07, `figureShading` `screen`), the resolve's within the terrain's.
+      expect(passes.slice(at, at + 6)).toEqual([
         { label: "terrain id raster", owner: "R14", built: true },
+        { label: "figure id raster", owner: "R07", built: true },
+        { label: "figure resolve", owner: "R07", built: true },
         { label: "depth pyramid", owner: "R14", built: true },
         { label: "terrain id raster late", owner: "R14", built: true },
         { label: "terrain resolve", owner: "R14", built: true },
@@ -65,6 +69,19 @@ describe("photorealisticPasses", () => {
       expect(labels.indexOf("bodies")).toBeLessThan(at);
       expect(labels.indexOf("depth pyramid")).toBeLessThan(labels.indexOf("bodies late"));
       expect(labels.indexOf("bodies late")).toBeLessThan(labels.indexOf("discs"));
+    },
+  );
+
+  it.each(QUALITY_SETTINGS)(
+    "puts the figures' raster and then their resolve after the bodies pass and before the discs on %s (plan R07, `figureShading` `screen`)",
+    (setting) => {
+      const labels = photorealisticPasses(setting).passes.map((pass) => pass.label);
+      const raster = labels.indexOf("figure id raster");
+      expect([
+        labels.indexOf("bodies") < raster,
+        labels.indexOf("figure resolve") === raster + 1,
+        raster + 1 < labels.indexOf("discs"),
+      ]).toEqual([true, true, true]);
     },
   );
 

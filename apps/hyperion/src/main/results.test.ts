@@ -2718,6 +2718,7 @@ describe("the schema check", () => {
         hiddenMarks: "culled",
         edgeStandIns: "masks",
         discCells: "packed",
+        figureShading: "screen",
       },
       segments: [
         {
@@ -2765,7 +2766,7 @@ describe("the schema check", () => {
     const markdown = summaryMarkdown(results);
     expect(markdown).toContain("## Geometry (plan R14)");
     expect(markdown).toContain(
-      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders, the lit pass's edge patches by clusters, the camera's strides by measured error, occlusion two-pass against the depth pyramid, the lit pass's interior patches shaded by the visibility buffer, the lit selection's budget its patches and lit triangles, the stand-ins strided, on their own grids at the camera's cap and their masks by their bands, the overlay's marks the ground hides culled, the edge bakes' stand-ins on the cluster path where exact, and as level-1 masks across the survey's edge, the disc cells packed.",
+      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders, the lit pass's edge patches by clusters, the camera's strides by measured error, occlusion two-pass against the depth pyramid, the lit pass's interior patches shaded by the visibility buffer, the lit selection's budget its patches and lit triangles, the stand-ins strided, on their own grids at the camera's cap and their masks by their bands, the overlay's marks the ground hides culled, the edge bakes' stand-ins on the cluster path where exact, and as level-1 masks across the survey's edge, the disc cells packed, the mesh bodies' figures shaded once a pixel.",
     );
     expect(markdown).toContain(
       "| orbit coast | 59 (61) | 33 (33) | 20 (30) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
@@ -2785,7 +2786,7 @@ describe("the schema check", () => {
         }),
       ),
     ).toContain(
-      "the stand-ins on their own grids at the camera's stride cap, their masks at stride 1, the overlay's marks the ground hides culled, the edge bakes' stand-ins on the cluster path where exact, and as level-1 masks across the survey's edge, the disc cells packed.",
+      "the stand-ins on their own grids at the camera's stride cap, their masks at stride 1, the overlay's marks the ground hides culled, the edge bakes' stand-ins on the cluster path where exact, and as level-1 masks across the survey's edge, the disc cells packed, the mesh bodies' figures shaded once a pixel.",
     );
     // The edge bakes' stand-ins where exact alone (R14.T3.c's edge stand-ins).
     const surveyed = {
@@ -2802,7 +2803,7 @@ describe("the schema check", () => {
         }),
       ),
     ).toContain(
-      "the edge bakes' stand-ins on the cluster path where exact, the disc cells packed.",
+      "the edge bakes' stand-ins on the cluster path where exact, the disc cells packed, the mesh bodies' figures shaded once a pixel.",
     );
   });
 
@@ -2848,6 +2849,7 @@ describe("the schema check", () => {
             hiddenMarks: "drawn",
             edgeStandIns: "off",
             discCells: "per-cell",
+            figureShading: "forward",
           },
           segments,
         },
@@ -2910,6 +2912,9 @@ describe("the schema check", () => {
       // Plan R07's disc cells: `per-cell` or `packed` where the file holds it.
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, discCells: "packed" })),
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, discCells: "pooled" })),
+      // And its figure's shading: `forward` or `screen` where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, figureShading: "screen" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, figureShading: "deferred" })),
       validateResults(
         JSON.parse(
           JSON.stringify({
@@ -2951,9 +2956,11 @@ describe("the schema check", () => {
       [],
       malformed,
       [],
+      malformed,
+      [],
     ]);
     expect(summaryMarkdown(results)).toContain(
-      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh, the camera's strides off, occlusion off, the lit pass's interior patches shaded forward, the lit selection's budget its patches, the stand-ins at stride 1, the overlay's marks the ground hides drawn, the edge bakes' stand-ins by the lit mesh, the disc cells a cell an invocation.",
+      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh, the camera's strides off, occlusion off, the lit pass's interior patches shaded forward, the lit selection's budget its patches, the stand-ins at stride 1, the overlay's marks the ground hides drawn, the edge bakes' stand-ins by the lit mesh, the disc cells a cell an invocation, the mesh bodies' figures shaded forward.",
     );
   });
 

@@ -1939,8 +1939,9 @@ describe("the renderer", () => {
     renderer.draws(plan);
     const materials = engine.counts.materials;
     engine.restore();
-    // The disc's two, the sprite's and the mesh regime's, instanced and on the cluster path.
-    expect(engine.counts.materials).toBe(materials + 5);
+    // The disc's two, the sprite's and the mesh regime's, instanced and on the cluster path, and its
+    // figure's raster, likewise, and resolve (`figureShading` `screen`).
+    expect(engine.counts.materials).toBe(materials + 8);
     const writes = engine.writes.length;
     renderer.draws(plan);
     expect(engine.textureWritten.filter((w) => w.texture === "bodies:phase table")).toHaveLength(2);

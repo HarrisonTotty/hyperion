@@ -266,6 +266,16 @@ export interface GeometrySettings {
    * settings (a lean, 2026-11-05).
    */
   readonly discCells: "per-cell" | "packed";
+  /**
+   * Plan R07's mesh-regime figure (the owner's Mac): `forward`, as before, shades each fragment its
+   * triangles cover (`shaders/smoothMesh.wgsl`), whose 2 × 2 quads' helper lanes along the figure's
+   * small triangles shade some 1.9 times the pixels it covers from orbit at high and 2.3 times at
+   * low (perf-body-shading's count); `screen` rasterises the figure's depth and an `r32uint` ID of
+   * its record with the forward draw's discards (`shaders/smoothMeshIds.wgsl`), then shades each
+   * pixel of a record's ID once in one rectangle draw (`shaders/figureResolve.wgsl`), the same light
+   * from the same pixel and record, bit for bit. `screen` on both settings (a lean, 2026-11-05).
+   */
+  readonly figureShading: "forward" | "screen";
 }
 
 /**
@@ -298,6 +308,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   hiddenMarks: "drawn",
   edgeStandIns: "off",
   discCells: "per-cell",
+  figureShading: "forward",
 };
 
 /**
@@ -481,6 +492,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       hiddenMarks: "culled",
       edgeStandIns: "masks",
       discCells: "packed",
+      figureShading: "screen",
     },
     decoration: true,
     scatterDensity: 1,
@@ -535,6 +547,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       hiddenMarks: "culled",
       edgeStandIns: "surveyed",
       discCells: "packed",
+      figureShading: "screen",
     },
     decoration: false,
     scatterDensity: 0,

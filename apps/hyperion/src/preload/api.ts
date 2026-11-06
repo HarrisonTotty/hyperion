@@ -281,6 +281,8 @@ export interface GeometryOverride {
   readonly edgeStandIns?: "off" | "surveyed" | "masks";
   /** Plan R07's `disc cells` pass: a cell an invocation, or each workgroup's points packed. */
   readonly discCells?: "per-cell" | "packed";
+  /** Plan R07's mesh-regime figure: shaded forward, or once a pixel by its IDs and a resolve. */
+  readonly figureShading?: "forward" | "screen";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

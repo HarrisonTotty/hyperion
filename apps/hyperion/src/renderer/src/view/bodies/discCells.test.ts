@@ -55,6 +55,7 @@ import {
   BODY_DISC_CELLS_KERNEL,
   BODY_DISC_CELLS_PACKED_KERNEL,
   BODY_DISC_MATERIALS,
+  FIGURE_RESOLVE_MATERIALS,
   type BodyFramePlan,
   cellWorkgroups,
   DISC_CELLS_PASS,
@@ -63,6 +64,8 @@ import {
   type LitBodyInput,
   LitBodyRenderer,
   planLitBodies,
+  SMOOTH_MESH_IDS_CLUSTER_MATERIAL,
+  SMOOTH_MESH_IDS_MATERIAL,
   SMOOTH_MESH_MATERIAL,
 } from "./draw";
 import { sphereFootprint } from "./regime";
@@ -834,8 +837,18 @@ describe("the cell pass for every record (R07.T8.e)", () => {
     ["the smooth mesh", SMOOTH_MESH_MATERIAL.fragmentWgsl, "fragmentMain"],
     ["the disc cells kernel", BODY_DISC_CELLS_KERNEL.reference, "main"],
     ["the packed disc cells kernel", BODY_DISC_CELLS_PACKED_KERNEL.reference, "main"],
+    ["the figure's resolve", FIGURE_RESOLVE_MATERIALS.plain.fragmentWgsl, "fragmentMain"],
   ])("reaches `shade` from one call site in %s's entry point", (_name, source, entry) => {
     expect(inlinedCopies(source, entry, "shade")).toBe(1);
+  });
+
+  // Its helper lanes along the figure's small triangles cost its tests alone (plan R07,
+  // `figureShading` `screen`).
+  it.each([
+    ["the figure's raster", SMOOTH_MESH_IDS_MATERIAL.fragmentWgsl],
+    ["the figure's raster on the cluster path", SMOOTH_MESH_IDS_CLUSTER_MATERIAL.fragmentWgsl],
+  ])("forms no light in %s: its fragment stage reaches no `shade`", (_name, source) => {
+    expect(inlinedCopies(source, "fragmentMain", "shade")).toBe(0);
   });
 
   it("makes its dispatches again after a device loss, a set each, on the new buffers", async () => {

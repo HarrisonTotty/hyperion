@@ -534,6 +534,12 @@ interface Resources {
    * the first frame whose terrain shades by it, and let go at a frame whose setting shades forward.
    */
   visibility: VisibilityBuffer | null;
+  /**
+   * The view's figure IDs (plan R07, the owner's Mac; `GeometrySettings.figureShading` `screen`),
+   * an `r32uint` drawn with the scene target's depth: made at the first frame whose figures are
+   * shaded once a pixel, released at the first drawn forward.
+   */
+  figureIds: VisibilityBuffer | null;
   glare: BufferHandle;
   glareCapacity: number;
   stars: BufferHandle;
@@ -879,6 +885,7 @@ export class PhotorealRenderer {
       atmosphere,
       airTargets: [],
       visibility: null,
+      figureIds: null,
       glare: this.#glareBuffer(GLARE_CAPACITY),
       glareCapacity: GLARE_CAPACITY,
       stars: this.#spriteBuffer(MIN_SPRITE_BYTES),
@@ -916,6 +923,7 @@ export class PhotorealRenderer {
         target.resize(size);
       }
       resources.visibility?.resize(size);
+      resources.figureIds?.resize(size);
       resources.size = size;
     }
     const radPx = radPerPx(frame.camera, frame.viewport);
@@ -1084,7 +1092,29 @@ export class PhotorealRenderer {
     // ride this pass's resolve: nothing is rendered between them and it. A frame whose terrain
     // draws nothing submits none, so the pass always follows them.
     const occlusion = this.#occlusionOf(resources, frame, geometry);
-    const figures = this.#bodies.meshDraws(plan);
+    // The figures shaded once a pixel where the geometry asks it and their pipelines are prepared
+    // (plan R07, the owner's Mac; `figureShading` `screen`): their raster into the view's figure IDs
+    // with the scene's depth where the forward draws would stand among the draws, then their
+    // resolve in the next pass, first; forward elsewhere, the same bits.
+    const screen =
+      geometry.figureShading === "screen" &&
+      plan.meshes.some(({ mesh }) => mesh.patches.length > 0) &&
+      this.#bodies.screenReady(plan);
+    if (!screen && resources.figureIds !== null) {
+      resources.figureIds.dispose();
+      resources.figureIds = null;
+    }
+    const figureIds = screen
+      ? (resources.figureIds ??= new VisibilityBuffer(
+          this.#engine,
+          `${this.#name} figures`,
+          resources.target,
+          resources.size,
+        ))
+      : null;
+    // Made before the terrain's, as the forward figures always are: the figures' cull among them.
+    const figureDraws = this.#bodies.meshDraws(plan, figureIds === null ? "forward" : "ids");
+    const figures = figureIds === null ? figureDraws : [];
     const terrainDraws = frame.terrain?.draws(plan, bodies, occlusion ?? undefined) ?? [];
     // The terrain by the visibility buffer where every body it draws gives it (plan R14, R14.T2.c
     // and T2.d), with the two-pass occlusion or without (R14.T3.d).
@@ -1098,13 +1128,35 @@ export class PhotorealRenderer {
         resources.visibility.dispose();
         resources.visibility = null;
       }
-      const meshes = [...opaque, ...after];
-      if (meshes.length > 0) {
+      if (figureIds === null) {
+        const meshes = [...opaque, ...after];
+        if (meshes.length > 0) {
+          resources.target.render({
+            label: PHOTOREAL_PASS_LABELS.bodies,
+            viewRotation,
+            projection,
+            draws: meshes,
+            postProcesses: [],
+            colourLoad: "load",
+          });
+        }
+      } else {
+        if (opaque.length > 0) {
+          resources.target.render({
+            label: PHOTOREAL_PASS_LABELS.bodies,
+            viewRotation,
+            projection,
+            draws: opaque,
+            postProcesses: [],
+            colourLoad: "load",
+          });
+        }
+        this.#figureRaster(figureIds, figureDraws, viewRotation, projection);
         resources.target.render({
-          label: PHOTOREAL_PASS_LABELS.bodies,
+          label: PHOTOREAL_PASS_LABELS.figureResolve,
           viewRotation,
           projection,
-          draws: meshes,
+          draws: [...this.#bodies.figureResolveDraws(plan, figureIds.ids), ...after],
           postProcesses: [],
           colourLoad: "load",
         });
@@ -1149,13 +1201,16 @@ export class PhotorealRenderer {
           colourLoad: "load",
         });
       }
+      if (figureIds !== null) {
+        this.#figureRaster(figureIds, figureDraws, viewRotation, projection);
+      }
       resources.target.render({
         label: VISIBILITY_RESOLVE_LABEL,
         viewRotation,
         projection,
         draws: [
           ...byIds.resolve.map((draw) => this.#withIds(draw, visibility.ids)),
-          ...figures,
+          ...(figureIds === null ? figures : this.#bodies.figureResolveDraws(plan, figureIds.ids)),
           ...byIds.forward,
         ],
         postProcesses: [],
@@ -1308,6 +1363,27 @@ export class PhotorealRenderer {
     this.#resources?.histograms.dropInFlight();
     // A cut: the next frame's two-pass occlusion keeps nothing of this one's visibility (R14.T3.d).
     this.#cut = true;
+  }
+
+  /**
+   * The figures' raster, `draws` (`LitBodyRenderer.meshDraws`' `ids`), into the view's figure IDs
+   * (plan R07, the owner's Mac; `figureShading` `screen`): its own pass, cleared to no figure, on the
+   * scene's depth, which it tests and writes as the forward draws would at their place among the
+   * draws.
+   */
+  #figureRaster(
+    figureIds: VisibilityBuffer,
+    draws: ReadonlyArray<DrawItem>,
+    viewRotation: Float32Array,
+    projection: Float32Array,
+  ): void {
+    figureIds.target.render({
+      label: PHOTOREAL_PASS_LABELS.figureIds,
+      viewRotation,
+      projection,
+      draws,
+      postProcesses: [],
+    });
   }
 
   /**
@@ -1650,6 +1726,7 @@ export class PhotorealRenderer {
         target.dispose();
       }
       resources.visibility?.dispose();
+      resources.figureIds?.dispose();
       // The atmospheres' composite and its triangle, made with the view's pipelines; their
       // kernels have no release.
       this.#engine.releaseMaterial(resources.atmosphere.composite);

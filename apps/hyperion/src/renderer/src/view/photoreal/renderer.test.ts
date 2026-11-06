@@ -67,6 +67,7 @@ import { BloomChain } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL, histogramParams, histogramWorkgroups } from "../post/histogram";
 import {
   GEOMETRY_BEFORE_R14,
+  type GeometrySettings,
   QUALITY_SETTINGS,
   type QualitySetting,
   SETTINGS,
@@ -193,6 +194,9 @@ function drawOfName(name: string): DrawItem {
     textures: {},
   };
 }
+
+/** The high setting's geometry, its mesh bodies' figures shaded forward, the way back (plan R07). */
+const FORWARD_FIGURES: GeometrySettings = { ...SETTINGS.high.geometry, figureShading: "forward" };
 
 function frameWith(sky: ReadonlyArray<DrawItem>): PhotorealFrame {
   const lit = aLitBody();
@@ -455,13 +459,98 @@ describe("the photorealistic renderer", () => {
       opaqueDraws: () => [opaque],
     };
     const from = engine.targetFrames.length;
-    renderer.render(new RecordingView(), { ...frame, terrain });
+    renderer.render(new RecordingView(), { ...frame, geometry: FORWARD_FIGURES, terrain });
     expect(
       engine.targetFrames
         .slice(from)
         .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
         ?.draws.map((draw) => draw.material.name),
     ).toEqual(["opaque terrain", "bodies:smoothMeshCluster", "bodies:smoothMeshCluster", "fins"]);
+    renderer.dispose();
+  });
+
+  it("shades the figures once a pixel: the bodies pass's opaque terrain, the figures' raster into the view's figure IDs with the scene's depth, then their resolve and the rest of the terrain (plan R07, `figureShading` `screen`)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const [opaque, rest] = [drawOfName("opaque terrain"), drawOfName("fins")];
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [opaque, rest],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [opaque],
+    };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), { ...frame, terrain });
+    const frames = engine.targetFrames.slice(from);
+    const pass = (label: string) => frames.find((f) => f.label === label);
+    const names = (label: string): string[] | undefined =>
+      pass(label)?.draws.map((draw) => draw.material.name);
+    const labels = frames.map((f) => f.label);
+    const ids = engine.textureSpecs.find((spec) => spec.name === "test view figures:ids colour");
+    expect([
+      SETTINGS.high.geometry.figureShading,
+      labels.indexOf(PHOTOREAL_PASS_LABELS.bodies) <
+        labels.indexOf(PHOTOREAL_PASS_LABELS.figureIds),
+      labels.indexOf(PHOTOREAL_PASS_LABELS.figureIds) <
+        labels.indexOf(PHOTOREAL_PASS_LABELS.figureResolve),
+      names(PHOTOREAL_PASS_LABELS.bodies),
+      names(PHOTOREAL_PASS_LABELS.figureIds),
+      pass(PHOTOREAL_PASS_LABELS.figureIds)?.colourLoad,
+      names(PHOTOREAL_PASS_LABELS.figureResolve),
+      pass(PHOTOREAL_PASS_LABELS.figureResolve)?.colourLoad,
+      Object.keys(pass(PHOTOREAL_PASS_LABELS.figureResolve)?.draws[0]?.textures ?? {}).includes(
+        "figureIds",
+      ),
+      ids?.format,
+    ]).toEqual([
+      "screen",
+      true,
+      true,
+      ["opaque terrain"],
+      ["bodies:smoothMeshIdsCluster", "bodies:smoothMeshIdsCluster"],
+      undefined,
+      ["bodies:figureResolve", "fins"],
+      "load",
+      true,
+      "r32uint",
+    ]);
+    renderer.dispose();
+  });
+
+  it("draws the figures forward until the pipelines that shade them once a pixel are prepared, and lets the view's figure IDs go at a frame that draws them forward (plan R07)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const frame = frameWith([]);
+    const bodies = frame.bodies.map((body) => ({
+      ...body,
+      handoverReliefM:
+        4 * limbDistanceM(1e8, body.figure.equatorialRadiusM) * pixelAngleRad(camera, VIEWPORT),
+    }));
+    const bare = renderer.render(new RecordingView(), { ...frame, bodies });
+    const handed = { ...frame, bodies, previousRegimes: bare?.regimes ?? new Map() };
+    const labelsOf = (drawn: PhotorealFrame): string[] => {
+      const from = engine.targetFrames.length;
+      renderer.render(new RecordingView(), drawn);
+      return engine.targetFrames.slice(from).map((f) => f.label);
+    };
+    const first = labelsOf(handed);
+    await microtasks();
+    const second = labelsOf(handed);
+    const forward = labelsOf({ ...handed, geometry: FORWARD_FIGURES });
+    // Let go at the forward frame, the figure IDs are made again at the next frame by them.
+    const again = labelsOf(handed);
+    expect([
+      first.includes(PHOTOREAL_PASS_LABELS.figureIds),
+      second.includes(PHOTOREAL_PASS_LABELS.figureIds),
+      forward.includes(PHOTOREAL_PASS_LABELS.figureIds),
+      again.includes(PHOTOREAL_PASS_LABELS.figureIds),
+      engine.textureSpecs.filter((spec) => spec.name === "test view figures:ids colour").length,
+    ]).toEqual([false, true, false, true, 2]);
     renderer.dispose();
   });
 
@@ -480,9 +569,8 @@ describe("the photorealistic renderer", () => {
       visibility: () => ({ raster: [raster], resolve: [resolve], forward: [fins] }),
       opaqueDraws: () => [],
     };
-    const byIds = { ...SETTINGS.high.geometry, shading: "visibility" as const };
     const from = engine.targetFrames.length;
-    renderer.render(new RecordingView(), { ...frame, geometry: byIds, terrain });
+    renderer.render(new RecordingView(), { ...frame, geometry: BY_IDS, terrain });
     const frames = engine.targetFrames.slice(from);
     const at = (label: string): number => frames.findIndex((f) => f.label === label);
     const resolvePass = frames[at(VISIBILITY_RESOLVE_LABEL)];
@@ -508,6 +596,49 @@ describe("the photorealistic renderer", () => {
     renderer.dispose();
   });
 
+  it("shades the figures once a pixel by the visibility buffer: their raster after the terrain's, their resolve after the terrain's in its pass (plan R07)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("forward")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => ({
+        raster: [drawOfName("id raster")],
+        resolve: [drawOfName("resolve")],
+        forward: [drawOfName("fins")],
+      }),
+      opaqueDraws: () => [],
+    };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), {
+      ...frame,
+      geometry: { ...SETTINGS.high.geometry, shading: "visibility" },
+      terrain,
+    });
+    const labels = engine.targetFrames.slice(from).map((f) => f.label);
+    const resolvePass = engine.targetFrames
+      .slice(from)
+      .find((f) => f.label === VISIBILITY_RESOLVE_LABEL);
+    expect([
+      labels.filter((label) =>
+        [
+          VISIBILITY_RASTER_LABEL,
+          PHOTOREAL_PASS_LABELS.figureIds,
+          VISIBILITY_RESOLVE_LABEL,
+          PHOTOREAL_PASS_LABELS.figureResolve,
+        ].includes(label),
+      ),
+      resolvePass?.draws.map((draw) => draw.material.name),
+    ]).toEqual([
+      [VISIBILITY_RASTER_LABEL, PHOTOREAL_PASS_LABELS.figureIds, VISIBILITY_RESOLVE_LABEL],
+      ["resolve", "bodies:figureResolve", "fins"],
+    ]);
+    renderer.dispose();
+  });
+
   /** A terrain by IDs of one raster, resolve and forward draw each, for `handedOver`'s frame. */
   function byIdsTerrain(): FrameTerrain {
     const by = { raster: [drawOfName("id raster")], resolve: [drawOfName("resolve")], forward: [] };
@@ -523,8 +654,12 @@ describe("the photorealistic renderer", () => {
     };
   }
 
-  /** The high setting's geometry shading by the visibility buffer. */
-  const BY_IDS = { ...SETTINGS.high.geometry, shading: "visibility" as const };
+  /** The high setting's geometry shading by the visibility buffer, its figures forward. */
+  const BY_IDS = {
+    ...SETTINGS.high.geometry,
+    shading: "visibility" as const,
+    figureShading: "forward" as const,
+  };
 
   it("keeps a resolve's draw with the view's IDs bound from frame to frame (R14.T2.d)", async () => {
     const { engine, renderer, frame } = await handedOver();

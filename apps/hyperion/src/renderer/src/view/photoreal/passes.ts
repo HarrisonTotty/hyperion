@@ -54,6 +54,15 @@ export const PHOTOREAL_PASS_LABELS = {
   discCells: DISC_CELLS_PASS,
   bodies: "bodies",
   /**
+   * The mesh bodies' figures shaded once a pixel (plan R07, the owner's Mac;
+   * `GeometrySettings.figureShading` `screen`): their raster into the view's figure IDs with the
+   * scene's depth, after the bodies pass's opaque terrain, then their resolve's pass, which draws
+   * the rest of the terrain after them; by the visibility buffer, the raster after the terrain's and
+   * the resolve in its resolve's pass.
+   */
+  figureIds: "figure id raster",
+  figureResolve: "figure resolve",
+  /**
    * The bodies pass's second raster under the two-pass occlusion (plan R14, R14.T3.d): the terrain's
    * lit clusters the first did not draw and the depth pyramid does not refuse, loading its colour
    * and depth.
@@ -150,6 +159,11 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       // resolve (R14.T2.d), else the bodies' late pass. The cull's late pass before it takes the
       // terrain cull's label.
       slot(VISIBILITY_RASTER_LABEL, "R14", true),
+      // The figures shaded once a pixel (`figureShading` `screen`), in the forward order: their
+      // raster, then their resolve with the rest of the terrain after it. By the visibility buffer
+      // their raster follows the terrain's late raster and their resolve is in its resolve's pass.
+      own(PHOTOREAL_PASS_LABELS.figureIds),
+      own(PHOTOREAL_PASS_LABELS.figureResolve),
       slot(DEPTH_PYRAMID_LABEL, "R14", true),
       slot(VISIBILITY_LATE_RASTER_LABEL, "R14", true),
       slot(VISIBILITY_RESOLVE_LABEL, "R14", true),

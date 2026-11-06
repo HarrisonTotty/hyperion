@@ -166,6 +166,7 @@ describe("the spike report's check", () => {
         hiddenMarks: "drawn",
         edgeStandIns: "off",
         discCells: "per-cell",
+        figureShading: "forward",
       },
       segments: [
         {
@@ -186,7 +187,7 @@ describe("the spike report's check", () => {
     // lever (T1.g), off, the camera's strides (T3.c), off, the occlusion (T3.d), off, the lit
     // selection's budget (T3.e), its patches, the stand-ins' strides (T3.c's stand-ins), off, and
     // the overlay's hidden marks (R10.T16.c), drawn, the edge bakes' stand-ins (T3.c's edge
-    // stand-ins), off, and plan R07's disc cells, per cell.
+    // stand-ins), off, plan R07's disc cells, per cell, and its figure's shading, forward.
     const {
       figureClusters: _figureClusters,
       hullClusters: _hullClusters,
@@ -201,6 +202,7 @@ describe("the spike report's check", () => {
       hiddenMarks: _hiddenMarks,
       edgeStandIns: _edgeStandIns,
       discCells: _discCells,
+      figureShading: _figureShading,
       ...beforeT4
     } = geometry.settings;
     expect([

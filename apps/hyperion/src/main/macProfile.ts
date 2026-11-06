@@ -127,6 +127,14 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: false,
   },
   {
+    name: "figure-shading",
+    decides: "plan R07, the mesh bodies' figures: shaded once a pixel (A) against forward (B)",
+    a: [],
+    b: ["--geometry", "figureShading=forward"],
+    ratios: [1],
+    countSides: true,
+  },
+  {
     name: "shading",
     decides:
       "R14.T2.e, the terrain's shading: forward, T2.a's (A), against the visibility buffer (B)",

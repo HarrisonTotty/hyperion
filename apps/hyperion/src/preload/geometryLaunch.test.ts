@@ -151,6 +151,25 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
+  it("reads and writes the figure's shading, last in the fields' order (plan R07)", () => {
+    const override = parseGeometryOverride("figureShading=screen,discCells=packed");
+    expect([
+      override,
+      geometryText(override),
+      parseGeometryOverride("figureShading=forward"),
+    ]).toEqual([
+      { figureShading: "screen", discCells: "packed" },
+      "discCells=packed,figureShading=screen",
+      { figureShading: "forward" },
+    ]);
+  });
+
+  it("refuses a figure's shading other than forward or screen (plan R07)", () => {
+    for (const text of ["figureShading=visibility", "figureShading=deferred", "figureShading="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("figureShading is forward or screen");
+    }
+  });
+
   it("refuses an occlusion other than off or hzb (R14.T3.d)", () => {
     for (const text of ["occlusion=none", "occlusion=on", "occlusion="]) {
       expect(() => parseGeometryOverride(text)).toThrow("occlusion is off or hzb");

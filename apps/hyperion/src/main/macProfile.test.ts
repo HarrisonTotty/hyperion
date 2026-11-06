@@ -122,9 +122,10 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, eight pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
-    // then two counted settings and the occlusion's and both shading pairs' two counted sides each.
-    expect(matrix).toHaveLength(4 + 8 * 4 + 2 * 2 * 4 + 2 + 3 * 2);
+    // Four own runs, nine pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
+    // then two counted settings and the occlusion's, figure-shading's and both shading pairs' two
+    // counted sides each.
+    expect(matrix).toHaveLength(4 + 9 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -179,7 +180,7 @@ describe("the Mac batch's matrix", () => {
   it("counts each setting's own way and each side of a pass-splitting pair last, at DPR 1, apart from the pairs (R14.T2.e)", () => {
     const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
     const counted = matrix.filter(isCounted);
-    expect(matrix.slice(-8)).toEqual(counted);
+    expect(matrix.slice(-10)).toEqual(counted);
     expect(counted.map((run) => [run.id, run.setting, run.ratio, run.args, run.place])).toEqual([
       ["counted-high-dpr1", "high", 1, ["--count-gpu-calls"], { kind: "counted" }],
       ["counted-low-dpr1", "low", 1, ["--count-gpu-calls"], { kind: "counted" }],
@@ -196,6 +197,20 @@ describe("the Mac batch's matrix", () => {
         1,
         ["--count-gpu-calls", "--geometry", "occlusion=hzb"],
         { kind: "counted side", lever: "occlusion", side: "b" },
+      ],
+      [
+        "counted-figure-shading-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls"],
+        { kind: "counted side", lever: "figure-shading", side: "a" },
+      ],
+      [
+        "counted-figure-shading-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "figureShading=forward"],
+        { kind: "counted side", lever: "figure-shading", side: "b" },
       ],
       [
         "counted-shading-high-dpr1-a",
@@ -376,7 +391,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 60 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 66 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(

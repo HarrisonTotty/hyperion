@@ -10198,3 +10198,17 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     dispatches the per-cell plain kernel until the packed one is made; `prepareEmissive`,
     `prepareAir` and `prepareEmissiveAir` take the way (`packed` unless told).
   - Catalogue `PACKED_CELL_ENTRIES` (with twins), the smoke's part 24 (its lane's part 20).
+  - Catalogue `PACKED_CELL_ENTRIES` (with twins), the smoke's part 20.
+- **The figure shaded once a pixel** (2026-11-05, perf-body-shading, the owner's Mac; a lean).
+  - Measured first: from orbit the figure's 2 × 2 quads ran 1.89 (high) and 2.33 (low) lanes a
+    covered pixel, its level-0 triangles 4–6 px; closed in 1.10–1.58.
+  - `GeometrySettings.figureShading`: `forward` the way back, `screen` on both settings;
+    `--geometry figureShading=…`, the smoke's `geometry-figureShading`, the Mac pair
+    `figure-shading` (counted sides).
+  - `SMOOTH_MESH_IDS_MATERIAL` (and its cluster form) writes each record into the view's `r32uint`
+    figure IDs (`Resources.figureIds`, a `VisibilityBuffer` on the scene's depth) with the forward
+    draw's discards; `FIGURE_RESOLVE_MATERIALS` (four forms) shade each ID's pixels over the disc's
+    rectangle at depth 1. `LitBodyRenderer.meshDraws(plan, "ids")`, `screenReady(plan)`,
+    `figureResolveDraws(plan, ids)`; passes `figure id raster` and `figure resolve`
+    (`PHOTOREAL_PASS_LABELS.figureIds`, `figureResolve`). Forward until the screen pipelines are
+    prepared, the same bits.
