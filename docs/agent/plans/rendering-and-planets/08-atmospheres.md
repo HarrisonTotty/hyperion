@@ -25174,3 +25174,11 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - `atmosphereCases.ts`: an absorption under 0 within `ABSORPTION_ROUNDING_SHARE` (10⁻¹²) of
     its scattering is written 0; `jupiterEnvelopeCase.ts`'s `asReadWhereApart` gives a channel the
     table's mean cosine where the mode's g lies past 10⁻⁴ of it (the haze's red, 2.5 × 10⁻⁴).
+- **jupiter-envelope and saturn-envelope retraced on the hand giants' 30 media** (R08.T16.a.2,
+  2026-11-05; lane `fix-p14-giant-chromophore`). Both references, `refusals.json` and
+  `vectorGate.json`'s `jupiterEnvelope` re-recorded; `CHROMOPHORE_GATE_TALLIES`: 2 pass, 0
+  miss, 22 refused (the vector I at the earlier pilots' counts; a re-pilot is pending). By
+  `deckGatePasses` it passes; the envelope's range stays `giant-deck`'s, its widening not built.
+  - Saturn's twin (not recorded): 10 pass, 2 miss (disc-p0 and disc-p60 blue, 1.10), 12 refused.
+  - Smoke part 6 (lean): (S)'s twins leave out the hand Jupiter's NH₃ haze (`OBLATE_TWIN_MISSES`);
+    with it the ray march from 400 km, the sun 3° down, missed at 2 of 4,070 channels (1.57 × 10⁻³).

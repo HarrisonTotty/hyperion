@@ -523,7 +523,7 @@ export async function titanHazeMedium(): Promise<RoutedMedium> {
  * which adds no absorber term), routed through its envelope's deck at its floor (R08.T16.a.2,
  * `--smoke-thick-read=1`'s override, as the `envelope` giant route routes it): its upper medium on
  * the floor's datum (`deckDatumOf`), the deck's table at the floor, and its black disc drawn on the
- * medium's own datum, the column's base 1,049 km under the floor, as a routed envelope's disc stands
+ * medium's own datum, the column's base 1,286 km under the floor, as a routed envelope's disc stands
  * (research-rm4-rm5-close-out §1.3), so that the march reads the deck over the disc. Its giants
  * stand twenty of their radii off, as `TEST SATURN`'s.
  *
@@ -625,14 +625,18 @@ export async function venusDeckMedium(): Promise<RoutedMedium> {
 }
 
 /**
- * The terms (S)'s twins leave out: none. Until 2026-11-03 the hand Jupiter's four aerosol decks,
- * whose per-frame kernels missed their twin on its oblate figure by up to 7% in the deck's march
- * and 2.8% with its NH₃ ice alone in the sky view: in their sheets the fitted sliced lookup's
- * local scale height stood at its 1 km floor, a rise whose drop below its tangent the kernels'
- * `f32` could not take on a giant's figure. The fit rises at least the body's least rise since
- * (`medium.ts`'s `fitLeastRiseM`), and (S)'s twins take its whole medium.
+ * The terms (S)'s twins leave out: its NH₃ haze (lean, 2026-11-05). Under the haze and chromophore
+ * of the sim's 30 rules (`test/giantFixtures.ts`'s `coldGiantHazes`) the deck route's ray march
+ * from 400 km with the sun 3° down missed its twin at 2 of its 4,070 channels by up to
+ * 1.57 × 10⁻³, against the bound's 10⁻³, in both variants; with the haze left out the twins hold
+ * (fix-p14-giant-chromophore's findings). Until 2026-11-03 the list held the hand Jupiter's four
+ * aerosol decks, whose per-frame kernels missed their twin on its oblate figure by up to 7% in the
+ * deck's march and 2.8% with its NH₃ ice alone in the sky view: in their sheets the fitted sliced
+ * lookup's local scale height stood at its 1 km floor, a rise whose drop below its tangent the
+ * kernels' `f32` could not take on a giant's figure. The fit rises at least the body's least rise
+ * since (`medium.ts`'s `fitLeastRiseM`).
  */
-export const OBLATE_TWIN_MISSES: ReadonlySet<string> = new Set<string>();
+export const OBLATE_TWIN_MISSES: ReadonlySet<string> = new Set<string>(["aerosol:NH3:2"]);
 
 /** `routed` less {@link OBLATE_TWIN_MISSES}' terms, for its twins; the medium itself where none. */
 export function withoutOblateTwinMisses(routed: RoutedMedium): RoutedMedium {

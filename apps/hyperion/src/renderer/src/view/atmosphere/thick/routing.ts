@@ -179,27 +179,27 @@ export const ENVELOPE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
  * `jupiter-envelope`'s recorded verdict by image (R08.T16.a.2): `vectorGate.json`'s
  * `jupiterEnvelope.tallies.images`, the hand Jupiter's medium split at its envelope floor through
  * the route an envelope takes, its chromophore absorbing above the floor, against the vector I of
- * its reference at seed 15, held to the file by the test. Of its 27 values 11 pass, 4 miss and 12
- * are refused, so that it passes only with its misses named ({@link CHROMOPHORE_GATE_EXCEPTIONS}),
- * which open a cool giant's range ({@link COOL_GIANT_ROUTE_RANGE}) on the `envelope` setting:
+ * its reference at seed 15, held to the file by the test. Retraced on the hand Jupiter's NH₃ haze
+ * and chromophore under the sim's rules at generator version 30 (`test/giantFixtures.ts`'s
+ * `coldGiantHazes`, 2026-11-05), of its 24 values 2 pass, none misses and 22 are refused:
  *
- * - the disc's red at p60–p75 reads 1.11–1.12 of the reference, a miss at p75 (1.5 times the
- *   gate's edge; refused at p60) and at seed 11 a miss at p60;
- * - the blue reads 1.13 at p60, and on the limb 0.91 at 0.3 H and 0.85 at 1 H (2.3 times the edge),
- *   its disc at p85 0.76 (refused here, a miss at seed 11): dark under every bake tried, the whole
- *   column's as a haze bakes it among them.
+ * - the twin reads 0.98–1.10 of the reference on the disc, its blue the highest (1.08–1.10 at
+ *   p0–p60), and 1.00–1.05 on the limb; at 27's media 4 missed (the disc's red at p75, its blue at
+ *   p60, the limb's blue at 0.3 H and 1 H);
+ * - the refusals are the vector I's but for the limb's scalar at 0.3 H and 1 H: at the counts of
+ *   the earlier pilots its σ passes T ÷ 8 almost everywhere (`refusals.json`).
  *
- * The refusals are the vector I's alone, on the disc in green and blue above all: its σ there is up
- * to 7 times the scalar radiance's at the same counts (919 times in disc-p30's blue, a heavy tail),
- * past T ÷ 8, where the scalar refuses none.
+ * By `deckGatePasses`' rule it passes on its 2 judged values; the envelope's range stays
+ * `giant-deck`'s ({@link ENVELOPE_ROUTE_RANGE}), its widening not built, and a pass on 2 values of
+ * 24 wants the vector I re-piloted before it is read as one.
  */
 export const CHROMOPHORE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
-  { image: "disc-p0", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
+  { image: "disc-p0", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
   { image: "disc-p30", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
-  { image: "disc-p60", comparisons: 3, passes: 1, misses: 1, refusals: 1 },
-  { image: "disc-p75", comparisons: 3, passes: 1, misses: 1, refusals: 1 },
-  { image: "disc-p85", comparisons: 3, passes: 1, misses: 0, refusals: 2 },
-  { image: "limb", comparisons: 12, passes: 6, misses: 2, refusals: 4 },
+  { image: "disc-p60", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+  { image: "disc-p75", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+  { image: "disc-p85", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
+  { image: "limb", comparisons: 9, passes: 1, misses: 0, refusals: 8 },
 ];
 
 /**
@@ -583,12 +583,12 @@ export function bakedAsHaze(
  * Each bound is the case's extreme, rounded outward at its third figure (the test holds them to the
  * case): τ to 10.04 (blue), ḡ to 0.7323 (red), τ ḡ to 7.331 (red); its deck is conservative, so
  * ω̄ is 1 and τ (1 − ω̄) 0, and an envelope's floor is black. A Jupiter-class envelope lies outside
- * it, its chromophore absorbing (the hand Jupiter's τ (1 − ω̄) 0.025–0.19 and blue τ 17.0 above
- * its floor, its chromophore at generator version 27's disc column), and so do the hand Saturn, the
- * sim's own Saturn's gases and decks (green τ 10.4 and blue 23.0 above its floor at 103.5 bar, its
- * chromophore's τ (1 − ω̄) the hand Jupiter's), and the hand ice giant (blue τ 10.29, red ḡ
- * 0.7340; `routing.test.ts`): on the `closed` giant route each stays `ATMOSPHERE: APPROXIMATE`, and
- * on the `envelope` route each routes on {@link COOL_GIANT_ROUTE_RANGE}.
+ * it, its chromophore absorbing (the hand Jupiter's τ (1 − ω̄) 0.016–0.12, its blue τ 10.3 and red
+ * ḡ 0.77 above its floor, under its NH₃ haze and chromophore of generator version 30's rules), and
+ * stays `ATMOSPHERE: APPROXIMATE`: the gate covering it, `jupiter-envelope`'s, is refused at 22 of
+ * its 24 values ({@link CHROMOPHORE_GATE_TALLIES}). Outside it too stand the hand Saturn, the sim's
+ * own Saturn's gases and decks under the same haze (blue τ 12.3 above its floor, its chromophore's
+ * τ (1 − ω̄) 0.065–0.49), and the hand ice giant (blue τ 10.29, red ḡ 0.7340; `routing.test.ts`).
  */
 export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
   mostOpticalDepth: 10.1,

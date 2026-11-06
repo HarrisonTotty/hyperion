@@ -921,10 +921,12 @@ describe("the routes' rows' frames (R08.T11's (R) to (U))", () => {
     expect(routed.medium.groundAlbedo).toEqual([0, 0, 0]);
   });
 
-  it("holds every row's twins to its whole medium, the hand Jupiter's four aerosol decks among them", () => {
-    expect(
-      [handJupiter(), titan, earth].map((medium) => withoutOblateTwinMisses(medium) === medium),
-    ).toEqual([true, true, true]);
+  it("holds every row's twins to its whole medium but the hand Jupiter's NH₃ haze, its aerosol decks among them", () => {
+    const left = withoutOblateTwinMisses(handJupiter());
+    expect([
+      termNames(handJupiter()).filter((name) => !termNames(left).includes(name)),
+      [titan, earth].map((medium) => withoutOblateTwinMisses(medium) === medium),
+    ]).toEqual([["aerosol:NH3:2"], [true, true]]);
   });
 
   it("keeps the hand Jupiter's gas and its NH₃ ice alone for the one-sheet twins", () => {

@@ -536,9 +536,16 @@ describe("the absorbing envelope's gate (R08.T16.a.2)", () => {
     );
   });
 
-  it("leaves the closed route's envelope range giant-deck's alone, jupiter-envelope's gate not passing without its named exceptions", () => {
-    expect([deckGatePasses(CHROMOPHORE_GATE_TALLIES), DECK_ROUTE_RANGE?.envelope]).toEqual([
-      false,
+  // Retraced on 30's NH₃ haze and chromophore it passes by the rule on its 2 judged values of 24,
+  // 22 refused: its widening is not built, and the range stays giant-deck's.
+  it("leaves the envelope's range giant-deck's alone, jupiter-envelope's gate passing on 2 values of 24", () => {
+    const judged = CHROMOPHORE_GATE_TALLIES.reduce(
+      (sum, image) => sum + image.comparisons - image.refusals,
+      0,
+    );
+    expect([deckGatePasses(CHROMOPHORE_GATE_TALLIES), judged, DECK_ROUTE_RANGE?.envelope]).toEqual([
+      true,
+      2,
       ENVELOPE_ROUTE_RANGE,
     ]);
   });

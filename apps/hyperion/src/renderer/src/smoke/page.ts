@@ -872,8 +872,8 @@ async function run(
   );
   // R08.T11's routes' rows on SwiftShader, each its twins and its row's frame, untimed: (T)'s here,
   // whose catalogue compiles its thermal forms, (R)'s in part 13, whose compiles its thick read, and
-  // (S)'s and (U)'s in parts 6 and 2, the lightest. (S)'s twins take its whole medium, its aerosol
-  // decks among them (`OBLATE_TWIN_MISSES` holds none since the fit's least rise, 2026-11-03).
+  // (S)'s and (U)'s in parts 6 and 2, the lightest. (S)'s twins take its whole medium but its NH₃
+  // haze, its aerosol decks among them (`OBLATE_TWIN_MISSES`: the haze, 2026-11-05).
   const routedRow = async (row: RoutedRow, made: () => Promise<RoutedMedium>): Promise<void> => {
     const routed = await made();
     await checkRoutedTwins(engine, checks, twins, [withoutOblateTwinMisses(routed)]);
