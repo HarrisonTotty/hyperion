@@ -198,6 +198,9 @@ function drawOfName(name: string): DrawItem {
 /** The high setting's geometry, its mesh bodies' figures shaded forward, the way back (plan R07). */
 const FORWARD_FIGURES: GeometrySettings = { ...SETTINGS.high.geometry, figureShading: "forward" };
 
+/** The high setting's geometry, its mesh bodies' figures shaded once a pixel (plan R07). */
+const SCREEN_FIGURES: GeometrySettings = { ...SETTINGS.high.geometry, figureShading: "screen" };
+
 function frameWith(sky: ReadonlyArray<DrawItem>): PhotorealFrame {
   const lit = aLitBody();
   return {
@@ -471,7 +474,8 @@ describe("the photorealistic renderer", () => {
 
   it("shades the figures once a pixel: the bodies pass's opaque terrain, the figures' raster into the view's figure IDs with the scene's depth, then their resolve and the rest of the terrain (plan R07, `figureShading` `screen`)", async () => {
     const { engine, renderer, frame } = await handedOver();
-    // The screen path's pipelines prepared, off the frame that asked for them.
+    // The screen path's pipelines asked for by a frame that takes it, and prepared off it.
+    renderer.render(new RecordingView(), { ...frame, geometry: SCREEN_FIGURES });
     await microtasks();
     const [opaque, rest] = [drawOfName("opaque terrain"), drawOfName("fins")];
     const terrain: FrameTerrain = {
@@ -485,7 +489,7 @@ describe("the photorealistic renderer", () => {
       opaqueDraws: () => [opaque],
     };
     const from = engine.targetFrames.length;
-    renderer.render(new RecordingView(), { ...frame, terrain });
+    renderer.render(new RecordingView(), { ...frame, geometry: SCREEN_FIGURES, terrain });
     const frames = engine.targetFrames.slice(from);
     const pass = (label: string) => frames.find((f) => f.label === label);
     const names = (label: string): string[] | undefined =>
@@ -493,7 +497,7 @@ describe("the photorealistic renderer", () => {
     const labels = frames.map((f) => f.label);
     const ids = engine.textureSpecs.find((spec) => spec.name === "test view figures:ids colour");
     expect([
-      SETTINGS.high.geometry.figureShading,
+      SCREEN_FIGURES.figureShading,
       labels.indexOf(PHOTOREAL_PASS_LABELS.bodies) <
         labels.indexOf(PHOTOREAL_PASS_LABELS.figureIds),
       labels.indexOf(PHOTOREAL_PASS_LABELS.figureIds) <
@@ -534,7 +538,12 @@ describe("the photorealistic renderer", () => {
         4 * limbDistanceM(1e8, body.figure.equatorialRadiusM) * pixelAngleRad(camera, VIEWPORT),
     }));
     const bare = renderer.render(new RecordingView(), { ...frame, bodies });
-    const handed = { ...frame, bodies, previousRegimes: bare?.regimes ?? new Map() };
+    const handed = {
+      ...frame,
+      bodies,
+      previousRegimes: bare?.regimes ?? new Map(),
+      geometry: SCREEN_FIGURES,
+    };
     const labelsOf = (drawn: PhotorealFrame): string[] => {
       const from = engine.targetFrames.length;
       renderer.render(new RecordingView(), drawn);
@@ -564,7 +573,7 @@ describe("the photorealistic renderer", () => {
     if (planet === undefined) {
       throw new Error("the frame has its planet");
     }
-    const glowing = { ...frame, bodies: [{ ...planet, thermal: field }] };
+    const glowing = { ...frame, bodies: [{ ...planet, thermal: field }], geometry: SCREEN_FIGURES };
     renderer.render(new RecordingView(), glowing);
     await microtasks();
     const from = engine.targetFrames.length;
@@ -622,6 +631,7 @@ describe("the photorealistic renderer", () => {
 
   it("shades the figures once a pixel by the visibility buffer: their raster after the terrain's, their resolve after the terrain's in its pass (plan R07)", async () => {
     const { engine, renderer, frame } = await handedOver();
+    renderer.render(new RecordingView(), { ...frame, geometry: SCREEN_FIGURES });
     await microtasks();
     const terrain: FrameTerrain = {
       surveyCoverage: () => null,
@@ -640,7 +650,7 @@ describe("the photorealistic renderer", () => {
     const from = engine.targetFrames.length;
     renderer.render(new RecordingView(), {
       ...frame,
-      geometry: { ...SETTINGS.high.geometry, shading: "visibility" },
+      geometry: { ...SCREEN_FIGURES, shading: "visibility" },
       terrain,
     });
     const labels = engine.targetFrames.slice(from).map((f) => f.label);

@@ -128,9 +128,9 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
   },
   {
     name: "figure-shading",
-    decides: "plan R07, the mesh bodies' figures: shaded once a pixel (A) against forward (B)",
+    decides: "plan R07, the mesh bodies' figures: forward (A) against shaded once a pixel (B)",
     a: [],
-    b: ["--geometry", "figureShading=forward"],
+    b: ["--geometry", "figureShading=screen"],
     ratios: [1],
     countSides: true,
   },

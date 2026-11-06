@@ -273,7 +273,10 @@ export interface GeometrySettings {
    * low (perf-body-shading's count); `screen` rasterises the figure's depth and an `r32uint` ID of
    * its record with the forward draw's discards (`shaders/smoothMeshIds.wgsl`), then shades each
    * pixel of a record's ID once in one rectangle draw (`shaders/figureResolve.wgsl`), the same light
-   * from the same pixel and record, bit for bit. `screen` on both settings (a lean, 2026-11-05).
+   * from the same pixel and record, bit for bit. `forward` on both settings until the owner's Mac
+   * pair (a lean, 2026-11-06): on the pod's SwiftShader, whose lanes outside a triangle cost little,
+   * `screen` drew the figure 7% slower from orbit at low and 70% slower at high, and 20% faster
+   * closed in at high (perf-body-shading's inspection timing).
    */
   readonly figureShading: "forward" | "screen";
 }
@@ -492,7 +495,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       hiddenMarks: "culled",
       edgeStandIns: "masks",
       discCells: "packed",
-      figureShading: "screen",
+      figureShading: "forward",
     },
     decoration: true,
     scatterDensity: 1,
@@ -547,7 +550,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       hiddenMarks: "culled",
       edgeStandIns: "surveyed",
       discCells: "packed",
-      figureShading: "screen",
+      figureShading: "forward",
     },
     decoration: false,
     scatterDensity: 0,

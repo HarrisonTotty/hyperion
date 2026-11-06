@@ -209,7 +209,7 @@ describe("the Mac batch's matrix", () => {
         "counted-figure-shading-high-dpr1-b",
         "high",
         1,
-        ["--count-gpu-calls", "--geometry", "figureShading=forward"],
+        ["--count-gpu-calls", "--geometry", "figureShading=screen"],
         { kind: "counted side", lever: "figure-shading", side: "b" },
       ],
       [

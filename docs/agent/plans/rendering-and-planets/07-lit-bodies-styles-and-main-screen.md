@@ -10202,7 +10202,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
 - **The figure shaded once a pixel** (2026-11-05, perf-body-shading, the owner's Mac; a lean).
   - Measured first: from orbit the figure's 2 × 2 quads ran 1.89 (high) and 2.33 (low) lanes a
     covered pixel, its level-0 triangles 4–6 px; closed in 1.10–1.58.
-  - `GeometrySettings.figureShading`: `forward` the way back, `screen` on both settings;
+  - `GeometrySettings.figureShading`: `forward` the way back and on both settings until the owner's
+    Mac pair (SwiftShader: `screen` 7% and 70% slower from orbit at low and high, 20% faster closed
+    in at high), `screen` the lever;
     `--geometry figureShading=…`, the smoke's `geometry-figureShading`, the Mac pair
     `figure-shading` (counted sides).
   - `SMOOTH_MESH_IDS_MATERIAL` (and its cluster form) writes each record into the view's `r32uint`
