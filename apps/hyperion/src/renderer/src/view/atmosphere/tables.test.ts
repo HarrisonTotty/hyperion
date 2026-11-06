@@ -71,6 +71,7 @@ import {
   absorberCount,
   absorberSlots,
   type AtmosphereBody,
+  ATMOSPHERE_TABLES_LABEL,
   AtmosphereTables,
   columnTableSizes,
   DENSITY_TABLE_LEVELS,
@@ -302,6 +303,24 @@ describe("AtmosphereTables", () => {
     const none = packLayerEdges(R05_EARTH_REFERENCE);
     expect([...none.subarray(at + 16)]).toEqual([0, 0, 0, 0]);
     expect([...none.subarray(0, at + 16)].every((h) => h === -1)).toBe(true);
+  });
+
+  it("uploads a medium's tables in one staged scope, and nothing for the same medium again (lane perf-page-long-tasks)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    const scopes = engine.staged.length;
+    const writes = engine.writes.length;
+    const textureWrites = engine.textureWritten.length;
+    tables.setMedium(TABULATED, R);
+    tables.setMedium(TABULATED, R);
+    expect(engine.staged.slice(scopes)).toEqual([
+      {
+        label: ATMOSPHERE_TABLES_LABEL,
+        writes: [writes, writes + 1],
+        textureWrites: [textureWrites, engine.textureWritten.length],
+      },
+    ]);
+    expect(engine.textureWritten.length - textureWrites).toBeGreaterThanOrEqual(4);
   });
 
   it("makes a tabulated medium's tables at their shape and releases the placeholders", async () => {

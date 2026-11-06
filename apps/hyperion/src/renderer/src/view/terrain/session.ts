@@ -833,7 +833,7 @@ export function sceneContacts(
 /** What the session's masks and maps make on its engine. */
 type TextureEngine = Pick<
   RenderEngine,
-  "createTexture" | "writeTexture" | "releaseTexture" | "onRestored"
+  "createTexture" | "writeTexture" | "releaseTexture" | "onRestored" | "stagedWrites"
 >;
 
 /**
@@ -869,6 +869,10 @@ class SessionTextures implements TextureEngine {
   releaseTexture(texture: TextureHandle): void {
     this.#held.delete(texture);
     this.#engine.releaseTexture(texture);
+  }
+
+  stagedWrites<T>(label: string, write: () => T): T {
+    return this.#engine.stagedWrites(label, write);
   }
 
   onRestored(listener: () => void): () => void {

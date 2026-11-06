@@ -477,6 +477,9 @@ export function surveyEdges(coverage: CoverageView, face: Face): ReadonlyArray<S
  */
 export const COVERAGE_MASK_FORMAT = "r8unorm" satisfies GPUTextureFormat;
 
+/** The staged scope's label of a coverage mask's upload (`RenderEngine.stagedWrites`). */
+export const COVERAGE_MASK_LABEL = "coverage mask upload";
+
 /** The mask's byte for a surveyed cell, 1.0 in the shader. */
 export const COVERAGE_MASK_SURVEYED = 255;
 
@@ -522,7 +525,10 @@ export function coverageMaskTextureSpec(name: string, level: number): TextureSpe
  * forgets them, for a body the view no longer draws.
  */
 export class CoverageMask {
-  readonly #engine: Pick<RenderEngine, "createTexture" | "writeTexture" | "releaseTexture">;
+  readonly #engine: Pick<
+    RenderEngine,
+    "createTexture" | "writeTexture" | "releaseTexture" | "stagedWrites"
+  >;
   readonly #name: string;
   #texture: TextureHandle | null = null;
   #level: number | null = null;
@@ -532,7 +538,10 @@ export class CoverageMask {
   #surveyed = 0;
 
   constructor(
-    engine: Pick<RenderEngine, "createTexture" | "writeTexture" | "releaseTexture">,
+    engine: Pick<
+      RenderEngine,
+      "createTexture" | "writeTexture" | "releaseTexture" | "stagedWrites"
+    >,
     name: string,
   ) {
     this.#engine = engine;
@@ -667,11 +676,16 @@ export class CoverageMask {
         throw error;
       }
     }
-    this.#engine.writeTexture(
-      this.#texture,
-      { x: 0, y: 0, z: 0 },
-      { width: side, height: side, depthOrArrayLayers: 6 },
-      texels,
-    );
+    const texture = this.#texture;
+    // Staged, so that a mask of up to 384 KiB never waits on the GPU process (lane
+    // perf-page-long-tasks).
+    this.#engine.stagedWrites(COVERAGE_MASK_LABEL, () => {
+      this.#engine.writeTexture(
+        texture,
+        { x: 0, y: 0, z: 0 },
+        { width: side, height: side, depthOrArrayLayers: 6 },
+        texels,
+      );
+    });
   }
 }

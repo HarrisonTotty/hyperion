@@ -1266,6 +1266,9 @@ const SLOT_DEPTHS_FORMAT: GPUTextureFormat = "rgba16float";
 /** The slot layers' texture name. */
 const SLOT_DEPTHS_NAME = "atmosphere slot depths";
 
+/** The staged scope's label of a medium's tables (`RenderEngine.stagedWrites`). */
+export const ATMOSPHERE_TABLES_LABEL = "atmosphere tables upload";
+
 /** A row of nothing, the tables' before their first build. */
 const EMPTY_ROW: PerPlanetRow = {
   transmittanceBytes: 0,
@@ -3453,12 +3456,16 @@ export class AtmosphereTables {
     this.#temperature = null;
     const engine = this.#engine;
     const r = this.#resources;
-    engine.writeBuffer(r.terms, 0, terms);
-    r.densityTables = this.#upload(r.densityTables, densityTables, DENSITY_FORMAT);
-    r.phaseTables = this.#upload(r.phaseTables, phaseTables, PHASE_FORMAT);
-    r.lobeTables = this.#uploadPlanes(r.lobeTables, lobeTables);
-    r.absorberCurves = this.#uploadCurves(r.absorberCurves, absorberCurves);
-    engine.writeTexture(r.oblateBody, [0, 0, 0], [OBLATE_BODY_TEXELS, 1, 1], oblateBody);
+    // The medium's tables in one staged scope, so that their uploads never wait on the GPU
+    // process (lane perf-page-long-tasks).
+    engine.stagedWrites(ATMOSPHERE_TABLES_LABEL, () => {
+      engine.writeBuffer(r.terms, 0, terms);
+      r.densityTables = this.#upload(r.densityTables, densityTables, DENSITY_FORMAT);
+      r.phaseTables = this.#upload(r.phaseTables, phaseTables, PHASE_FORMAT);
+      r.lobeTables = this.#uploadPlanes(r.lobeTables, lobeTables);
+      r.absorberCurves = this.#uploadCurves(r.absorberCurves, absorberCurves);
+      engine.writeTexture(r.oblateBody, [0, 0, 0], [OBLATE_BODY_TEXELS, 1, 1], oblateBody);
+    });
     const sizes = columnTableSizes(medium, this.#columnTables);
     const sliceCount = plan.kappa.length;
     const held = r.slices;

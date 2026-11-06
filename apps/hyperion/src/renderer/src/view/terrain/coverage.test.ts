@@ -6,6 +6,7 @@ import type { AllocationEvent } from "../engine/memory";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { stToUv } from "./cube";
 import {
+  COVERAGE_MASK_LABEL,
   COVERAGE_MASK_SURVEYED,
   CoverageMask,
   coverageMaskTextureSpec,
@@ -348,6 +349,18 @@ describe("the GPU coverage mask", () => {
     expect(texel(3, 31, 2)).toBe(COVERAGE_MASK_SURVEYED);
     expect(texel(1, 4, 4)).toBe(0);
     expect(texels.reduce((n, t) => n + (t === 0 ? 0 : 1), 0)).toBe(2);
+  });
+
+  it("writes each mask in a staged scope of its own (lane perf-page-long-tasks)", async () => {
+    const engine = await countingRenderEngine();
+    const mask = new CoverageMask(engine, "coverage mask");
+    mask.update(merged(CoverageView.empty(8), cover([0, 10, 3]), 1));
+    mask.update(merged(CoverageView.empty(8), cover([0, 20, 3]), 2));
+    expect(engine.staged).toEqual([
+      { label: COVERAGE_MASK_LABEL, writes: [0, 0], textureWrites: [0, 1] },
+      { label: COVERAGE_MASK_LABEL, writes: [0, 0], textureWrites: [1, 2] },
+    ]);
+    mask.release();
   });
 
   it("is made under coarse-field-gpu, 384 KiB at level 8, and remade for another level", async () => {
