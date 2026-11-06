@@ -471,6 +471,8 @@ describe("the photorealistic renderer", () => {
 
   it("shades the figures once a pixel: the bodies pass's opaque terrain, the figures' raster into the view's figure IDs with the scene's depth, then their resolve and the rest of the terrain (plan R07, `figureShading` `screen`)", async () => {
     const { engine, renderer, frame } = await handedOver();
+    // The screen path's pipelines prepared, off the frame that asked for them.
+    await microtasks();
     const [opaque, rest] = [drawOfName("opaque terrain"), drawOfName("fins")];
     const terrain: FrameTerrain = {
       surveyCoverage: () => null,
@@ -554,6 +556,28 @@ describe("the photorealistic renderer", () => {
     renderer.dispose();
   });
 
+  it("resolves an emitting figure by the resolve's emissive form (plan R07, R08.T18.a)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    await renderer.prepareEmissive();
+    const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+    const [planet] = frame.bodies;
+    if (planet === undefined) {
+      throw new Error("the frame has its planet");
+    }
+    const glowing = { ...frame, bodies: [{ ...planet, thermal: field }] };
+    renderer.render(new RecordingView(), glowing);
+    await microtasks();
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), glowing);
+    expect(
+      engine.targetFrames
+        .slice(from)
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.figureResolve)
+        ?.draws.map((draw) => draw.material.name),
+    ).toEqual(["bodies:figureResolveEmissive"]);
+    renderer.dispose();
+  });
+
   it("draws the terrain by the visibility buffer: its ID raster into the view's IDs with the scene's depth, then the resolve over them, the figures and the rest (R14.T2.c–e)", async () => {
     const { engine, renderer, frame } = await handedOver();
     const raster = drawOfName("id raster");
@@ -598,6 +622,7 @@ describe("the photorealistic renderer", () => {
 
   it("shades the figures once a pixel by the visibility buffer: their raster after the terrain's, their resolve after the terrain's in its pass (plan R07)", async () => {
     const { engine, renderer, frame } = await handedOver();
+    await microtasks();
     const terrain: FrameTerrain = {
       surveyCoverage: () => null,
       surveyedWhole: () => false,

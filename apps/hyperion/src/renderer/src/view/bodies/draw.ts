@@ -1808,6 +1808,9 @@ export function cellWorkgroups(groups: number): readonly [number, number, number
 /** Bytes of one pixel's sums in `cell_sums`: two `vec4f`. */
 const CELL_SUM_BYTES = 32;
 
+/** The name of the buffer of the `disc cells` pass's sums, which the smoke reads back. */
+export const CELL_SUMS_BUFFER_NAME = "bodies:disc cell sums";
+
 /**
  * What the `disc cells` pass takes of the `discs` pass it serves (R07.T8.d): that pass's frame,
  * packed as the engine packs a submission's (`frame.wgsl`), so that each cell is the one the
@@ -2241,7 +2244,7 @@ export class LitBodyRenderer {
       instances: this.#buffer("bodies:mesh instances", MIN_BUFFER_BYTES),
       cellJobs: this.#buffer("bodies:disc cell jobs", MIN_BUFFER_BYTES),
       cellGroups: this.#buffer("bodies:disc cell groups", MIN_BUFFER_BYTES),
-      cellSums: this.#buffer("bodies:disc cell sums", MIN_BUFFER_BYTES),
+      cellSums: this.#buffer(CELL_SUMS_BUFFER_NAME, MIN_BUFFER_BYTES),
       noDiscTable: this.#noDiscTable(),
       emissive: null,
       air: null,
@@ -2699,10 +2702,16 @@ export class LitBodyRenderer {
   }
 
   /**
-   * The draws of a plan's mesh bodies, for the `bodies` pass: opaque, with depth, before the
-   * painter's sequence (Design note 8). Each figure is one instanced draw, or on the cluster path
-   * (plan R14, R14.T4.a) the draws of its pass's stride-1 buckets, one a template, its clusters
-   * kept by the cull's frustum ({@link LitBodyRenderer.cullFigures}).
+   * The draws of a plan's mesh bodies' figures: for the `bodies` pass, opaque, with depth, before
+   * the painter's sequence (Design note 8), or their raster into the view's figure IDs. Each figure
+   * is one instanced draw, or on the cluster path (plan R14, R14.T4.a) the draws of its pass's
+   * stride-1 buckets, one a template, its clusters kept by the cull's frustum
+   * ({@link LitBodyRenderer.cullFigures}).
+   *
+   * @param shading - `forward`, the figures' own forms into the scene target; `ids`, their raster
+   *   (plan R07, `GeometrySettings.figureShading` `screen`) into the view's `r32uint` figure IDs on
+   *   the scene's depth, one material for every form, which {@link LitBodyRenderer.figureResolveDraws}
+   *   then shades.
    */
   meshDraws(plan: BodyFramePlan, shading: "forward" | "ids" = "forward"): DrawItem[] {
     const firstInstance = this.#upload(plan);

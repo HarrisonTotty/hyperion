@@ -469,9 +469,10 @@ const CELL_FORM_KERNELS: Readonly<Record<CellWay, Readonly<Record<CellForm, Kern
 
 /**
  * The way of the `disc cells` kernel whose forms {@link PhotorealRenderer.prepareEmissive} and its
- * kin make where they are not told: both settings' (`GeometrySettings.discCells`).
+ * kin make where they are not told: the high setting's (`GeometrySettings.discCells`), the low's
+ * too.
  */
-const PREPARED_CELL_WAY: CellWay = "packed";
+const PREPARED_CELL_WAY: CellWay = SETTINGS.high.geometry.discCells;
 
 /**
  * A form of the `disc cells` kernel as one device's renderer asks for it: R08.T18.a's emissive,

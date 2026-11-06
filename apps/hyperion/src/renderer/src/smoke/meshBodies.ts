@@ -405,7 +405,8 @@ async function checkFigureScreen(
       for (const { name, plan, camera } of frames) {
         renderer.setGeometry(geometry);
         const forwardPlan = plan();
-        // Each frame drawn and read back forward, then once a pixel, before the next.
+        // Each frame drawn and read back forward, then once a pixel, before the next: the harness
+        // reads its targets back in order.
         // oxlint-disable-next-line no-await-in-loop
         const forward = await drawFigureFrame(engine, renderer, forwardPlan, camera, viewport);
         const screenPlan = plan();
@@ -417,6 +418,7 @@ async function checkFigureScreen(
           prepared = renderer.screenReady(screenPlan);
         }
         ready &&= prepared;
+        // Read back before the next frame draws, as the forward frame was.
         // oxlint-disable-next-line no-await-in-loop
         const screen = await drawScreenFigureFrame(engine, renderer, screenPlan, camera, viewport);
         const colourSame = bytesDigest(forward.colour) === bytesDigest(screen.colour);

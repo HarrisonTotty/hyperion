@@ -1,5 +1,5 @@
 import type { BodyIdHex } from "@hyperion/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
@@ -65,6 +65,7 @@ import { datumNormalMap, UNREAD_TEXTURES, unreadNormalMap } from "../../test/nor
 import type { DiscSurface } from "../appearance/bodyAppearance";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { microtasks } from "../../test/opticsFakes";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import type { DrawItem, TextureHandle } from "../engine/types";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
@@ -1991,6 +1992,62 @@ describe("mesh bodies (T9)", () => {
   }
 
   const [PLANET, MOON, CLEAR] = sceneOfThree().bodies.map((b) => b.id);
+
+  it("readies the figure's screen path once its raster and resolve are prepared, and keeps it unready where they are refused, reporting each refusal once (plan R07)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const prepare = engine.prepareMaterial.bind(engine);
+    let refuse = false;
+    const asks = vi
+      .spyOn(engine, "prepareMaterial")
+      .mockImplementation(async (material, targets, meshes) =>
+        refuse && material.name.startsWith("bodies:smoothMeshIds")
+          ? Promise.reject(new Error("refused"))
+          : prepare(material, targets, meshes),
+      );
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const plan = promotedPlan();
+    const first = renderer.screenReady(plan);
+    await microtasks();
+    const ready = renderer.screenReady(plan);
+    // A refusal on the next device leaves the path unready, asked and reported once a material.
+    refuse = true;
+    engine.restore();
+    renderer.screenReady(plan);
+    await microtasks();
+    const refused = [renderer.screenReady(plan), renderer.screenReady(plan)];
+    // Each raster asked once a device, the refused ones not again.
+    const idsAsked = asks.mock.calls.filter(([material]) =>
+      material.name.startsWith("bodies:smoothMeshIds"),
+    );
+    expect([
+      first,
+      ready,
+      engine.prepares.some(({ name }) => name === "bodies:figureResolve"),
+      refused,
+      idsAsked.length,
+      reported.mock.calls.filter(([text]) => String(text).includes("could not be prepared")).length,
+    ]).toEqual([false, true, true, [false, false], 4, 2]);
+    renderer.dispose();
+  });
+
+  it("reports no loss of the figure's screen pipelines, and prepares them again on the restored device (plan R07)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const plan = promotedPlan();
+    engine.loseDevice();
+    renderer.screenReady(plan);
+    await microtasks();
+    engine.restore();
+    renderer.screenReady(plan);
+    await microtasks();
+    expect([
+      renderer.screenReady(plan),
+      reported.mock.calls.filter(([text]) => String(text).includes("could not be prepared")).length,
+    ]).toEqual([true, 0]);
+    renderer.dispose();
+  });
 
   it("promotes a disc over a depth writer, and a disc overlapping it, but not one clear of both", () => {
     const plan = promotedPlan();

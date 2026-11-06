@@ -45,6 +45,7 @@ import {
   BODY_DISC_CELLS_KERNEL,
   BODY_DISC_CELLS_PACKED_KERNEL,
   type BodyFramePlan,
+  CELL_SUMS_BUFFER_NAME,
   type LitBodyEngine,
   type LitBodyInput,
   LitBodyRenderer,
@@ -189,9 +190,6 @@ function planOf(item: CellCase, sunDeg = 80): BodyFramePlan {
   );
 }
 
-/** The lit-body renderer's buffer of the `disc cells` pass's sums (`draw.ts`' resources). */
-const CELL_SUMS_BUFFER = "bodies:disc cell sums";
-
 /**
  * The renderer's engine, keeping the sums buffer each `disc cells` dispatch binds, so that the
  * sentinel draw can overwrite the sums the draws then read, and making it readable; every call is
@@ -209,7 +207,7 @@ function keepingSums(engine: RenderEngine): {
     // renderer's own buffer, never read back, is not made for.
     createBuffer: (spec) =>
       engine.createBuffer(
-        spec.name === CELL_SUMS_BUFFER
+        spec.name === CELL_SUMS_BUFFER_NAME
           ? { ...spec, usage: spec.usage | BUFFER_USAGE.COPY_SRC }
           : spec,
       ),
@@ -580,12 +578,15 @@ export async function checkCellPassEveryRecord(
       // plan's records are written once.
       // oxlint-disable-next-line no-await-in-loop
       const throughPass = await draw("pass", plan);
+      // Read before the next dispatch writes the renderer's one sums buffer again.
       // oxlint-disable-next-line no-await-in-loop
       const perCellSums = await sumsNow();
       // The packed kernel's (`GeometrySettings.discCells`): its sums and its draws byte for byte
       // the per-cell kernel's, the bytes past its jobs' sums left as the per-cell run left them.
+      // Drawn and read back in turn, as every draw of the case is.
       // oxlint-disable-next-line no-await-in-loop
       const packed = await draw("pass", planOf(item), packedKernel);
+      // Read before the in-fragment draw's sentinel overwrites the buffer.
       // oxlint-disable-next-line no-await-in-loop
       const packedSums = await sumsNow();
       const sumsEqual =
