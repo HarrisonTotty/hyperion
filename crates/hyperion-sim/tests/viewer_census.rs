@@ -33,8 +33,10 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::math;
 use hyperion_sim::planetary::BodyIndex;
-use hyperion_sim::planetary::record::Section;
-use hyperion_sim::planetary::surface::CoarseInputs;
+use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+use hyperion_sim::planetary::derive::photometry::THIN_ATMOSPHERE_PRESSURE;
+use hyperion_sim::planetary::record::{Section, SectionState};
+use hyperion_sim::planetary::surface::{CoarseInputs, ReadCoarseInputsError, SurfaceInputsError};
 use hyperion_sim::planetary::viewer::{DensityGrid, ViewerSystem, draw_inputs};
 use hyperion_sim::time::UniverseTime;
 use hyperion_surface::material::weathered_entry_bvr;
@@ -148,6 +150,8 @@ struct Shown {
     hue_deg: f64,
 }
 
+/// A display-linear value's 8-bit sRGB code, clamped to [0, 1] first: the sRGB transfer function of
+/// IEC 61966-2-1:1999, as `tonemap.ts`' `srgbEncode` takes it.
 fn srgb_code(linear: f64) -> u8 {
     let v = linear.clamp(0.0, 1.0);
     let encoded = if v <= 0.003_130_8 {
@@ -166,6 +170,7 @@ fn srgb_code(linear: f64) -> u8 {
     code
 }
 
+/// CIELAB's f(t) of a tristimulus ratio t, with δ = 6 ÷ 29 (CIE 15:2004, §8.2.1).
 fn lab_f(t: f64) -> f64 {
     let delta: f64 = 6.0 / 29.0;
     if t > math::powi(delta, 3) {
@@ -176,8 +181,16 @@ fn lab_f(t: f64) -> f64 {
 }
 
 /// The light `rgb` (linear Rec. 709) exposed to the meter's grey and stated.
+///
+/// # Panics
+///
+/// For light that is not finite or has no luminance, which no lit disc returns.
 fn shown(rgb: [f64; 3]) -> Shown {
     let y = luminance(rgb);
+    assert!(
+        rgb.iter().all(|channel| channel.is_finite()) && y > 0.0,
+        "a lit disc's light {rgb:?}"
+    );
     let exposed = rgb.map(|channel| (channel * METER_GREY / y).max(0.0));
     let xyz = apply(&SRGB_TO_XYZ, exposed);
     let white = apply(&SRGB_TO_XYZ, [1.0; 3]);
@@ -211,6 +224,37 @@ fn host_class(teff_k: f64) -> &'static str {
     }
 }
 
+/// What a draw's planet is by its record: its published surface state and material, or an
+/// envelope with no surface section, modelled or with its section's state.
+#[derive(Debug, Clone, Copy)]
+enum Ground {
+    Surface {
+        state: SurfaceState,
+        material: SurfaceMaterial,
+    },
+    Envelope,
+    EnvelopeSection(SectionState),
+}
+
+impl Ground {
+    /// Its state as the table states it.
+    fn label(self) -> String {
+        match self {
+            Self::Surface { state, .. } => format!("{state:?}"),
+            Self::Envelope => "GasEnvelope".to_owned(),
+            Self::EnvelopeSection(section) => format!("Envelope ({section:?})"),
+        }
+    }
+
+    /// Its material as the table states it.
+    fn material(self) -> String {
+        match self {
+            Self::Surface { material, .. } => format!("{material:?}"),
+            Self::Envelope | Self::EnvelopeSection(_) => "-".to_owned(),
+        }
+    }
+}
+
 /// One draw's row.
 #[derive(Debug, Clone)]
 struct Row {
@@ -220,51 +264,59 @@ struct Row {
     host_msun: f64,
     a_au: f64,
     mass_mearth: f64,
-    state: String,
-    material: String,
+    ground: Ground,
     pressure_pa: Option<f64>,
     template: String,
     lid: String,
     host_rgb: [f64; 3],
-    template_bvr: [f64; 3],
+    template_bvr: Option<[f64; 3]>,
     lid_bvr: Option<[f64; 3]>,
 }
 
 fn draw_row(galaxy: &Galaxy, grid: &DensityGrid, draw_seed: u64) -> Row {
-    let drawn = draw_inputs(galaxy, grid, draw_seed).expect("a planet of the galaxy");
+    let drawn = draw_inputs(galaxy, grid, draw_seed)
+        .unwrap_or_else(|error| panic!("draw {draw_seed}: a planet of the galaxy: {error}"));
     let raw = *drawn.inputs.raw();
-    let system = ViewerSystem::generate(drawn.inputs).expect("a drawn planet's system");
+    let system = ViewerSystem::generate(drawn.inputs)
+        .unwrap_or_else(|error| panic!("draw {draw_seed}: the drawn planet's system: {error}"));
     let index = BodyIndex::try_from(system.planet().body_index()).expect("a planet's index");
     let record = system
         .planets()
         .body_at(system.context(), index, UniverseTime::EPOCH)
-        .expect("the viewer's planet at the epoch");
+        .unwrap_or_else(|error| panic!("draw {draw_seed}: the planet at the epoch: {error}"));
     let disc = system
         .host_discs_at(UniverseTime::EPOCH)
         .into_iter()
         .next()
-        .expect("a host disc at the epoch");
+        .unwrap_or_else(|| panic!("draw {draw_seed}: a host disc at the epoch"));
     let colour = disc.colour();
     let [red, green] = colour.red_green();
     let host_rgb = [red, green, colour.blue()];
     let teff_k = disc.teff().value();
-    let (state, material) = match record.surface() {
-        Section::Ok(surface) => (
-            format!("{:?}", surface.published_state()),
-            format!("{:?}", surface.material()),
-        ),
-        _ => match record.envelope() {
-            Section::Ok(_) => ("GasEnvelope".to_owned(), "-".to_owned()),
-            // No surface section and no envelope modelled: a sub-Neptune's envelope.
-            _ => ("Envelope (not modelled)".to_owned(), "-".to_owned()),
+    let ground = match (record.surface(), record.envelope()) {
+        (Section::Ok(surface), _) => Ground::Surface {
+            state: surface.published_state(),
+            material: surface.material(),
         },
+        (_, Section::Ok(_)) => Ground::Envelope,
+        // No surface section, and an envelope's not given: a sub-Neptune's or a steam envelope's
+        // (`record.rs`, `BodyRecord::envelope`), by its section's state.
+        (
+            Section::NotResolved | Section::NotModelled | Section::NotApplicable,
+            envelope @ (Section::NotResolved | Section::NotModelled | Section::NotApplicable),
+        ) => Ground::EnvelopeSection(envelope.state()),
     };
     let (template, template_bvr) = match record.photometry() {
         Section::Ok(photometry) => {
             let p = photometry.geometric_albedo();
-            (format!("{:?}", photometry.template()), [p.b, p.v, p.r])
+            (
+                format!("{:?}", photometry.template()),
+                Some([p.b, p.v, p.r]),
+            )
         }
-        _ => ("not modelled".to_owned(), [f64::NAN; 3]),
+        Section::NotResolved | Section::NotModelled | Section::NotApplicable => {
+            ("-".to_owned(), None)
+        }
     };
     let (lid, lid_bvr, pressure_pa) = match CoarseInputs::for_body(&record, None, system.context())
     {
@@ -280,7 +332,15 @@ fn draw_row(galaxy: &Galaxy, grid: &DensityGrid, draw_seed: u64) -> Row {
                 Some(inputs.surface_pressure().value()),
             )
         }
-        Err(_) => ("-".to_owned(), None, None),
+        // A planet with no solid surface has no lid; one whose surface is not modelled or is
+        // withheld is said so. Any other refusal is a fault of the reading.
+        Err(ReadCoarseInputsError::Section(SurfaceInputsError::NoSolidSurface)) => {
+            ("-".to_owned(), None, None)
+        }
+        Err(ReadCoarseInputsError::Section(
+            SurfaceInputsError::NotModelled(_) | SurfaceInputsError::NotResolved(_),
+        )) => ("not modelled".to_owned(), None, None),
+        Err(error) => panic!("draw {draw_seed}: the planet's coarse inputs: {error}"),
     };
     Row {
         draw_seed,
@@ -289,8 +349,7 @@ fn draw_row(galaxy: &Galaxy, grid: &DensityGrid, draw_seed: u64) -> Row {
         host_msun: raw.star_mass_msun,
         a_au: raw.semi_major_axis_au,
         mass_mearth: raw.mass_mearth,
-        state,
-        material,
+        ground,
         pressure_pa,
         template,
         lid,
@@ -306,16 +365,27 @@ fn lit(bvr: [f64; 3], host: [f64; 3]) -> [f64; 3] {
     [bvr[2] * host[0], bvr[1] * host[1], bvr[0] * host[2]]
 }
 
-/// The air's class by the surface pressure: none below 1 Pa, thin below 30 kPa (plan 14's
-/// `THIN_ATMOSPHERE_PRESSURE`), thick at or above it.
-fn air_class(state: &str, pressure_pa: Option<f64>) -> &'static str {
-    match (state, pressure_pa) {
-        ("GasEnvelope" | "Envelope (not modelled)", _) => "envelope",
-        ("Airless", _) => "airless",
-        ("Tenuous", _) => "tenuous",
-        (_, Some(p)) if p < 30_000.0 => "thin",
-        (_, Some(_)) => "thick",
-        (_, None) => "unknown",
+/// The air's class: an envelope's, an airless or tenuous surface's by its state, and any other's by
+/// its surface pressure, thin below plan 14's `THIN_ATMOSPHERE_PRESSURE` (30 kPa) and thick at or
+/// above it.
+fn air_class(ground: Ground, pressure_pa: Option<f64>) -> &'static str {
+    let by_pressure = || match pressure_pa {
+        Some(p) if p < THIN_ATMOSPHERE_PRESSURE.value() => "thin",
+        Some(_) => "thick",
+        None => "unknown",
+    };
+    match ground {
+        Ground::Envelope | Ground::EnvelopeSection(_) => "envelope",
+        Ground::Surface { state, .. } => match state {
+            SurfaceState::GasEnvelope | SurfaceState::SteamEnvelope => "envelope",
+            SurfaceState::Airless => "airless",
+            SurfaceState::Tenuous => "tenuous",
+            SurfaceState::MagmaOcean
+            | SurfaceState::RunawayGreenhouse
+            | SurfaceState::Temperate
+            | SurfaceState::Snowball
+            | SurfaceState::Desert => by_pressure(),
+        },
     }
 }
 
@@ -372,62 +442,57 @@ fn reading(colours: &[Shown]) -> String {
     )
 }
 
-/// Each draw's disc colours, in the draws' order: the template's and the lid's, today's (`D65`)
-/// and adapted to the host (`HOST`), and the template's and the lid's had every host been the
-/// Sun, at `D65` and adapted. A draw with no lid has no lid colours.
-#[derive(Debug, Default)]
-struct Colours {
-    template_d65: Vec<Shown>,
-    template_host: Vec<Shown>,
-    template_sun_d65: Vec<Shown>,
-    template_sun: Vec<Shown>,
-    lid_d65: Vec<Shown>,
-    lid_host: Vec<Shown>,
-    lid_sun: Vec<Shown>,
+/// A surface's colour four ways: today's (`D65`) and adapted to its host (`HOST`), and had its host
+/// been the Sun, at `D65` and adapted.
+#[derive(Debug, Clone, Copy)]
+struct Seen {
+    d65: Shown,
+    host: Shown,
+    sun_d65: Shown,
+    sun: Shown,
 }
 
-fn cell(s: Shown) -> String {
-    format!(
-        "#{:02x}{:02x}{:02x} C*{:.0} h{:.0}",
-        s.srgb[0], s.srgb[1], s.srgb[2], s.chroma, s.hue_deg
+/// One draw's disc colours: its template's and its lid's, `None` for a draw with no photometry or
+/// no lid.
+#[derive(Debug, Clone, Copy)]
+struct DrawColours {
+    template: Option<Seen>,
+    lid: Option<Seen>,
+}
+
+/// A surface of albedos `bvr` lit by `host` and by `sun`, each balanced by its own white.
+fn seen(bvr: [f64; 3], host: [f64; 3], sun: [f64; 3]) -> Seen {
+    Seen {
+        d65: shown(lit(bvr, host)),
+        host: shown(apply(&white_balance_rows(host), lit(bvr, host))),
+        sun_d65: shown(lit(bvr, sun)),
+        sun: shown(apply(&white_balance_rows(sun), lit(bvr, sun))),
+    }
+}
+
+fn cell(s: Option<Shown>) -> String {
+    s.map_or_else(
+        || "-".to_owned(),
+        |s| {
+            format!(
+                "#{:02x}{:02x}{:02x} C*{:.0} h{:.0}",
+                s.srgb[0], s.srgb[1], s.srgb[2], s.chroma, s.hue_deg
+            )
+        },
     )
 }
 
-/// The colours of `rows` under their hosts and under `sun`, with the table's lines.
-fn colours_of(rows: &[Row], sun: [f64; 3]) -> (Colours, Vec<String>) {
-    let mut colours = Colours::default();
+/// The colours of `rows` under their hosts and under `sun`, in the rows' order, with the table's
+/// lines.
+fn colours_of(rows: &[Row], sun: [f64; 3]) -> (Vec<DrawColours>, Vec<String>) {
+    let mut colours = Vec::with_capacity(rows.len());
     let mut lines = Vec::with_capacity(rows.len());
-    let sun_balance = white_balance_rows(sun);
     for row in rows {
-        let balance = white_balance_rows(row.host_rgb);
-        let t_d65 = shown(lit(row.template_bvr, row.host_rgb));
-        let t_host = shown(apply(&balance, lit(row.template_bvr, row.host_rgb)));
-        assert!(
-            t_d65.chroma.is_finite() && t_host.chroma.is_finite(),
-            "draw {}: a finite colour",
-            row.draw_seed
-        );
-        colours.template_d65.push(t_d65);
-        colours.template_host.push(t_host);
-        colours
-            .template_sun_d65
-            .push(shown(lit(row.template_bvr, sun)));
-        colours
-            .template_sun
-            .push(shown(apply(&sun_balance, lit(row.template_bvr, sun))));
-        let (lid_d65, lid_host) = row.lid_bvr.map_or_else(
-            || ("-".to_owned(), "-".to_owned()),
-            |bvr| {
-                let d65 = shown(lit(bvr, row.host_rgb));
-                let host = shown(apply(&balance, lit(bvr, row.host_rgb)));
-                colours.lid_d65.push(d65);
-                colours.lid_host.push(host);
-                colours
-                    .lid_sun
-                    .push(shown(apply(&sun_balance, lit(bvr, sun))));
-                (cell(d65), cell(host))
-            },
-        );
+        let draw = DrawColours {
+            template: row.template_bvr.map(|bvr| seen(bvr, row.host_rgb, sun)),
+            lid: row.lid_bvr.map(|bvr| seen(bvr, row.host_rgb, sun)),
+        };
+        colours.push(draw);
         lines.push(format!(
             "| {} | {:.0} | {} | {:.3} | {:.4} | {:.3} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             row.draw_seed,
@@ -436,15 +501,15 @@ fn colours_of(rows: &[Row], sun: [f64; 3]) -> (Colours, Vec<String>) {
             row.host_msun,
             row.a_au,
             row.mass_mearth,
-            air_class(&row.state, row.pressure_pa),
-            row.state,
-            row.material,
+            air_class(row.ground, row.pressure_pa),
+            row.ground.label(),
+            row.ground.material(),
             row.template,
             row.lid,
-            cell(t_d65),
-            cell(t_host),
-            lid_d65,
-            lid_host,
+            cell(draw.template.map(|t| t.d65)),
+            cell(draw.template.map(|t| t.host)),
+            cell(draw.lid.map(|l| l.d65)),
+            cell(draw.lid.map(|l| l.host)),
         ));
     }
     (colours, lines)
@@ -464,10 +529,11 @@ fn print_shares(rows: &[Row]) {
     );
     println!();
     println!("## Planets: air, state, template, lid");
-    for (key, count) in tally(rows.iter().map(|r| air_class(&r.state, r.pressure_pa))) {
+    for (key, count) in tally(rows.iter().map(|r| air_class(r.ground, r.pressure_pa))) {
         println!("- air {key}: {}", share(count, n));
     }
-    for (key, count) in tally(rows.iter().map(|r| r.state.as_str())) {
+    let states: Vec<String> = rows.iter().map(|r| r.ground.label()).collect();
+    for (key, count) in tally(states.iter().map(String::as_str)) {
         println!("- state {key}: {}", share(count, n));
     }
     for (key, count) in tally(rows.iter().map(|r| r.template.as_str())) {
@@ -478,49 +544,67 @@ fn print_shares(rows: &[Row]) {
     }
 }
 
+/// One way of seeing a draw's disc, picked from its colours.
+type Pick = fn(&DrawColours) -> Option<Shown>;
+
+/// The colours `pick` picks of the draws of `rows` that `keep` keeps.
+fn picked(
+    rows: &[Row],
+    colours: &[DrawColours],
+    pick: Pick,
+    keep: impl Fn(&Row) -> bool,
+) -> Vec<Shown> {
+    rows.iter()
+        .zip(colours)
+        .filter(|(row, _)| keep(row))
+        .filter_map(|(_, draw)| pick(draw))
+        .collect()
+}
+
 /// How the colours read: as a whole, by the host's class, and how many distinct 8-bit colours.
-fn print_readings(rows: &[Row], colours: &Colours) {
+fn print_readings(rows: &[Row], colours: &[DrawColours]) {
     println!();
     println!(
         "## Disc colours (at the meter's grey; orange-brown is C* >= {CAST_CHROMA} at h {}-{}°, \
          grey C* < {NEUTRAL_CHROMA})",
         ORANGE_HUES.0, ORANGE_HUES.1
     );
-    let sets: [(&str, &[Shown]); 7] = [
-        ("template, D65 (today)", &colours.template_d65),
-        ("template, HOST", &colours.template_host),
-        (
-            "template, every host the Sun, D65",
-            &colours.template_sun_d65,
-        ),
-        (
-            "template, every host the Sun, adapted",
-            &colours.template_sun,
-        ),
-        ("lid, D65 (today)", &colours.lid_d65),
-        ("lid, HOST", &colours.lid_host),
-        ("lid, every host the Sun, adapted", &colours.lid_sun),
+    let template_d65: Pick = |c| c.template.map(|t| t.d65);
+    let template_host: Pick = |c| c.template.map(|t| t.host);
+    let template_sun: Pick = |c| c.template.map(|t| t.sun);
+    let lid_d65: Pick = |c| c.lid.map(|l| l.d65);
+    let lid_host: Pick = |c| c.lid.map(|l| l.host);
+    let lid_sun: Pick = |c| c.lid.map(|l| l.sun);
+    let sets: [(&str, Pick); 7] = [
+        ("template, D65 (today)", template_d65),
+        ("template, HOST", template_host),
+        ("template, every host the Sun, D65", |c| {
+            c.template.map(|t| t.sun_d65)
+        }),
+        ("template, every host the Sun, adapted", template_sun),
+        ("lid, D65 (today)", lid_d65),
+        ("lid, HOST", lid_host),
+        ("lid, every host the Sun, adapted", lid_sun),
     ];
-    for (name, set) in sets {
-        println!("- {name}: {}", reading(set));
+    for (name, pick) in sets {
+        println!(
+            "- {name}: {}",
+            reading(&picked(rows, colours, pick, |_| true))
+        );
     }
-    let by_class = |class: &str, set: &[Shown]| -> String {
-        let picked: Vec<Shown> = rows
-            .iter()
-            .zip(set)
-            .filter(|(r, _)| r.class == class)
-            .map(|(_, c)| *c)
-            .collect();
-        format!("{class} ({}): {}", picked.len(), reading(&picked))
-    };
     println!();
     println!("## Template colours by host class");
     for class in ["M", "K", "G", "F"] {
-        println!("- D65 {}", by_class(class, &colours.template_d65));
-        println!("- HOST {}", by_class(class, &colours.template_host));
+        for (name, pick) in [("D65", template_d65), ("HOST", template_host)] {
+            let set = picked(rows, colours, pick, |row| row.class == class);
+            println!("- {name} {class} ({}): {}", set.len(), reading(&set));
+        }
     }
-    let distinct = |set: &[Shown]| -> usize {
-        let mut codes: Vec<[u8; 3]> = set.iter().map(|c| c.srgb).collect();
+    let distinct = |pick: Pick| -> usize {
+        let mut codes: Vec<[u8; 3]> = picked(rows, colours, pick, |_| true)
+            .iter()
+            .map(|c| c.srgb)
+            .collect();
         codes.sort_unstable();
         codes.dedup();
         codes.len()
@@ -529,22 +613,22 @@ fn print_readings(rows: &[Row], colours: &Colours) {
     println!("## Variety");
     println!(
         "- distinct 8-bit template colours: D65 {}, HOST {}, every host the Sun {}",
-        distinct(&colours.template_d65),
-        distinct(&colours.template_host),
-        distinct(&colours.template_sun)
+        distinct(template_d65),
+        distinct(template_host),
+        distinct(template_sun)
     );
     println!(
         "- distinct 8-bit lid colours: D65 {}, HOST {}, every host the Sun {} (of {})",
-        distinct(&colours.lid_d65),
-        distinct(&colours.lid_host),
-        distinct(&colours.lid_sun),
-        colours.lid_d65.len()
+        distinct(lid_d65),
+        distinct(lid_host),
+        distinct(lid_sun),
+        picked(rows, colours, lid_d65, |_| true).len()
     );
 }
 
 #[test]
 #[ignore = "slow: 200 RANDOMIZE draws, each a system generated"]
-fn randomize_census_of_hosts_surfaces_and_disc_colours() {
+fn every_randomize_draw_lights_a_planet_whose_host_white_adapts_to_neutral() {
     let galaxy = Galaxy::from_params(Seed::new(GALAXY_SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture builds");
     let grid = DensityGrid::of(&galaxy);
