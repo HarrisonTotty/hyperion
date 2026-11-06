@@ -430,6 +430,11 @@ export interface ViewDisplayHarness {
   /** The server link's socket, which the test answers as the server. */
   readonly socket: FakeWebSocket;
   /**
+   * Opens another body inspection, as `SYSTEM`'s `VIEW BODY` or the `PLANET VIEWER`'s next planet
+   * hands `VIEW` one: its stage is a new one.
+   */
+  readonly inspect: (opening: InspectionOpening) => void;
+  /**
    * Every height worker the display's terrain sessions started, first first (plan R10,
    * R10.T16.a): scripted, each answering when the test tells it.
    */
@@ -486,12 +491,12 @@ export function renderViewDisplay(options: {
     return worker;
   };
 
-  render(
+  const tree = (inspection: InspectionOpening | null) => (
     <ServerLinkHarness>
       <UniverseProvider>
         <GraphicsStatusContext value={options.store}>
           <UniversePanel expanded onToggle={() => undefined} />
-          <ViewSceneProvider active knownSystem={null} inspection={options.inspection ?? null}>
+          <ViewSceneProvider active knownSystem={null} inspection={inspection}>
             {() => (
               <Activity mode="visible">
                 {/* In the console frame's work area, as `ConsoleFrame` lays VIEW out. */}
@@ -511,8 +516,9 @@ export function renderViewDisplay(options: {
           </ViewSceneProvider>
         </GraphicsStatusContext>
       </UniverseProvider>
-    </ServerLinkHarness>,
+    </ServerLinkHarness>
   );
+  const { rerender } = render(tree(options.inspection ?? null));
   const socket = FakeWebSocket.latest();
   act(() => {
     socket.serverWelcomes();
@@ -539,6 +545,11 @@ export function renderViewDisplay(options: {
     },
     views: () => options.engines.flatMap((engine) => engine.views),
     socket,
+    inspect: (opening) => {
+      act(() => {
+        rerender(tree(opening));
+      });
+    },
     heightWorkers,
   };
 }

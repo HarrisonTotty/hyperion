@@ -9,7 +9,8 @@
  * sky from its new place, which `useSky`'s request rule asks for; two views far apart, such as two
  * cameras across the nuclear disc, ask skies of their own and so hold a cube each. A cube is
  * released through T13.h's releases when its last view lets it go, and forgotten when a device
- * loss takes it.
+ * loss takes it. A cube whose last view was disposed is kept as the device's one spare until a view
+ * takes it up again or another is baked ({@link SkyCubeCache.letGo}).
  */
 
 import type { SkyStars } from "@hyperion/protocol";
@@ -46,6 +47,8 @@ export class SkyCubeCache {
   readonly #entries: Entry[] = [];
   /** Which entry each view draws. */
   readonly #byView = new Map<string, Entry>();
+  /** The cube a disposed view let go last, which no view draws ({@link SkyCubeCache.letGo}). */
+  #spare: Entry | null = null;
 
   constructor(engine: RenderEngine) {
     this.#engine = engine;
@@ -54,12 +57,13 @@ export class SkyCubeCache {
     engine.onRestored(() => {
       this.#entries.length = 0;
       this.#byView.clear();
+      this.#spare = null;
     });
   }
 
-  /** How many cubes the device holds. */
+  /** How many cubes the device holds, the spare among them. */
   get size(): number {
-    return this.#entries.length;
+    return this.#entries.length + (this.#spare === null ? 0 : 1);
   }
 
   /**
@@ -77,7 +81,14 @@ export class SkyCubeCache {
       return null;
     }
     let entry = this.#entries.find((candidate) => this.#fits(candidate, request));
+    if (entry === undefined && this.#spare !== null && this.#fits(this.#spare, request)) {
+      entry = this.#spare;
+      this.#spare = null;
+      this.#entries.push(entry);
+    }
     if (entry === undefined) {
+      // The spare goes before a bake, so that the device never holds more than the bake would.
+      this.#dropSpare();
       entry = {
         stars: request.stars,
         baked: request.baked,
@@ -102,6 +113,35 @@ export class SkyCubeCache {
     if (entry.views.size === 0) {
       this.#entries.splice(this.#entries.indexOf(entry), 1);
       releaseBakedCube(this.#engine, entry.cube);
+    }
+  }
+
+  /**
+   * Lets a disposed view's cube go: released with its last view, as {@link SkyCubeCache.release}
+   * releases it, but kept as the device's one spare until a view asks for it again, another cube is
+   * baked, or the device is lost. A stage remounted for a new scene of the same sky (the `PLANET
+   * VIEWER`'s next planet, plan R15) then takes its cube up again rather than bake it anew; the
+   * spare it replaces is released.
+   */
+  letGo(view: string): void {
+    const entry = this.#byView.get(view);
+    if (entry === undefined) {
+      return;
+    }
+    this.#byView.delete(view);
+    entry.views.delete(view);
+    if (entry.views.size === 0) {
+      this.#entries.splice(this.#entries.indexOf(entry), 1);
+      this.#dropSpare();
+      this.#spare = entry;
+    }
+  }
+
+  /** Releases the spare, if any. */
+  #dropSpare(): void {
+    if (this.#spare !== null) {
+      releaseBakedCube(this.#engine, this.#spare.cube);
+      this.#spare = null;
     }
   }
 

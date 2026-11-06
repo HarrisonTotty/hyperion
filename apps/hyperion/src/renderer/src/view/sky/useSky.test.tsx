@@ -1,5 +1,6 @@
 import type { SkyLayerCensusDto, SkyRequest } from "@hyperion/protocol";
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
@@ -17,7 +18,7 @@ import {
 import { galacticTranslated } from "../coords/position";
 import { decodeSkyPayload } from "./decodePayload";
 import type { SkyCamera } from "./model";
-import { type SkyDecoder, useSky } from "./useSky";
+import { type SkyDecoder, SkyKeep, useSky } from "./useSky";
 
 const CAMERAS: ReadonlyArray<SkyCamera> = [
   { position: skyRequest(0).observer, fovDeg: 60, widthPx: 1_920 },
@@ -174,6 +175,48 @@ function shiftedBy(px: number): SkyCamera {
 /** The hook's props for a camera moved to `camera`, the sky asked from where it is. */
 function from(camera: SkyCamera, years = 0): SkyProps {
   return { request: { ...skyRequest(years), observer: camera.position }, cameras: [camera] };
+}
+
+/** A stage's sky, its state as text: `pending`, `none`, or `held <stars> final|partial`. */
+function KeptStage({
+  request,
+  keep,
+}: {
+  readonly request: SkyRequest;
+  readonly keep: SkyKeep;
+}): ReactNode {
+  const sky = useSky(request, CAMERAS, { createDecoder: inThreadDecoder, keep });
+  const model = sky.model;
+  let text: string;
+  if (sky.pending) {
+    text = "pending";
+  } else if (model === null) {
+    text = "none";
+  } else {
+    text = `held ${String(model.stars.count)} ${model.response.final ? "final" : "partial"}`;
+  }
+  return <output aria-label="sky">{text}</output>;
+}
+
+/** One view's stages over one keep: `stage` remounts the next, as a new scene does. */
+function renderStages(keep: SkyKeep) {
+  const tree = (stage: number, request: SkyRequest) => (
+    <ServerLinkHarness>
+      <KeptStage key={stage} request={request} keep={keep} />
+    </ServerLinkHarness>
+  );
+  const view = render(tree(1, skyRequest(0)));
+  const socket = FakeWebSocket.latest();
+  act(() => {
+    socket.serverWelcomes();
+  });
+  return {
+    socket,
+    remount: (stage: number, request: SkyRequest) => {
+      view.rerender(tree(stage, request));
+    },
+    shown: () => screen.getByRole("status", { name: "sky" }).textContent,
+  };
 }
 
 describe("useSky", () => {
@@ -596,6 +639,49 @@ describe("useSky", () => {
         result.current.pending,
         result.current.model?.stars.count,
       ]).toEqual([[other], 2, false, 3]);
+    });
+  });
+
+  describe("kept above the stage (plan R15)", () => {
+    it("takes up the sky held and the request in flight as a new stage of its arrival mounts", async () => {
+      const { socket, remount, shown } = renderStages(new SkyKeep());
+      const first = latestSky(socket).id;
+      await replyAt(socket, first, 1, [125, 125, 125]);
+      remount(2, skyRequest(0));
+      const taken = shown();
+      await replyAt(socket, first, 3, FINAL);
+      expect([taken, socket.requestsOfKind("sky").length, socket.cancelledIds(), shown()]).toEqual([
+        "held 1 partial",
+        1,
+        [],
+        "held 3 final",
+      ]);
+    });
+
+    it("asks nothing again for a new stage of the arrival of the sky held", async () => {
+      const { socket, remount, shown } = renderStages(new SkyKeep());
+      await replyAt(socket, latestSky(socket).id, 3, FINAL);
+      remount(2, skyRequest(0));
+      expect([socket.requestsOfKind("sky").length, shown()]).toEqual([1, "held 3 final"]);
+    });
+
+    it("cancels the request kept where a new stage asks another arrival", () => {
+      const { socket, remount, shown } = renderStages(new SkyKeep());
+      const first = latestSky(socket).id;
+      remount(2, skyRequest(0, "0200080020000001"));
+      expect([socket.cancelledIds(), latestSky(socket).body.exclude_system, shown()]).toEqual([
+        [first],
+        "0200080020000001",
+        "pending",
+      ]);
+    });
+
+    it("cancels the request kept once its view has gone", () => {
+      const keep = new SkyKeep();
+      const { socket } = renderStages(keep);
+      const first = latestSky(socket).id;
+      keep.dispose();
+      expect(socket.cancelledIds()).toEqual([first]);
     });
   });
 });

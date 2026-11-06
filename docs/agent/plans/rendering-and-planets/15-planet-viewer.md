@@ -261,3 +261,12 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   `tests/viewer_census.rs` prints `RANDOMIZE`'s first 200 draws (draw seeds 1 to 200): each host's
   T_eff and class, the planet's air, state, template and lid, and its template's and lid's colour at
   `D65` and adapted to its host (linear Bradford, `whiteBalance.ts`'s numbers). It asserts no figure.
+- feat-host-discs-at-once (2026-11-06): a generated planet's inspection carries `sky: "shared"`
+  (`ServedSky` on `ServedSceneSource` and `BodyInspection`), and its view asks the sky with
+  `exclude_system: null`; a viewer ID is no galaxy record, so its census and payload are the
+  unexcluded ones byte for byte (server test). Its discs come from `host_discs` (R07's records).
+- (lean, 2026-11-06) A switch keeps the drawn stars, their bake and the request in flight: `useSky`
+  takes a `SkyKeep` made above the stage, which a new scene's stage takes up (its request rule
+  judging it as ever), and a disposed view's cube is the cache's one spare (`SkyCubeCache.letGo`)
+  until it is taken up or another is baked. It holds for every new scene of the same arrival, a
+  `VIEW BODY` in the server scene's system among them.

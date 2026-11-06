@@ -295,7 +295,18 @@ export interface ServedSceneSource {
    * the label block names (`POSITIONS AS SEEN FROM <designation>`).
    */
   readonly seenFrom: BodyIdHex;
+  /** Whose sky the view asks ({@link ServedSky}); absent, the system's own. */
+  readonly sky?: ServedSky;
 }
+
+/**
+ * Whose sky a served scene is seen against: `system`, its own system's, whose stars the census leaves
+ * out, as every galaxy system's is; or `shared`, the `PLANET VIEWER`'s one sky for every generated
+ * planet (plan R15), asked with no system left out. A viewer system is no record of the galaxy, so
+ * leaving it out leaves no star out, and every viewer system stands at one point: one sky then
+ * serves every generated planet within the client's hold, its discs asked on their own.
+ */
+export type ServedSky = "system" | "shared";
 
 /**
  * Where a scene came from: a kept test scene, with its name (`PRECISION TEST`,

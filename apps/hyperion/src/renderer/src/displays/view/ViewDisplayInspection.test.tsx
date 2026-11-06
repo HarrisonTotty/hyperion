@@ -28,6 +28,7 @@ import {
 } from "../../test/viewDisplayHarness";
 import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
 import { TONEMAP_PASS } from "../../view/post/tonemap";
+import type { ServedSky } from "../../view/scene/model";
 import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
 import { type InspectionOpening, inspectionOption } from "./ViewSceneProvider";
 
@@ -55,6 +56,7 @@ const REFUSED: InspectionSurvey = {
  */
 function earthOpening(
   survey: Promise<InspectionSurvey> = Promise.resolve(RECORDED),
+  shared: { readonly sky: ServedSky; readonly sequence: number } = { sky: "system", sequence: 1 },
 ): InspectionOpening {
   const result = toSystemBodiesModel(sliceBodies(), DESIGNATION);
   if (result.kind !== "ok") {
@@ -73,10 +75,16 @@ function earthOpening(
       bodies: result.bodies,
       body: FIXTURE_EARTH,
       time: { seconds: 3_600, nanos: 0 },
+      sky: shared.sky,
     }),
-    sequence: 1,
+    sequence: shared.sequence,
     survey,
   };
+}
+
+/** The Earth opened as the `PLANET VIEWER`'s `sequence`th generated planet, its sky the shared one. */
+function viewerOpening(sequence: number): InspectionOpening {
+  return earthOpening(Promise.resolve(RECORDED), { sky: "shared", sequence });
 }
 
 /** A survey the test settles, as the server answers it. */
@@ -187,6 +195,33 @@ async function skyArrivesWithSun(view: ViewDisplayHarness): Promise<void> {
     await vi.advanceTimersByTimeAsync(0);
   });
   await settle();
+}
+
+/**
+ * Answers the view's latest sky request, final, with one star and the hosts a sky that leaves no
+ * system out carries: none.
+ */
+async function sharedSkyArrives(view: ViewDisplayHarness): Promise<void> {
+  const sky = view.socket.requestsOfKind("sky").at(-1);
+  if (sky === undefined) {
+    throw new Error("the view asks no sky");
+  }
+  const payload = skyPayload([{ direction: [0, 0, -1], distanceLy: 100, vMag: 1 }], 2, null);
+  await act(async () => {
+    view.socket.serverSendsBinary(binaryFrame(sky.id, 0, 1, [...payload]));
+    view.socket.serverResponds(sky.id, {
+      kind: "sky",
+      ...skyResponse(sky.body, payload, 1, 2),
+      hosts: [],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await settle();
+}
+
+/** The primary's `STARS` line reads `PENDING`: no sky of its arrival is held. */
+function starsPendingShown(): boolean {
+  return /STARS\s*PENDING/u.test(primaryLabelBlock().textContent);
 }
 
 /** Answers the view's latest `host_discs` request with `hosts`, as the server does at once. */
@@ -449,6 +484,85 @@ describe("VIEW's body inspection (the owner's request)", () => {
       true,
       true,
     ]);
+  });
+
+  it("asks a generated planet's shared sky with no system left out (plan R15)", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await inspecting(viewerOpening(1));
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+    expect(view.socket.requestsOfKind("sky").map((request) => request.body.exclude_system)).toEqual(
+      [null],
+    );
+  });
+
+  it("keeps the shared sky through the next generated planet, asking no sky in the hold (plan R15)", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await inspecting(viewerOpening(1));
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+    await discsArrive(view, [sunLikeHostDisc({ star: 0 })]);
+    await sharedSkyArrives(view);
+    const heldFirst = !starsPendingShown();
+
+    view.inspect(viewerOpening(2));
+    await settle();
+    view.advance(600);
+    await settle();
+
+    // The next planet's stage keeps the stars drawn, asks no sky, and is lit by its system's discs,
+    // which it holds already: the same system here, kept by universe and system.
+    expect([
+      heldFirst,
+      view.socket.requestsOfKind("sky").length,
+      starsPendingShown(),
+      primaryLabelBlock().textContent.includes("LIGHTING: PENDING"),
+      view.socket.requestsOfKind("host_discs").length,
+    ]).toEqual([true, 1, false, false, 1]);
+  });
+
+  it("keeps the shared sky's request in flight through the next generated planet, which it then draws (plan R15)", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await inspecting(viewerOpening(1));
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+    const [first] = view.socket.requestsOfKind("sky");
+
+    view.inspect(viewerOpening(2));
+    await settle();
+    view.advance(600);
+    await settle();
+    const pendingThrough = starsPendingShown();
+    await sharedSkyArrives(view);
+
+    expect([
+      first !== undefined && view.socket.cancelledIds().includes(first.id),
+      view.socket.requestsOfKind("sky").length,
+      pendingThrough,
+      starsPendingShown(),
+    ]).toEqual([false, 1, true, false]);
+  });
+
+  it("asks its own sky as another system's inspection opens after a generated planet", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await inspecting(viewerOpening(1));
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+    await sharedSkyArrives(view);
+
+    view.inspect(earthOpening(Promise.resolve(RECORDED), { sky: "system", sequence: 2 }));
+    await settle();
+    view.advance(600);
+    await settle();
+
+    expect([
+      view.socket.requestsOfKind("sky").map((request) => request.body.exclude_system),
+      starsPendingShown(),
+    ]).toEqual([[null, FIXTURE_SYSTEM], true]);
   });
 
   it("keeps a meter the operator chose in it, through another scene's own choice and back (ux-calls-view, item 3b)", async () => {

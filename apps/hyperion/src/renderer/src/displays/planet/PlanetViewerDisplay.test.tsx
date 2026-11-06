@@ -292,6 +292,15 @@ describe("PlanetViewerDisplay", () => {
     expect(socket.requestsOfKind("survey_pass").at(-1)?.body.scope).toBe("training");
   });
 
+  it("asks a generated planet's sky with no system left out, the one every generated planet shares (plan R15)", async () => {
+    const { socket, user } = await renderViewer();
+    await openUniverse(socket, user);
+    await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+    await showPlanet(socket, toInputsDto(DEFAULT_INPUTS));
+    const skies = socket.requestsOfKind("sky").map((request) => request.body.exclude_system);
+    expect([skies.length > 0, new Set(skies)]).toEqual([true, new Set([null])]);
+  });
+
   it("puts a refusal the server gives under the field of the input it names", async () => {
     const { socket, user } = await renderViewer();
     await openUniverse(socket, user);

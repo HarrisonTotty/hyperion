@@ -44,7 +44,7 @@ import type { CameraPose } from "../camera/pose";
 import { DEFAULT_FOV_DEG } from "../camera/projection";
 import { lookAlong } from "../camera/quaternion";
 import { serverSceneAtPush } from "../scene/fromServer";
-import type { ServedSceneSource, ViewBody, ViewScene } from "../scene/model";
+import type { ServedSceneSource, ServedSky, ViewBody, ViewScene } from "../scene/model";
 import { hostStar } from "../scene/servedBody";
 import { KEPT_TIDAL_RADIUS_M, type KeptScene } from "./kept";
 
@@ -90,6 +90,8 @@ export interface BodyInspection {
   readonly body: BodyIdHex;
   /** The display's time when the inspection was opened, at which its script starts. */
   readonly time: UniverseTime;
+  /** Whose sky its view asks (`ServedSky`): absent, its system's own. */
+  readonly sky?: ServedSky;
 }
 
 /** The scene's origin, and a body at rest. */
@@ -246,6 +248,7 @@ export function inspectionScene(inspection: BodyInspection): KeptScene {
     place,
     grants: grantLevels(inspection.bodies),
     seenFrom: body,
+    ...(inspection.sky === undefined ? {} : { sky: inspection.sky }),
   };
   const record = inspection.bodies.bodies.find((each) => each.id === body);
   const first = drawnAt(system, place, body, time, time);

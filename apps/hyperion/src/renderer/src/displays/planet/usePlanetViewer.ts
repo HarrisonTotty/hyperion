@@ -6,7 +6,8 @@
  * - **`GENERATE`** asks `viewer_planet` for the inputs, then `system_bodies` for its system at the
  *   epoch, and opens the planet as an inspection: the same kept scene of served bodies `VIEW`'s
  *   `VIEW BODY` opens (`inspectionScene`), with its whole body surveyed in training's scratch log as
- *   it opens (`surveyInspected`).
+ *   it opens (`surveyInspected`). Its sky is the one every generated planet shares
+ *   (`ServedSky`'s `shared`), so that the next planet keeps the stars drawn.
  * - **`RANDOMIZE`** asks `viewer_randomize` with the draw seed, puts the planet's inputs it draws
  *   on the panel, and generates them; once that planet is shown, and only then, the seed is the
  *   last draw's and the draw seed moves on by one, so that each press draws another planet.
@@ -432,7 +433,9 @@ async function generated(
   const { drawn } = planet.response;
   return {
     kind: "opened",
-    inspection: read.inspection,
+    // Every viewer system stands at one point and is no record of the galaxy: its sky is the one
+    // every generated planet shares, asked with no system left out (plan R15; `ServedSky`).
+    inspection: { ...read.inspection, sky: "shared" },
     source: { kind: "generated" },
     inputs: fromInputsDto(planet.response.inputs),
     drawn: {

@@ -8,6 +8,7 @@ import type { UniverseIdHex } from "@hyperion/protocol";
 import { useMemo } from "react";
 
 import type { SystemPlace } from "../../lib/scene/model";
+import type { ServedSky } from "../../view/scene/model";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import { cameraGalacticPosition } from "../../view/sky/camera";
@@ -28,7 +29,7 @@ import {
 } from "../../view/sky/label";
 import type { SkyCamera, SkyModel } from "../../view/sky/model";
 import { selectSkySprites, type SkySelection } from "../../view/sky/select";
-import { useSky } from "../../view/sky/useSky";
+import { type SkyKeep, type UseSkyOptions, useSky } from "../../view/sky/useSky";
 import { viewSkyLabelV, viewSkyLimit, viewSkyRequest } from "../../view/sky/viewSky";
 import { type LabelField, type LabelLine, runPose, type ViewRun } from "./viewRun";
 
@@ -218,6 +219,11 @@ export interface ViewSkyInput {
   /** The server scene's system place, or `null` for a kept scene: nothing is asked. */
   readonly place: SystemPlace | null;
   /**
+   * Whose sky is asked (plan R15): the place's system's own, which leaves it out, or the one every
+   * generated planet shares, which leaves none out; absent, the system's own.
+   */
+  readonly sky?: ServedSky | undefined;
+  /**
    * The run as last published: its scene's time, its camera's pose, role and field of view. The
    * sky is asked from its camera's galactic position, once its scene is the place's system.
    */
@@ -231,7 +237,16 @@ export interface ViewSkyInput {
   readonly widthPx: number | null;
   /** The quality setting `VIEW` is given, whose N_max and sprite budget the sky takes (R07.T17). */
   readonly setting: QualitySetting;
+  /**
+   * Where the sky is kept above the stage that a new scene remounts (`useSky`'s `SkyKeep`; plan
+   * R15), so that a new scene of the same arrival keeps the stars drawn and the request in flight;
+   * absent, the stage's own.
+   */
+  readonly keep?: SkyKeep | undefined;
 }
+
+/** `useSky`'s options for a stage that keeps its own sky. */
+const NO_SKY_OPTIONS: UseSkyOptions = {};
 
 /** The view's width the parallax rule reads before the view is measured: 1080p's. */
 const DEFAULT_WIDTH_PX = 1_920;
@@ -270,7 +285,7 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
       : viewSkyRequest({
           universe,
           observer,
-          system: place.system,
+          system: input.sky === "shared" ? null : place.system,
           time,
           role: run.camera.role,
           fovDeg: run.camera.fovDeg,
@@ -281,7 +296,11 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
   const following = universe !== null && known && observer === null;
   const cameras: ReadonlyArray<SkyCamera> =
     position === null ? [] : [{ position, fovDeg: run.camera.fovDeg, widthPx }];
-  const { model, pending } = useSky(request, cameras);
+  const { model, pending } = useSky(
+    request,
+    cameras,
+    input.keep === undefined ? NO_SKY_OPTIONS : { keep: input.keep },
+  );
   const role = run.camera.role;
   const fovDeg = run.camera.fovDeg;
   // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's role, field of view, size or
@@ -291,7 +310,8 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
     () => (model === null ? null : cullViewSky(model, role, fovDeg, widthPx, setting)),
     [model, role, fovDeg, widthPx, setting],
   );
-  // A sky is this view's only for the system it was asked about, whose position is known.
+  // A sky is this view's only for the system it was asked about, whose position is known, or, the
+  // planet viewer's shared sky, for any generated planet's, each leaving no system out.
   const ours =
     drawn !== null &&
     request !== null &&

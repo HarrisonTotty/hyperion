@@ -119,7 +119,11 @@ export interface ViewSkyInput {
    * (R06.T12), from which the parallax rule measures the camera.
    */
   readonly observer: GalacticPosition;
-  readonly system: string;
+  /**
+   * The system the census leaves out, the scene's own, whose stars are discs; `null` for a sky that
+   * leaves none out, the `PLANET VIEWER`'s one sky for every generated planet (plan R15).
+   */
+  readonly system: string | null;
   readonly time: UniverseTime;
   readonly role: ViewRole;
   readonly fovDeg: number;

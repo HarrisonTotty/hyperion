@@ -890,13 +890,17 @@ export class ViewFrameDrawer {
     }
   }
 
-  /** Releases the renderers, the layers, the view's hold on the cube, and the view itself. */
+  /**
+   * Releases the renderers, the layers, the view's hold on the cube, and the view itself. The cube
+   * is let go as the cache's spare (`SkyCubeCache.letGo`), so that a stage remounted for a new scene
+   * of the same sky takes it up again.
+   */
   dispose(): void {
     this.#unsubscribe();
     this.#wireframe.dispose();
     this.#photoreal.dispose();
     this.#band.dispose();
-    skyCubeCacheOf(this.#engine).release(this.#name);
+    skyCubeCacheOf(this.#engine).letGo(this.#name);
     this.#cubes.dispose();
     this.#view.dispose();
   }

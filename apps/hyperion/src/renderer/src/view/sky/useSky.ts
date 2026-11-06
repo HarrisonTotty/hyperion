@@ -4,7 +4,13 @@
  * until that request's replies hold as much (plan R06, T12 and T12.b; Design note 13).
  */
 
-import type { PartialBulkAnswer, RequestFailure, SkyRequest } from "@hyperion/protocol";
+import type {
+  PartialBulkAnswer,
+  PendingBulkRequest,
+  RequestClient,
+  RequestFailure,
+  SkyRequest,
+} from "@hyperion/protocol";
 import { useEffect, useMemo, useState } from "react";
 
 import { useServerLink } from "../../lib/serverLink";
@@ -127,6 +133,12 @@ export interface SkyView {
 export interface UseSkyOptions {
   /** Makes the decoder: the worker's by default; a test's stand-in, stable in identity, otherwise. */
   readonly createDecoder?: () => SkyDecoder;
+  /**
+   * Where the sky is kept above the stage that a new scene remounts ({@link SkyKeep}), so that the
+   * new scene takes up the sky held and the request in flight; absent, the hook keeps its own, which
+   * an unmount drops and cancels.
+   */
+  readonly keep?: SkyKeep;
 }
 
 /** A decoded sky, before the link's state marks it stale. */
@@ -142,6 +154,8 @@ interface Asked {
 interface Answer {
   readonly sky: Decoded;
   readonly asked: Asked;
+  /** The reply it was decoded from, as it arrived, so that one taken over is not decoded twice. */
+  readonly reply: Reply;
 }
 
 /** A failed request and its reason. */
@@ -192,6 +206,133 @@ type Settled =
 /** One reply of a sky request, as it arrived: its response and its payload's chunks. */
 type Reply = PartialBulkAnswer<"sky">;
 
+/** What a sky request's listener hears: each reply as it arrives, and its failure. */
+interface FlightListener {
+  readonly reply: (reply: Reply) => void;
+  readonly fail: (failure: RequestFailure) => void;
+}
+
+/**
+ * One sky request in flight and what it has sent: its latest reply and how it failed, for its
+ * listener, the effect that decodes them, which a stage remounted takes over ({@link SkyKeep}).
+ */
+class SkyFlight {
+  readonly asked: Asked;
+  readonly #pending: PendingBulkRequest<"sky">;
+  #latest: Reply | null = null;
+  #failure: RequestFailure | null = null;
+  #listener: FlightListener | null = null;
+
+  constructor(asked: Asked, requests: Pick<RequestClient, "requestBulk">) {
+    this.asked = asked;
+    this.#pending = requests.requestBulk<"sky">({ kind: "sky", ...asked.request }, (r) => r.bulk, {
+      onPartial: (reply) => {
+        this.#receive(reply);
+      },
+    });
+    void this.#ended().catch((error: unknown) => {
+      console.error("the sky's request could not be read:", error);
+    });
+  }
+
+  /** Hands on the request's outcome: its final reply, or its failure. */
+  async #ended(): Promise<void> {
+    const outcome = await this.#pending.outcome;
+    if (outcome.ok) {
+      this.#receive({ response: outcome.response, chunks: outcome.chunks });
+    } else {
+      this.#failure = outcome.error;
+      this.#listener?.fail(outcome.error);
+    }
+  }
+
+  #receive(reply: Reply): void {
+    this.#latest = reply;
+    this.#listener?.reply(reply);
+  }
+
+  /** Listens from now on, hearing at once its latest reply and its failure, where they came. */
+  attach(listener: FlightListener): void {
+    this.#listener = listener;
+    if (this.#latest !== null) {
+      listener.reply(this.#latest);
+    }
+    if (this.#failure !== null) {
+      listener.fail(this.#failure);
+    }
+  }
+
+  /** Stops listening; the request goes on. */
+  detach(): void {
+    this.#listener = null;
+  }
+
+  /** Stops listening and cancels the request. */
+  cancel(): void {
+    this.#listener = null;
+    this.#pending.cancel();
+  }
+}
+
+/** What a stage's sky leaves the next: its state as last committed. */
+interface KeptSky {
+  readonly held: Answer | null;
+  readonly newest: Answer | null;
+  readonly asked: Asked | null;
+  readonly failure: Failure | null;
+}
+
+/** A keep that holds nothing yet. */
+const NOTHING_KEPT: KeptSky = { held: null, newest: null, asked: null, failure: null };
+
+/**
+ * A view's sky kept above the stage that a new scene remounts (plan R15): what the last stage's
+ * sky held, as last committed, and its request in flight, so that a new scene takes them up as a
+ * scene within one stage would, its request rule judging them as ever (`sameArrival`). A new scene
+ * of the same arrival, the `PLANET VIEWER`'s next generated planet, keeps the stars drawn, their
+ * bake (`SkyCubeCache.letGo`) and the census under way; one of another arrival asks its own, which
+ * cancels the request kept.
+ *
+ * @remarks
+ * Made once by the view above its stages, and disposed with it. Only `useSky` reads and writes it.
+ */
+export class SkyKeep {
+  #kept: KeptSky = NOTHING_KEPT;
+  #flight: SkyFlight | null = null;
+
+  /** What the last stage's sky held, as last committed. */
+  recall(): KeptSky {
+    return this.#kept;
+  }
+
+  /** Keeps a stage's sky as committed. */
+  keep(kept: KeptSky): void {
+    this.#kept = kept;
+  }
+
+  /** The request of `asked`: the one in flight where it is `asked`'s, else a new one, the old cancelled. */
+  fly(asked: Asked, requests: Pick<RequestClient, "requestBulk">): SkyFlight {
+    if (this.#flight?.asked === asked) {
+      return this.#flight;
+    }
+    this.#flight?.cancel();
+    this.#flight = new SkyFlight(asked, requests);
+    return this.#flight;
+  }
+
+  /** Cancels the request in flight, which no stage asks any longer. */
+  land(): void {
+    this.#flight?.cancel();
+    this.#flight = null;
+  }
+
+  /** Cancels the request in flight and forgets the sky kept: the view has gone. */
+  dispose(): void {
+    this.land();
+    this.#kept = NOTHING_KEPT;
+  }
+}
+
 /**
  * The view's sky (plan R06, T12; R06.T11.d; R06.T12.b).
  *
@@ -223,11 +364,13 @@ export function useSky(
   options: UseSkyOptions = {},
 ): SkyView {
   const { status, requests } = useServerLink();
-  const [held, setHeld] = useState<Answer | null>(null);
+  const keep = options.keep;
+  // A new scene's stage takes up what the last one's sky held, and its request in flight.
+  const [held, setHeld] = useState<Answer | null>(() => keep?.recall().held ?? null);
   // The newest decoded reply of the request last asked: held at once, or once the hold allows.
-  const [newest, setNewest] = useState<Answer | null>(null);
-  const [asked, setAsked] = useState<Asked | null>(null);
-  const [failure, setFailure] = useState<Failure | null>(null);
+  const [newest, setNewest] = useState<Answer | null>(() => keep?.recall().newest ?? null);
+  const [asked, setAsked] = useState<Asked | null>(() => keep?.recall().asked ?? null);
+  const [failure, setFailure] = useState<Failure | null>(() => keep?.recall().failure ?? null);
   const stale = status !== "connected";
   const heldModel = useMemo<SkyModel | null>(
     () => (held === null ? null : { ...held.sky, stale }),
@@ -256,10 +399,19 @@ export function useSky(
   }
 
   const createDecoder = options.createDecoder ?? createWorkerSkyDecoder;
+  // What the sky holds as committed, for the stage a new scene remounts.
+  useEffect(() => {
+    keep?.keep({ held, newest, asked, failure });
+  }, [keep, held, newest, asked, failure]);
   useEffect(() => {
     if (asked === null) {
+      keep?.land();
       return undefined;
     }
+    // A request taken over from the stage before gives its latest reply again, which that stage may
+    // have decoded already: it is not decoded twice, so that the sky held keeps its identity.
+    const taken = keep?.recall();
+    const decodedReply = taken?.newest?.reply ?? taken?.held?.reply ?? null;
     let live = true;
     // Made once a payload is in hand, so that a request never answered starts no worker.
     let decoder: SkyDecoder | null = null;
@@ -319,6 +471,7 @@ export function useSky(
           band: decoded.band,
         },
         asked,
+        reply,
       });
       if (reply.response.final) {
         draining = false;
@@ -332,35 +485,39 @@ export function useSky(
       if (!live) {
         return;
       }
+      if (reply === decodedReply) {
+        if (reply.response.final) {
+          settle({ kind: "held" });
+        }
+        return;
+      }
       waiting = reply;
       if (!draining) {
         draining = true;
         void drain().catch(failed);
       }
     };
-    const pending = requests.requestBulk<"sky">({ kind: "sky", ...asked.request }, (r) => r.bulk, {
-      onPartial: offer,
-    });
-    const finish = async (): Promise<void> => {
-      const outcome = await pending.outcome;
-      if (outcome.ok) {
-        offer({ response: outcome.response, chunks: outcome.chunks });
-      } else if (isTransient(outcome.error)) {
+    const fail = (error: RequestFailure): void => {
+      if (isTransient(error)) {
         settle({ kind: "transient" });
       } else {
-        settle({
-          kind: "failed",
-          failure: { request: asked.request, message: outcome.error.message },
-        });
+        settle({ kind: "failed", failure: { request: asked.request, message: error.message } });
       }
     };
-    void finish().catch(failed);
+    const flight = keep === undefined ? new SkyFlight(asked, requests) : keep.fly(asked, requests);
+    flight.attach({ reply: offer, fail });
     return () => {
       live = false;
-      pending.cancel();
+      // A kept request goes on for the stage a new scene remounts, which the keep cancels where it
+      // asks another, or none.
+      if (keep === undefined) {
+        flight.cancel();
+      } else {
+        flight.detach();
+      }
       decoder?.dispose();
     };
-  }, [asked, requests, createDecoder]);
+  }, [asked, requests, createDecoder, keep]);
 
   const current = request ?? asked?.request ?? null;
   const model =

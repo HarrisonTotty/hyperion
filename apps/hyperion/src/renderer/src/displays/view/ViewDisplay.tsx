@@ -97,6 +97,7 @@ import {
   type SystemHostDiscs,
 } from "../../view/lighting/hostLights";
 import { type HostDiscsAsk, useHostDiscs } from "../../view/lighting/useHostDiscs";
+import { SkyKeep } from "../../view/sky/useSky";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { AutoExposure, type Metering, meteringFor } from "../../view/post/autoExposure";
 import {
@@ -532,6 +533,11 @@ interface ViewStageProps {
   readonly hostDiscs: SystemHostDiscs | null;
   /** Whether the scene's system's discs are asked and not yet answered or refused. */
   readonly hostDiscsPending: boolean;
+  /**
+   * The view's sky kept above the stage (`SkyKeep`; plan R15): a new scene's stage takes up the sky
+   * held and the request in flight, which its request rule then judges as ever.
+   */
+  readonly skyKeep: SkyKeep;
   /** The open universe, about which the sky is asked (R06), or `null`. */
   readonly universe: UniverseIdHex | null;
   /** The quality setting the views are budgeted at, and drawn at. */
@@ -931,6 +937,7 @@ function ViewStage({
   countLine,
   hostDiscs,
   hostDiscsPending,
+  skyKeep,
   universe,
   setting,
   geometry,
@@ -1048,6 +1055,8 @@ function ViewStage({
   const viewSky = useViewSky({
     universe: servedScene?.universe ?? universe,
     place: server?.place ?? servedScene?.place ?? null,
+    sky: servedScene?.sky,
+    keep: skyKeep,
     run: shown.run,
     exposure,
     widthPx: size === null ? null : Math.round(size.widthPx * size.devicePixelRatio),
@@ -3148,6 +3157,16 @@ function ViewPanels({
   // remounts, so that a served scene is lit at once and one of the same system asks nothing again
   // (plans R06 and R07).
   const hostDiscs = useHostDiscs(hostDiscsAt(universe, server, served, keptStart));
+  // The sky held and its request in flight, kept from here, above the stage, so that a new scene of
+  // the same arrival keeps its stars drawn and its census under way (plan R15): the planet viewer's
+  // next generated planet, whose sky is the one they all share.
+  const [skyKeep] = useState(() => new SkyKeep());
+  useEffect(
+    () => () => {
+      skyKeep.dispose();
+    },
+    [skyKeep],
+  );
   // What the chosen scene loads for itself, started here and not as it is made, in render
   // (`ATMOSPHERE TEST`'s media, R08.T10.b). The load is the page's, shared by every stage that
   // chooses the scene, so leaving the scene stops nothing.
@@ -3387,6 +3406,7 @@ function ViewPanels({
         countLine={interim.countLine}
         hostDiscs={hostDiscs.held}
         hostDiscsPending={hostDiscs.pending}
+        skyKeep={skyKeep}
         universe={universe}
         setting={setting}
         geometry={terrainGeometry}
