@@ -52,6 +52,7 @@ import {
 } from "./graphics/switches";
 import { reduceProfileFile } from "./inspectionTiming";
 import { isOwnPage } from "./ipcSender";
+import { PageProfiler } from "./pageProfile";
 import { reduceTraceFile } from "./reduceTrace";
 import {
   activeGpu,
@@ -482,6 +483,23 @@ function startViewsCheckSession(
   const stamp = startedAt.toISOString().replaceAll(/[-:]/g, "").slice(0, 15);
   const repo = process.cwd();
   const dirs = viewsCheckDirs(launch, graphics.launchMode);
+  // The page's CPU profile over an inspection's profiled run, from the page's load, which names
+  // what ran in each of its long tasks (lane perf-page-long-tasks).
+  const pageProfile =
+    launch.run === "inspection" && launch.timing === true
+      ? new PageProfiler(window.webContents.debugger, (line) => {
+          process.stdout.write(`${line}\n`);
+        })
+      : null;
+  if (pageProfile !== null) {
+    window.webContents.once("did-finish-load", () => {
+      void pageProfile.start().catch((error: unknown) => {
+        process.stdout.write(
+          `views check: the page's CPU profile did not start: ${String(error)}\n`,
+        );
+      });
+    });
+  }
   const checkSession = new ViewsCheckSession({
     launch,
     describe: async () => ({
@@ -513,6 +531,7 @@ function startViewsCheckSession(
     reduce: reduceWindowFile,
     profilePath: (name) => join(app.getPath("userData"), `views-check-profile-${name}.pftrace`),
     reduceProfile: reduceProfileFile,
+    ...(pageProfile === null ? {} : { pageProfile }),
     timingDir: resolve(repo, INSPECTION_TIMING_DIR),
     removeFile: (path) => rm(path, { force: true }),
     capturesDir: resolve(repo, dirs.captures, `captures-${stamp}`),

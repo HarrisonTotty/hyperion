@@ -2385,6 +2385,35 @@ export interface InspectionReactComponent {
   readonly propsChanged: ReadonlyArray<{ readonly prop: string; readonly renders: number }>;
 }
 
+/** One task of the page's main thread of 50 ms or more (lane perf-page-long-tasks). */
+export interface InspectionLongTask {
+  /** Its start on the page's clock, `performance.now()` ms. */
+  readonly startMs: number;
+  readonly durationMs: number;
+  /**
+   * Its frame's rendering update (the animation frame's callbacks, the draw loop's among them,
+   * then style, layout and paint) where that began within it, ms; else 0.
+   */
+  readonly renderMs: number;
+}
+
+/**
+ * The page's long tasks over the inspection run (`--timing`; lane perf-page-long-tasks), from
+ * Chromium's `longtask` entries, each with its `long-animation-frame` entry's rendering update.
+ */
+export interface InspectionLongTasks {
+  /** Whether the page reported each kind of entry. */
+  readonly observed: { readonly longtask: boolean; readonly longAnimationFrame: boolean };
+  /**
+   * From when they were observed to when they were taken, on the page's clock, ms; the entries
+   * buffered before the observer started are among them.
+   */
+  readonly fromMs: number;
+  readonly toMs: number;
+  /** Every task of 50 ms or more, in order. */
+  readonly tasks: ReadonlyArray<InspectionLongTask>;
+}
+
 /** What the renderer measured over one profiled window of the inspection run. */
 export interface InspectionTimingWindow {
   readonly name: InspectionTimingWindowName;
@@ -2480,6 +2509,11 @@ export interface InspectionTimingRecord {
   readonly devicePixelRatio: number;
   /** The windows, in the order measured. */
   readonly windows: ReadonlyArray<InspectionTimingWindow>;
+  /**
+   * The page's long tasks over the run (lane perf-page-long-tasks), or `null` where none were
+   * recorded.
+   */
+  readonly longTasks: InspectionLongTasks | null;
 }
 
 /**

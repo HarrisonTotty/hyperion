@@ -32,6 +32,8 @@ import type {
   InspectionAttachmentView,
   InspectionGpuAttachment,
   InspectionGpuCall,
+  InspectionLongTask,
+  InspectionLongTasks,
   InspectionReactCommits,
   InspectionReactComponent,
   InspectionTimingBytes,
@@ -1735,11 +1737,63 @@ function timingWindow(value: unknown): ReadTimingWindow | null {
   return { kind: "window", window };
 }
 
+/** `value` as one long task, or `null`: its times finite, its rendering within it. */
+function longTask(value: unknown): InspectionLongTask | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { startMs, durationMs, renderMs } = value;
+  return !isFiniteNumber(startMs) ||
+    !isFiniteNumber(durationMs) ||
+    !(durationMs >= 0) ||
+    !isFiniteNumber(renderMs) ||
+    !(renderMs >= 0) ||
+    renderMs > durationMs
+    ? null
+    : { startMs, durationMs, renderMs };
+}
+
+/**
+ * `value` as the run's long tasks (lane perf-page-long-tasks): `null` where none were recorded;
+ * `undefined` where it is neither, its span backwards or its tasks out of order.
+ */
+function longTasks(value: unknown): InspectionLongTasks | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { observed, fromMs, toMs } = value;
+  const tasks = listOf(value["tasks"], longTask);
+  if (
+    !isRecord(observed) ||
+    typeof observed["longtask"] !== "boolean" ||
+    typeof observed["longAnimationFrame"] !== "boolean" ||
+    !isFiniteNumber(fromMs) ||
+    !isFiniteNumber(toMs) ||
+    toMs < fromMs ||
+    tasks === null ||
+    tasks.some((task, i) => i > 0 && task.startMs < (tasks[i - 1]?.startMs ?? task.startMs))
+  ) {
+    return undefined;
+  }
+  return {
+    observed: {
+      longtask: observed["longtask"],
+      longAnimationFrame: observed["longAnimationFrame"],
+    },
+    fromMs,
+    toMs,
+    tasks,
+  };
+}
+
 /**
  * `value` as the inspection run's frame profile's record (the owner's report, 2026-11-01), or
- * `null` if it is not one: each window at most once. A window whose passes' times are not as many
- * as its frames' GPU times is dropped alone, its name and both counts logged, the others kept
- * (lane fix-inspection-timing-record).
+ * `null` if it is not one: each window at most once, and the run's long tasks or `null`. A window
+ * whose passes' times are not as many as its frames' GPU times is dropped alone, its name and both
+ * counts logged, the others kept (lane fix-inspection-timing-record).
  */
 export function readInspectionTimingRecord(value: unknown): InspectionTimingRecord | null {
   if (!isRecord(value)) {
@@ -1747,13 +1801,15 @@ export function readInspectionTimingRecord(value: unknown): InspectionTimingReco
   }
   const { timer, devicePixelRatio } = value;
   const read = listOf(value["windows"], timingWindow);
+  const tasks = longTasks(value["longTasks"]);
   if (
     (timer !== "full" && timer !== "quantized" && timer !== "absent") ||
     !isFiniteNumber(devicePixelRatio) ||
     !(devicePixelRatio > 0) ||
     read === null ||
     new Set(read.map((each) => (each.kind === "mistimed" ? each.name : each.window.name))).size !==
-      read.length
+      read.length ||
+    tasks === undefined
   ) {
     return null;
   }
@@ -1767,5 +1823,5 @@ export function readInspectionTimingRecord(value: unknown): InspectionTimingReco
       windows.push(each.window);
     }
   }
-  return { timer, devicePixelRatio, windows };
+  return { timer, devicePixelRatio, windows, longTasks: tasks };
 }

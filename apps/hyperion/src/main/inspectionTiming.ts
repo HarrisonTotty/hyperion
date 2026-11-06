@@ -33,6 +33,8 @@ import type {
   InspectionAtmosphereRead,
   InspectionGpuAttachment,
   InspectionGpuCall,
+  InspectionLongTask,
+  InspectionLongTasks,
   InspectionReactCommits,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
@@ -48,6 +50,13 @@ import type {
   ViewsCheckWindow,
 } from "../preload/api";
 import { type Measured, measured, missing } from "./measured";
+import {
+  functionName,
+  type LongTaskFunctions,
+  longTaskFunctions,
+  type PageProfile,
+  type ProfiledFunction,
+} from "./pageProfile";
 import { readTraceFileEvents, TraceReducer } from "./reduceTrace";
 import { formatAsPrettier, ADDED_FILE_LIMIT_BYTES, type ResultsFiles } from "./results";
 import type { ViewsCheckRunInput } from "./viewsCheckResults";
@@ -61,9 +70,10 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
  * run's lit probe (R08.T9.b), 4 since each window's terrain cluster counters (plan R14, R14.T3.d), 5
  * since each window's React commits and each thread's React work (lane perf-render-thread-2), 6
  * since each thread's longest task (lane perf-render-thread-ground), 7 since each window's render
- * passes' attachments and each body's atmosphere read (R14.T2.e; a file before it has neither).
+ * passes' attachments and each body's atmosphere read (R14.T2.e; a file before it has neither), 8
+ * since the run's long tasks (lane perf-page-long-tasks).
  */
-export const INSPECTION_TIMING_VERSION = 7;
+export const INSPECTION_TIMING_VERSION = 8;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -115,15 +125,7 @@ export const PROFILED_INCLUSIVE_FUNCTIONS = 100;
 /** The threads a window lists, the busiest first. */
 export const PROFILED_THREADS = 12;
 
-/** The longest function name kept, characters: a Rust symbol of the surface module runs to 400. */
-const FUNCTION_NAME_CHARS = 120;
-
-/** One function's sampled time on a thread over a window. */
-export interface ProfiledFunction {
-  /** Its name, script file and line (`surveyEdges styles-….js:36206`), or V8's own (`(program)`). */
-  readonly name: string;
-  readonly ms: number;
-}
+export type { ProfiledFunction } from "./pageProfile";
 
 /** One thread over a window, from its trace. */
 export interface ProfiledThread {
@@ -244,21 +246,6 @@ function clippedLongestUs(spans: ReadonlyArray<Span>, fromUs: number, toUs: numb
     longest = Math.max(longest, Math.min(end, toUs) - Math.max(start, fromUs));
   }
   return longest;
-}
-
-/** A call frame's name as the profile lists it: function, script file and line. */
-function functionName(frame: Readonly<Record<string, unknown>>): string {
-  const name = stringOf(frame["functionName"]) ?? "";
-  const url = stringOf(frame["url"]) ?? "";
-  const line = numberOf(frame["lineNumber"]);
-  const file = url.split(/[?#]/u)[0]?.split("/").at(-1) ?? "";
-  const full =
-    file.length === 0
-      ? name.length === 0
-        ? "(anonymous)"
-        : name
-      : `${name.length === 0 ? "(anonymous)" : name} ${file}${line === undefined ? "" : `:${String(line + 1)}`}`;
-  return full.length > FUNCTION_NAME_CHARS ? `${full.slice(0, FUNCTION_NAME_CHARS - 1)}…` : full;
 }
 
 /** The `count` largest of `totals`, ms, largest first, ties by name. */
@@ -940,6 +927,8 @@ export interface InspectionTimingResults {
     readonly litProbe: LitProbeName | null;
   };
   readonly windows: ReadonlyArray<InspectionTimingWindowResults>;
+  /** The page's long tasks over the run, or `null` where none were recorded. */
+  readonly longTasks: LongTaskFigures | null;
 }
 
 /** Everything a timing file is built from. */
@@ -957,6 +946,8 @@ export interface InspectionTimingInput {
   readonly record: InspectionTimingRecord;
   /** Each window's reduced trace, by name; a window without one is recorded as missing. */
   readonly traces: ReadonlyMap<InspectionTimingWindowName, Measured<ProfileTraceFigures>>;
+  /** The page's CPU profile over the run, which names each long task's functions, or `null`. */
+  readonly pageProfile: PageProfile | null;
 }
 
 /**
@@ -1048,6 +1039,125 @@ function windowResults(
   };
 }
 
+/** The long tasks' triggers a file lists, the most time first. */
+export const LISTED_LONG_TASK_TRIGGERS = 20;
+
+/** The longest long tasks a file lists, each with its functions. */
+export const LISTED_LONG_TASKS = 30;
+
+/** A long task's length past which it stalls the console outright, ms: the lane's goal. */
+export const STALLING_TASK_MS = 1000;
+
+/** The long tasks set off by one trigger over the run. */
+export interface LongTaskTrigger {
+  /**
+   * What ran in them: their entry, the outermost named function of the app their samples ran
+   * under, and their hottest function by self time (`entry → self`); with no profile,
+   * `(rendering update)` where the frame's rendering update ran in it, else `(not profiled)`.
+   */
+  readonly trigger: string;
+  readonly count: number;
+  readonly totalMs: number;
+  readonly longestMs: number;
+}
+
+/** One of the longest tasks: the window it began in, if any, and what ran in it, if profiled. */
+export interface ListedLongTask extends InspectionLongTask {
+  readonly window: InspectionTimingWindowName | null;
+  readonly functions: LongTaskFunctions | null;
+}
+
+/** The run's long tasks, summarised (lane perf-page-long-tasks). */
+export interface LongTaskFigures {
+  readonly observed: InspectionLongTasks["observed"];
+  /** Whether the page's CPU profile named what ran in them (`pageProfile.ts`). */
+  readonly profiled: boolean;
+  /** The span they were observed over, ms. */
+  readonly spanMs: number;
+  /** Tasks of 50 ms or more. */
+  readonly count: number;
+  /** Those of {@link STALLING_TASK_MS} or more. */
+  readonly stallingCount: number;
+  readonly longestMs: number;
+  readonly totalMs: number;
+  /** Their lengths, summarised. */
+  readonly durationMs: TimeSummary;
+  /** By trigger, the most time first, at most {@link LISTED_LONG_TASK_TRIGGERS}. */
+  readonly byTrigger: ReadonlyArray<LongTaskTrigger>;
+  /** The longest, at most {@link LISTED_LONG_TASKS}, the longest first. */
+  readonly longest: ReadonlyArray<ListedLongTask>;
+}
+
+/** What ran in a long task, as {@link LongTaskTrigger.trigger} names it. */
+export function longTaskTrigger(
+  task: InspectionLongTask,
+  functions: LongTaskFunctions | null,
+): string {
+  if (functions === null) {
+    return task.renderMs > 0 ? "(rendering update)" : "(not profiled)";
+  }
+  return `${functions.entry ?? "(no entry)"} → ${functions.self[0]?.name ?? "(not sampled)"}`;
+}
+
+/**
+ * The run's long tasks summarised, each listed one placed in the window it began in, and each
+ * named by what ran in it where `profile`, the page's CPU profile, is given.
+ */
+export function longTaskFigures(
+  record: InspectionLongTasks,
+  windows: ReadonlyArray<Pick<InspectionTimingWindow, "name" | "startMs" | "endMs">>,
+  profile: PageProfile | null,
+): LongTaskFigures {
+  const tasks = record.tasks.map((task) => ({
+    task,
+    functions:
+      profile === null
+        ? null
+        : longTaskFunctions(profile, task.startMs, task.startMs + task.durationMs),
+  }));
+  const durations = record.tasks.map((task) => task.durationMs);
+  const triggers = new Map<string, { count: number; totalMs: number; longestMs: number }>();
+  for (const { task, functions } of tasks) {
+    const key = longTaskTrigger(task, functions);
+    const tally = triggers.get(key) ?? { count: 0, totalMs: 0, longestMs: 0 };
+    tally.count += 1;
+    tally.totalMs += task.durationMs;
+    tally.longestMs = Math.max(tally.longestMs, task.durationMs);
+    triggers.set(key, tally);
+  }
+  const windowOf = (startMs: number): InspectionTimingWindowName | null =>
+    windows.find((each) => each.startMs <= startMs && startMs < each.endMs)?.name ?? null;
+  return {
+    observed: record.observed,
+    profiled: profile !== null,
+    spanMs: record.toMs - record.fromMs,
+    count: tasks.length,
+    stallingCount: durations.filter((ms) => ms >= STALLING_TASK_MS).length,
+    longestMs: durations.reduce((most, ms) => Math.max(most, ms), 0),
+    totalMs: durations.reduce((sum, ms) => sum + ms, 0),
+    durationMs: summariseTimes(durations),
+    byTrigger: [...triggers]
+      .map(([trigger, tally]): LongTaskTrigger => ({
+        trigger,
+        count: tally.count,
+        totalMs: tally.totalMs,
+        longestMs: tally.longestMs,
+      }))
+      .toSorted((a, b) => b.totalMs - a.totalMs || b.count - a.count)
+      .slice(0, LISTED_LONG_TASK_TRIGGERS),
+    longest: tasks
+      .toSorted((a, b) => b.task.durationMs - a.task.durationMs)
+      .slice(0, LISTED_LONG_TASKS)
+      .map(({ task, functions }): ListedLongTask => ({
+        startMs: task.startMs,
+        durationMs: task.durationMs,
+        renderMs: task.renderMs,
+        window: windowOf(task.startMs),
+        functions,
+      })),
+  };
+}
+
 /** Builds the timing file from the run's description, the renderer's record and the traces. */
 export function buildInspectionTimingResults(
   input: InspectionTimingInput,
@@ -1075,6 +1185,10 @@ export function buildInspectionTimingResults(
       litProbe: input.litProbe,
     },
     windows: record.windows.map((window) => windowResults(window, input.traces.get(window.name))),
+    longTasks:
+      record.longTasks === null
+        ? null
+        : longTaskFigures(record.longTasks, record.windows, input.pageProfile),
   };
 }
 
@@ -1407,7 +1521,49 @@ export function inspectionTimingMarkdown(results: InspectionTimingResults): stri
     "- **A profile, not a measurement:** nothing is judged; a hidden run's frames are never presented, and the machine may be shared.",
     "",
     ...results.windows.flatMap(windowMarkdown),
+    ...longTasksMarkdown(results.longTasks),
   ].join("\n");
+}
+
+/** The long tasks' section of the summary, or nothing where none were recorded. */
+function longTasksMarkdown(figures: LongTaskFigures | null): string[] {
+  if (figures === null) {
+    return [];
+  }
+  const seen =
+    figures.observed.longtask && figures.observed.longAnimationFrame
+      ? ""
+      : ` (the page reported ${figures.observed.longtask ? "no long animation frames" : "no long tasks"})`;
+  const functionsText = (functions: LongTaskFunctions | null): string =>
+    functions === null
+      ? "—"
+      : cell(
+          [
+            functions.entry ?? "(no entry)",
+            ...functions.self.map((each) => `${each.ms.toFixed(0)} \`${each.name}\``),
+          ].join("; "),
+        );
+  return [
+    "## The page's long tasks",
+    "",
+    `- **Over the run:** ${String(figures.count)} tasks of 50 ms or more in ${(figures.spanMs / 1000).toFixed(0)} s${seen}, ${(figures.totalMs / 1000).toFixed(1)} s in all; ${String(figures.stallingCount)} of ${String(STALLING_TASK_MS / 1000)} s or more; the longest ${msText(figures.longestMs, 0)} ms, the median ${msText(figures.durationMs.medianMs, 0)} ms and the p95 ${msText(figures.durationMs.p95Ms, 0)} ms`,
+    `- **What ran in them:** ${figures.profiled ? "from the page's CPU profile over the run, each task's entry (the outermost named function of the app) and its hottest functions by self time" : "not profiled: the page's CPU profile was not taken or not read"}`,
+    "",
+    "| Trigger | Tasks | Total (ms) | Longest (ms) |",
+    "| --- | --- | --- | --- |",
+    ...figures.byTrigger.map(
+      (each) =>
+        `| ${cell(each.trigger)} | ${String(each.count)} | ${each.totalMs.toFixed(0)} | ${each.longestMs.toFixed(0)} |`,
+    ),
+    "",
+    "| Start (s) | Length (ms) | Window | Rendering (ms) | Entry; self (ms) |",
+    "| --- | --- | --- | --- | --- |",
+    ...figures.longest.map(
+      (task) =>
+        `| ${(task.startMs / 1000).toFixed(1)} | ${task.durationMs.toFixed(0)} | ${task.window ?? "—"} | ${task.renderMs.toFixed(0)} | ${functionsText(task.functions)} |`,
+    ),
+    "",
+  ];
 }
 
 /** Runs of one day, machine and setting the writer numbers before it gives up. */

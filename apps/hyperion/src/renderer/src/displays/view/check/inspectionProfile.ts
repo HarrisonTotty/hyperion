@@ -27,6 +27,7 @@ import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import type { QualitySetting } from "../../../view/quality/qualitySetting";
 import { PRIMARY_VIEW_NAME } from "../viewNames";
 import type { GpuCallCounter } from "./gpuCallCounter";
+import type { LongTaskRecorder } from "./longTasks";
 import type { ReactCommitCounter } from "./reactCommits";
 import type { ViewsProbe } from "./viewsProbe";
 
@@ -95,6 +96,11 @@ export interface InspectionProfileDeps {
    * at a window's start has them read back by its end; `null` where none have come back.
    */
   readonly clusters: () => InspectionTimingClusters | null;
+  /**
+   * The page's long tasks over the run (lane perf-page-long-tasks), taken as the record is, or
+   * `null` where none are recorded.
+   */
+  readonly longTasks: Pick<LongTaskRecorder, "take"> | null;
 }
 
 /** What the primary's label block says as a window ends. */
@@ -266,6 +272,7 @@ export class InspectionProfiler {
       timer: this.#deps.views.timer(),
       devicePixelRatio: this.#deps.devicePixelRatio,
       windows: this.#windows,
+      longTasks: this.#deps.longTasks?.take() ?? null,
     };
   }
 

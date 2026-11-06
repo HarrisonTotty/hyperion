@@ -45,6 +45,7 @@ import {
 } from "./softwareTiming";
 import { recordTerrainCheck, runTerrainCheck, TERRAIN_CHECK_TIMING } from "./terrainCheckRun";
 import type { InspectionClusters } from "./inspectionClusters";
+import { LongTaskRecorder, pageLongTaskSource } from "./longTasks";
 import { reactCommitCounterOf } from "./reactCommits";
 import type { TerrainProbe } from "./terrainProbe";
 import { recordViewsCheck, runViewsCheck, STOPPED, VIEWS_CHECK_TIMING } from "./viewsCheckRun";
@@ -223,6 +224,17 @@ export function ViewsCheckRunner({
         break;
       case "inspection": {
         const { served } = run;
+        // The page's long tasks over the run, recorded with the frame profile alone.
+        const longTasks =
+          api.launch.timing === true
+            ? new LongTaskRecorder(pageLongTaskSource(), shared.nowMs)
+            : null;
+        longTasks?.start();
+        if (longTasks !== null) {
+          stopWatching = () => {
+            longTasks.stop();
+          };
+        }
         // The frame profile, on an `--inspection --timing` launch alone (the owner's report).
         const profile =
           api.launch.timing === true
@@ -238,6 +250,7 @@ export function ViewsCheckRunner({
                 calls: run.calls,
                 react: reactCommitCounterOf(globalThis),
                 clusters: () => run.clusters.counts(served?.body ?? null),
+                longTasks,
               })
             : null;
         ended = recordInspectionCheck(

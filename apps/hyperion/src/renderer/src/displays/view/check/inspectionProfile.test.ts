@@ -55,7 +55,8 @@ const CENSUS: MarchCensus = {
  * A profiler over fakes, the clock moving by each wait, the primary drawing every `drawMs`, its
  * calls counted by `counter` where given, and each census asked of the probe answered by `census`
  * (none by default: no engine made) and its signals kept, React's commits counted by `react`
- * where given, and the probe's figures replaced by `probe`'s where it has them.
+ * where given, the probe's figures replaced by `probe`'s where it has them, and the page's long
+ * tasks taken from `longTasks` where given.
  */
 function profiler(
   drawMs: number,
@@ -64,6 +65,7 @@ function profiler(
   census: () => Promise<MarchCensus> | null = () => null,
   react: InspectionProfileDeps["react"] = null,
   probe: Partial<InspectionProfileDeps["views"]> = {},
+  longTasks: InspectionProfileDeps["longTasks"] = null,
 ): {
   readonly profile: InspectionProfiler;
   readonly calls: string[];
@@ -144,6 +146,7 @@ function profiler(
       clusterReads.push(nowMs);
       return { passes: [{ label: "lit", clusters: clusterReads.length, triangles: 896 }] };
     },
+    longTasks,
   };
   return { profile: new InspectionProfiler(deps), calls, marked, signals, clusterReads };
 }
@@ -365,6 +368,33 @@ describe("the inspection run's frame profile (the owner's report)", () => {
     await profile.write();
     expect(calls.at(-1)).toBe("write orbit close");
     expect(profile.record().timer).toBe("quantized");
+  });
+
+  it("records the page's long tasks as the record is taken, or none without a recorder", () => {
+    const tasks = {
+      observed: { longtask: true, longAnimationFrame: true },
+      fromMs: 0,
+      toMs: 5_000,
+      tasks: [{ startMs: 1_200, durationMs: 80, renderMs: 0 }],
+    };
+    const take = vi.fn<() => typeof tasks>(() => tasks);
+    const { profile } = profiler(
+      100,
+      Number.NEGATIVE_INFINITY,
+      null,
+      () => null,
+      null,
+      {},
+      {
+        take,
+      },
+    );
+    expect([take.mock.calls.length, profile.record().longTasks, take.mock.calls.length]).toEqual([
+      0,
+      tasks,
+      1,
+    ]);
+    expect(profiler(100).profile.record().longTasks).toBeNull();
   });
 
   it("stretches its waits five times in software, never its count of draws", () => {

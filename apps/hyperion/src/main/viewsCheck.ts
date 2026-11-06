@@ -82,6 +82,7 @@ import {
   type ReducedProfile,
   writeInspectionTimingResults,
 } from "./inspectionTiming";
+import type { PageProfiler } from "./pageProfile";
 import { type Measured, measured, missing } from "./measured";
 import {
   readTraceFileEvents,
@@ -479,6 +480,12 @@ export interface ViewsCheckSessionDeps {
   readonly profilePath: (name: InspectionTimingWindowName) => string;
   /** Reads a profiled window's trace: `inspectionTiming.ts`' `reduceProfileFile`. */
   readonly reduceProfile: (path: string) => Promise<ReducedProfile>;
+  /**
+   * The page's CPU profile over an `--inspection --timing` run (lane perf-page-long-tasks), started
+   * as the page loaded and stopped as the timing file is written, which names what ran in each of
+   * the page's long tasks; absent on every other launch.
+   */
+  readonly pageProfile?: Pick<PageProfiler, "stop">;
   /** Where the inspection run's timing file goes ({@link INSPECTION_TIMING_DIR}, resolved). */
   readonly timingDir: string;
   readonly removeFile: (path: string) => Promise<void>;
@@ -763,6 +770,7 @@ export class ViewsCheckSession {
       throw new Error("the launch profiles no frame");
     }
     const run = await this.#run;
+    const pageProfile = (await this.#deps.pageProfile?.stop()) ?? null;
     const results = buildInspectionTimingResults({
       run: { ...run, window: this.#deps.windowSize() },
       served: this.#deps.launch.served ?? null,
@@ -772,6 +780,7 @@ export class ViewsCheckSession {
       litProbe: this.#deps.launch.litProbe ?? null,
       record,
       traces: this.#profiles,
+      pageProfile,
     });
     const write = this.#deps.writeTiming ?? writeInspectionTimingResults;
     const paths = await write(this.#deps.timingDir, results);

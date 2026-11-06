@@ -134,7 +134,7 @@ describe("the preload's views-check functions", () => {
       ),
     );
     const api = viewsCheckApi(LAUNCH, { invoke });
-    const record = { timer: "absent", devicePixelRatio: 1, windows: [] } as const;
+    const record = { timer: "absent", devicePixelRatio: 1, windows: [], longTasks: null } as const;
     await api.startProfile("orbit");
     await api.endProfile("orbit", { startMs: 1, endMs: 2 });
     expect(await api.writeTimingResults(record)).toEqual({ json: "a", markdown: "b" });
@@ -148,7 +148,12 @@ describe("the preload's views-check functions", () => {
   it("refuses a timing file's answer of the wrong shape", async () => {
     const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
     await expect(
-      api.writeTimingResults({ timer: "absent", devicePixelRatio: 1, windows: [] }),
+      api.writeTimingResults({
+        timer: "absent",
+        devicePixelRatio: 1,
+        windows: [],
+        longTasks: null,
+      }),
     ).rejects.toThrow("the main process wrote no timing file");
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   InspectionGpuAttachment,
+  InspectionLongTasks,
   InspectionTimingMarchCensus,
   InspectionTimingRecord,
 } from "../preload/api";
@@ -13,6 +14,7 @@ import {
   inspectionTimingTraceConfig,
   type InspectionTimingResults,
   isMarchKernel,
+  longTaskFigures,
   ProfileScan,
   profileFigures,
   summariseTimes,
@@ -20,6 +22,7 @@ import {
   TERRAIN_PASS_LABELS,
 } from "./inspectionTiming";
 import { measured } from "./measured";
+import { longTaskFunctions, type PageProfile } from "./pageProfile";
 import { readInspectionTimingRecord } from "./viewsCheckRecord";
 
 /** The renderer's main thread and a worker of its process, and the GPU process's main thread. */
@@ -301,17 +304,21 @@ const RECORD: InspectionTimingRecord = {
       marchCensus: CENSUS,
     },
   ],
+  longTasks: null,
 };
 
 /**
- * The timing file of {@link RECORD}, its trace a main thread busy 1,500 ms, drawn under
- * `compositeProbe`, `marchProbe`, `atmosphereLevers` and `litProbe`.
+ * The timing file of `record`, {@link RECORD} by default, its trace a main thread busy 1,500 ms,
+ * drawn under `compositeProbe`, `marchProbe`, `atmosphereLevers` and `litProbe`, its long tasks
+ * named by `profile`, the page's CPU profile, where given.
  */
 function results(
   compositeProbe: InspectionTimingResults["run"]["compositeProbe"] = null,
   marchProbe: InspectionTimingResults["run"]["marchProbe"] = null,
   atmosphereLevers: InspectionTimingResults["run"]["atmosphereLevers"] = null,
   litProbe: InspectionTimingResults["run"]["litProbe"] = null,
+  record: InspectionTimingRecord = RECORD,
+  profile: PageProfile | null = null,
 ): InspectionTimingResults {
   return buildInspectionTimingResults({
     run: {
@@ -343,7 +350,8 @@ function results(
     marchProbe,
     atmosphereLevers,
     litProbe,
-    record: RECORD,
+    record,
+    pageProfile: profile,
     traces: new Map([
       [
         "close",
@@ -368,6 +376,32 @@ function results(
       ],
     ]),
   });
+}
+
+/**
+ * A page's CPU profile on the page's clock, a sample a millisecond: 2,000 ms in a height worker's
+ * reply blocked in `writeBuffer` from 100 ms, then 300 ms of the draw loop's tick from 5,000 ms,
+ * and idle otherwise.
+ */
+function pageProfile(): PageProfile {
+  const nodes = new Map([
+    [1, { parent: undefined, name: "(root)", named: false }],
+    [2, { parent: 1, name: "(idle)", named: false }],
+    [3, { parent: 1, name: "onMessage useTerrainSession-x.js:9", named: true }],
+    [4, { parent: 3, name: "upload useTerrainSession-x.js:20", named: true }],
+    [5, { parent: 4, name: "writeBuffer", named: false }],
+    [6, { parent: 1, name: "tick index-x.js:5", named: true }],
+    [7, { parent: 6, name: "draw useTerrainSession-x.js:40", named: true }],
+  ]);
+  const sampleNodes: number[] = [];
+  const sampleAtMs: number[] = [];
+  for (let ms = 0; ms < 8_000; ms += 1) {
+    sampleAtMs.push(ms);
+    sampleNodes.push(
+      ms >= 100 && ms < 2_100 ? (ms < 150 ? 4 : 5) : ms >= 5_000 && ms < 5_300 ? 7 : 2,
+    );
+  }
+  return { nodes, sampleNodes, sampleAtMs, endMs: 8_000 };
 }
 
 describe("the frame profile's timing file (the owner's report)", () => {
@@ -746,6 +780,150 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
   });
 
+  it("takes the run's long tasks, or none, and refuses them malformed or out of order (lane perf-page-long-tasks)", () => {
+    const tasks: InspectionLongTasks = {
+      observed: { longtask: true, longAnimationFrame: true },
+      fromMs: 0,
+      toMs: 10_000,
+      tasks: [
+        { startMs: 1_000, durationMs: 950, renderMs: 0 },
+        { startMs: 3_000, durationMs: 60, renderMs: 30 },
+      ],
+    };
+    const [first, second] = tasks.tasks;
+    if (first === undefined || second === undefined) {
+      throw new Error("the record holds two tasks");
+    }
+    expect(readInspectionTimingRecord({ ...RECORD, longTasks: tasks })?.longTasks).toEqual(tasks);
+    expect(readInspectionTimingRecord({ ...RECORD, longTasks: null })?.longTasks).toBeNull();
+    expect(
+      [
+        { ...tasks, toMs: -1 },
+        { ...tasks, tasks: [second, first] },
+        { ...tasks, tasks: [{ ...first, renderMs: 951 }] },
+        { ...tasks, tasks: [{ ...first, durationMs: Number.NaN }] },
+        { ...tasks, observed: { longtask: true } },
+        undefined,
+      ].map((longTasks) => readInspectionTimingRecord({ ...RECORD, longTasks })),
+    ).toEqual([null, null, null, null, null, null]);
+  });
+
+  it("names what ran in a long task from the page's profile: its entry and its hottest functions (lane perf-page-long-tasks)", () => {
+    expect([
+      longTaskFunctions(pageProfile(), 100, 2_100),
+      longTaskFunctions(pageProfile(), 5_000, 5_300).entry,
+      longTaskFunctions(pageProfile(), 6_000, 6_100),
+    ]).toEqual([
+      {
+        sampledMs: 2_000,
+        entry: "onMessage useTerrainSession-x.js:9",
+        self: [
+          { name: "writeBuffer", ms: 1_950 },
+          { name: "upload useTerrainSession-x.js:20", ms: 50 },
+        ],
+      },
+      "tick index-x.js:5",
+      { sampledMs: 0, entry: null, self: [] },
+    ]);
+  });
+
+  it("counts the long tasks, the stalling ones apart, sums them by what ran in them and places the longest in their windows (lane perf-page-long-tasks)", () => {
+    const record: InspectionLongTasks = {
+      observed: { longtask: true, longAnimationFrame: true },
+      fromMs: 0,
+      toMs: 60_000,
+      tasks: [
+        { startMs: 100, durationMs: 2_000, renderMs: 0 },
+        { startMs: 3_000, durationMs: 80, renderMs: 70 },
+        { startMs: 5_000, durationMs: 300, renderMs: 300 },
+        { startMs: 6_000, durationMs: 50, renderMs: 0 },
+      ],
+    };
+    const windows = [{ name: "orbit" as const, startMs: 4_000, endMs: 8_000 }];
+    const figures = longTaskFigures(record, windows, pageProfile());
+    expect([
+      figures.profiled,
+      figures.count,
+      figures.stallingCount,
+      figures.longestMs,
+      figures.totalMs,
+      figures.byTrigger,
+      figures.longest.map((task) => [task.durationMs, task.window, task.functions?.entry]),
+    ]).toEqual([
+      true,
+      4,
+      1,
+      2_000,
+      2_430,
+      [
+        {
+          trigger: "onMessage useTerrainSession-x.js:9 → writeBuffer",
+          count: 1,
+          totalMs: 2_000,
+          longestMs: 2_000,
+        },
+        {
+          trigger: "tick index-x.js:5 → draw useTerrainSession-x.js:40",
+          count: 1,
+          totalMs: 300,
+          longestMs: 300,
+        },
+        { trigger: "(no entry) → (not sampled)", count: 2, totalMs: 130, longestMs: 80 },
+      ],
+      [
+        [2_000, null, "onMessage useTerrainSession-x.js:9"],
+        [300, "orbit", "tick index-x.js:5"],
+        [80, null, null],
+        [50, "orbit", null],
+      ],
+    ]);
+    const unprofiled = longTaskFigures(record, windows, null);
+    expect([unprofiled.profiled, unprofiled.byTrigger.map((each) => each.trigger)]).toEqual([
+      false,
+      ["(not profiled)", "(rendering update)"],
+    ]);
+  });
+
+  it("writes the long tasks' section of the summary, or none without them (lane perf-page-long-tasks)", () => {
+    const withTasks = results(null, null, null, null, {
+      ...RECORD,
+      longTasks: {
+        observed: { longtask: true, longAnimationFrame: false },
+        fromMs: 0,
+        toMs: 120_000,
+        tasks: [{ startMs: 1_500, durationMs: 1_250, renderMs: 0 }],
+      },
+    });
+    const markdown = inspectionTimingMarkdown(withTasks);
+    expect(markdown).toContain(
+      "- **Over the run:** 1 tasks of 50 ms or more in 120 s (the page reported no long animation frames), 1.3 s in all; 1 of 1 s or more; the longest 1250 ms, the median 1250 ms and the p95 1250 ms",
+    );
+    expect(markdown).toContain("| (not profiled) | 1 | 1250 | 1250 |");
+    expect(markdown).toContain("| 1.5 | 1250 | close | 0 | — |");
+    const attributed = inspectionTimingMarkdown(
+      results(
+        null,
+        null,
+        null,
+        null,
+        {
+          ...RECORD,
+          longTasks: {
+            observed: { longtask: true, longAnimationFrame: true },
+            fromMs: 0,
+            toMs: 120_000,
+            tasks: [{ startMs: 100, durationMs: 2_000, renderMs: 0 }],
+          },
+        },
+        pageProfile(),
+      ),
+    );
+    expect(attributed).toContain(
+      "| 0.1 | 2000 | close | 0 | onMessage useTerrainSession-x.js:9; 1950 `writeBuffer`; 50 `upload useTerrainSession-x.js:20` |",
+    );
+    expect(inspectionTimingMarkdown(results())).not.toContain("long tasks");
+  });
+
   it("summarises no times as none", () => {
     expect(summariseTimes([])).toEqual({
       count: 0,
@@ -793,7 +971,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 7,
+      version: 8,
       run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
     });
   });
