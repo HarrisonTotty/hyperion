@@ -2518,6 +2518,8 @@ export class AtmosphereTables {
   #thick: { readonly packed: PackedThickTable; texture: TextureHandle } | null = null;
   /** The body's thick bake, which the table holds, or `null` (R08.T14.c). */
   #thickBands: ReadonlyArray<MsSourceTable> | null = null;
+  /** Whether {@link AtmosphereTables.thickDeparts}, as last given (fix-r08-decked-air-route). */
+  #thickDeparts = false;
   /** The body's polarisation correction, which the table holds, or `null` (R08.T14.f). */
   #correction: ReadonlyArray<PolarisationTable> | null = null;
   /**
@@ -3008,13 +3010,27 @@ export class AtmosphereTables {
    *
    * @param bands - The bake's tables, one a latitude band of the tables' plan, in its order, each
    *   at its band's s.
+   * @param departs - Whether the bake is a decked thin air's (plan R08, fix-r08-decked-air-route;
+   *   `thick/routing.ts`'s `deckedAirRouted`), whose drawn surfaces depart from it
+   *   ({@link AtmosphereTables.thickDeparts}); `false` for every other bake and with none.
    * @throws RangeError for bands that are not the plan's, as `packThickTable` refuses them or the
    *   correction held, and the tables keep what they held; `EngineUnavailable` while the engine has
    *   no device (a loss); or Error once they are disposed.
    */
-  setThickTables(bands: ReadonlyArray<MsSourceTable> | null): void {
+  setThickTables(bands: ReadonlyArray<MsSourceTable> | null, departs = false): void {
     this.#checkPlanBands("thick bake", bands);
     this.#pack(bands, this.#correction);
+    this.#thickDeparts = bands !== null && departs;
+  }
+
+  /**
+   * Whether the thick table holds a decked thin air's bake, whose drawn surfaces seen from orbit
+   * depart from it (plan R08, fix-r08-decked-air-route; `hillaire.ts`'s `DeckedAirSurface`): given
+   * by {@link AtmosphereTables.setThickTables}, and `false` once the bake is taken away or the
+   * tables are built for another medium.
+   */
+  get thickDeparts(): boolean {
+    return this.#thickDeparts && this.#thick !== null && this.#thickBands !== null;
   }
 
   /**
@@ -3448,6 +3464,7 @@ export class AtmosphereTables {
     // R08.T14.f, R08.T15.a.2), as does the disc's table (R08.T16.b).
     this.#releaseThick();
     this.#thickBands = null;
+    this.#thickDeparts = false;
     this.#correction = null;
     this.#releaseDisc();
     this.#releaseDeck();

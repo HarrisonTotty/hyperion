@@ -54,11 +54,18 @@ export class FakeTables implements CachedTables {
     return this.thick.at(-1) ?? null;
   }
 
-  setThickTables(bands: ReadonlyArray<MsSourceTable> | null): void {
+  /**
+   * Whether each bake {@link FakeTables.setThickTables} took was a decked air's, its drawn surfaces
+   * departing from it (fix-r08-decked-air-route), in the same order.
+   */
+  readonly departs: boolean[] = [];
+
+  setThickTables(bands: ReadonlyArray<MsSourceTable> | null, departs = false): void {
     if (this.thickThrows !== null) {
       throw this.thickThrows;
     }
     this.thick.push(bands);
+    this.departs.push(departs);
   }
 
   /** The correction the tables hold: the last given, or `null`. */

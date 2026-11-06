@@ -3532,6 +3532,9 @@ describe("the product's route (R08.T14.d.4)", () => {
     keptFrame(h, [[A, EARTH, undefined]]);
     await landBake(h);
     await landCorrectionOfA(h);
+    // Its bake is given as a decked air's, whose drawn surfaces depart from it
+    // (fix-r08-decked-air-route).
+    expect(madeAt(h, 0).departs.at(-1)).toBe(true);
     const at = (heightM: number, lightElevationSine: number): AtmosphereViewReport =>
       keptFrame(h, [[A, EARTH, { heightM, lightElevationSine }]]);
     const noon = at(2, 0.9);
@@ -3595,6 +3598,8 @@ describe("the product's route (R08.T14.d.4)", () => {
       asked.labels,
       [landed.labels, [...landed.reasons]],
       [lowSun.labels, [...lowSun.reasons]],
+      // A haze's bake is no decked air's: its drawn surfaces keep the route (fix-r08-decked-air-route).
+      madeAt(h, 0).departs,
     ]).toEqual([
       1,
       1,
@@ -3602,6 +3607,7 @@ describe("the product's route (R08.T14.d.4)", () => {
       ["atmosphereComputing"],
       [[], []],
       [["atmosphereApproximate"], [[A, [LOW_SUN_REASON]]]],
+      [false],
     ]);
   }, 180_000);
 

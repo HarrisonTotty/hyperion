@@ -38,6 +38,7 @@ export { MAX_SKY_LIGHT_SLOTS, MAX_SKY_SOURCES } from "./hillaire";
 export {
   type AtmosphereSettings,
   type CompositeTransmittance,
+  type DeckedAirSurface,
   PER_PIXEL_LEVERS,
   type SurfaceLobes,
   type SurfaceTransmittance,
@@ -180,6 +181,12 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * march's compile (test-render's venus-92bar row, part 2: 341 s against BASE's 252 s, side by side
  * on a pod, from 374–381 s before the deck's march compiled it out), not its frames.
  *
+ * `departure` (plan R08, fix-r08-decked-air-route) keeps that light under a decked thin air's bake
+ * too, its in-scatter less the bake's ground's share of it (`hillaire.ts`'s `DeckedAirSurface`), so
+ * that the served Earth-like world's drawn ground keeps its contrast through the route; its cost one
+ * lookup of the sky's irradiance a source on a drawn surface's ray, on a decked air's bake alone;
+ * `uniform` is the way back, the route as the bake draws it.
+ *
  * `packed` (plan R08, R08.T8.d) takes the far limb's node rays one an invocation on both settings:
  * byte for byte the per-texel march on SwiftShader, and from orbit in the inspection profile (pod,
  * 16 vCPU, from 22 Mm and 28.9 Mm, each against the composite's time) 29% less of the march on high
@@ -222,6 +229,7 @@ export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSett
     compositeTransmittance: "march",
     surfaceTransmittance: "channels",
     surfaceLobes: "transmitted",
+    deckedAirSurface: "departure",
     marchCover: "area",
     limbRays: "packed",
     sourceTransmittance: "table",
@@ -231,6 +239,7 @@ export const ATMOSPHERE_SETTINGS: Readonly<Record<QualitySetting, AtmosphereSett
     compositeTransmittance: "march",
     surfaceTransmittance: "channels",
     surfaceLobes: "transmitted",
+    deckedAirSurface: "departure",
     marchCover: "area",
     limbRays: "packed",
     sourceTransmittance: "table",

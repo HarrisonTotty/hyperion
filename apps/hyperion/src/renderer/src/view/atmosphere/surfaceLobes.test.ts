@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Vec3 } from "../../geometry/vec3";
+import { patternedThickBake } from "../../test/thickTables";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { Rgb } from "../photometry/toneCurve";
 import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES, referenceSunIlluminanceLx } from "./earth";
@@ -18,8 +19,15 @@ import {
 } from "./hillaire";
 import type { AtmosphereMedium, MediumTerm } from "./medium";
 import { MARS_REFERENCE, MARS_REFERENCE_RADIUS_M } from "./reference/cases";
+import type { ReferenceGeometry } from "./reference/geometries";
+import { referenceTwin } from "./reference/twin";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
-import { type AbsorberCurveSlots, NO_ABSORBER_CURVES, resampledPhase } from "./tables";
+import {
+  type AbsorberCurveSlots,
+  kernelMedium,
+  NO_ABSORBER_CURVES,
+  resampledPhase,
+} from "./tables";
 import {
   marchTwin,
   type PlanetTwin,
@@ -297,9 +305,9 @@ describe("a drawn surface's lobes on a bake's table (fix-r08-decked-air-opacity)
     }
   });
 
-  it("keeps none in a thick ray march's kernel unless its table is the correction alone", () => {
+  it("keeps none in a thick ray march's kernel unless its table is the correction alone or it departs from a decked air's bake (fix-r08-decked-air-route)", () => {
     expect(RAY_MARCH_THICK_KERNEL.reference).toContain(
-      "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && thickCorrectionOnly();",
+      "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && (thickCorrectionOnly() || view.forward.w > 1.5);",
     );
     expect(RAY_MARCH_KERNEL.reference).toContain(
       "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0;",
@@ -325,7 +333,8 @@ describe("the ray march's second target with the lobes' light kept (fix-r08-deck
       /for \(var lobed = surfaceLobes; lobed; lobed = false\) \{\s*let stepDepth = local\.extinction \* dtM \+ \(\(\*march\)\.path0\.depth - absorbedBefore\);\s*let kept = rayMarchLobeScatteringOf\(local\) \* dtM;\s*\*surfaceDepth \+= max\(stepDepth - kept, vec3f\(0\.0\)\);\s*\}/u,
     );
     expect(code).toMatch(/var surfaceDepth = vec3f\(0\.0\);/u);
-    expect(code.split("exp(-surfaceDepth)").length - 1).toBe(1);
+    // The second target's, and the departure's T_lobe (fix-r08-decked-air-route).
+    expect(code.split("exp(-surfaceDepth)").length - 1).toBe(2);
     expect(code).not.toMatch(/if \(surfaceLobes\)\s*\{\s*let stepDepth/u);
   });
 
@@ -336,4 +345,52 @@ describe("the ray march's second target with the lobes' light kept (fix-r08-deck
       expect(deck).toMatch(/let surfaceLobes = false;/u);
     }
   });
+});
+
+describe("a decked air's departure in the twin (fix-r08-decked-air-route)", () => {
+  const FIGURE = { kind: "sphere", radiusM: MARS_REFERENCE_RADIUS_M } as const;
+  const ONE_BAND = [
+    {
+      gravityRatio: 1,
+      latitudeRad: 0,
+      bottomRadiusM: MARS_REFERENCE_RADIUS_M,
+      coefficientFactor: 1,
+    },
+  ];
+  /** A patterned bake over Mars's dust, the medium with a drawn lobe, and a disc from orbit. */
+  const bake = patternedThickBake(ONE_BAND, kernelMedium(MARS_REFERENCE), 1);
+  const DISC: ReferenceGeometry = {
+    name: "disc",
+    image: "disc-p30",
+    observer: { heightM: 1_000_000, latitudeDeg: 0 },
+    view: { zenithDeg: 180, azimuthDeg: 0 },
+    sun: { zenithDeg: 30, azimuthDeg: 0 },
+  };
+
+  it(
+    "equals the route over a ground of the bake's albedo, its drawn surface's part through T_lobe",
+    { timeout: 120_000 },
+    () => {
+      const route = referenceTwin(MARS_REFERENCE, FIGURE, {
+        thick: bake,
+        deckedAirSurface: "uniform",
+      });
+      const departed = referenceTwin(MARS_REFERENCE, FIGURE, {
+        thick: bake,
+        deckedAirSurface: "departure",
+      });
+      const routed = route.radiance(DISC);
+      const total = departed.radiance(DISC);
+      // S̄ is lit as the drawn ground is, so the two differ by the lookups' rounding alone: the
+      // disc measured 3 × 10⁻⁸ apart (2026-11-06).
+      for (const c of CHANNELS) {
+        expect(Math.abs(total[c] / routed[c] - 1)).toBeLessThan(1e-6);
+        expect(departed.surfaceRadiance(DISC)[c]).toBeGreaterThan(
+          1.2 * route.surfaceRadiance(DISC)[c],
+        );
+      }
+      // No decked air's bake, the default, is the route.
+      expect(referenceTwin(MARS_REFERENCE, FIGURE, { thick: bake }).radiance(DISC)).toEqual(routed);
+    },
+  );
 });

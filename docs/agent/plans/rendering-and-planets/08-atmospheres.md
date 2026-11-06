@@ -25257,3 +25257,15 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     summed. `caseGate.json`, `sweepBoundary.json` and `vectorGate.json` hold unchanged (by hand;
     `vectorGate.json`'s `jupiterEnvelope` differs on BASE too, kept as committed).
   - Pending: the term's compile cost on SwiftShader (the outbox's findings).
+  - Step 2, the departure: `AtmosphereSettings.deckedAirSurface` (`DeckedAirSurface`, `departure` on
+    both settings, `uniform` the way back); `surfaceLobesOf(levers, tables)` gives `forward.w` 2
+    under a decked air's bake. `AtmosphereTables.setThickTables(bands, departs)` and
+    `thickDeparts`; the cache passes `held.deckedAir` (`CachedTables`, `FakeTables.departs`).
+  - `rayMarch.wgsl`'s bare-ground block also takes S̄ where `departs` (`let bare = …` now; one
+    lookup call site); `THICK_READ` rewrites `departs` and `skyLit`, and `withThickRead` appends
+    `thickDeparture.wgsl` (`marchIrradiance`, binding 26) to a march alone; thick marches bind
+    `tables.irradiance()`. `DECK_GROUND` is two rewrites; a deck's march drops the departure.
+  - The twin: `RayMarchSettings.departure` (`TwinDeparture`, the sky's irradiance), `Marcher`'s
+    `departs`; `TwinOptions.deckedAirSurface` (`null` by default: no decked air's bake).
+    `deckedAirGate.json` re-blessed by hand: both grounds' tallies unchanged, the surface shares
+    moved (through T_lobe).

@@ -123,6 +123,7 @@ import skyViewBelowDeckWgsl from "./shaders/skyViewBelowDeck.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
 import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
 import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
+import thickDepartureWgsl from "./shaders/thickDeparture.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import thickReadBandsWgsl from "./shaders/thickReadBands.wgsl?raw";
 import thickSampleRowWgsl from "./shaders/thickSampleRow.wgsl?raw";
@@ -456,6 +457,22 @@ export type SurfaceTransmittance = "channels" | "grey";
 export type SurfaceLobes = "transmitted" | "extinguished";
 
 /**
+ * How a drawn surface seen from orbit through a decked thin air's bake keeps its own ground's
+ * contrast (plan R08, fix-r08-decked-air-route; research-leans-46 §2): `departure`, the ray march's
+ * second target T_lobe under the bake too, as {@link SurfaceLobes} `transmitted` keeps it beside
+ * Ψ_ms, and its in-scatter less the bake's ground's share of that light, S̄ (T_lobe − T_direct), at
+ * least 0 (`rayMarch.wgsl`'s header; S̄ the drawn ground's light at the ray's end with the bake's
+ * ground albedo), so that the pixel is L_routed(ρ̄) + (S − S̄) T_lobe, 6S's form with the
+ * surroundings at the bake's mean (Tanré, Herman and Deschamps 1981, Appl. Opt. 20, 3676; Vermote
+ * et al. 1997, IEEE TGRS 35, 675); or `uniform`, the way back, the route as the bake draws it, its
+ * drawn surface behind T_direct, every ground's forward light the bake's J over one uniform ground.
+ * Over a ground of the bake's albedo the two are the same pixel. It takes `transmitted` and the
+ * surfaces' transmittance per channel (`channels`), and only a body whose tables hold a decked
+ * air's bake (`AtmosphereTables.thickDeparts`); every other route is as before.
+ */
+export type DeckedAirSurface = "departure" | "uniform";
+
+/**
  * How a view's ray march covers its target (plan R08, R08.T8.d; {@link MarchCover}): `area`, the
  * air's area by the footprint's entry point alone, the way back; or `tiles`, R08.T11.d's exact tile
  * cull over it, the centre ray's entry point marching the tiles no far-limb footprint can blend in
@@ -515,6 +532,8 @@ export interface AtmosphereSettings {
   readonly surfaceTransmittance: SurfaceTransmittance;
   /** {@link SurfaceLobes}: `transmitted` on both settings; `extinguished` is the way back. */
   readonly surfaceLobes: SurfaceLobes;
+  /** {@link DeckedAirSurface}: `departure` on both settings; `uniform` is the way back. */
+  readonly deckedAirSurface: DeckedAirSurface;
   /** {@link ViewMarchCover} (R08.T8.d): `area` on both settings, the way back; `tiles` the lever. */
   readonly marchCover: ViewMarchCover;
   /** {@link LimbRays} (R08.T8.d): `packed` on both settings; `per-texel` is the way back. */
@@ -542,11 +561,33 @@ export const PER_PIXEL_LEVERS: AtmosphereSettings = {
   compositeTransmittance: "per-pixel",
   surfaceTransmittance: "channels",
   surfaceLobes: "transmitted",
+  deckedAirSurface: "departure",
   marchCover: "area",
   limbRays: "per-texel",
   sourceTransmittance: "per-fragment",
   marchSourceTransmittance: "per-step",
 };
+
+/**
+ * The view's `forward.w`, the ray march's alone (plan R08, fix-r08-decked-air-opacity and
+ * fix-r08-decked-air-route): 0 where a drawn surface keeps none of its forward lobes' light
+ * ({@link SurfaceLobes} `extinguished`); 2 where it also departs from a decked air's bake its tables
+ * hold (`thickDeparts`), under {@link DeckedAirSurface} `departure` with the surfaces' transmittance
+ * per channel, which the departure's second target is; else 1.
+ */
+export function surfaceLobesOf(
+  levers: Pick<AtmosphereSettings, "surfaceLobes" | "deckedAirSurface" | "surfaceTransmittance">,
+  tables: { readonly thickDeparts: boolean },
+): 0 | 1 | 2 {
+  if (levers.surfaceLobes !== "transmitted") {
+    return 0;
+  }
+  return levers.deckedAirSurface === "departure" &&
+    levers.surfaceTransmittance === "channels" &&
+    tables.thickDeparts
+    ? 2
+    : 1;
+}
 
 /**
  * The datum spheroid the atmosphere stands on: R05's `BodyFigure` (planet.ts, T7.a) has these
@@ -1468,11 +1509,14 @@ export const MARCH_TABLE_ONLY_KERNELS: ReadonlyArray<KernelPair> = [
  * multiple scattering taken by `thickRead.wgsl`'s `thickSourceAt` in place of `source.wgsl`'s
  * `sourceAt`, and the forward lobes' higher orders at the analytic term's share. Each is one line;
  * the second stands once in every kernel (`source.wgsl`'s `sourceInScatteringAt`), the third only
- * in a march by slot (`rayMarchSlots.wgsl`), and the first in each of them. The last, in a ray march
- * alone (fix-r08-decked-air-opacity): a drawn surface keeps its forward lobes' light
- * ({@link SurfaceLobes}) beside the correction alone, never on a bake's table, whose J re-emits the
+ * in a march by slot (`rayMarchSlots.wgsl`), and the first in each of them. The fourth, in a ray
+ * march alone (fix-r08-decked-air-opacity): a drawn surface keeps its forward lobes' light
+ * ({@link SurfaceLobes}) beside the correction alone, and on a bake's table, whose J re-emits the
  * truncated lobe's diffuse field, the ground's light among it, into each direction (`thick/bake.ts`'s
- * E, its first term), so that the lobes' light is the table's there.
+ * E, its first term), only under a decked air's bake (`forward.w` 2; {@link DeckedAirSurface}), where
+ * the last two take the bake's ground's share of that light from the in-scatter
+ * (fix-r08-decked-air-route; `rayMarch.wgsl`'s header): the ray departs, its ground's sky the
+ * irradiance table's ({@link THICK_DEPARTURE_WGSL}).
  */
 const THICK_READ: ReadonlyArray<{
   readonly general: string;
@@ -1501,11 +1545,31 @@ const THICK_READ: ReadonlyArray<{
   {
     general: "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0;",
     thick:
-      "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && thickCorrectionOnly();",
+      "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && " +
+      "(thickCorrectionOnly() || view.forward.w > 1.5);",
+    least: 0,
+    most: 1,
+  },
+  {
+    general: "let departs = false;",
+    thick: "let departs = surfaceLobes && !thickCorrectionOnly();",
+    least: 0,
+    most: 1,
+  },
+  {
+    general: "let skyLit = vec3f(0.0);",
+    thick: "let skyLit = thickDepartureSkyAt(body, start, muSun, slot);",
     least: 0,
     most: 1,
   },
 ];
+
+/**
+ * The decked air's departure's sky a thick read's ray march takes ({@link withThickRead}; plan R08,
+ * fix-r08-decked-air-route): `thickDeparture.wgsl`, the irradiance table bound as `marchIrradiance`
+ * and its read, appended to a kernel whose sources call it alone.
+ */
+export const THICK_DEPARTURE_WGSL = thickDepartureWgsl;
 
 /**
  * The thick table's read a per-frame kernel takes ({@link withThickRead}): `thickRead.wgsl`, the
@@ -1520,7 +1584,8 @@ export const THICK_READ_WGSL = `${thickReadWgsl}\n${thickReadBandsWgsl}`;
  * cosine cell up and Hillaire's Ψ_ms below the rows' edge, −7/32, blended across that cell, and the
  * forward lobes' higher orders take Ψ_ms's share ({@link THICK_READ}). Every other line is the
  * kernel's own, so that the thin kernel stays as it was to the byte and the thick one differs from it
- * only there; the table binds at `thickTable` beside the kernel's own bindings.
+ * only there; the table binds at `thickTable` beside the kernel's own bindings, and a ray march's
+ * sky's irradiance at `marchIrradiance` (its departure, fix-r08-decked-air-route).
  *
  * @throws Error naming the kernel when its sources hold a rewritten line more or fewer times than
  *   {@link THICK_READ} allows, or still call `sourceAt` after them.
@@ -1539,7 +1604,10 @@ export function withThickRead(pair: KernelPair): KernelPair {
     if (/[^\w]sourceAt\(/u.test(code.replaceAll("fn sourceAt(", ""))) {
       throw new Error(`kernel ${pair.name} still calls sourceAt after the thick read's rewrites`);
     }
-    return `${code}\n${THICK_READ_WGSL}`;
+    // A ray march's departure reads the sky's irradiance (fix-r08-decked-air-route): its table is
+    // declared where the march calls it alone, so that every binding a kernel declares it reads.
+    const departs = code.includes("thickDepartureSkyAt(");
+    return `${code}\n${THICK_READ_WGSL}${departs ? `\n${THICK_DEPARTURE_WGSL}` : ""}`;
   };
   return {
     ...pair,
@@ -1925,14 +1993,21 @@ const DECK_READ: ReadonlyArray<readonly [string, string]> = [
  * research-rm4-rm5-close-out §1.3): over a deck, wherever the ray reaches the kernels' datum, the
  * deck's, before any drawn surface, not only where nothing is drawn, so that a disc drawn below the
  * deck's datum (a routed envelope's on its column's base, a surface beneath its deck) never hides
- * the deck the march reads there. It stands twice in each march: the deck's light, and the
- * transmittance to what lies beyond, 0 there. A drawn surface at or beyond the datum's hit takes
+ * the deck the march reads there. Each stands once in each march: the deck's light (`bare`, since
+ * fix-r08-decked-air-route, whose departure shares its block), and the transmittance to what lies
+ * beyond, 0 there. A drawn surface at or beyond the datum's hit takes
  * the bare ground's count already (R08.T11.b), so from above the air the march to it is the one to
  * the bare ground.
  */
-const DECK_GROUND: readonly [string, string] = [
-  "if (depth == 0.0 && hitsGround && ground.x <= tEnd) {",
-  "if (hitsGround && ground.x <= tEnd) {",
+const DECK_GROUND: ReadonlyArray<readonly [string, string]> = [
+  [
+    "let bare = depth == 0.0 && hitsGround && ground.x <= tEnd;",
+    "let bare = hitsGround && ground.x <= tEnd;",
+  ],
+  [
+    "if (depth == 0.0 && hitsGround && ground.x <= tEnd) {",
+    "if (hitsGround && ground.x <= tEnd) {",
+  ],
 ];
 
 /**
@@ -1958,9 +2033,12 @@ const DECK_NEEDED: readonly [string, string] = [
  */
 const DECK_NO_SURFACE_LOBES: ReadonlyArray<readonly [string, string]> = [
   [
-    "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && thickCorrectionOnly();",
+    "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && " +
+      "(thickCorrectionOnly() || view.forward.w > 1.5);",
     "let surfaceLobes = false;",
   ],
+  ["let departs = surfaceLobes && !thickCorrectionOnly();", "let departs = false;"],
+  ["let skyLit = thickDepartureSkyAt(body, start, muSun, slot);", "let skyLit = vec3f(0.0);"],
   [
     "rayMarchSurfaceStep(surfaceDepth, march, local, absorbedBefore, stepAt.dtM, surfaceLobes);",
     "// No drawn surface's lobes' light over a deck (fix-r08-decked-air-route).",
@@ -1977,8 +2055,8 @@ const DECK_NO_SURFACE_LOBES: ReadonlyArray<readonly [string, string]> = [
  * ({@link DECK_NO_SURFACE_LOBES}). Every other line is the thick kernel's own, so that a body with
  * no deck keeps its kernels to the byte.
  *
- * @throws Error naming the kernel when its sources hold a rewritten line other than once (the bare
- *   ground's test other than twice), or it does not read the thick table.
+ * @throws Error naming the kernel when its sources hold a rewritten line other than once, or it does
+ *   not read the thick table.
  */
 export function withDeckRead(pair: KernelPair): KernelPair {
   const rewrite = (wgsl: string): string => {
@@ -1992,11 +2070,12 @@ export function withDeckRead(pair: KernelPair): KernelPair {
       }
       return text.replaceAll(general, deck);
     };
-    const code = [...DECK_READ, DECK_NEEDED, ...DECK_NO_SURFACE_LOBES].reduce(
+    // A deck's march reads no departure's sky (fix-r08-decked-air-route): its table goes with it.
+    const code = [...DECK_READ, DECK_NEEDED, ...DECK_NO_SURFACE_LOBES, ...DECK_GROUND].reduce(
       (text, rewritten) => replaced(text, rewritten, 1),
-      wgsl,
+      wgsl.replace(`\n${THICK_DEPARTURE_WGSL}`, ""),
     );
-    return `${replaced(code, DECK_GROUND, 2)}\n${deckReadWgsl}`;
+    return `${code}\n${deckReadWgsl}`;
   };
   return {
     ...pair,
@@ -4564,6 +4643,11 @@ export class HillaireAtmosphere {
       sourceTable = tables.sourceTransmittance();
     }
     const sourceTableBound = sourceTable === null ? {} : { atmosphere_source_table: sourceTable };
+    // Every march on the thick read but over a deck (thermal or not) declares the sky's irradiance,
+    // which its departure reads (fix-r08-decked-air-route; `thickDeparture.wgsl`), built at its
+    // first read after each build of the tables, as the lit passes take it.
+    const departureBound =
+      thickTable === null || deckTable !== null ? {} : { marchIrradiance: tables.irradiance() };
     // The march's kernels: the thin read's, with the tile cull's centre ray, or the thick read's,
     // from the sources' table where its lever takes it.
     const march = (): FrameMarch =>
@@ -4605,6 +4689,7 @@ export class HillaireAtmosphere {
           ...common.sampled,
           sceneDepth: scene.depth,
           ...sourceTableBound,
+          ...departureBound,
           ...(slotDepths === null ? {} : { slotDepths }),
           ...(deckTable === null ? {} : { deckTable }),
         },
@@ -4693,6 +4778,7 @@ export class HillaireAtmosphere {
               ...common.sampled,
               sceneDepth: scene.depth,
               ...sourceTableBound,
+              ...departureBound,
               ...(slotDepths === null ? {} : { slotDepths }),
             },
             uniforms: {
@@ -5136,13 +5222,9 @@ export class HillaireAtmosphere {
     set("right", [right.x * tanX, right.y * tanX, right.z * tanX, 0]);
     set("upRay", [up.x * tanY, up.y * tanY, up.z * tanY, 0]);
     // Its w, whether a drawn surface keeps its forward lobes' light ({@link SurfaceLobes}), the
-    // ray march's alone.
-    set("forward", [
-      forward.x,
-      forward.y,
-      forward.z,
-      this.#levers.surfaceLobes === "transmitted" ? 1 : 0,
-    ]);
+    // ray march's alone: 1, or 2 where it also departs from a decked air's bake
+    // ({@link DeckedAirSurface}; fix-r08-decked-air-route).
+    set("forward", [forward.x, forward.y, forward.z, surfaceLobesOf(this.#levers, this.#tables)]);
     set("tables", [
       tableRadiusM(this.#figure),
       sizes.aerialPerspectiveReachM,

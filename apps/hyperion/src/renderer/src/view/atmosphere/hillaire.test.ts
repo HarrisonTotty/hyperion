@@ -88,6 +88,7 @@ import {
   type SpheroidFigure,
   skyAxisOf,
   type SunState,
+  surfaceLobesOf,
   TABLE_SIZES,
   tableRadiusM,
   topShellOf,
@@ -3205,6 +3206,7 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
         compositeTransmittance: "march",
         surfaceTransmittance: "channels",
         surfaceLobes: "transmitted",
+        deckedAirSurface: "departure",
         marchCover: "area",
         limbRays: "packed",
         sourceTransmittance: "table",
@@ -3214,6 +3216,7 @@ describe("HillaireAtmosphere's sky behind at the march's resolution (the owner's
         compositeTransmittance: "march",
         surfaceTransmittance: "channels",
         surfaceLobes: "transmitted",
+        deckedAirSurface: "departure",
         marchCover: "area",
         limbRays: "packed",
         sourceTransmittance: "table",
@@ -3241,6 +3244,68 @@ describe("HillaireAtmosphere's surfaces keeping their forward lobes' light (fix-
     );
     const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(draw.uniforms["forward"]?.[3]).toBe(lever);
+  });
+});
+
+describe("HillaireAtmosphere's decked air's departure (fix-r08-decked-air-route)", () => {
+  const EMPTY = { uniforms: {}, buffers: {}, sampled: {}, storage: {} };
+  /** From 10⁹ m over the equator, looking at the centre. */
+  const distant: AtmosphereCamera = {
+    positionM: { x: 1e9, y: 0, z: 0 },
+    orientation: lookAlong({ x: -1, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }),
+    fovXRad: Math.PI / 3,
+    viewport: { widthPx: 320, heightPx: 180 },
+  };
+
+  it.each([
+    ["a departing bake on both settings", ATMOSPHERE_SETTINGS.high, true, 2],
+    ["a bake that is no decked air's", ATMOSPHERE_SETTINGS.high, false, 1],
+    ["the way back's uniform route", { ...PER_PIXEL_LEVERS, deckedAirSurface: "uniform" }, true, 1],
+    [
+      "the surfaces dimmed by the mean",
+      { ...PER_PIXEL_LEVERS, surfaceTransmittance: "grey" },
+      true,
+      1,
+    ],
+    ["no lobes kept", { ...PER_PIXEL_LEVERS, surfaceLobes: "extinguished" }, true, 0],
+  ] as const)("takes forward.w for %s", (_, levers, thickDeparts, w) => {
+    expect(surfaceLobesOf(levers, { thickDeparts })).toBe(w);
+  });
+
+  it("departs from a decked air's bake alone, and binds its march the sky's irradiance it reads", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const tables = new AtmosphereTables(
+      engine,
+      R05_EARTH_REFERENCE,
+      tableRadiusM(WGS84),
+      NO_ABSORBER_CURVES,
+      earthBody(),
+    );
+    const bake = patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), 1);
+    const view = HillaireAtmosphere.over(
+      engine,
+      tables,
+      TABLE_SIZES.high,
+      kernels,
+      ATMOSPHERE_SETTINGS.high,
+    );
+    const drawn = (): readonly [number | undefined, boolean] => {
+      engine.dispatched.length = 0;
+      const draw = view.drawFrame(distant, [NOON], SCENE);
+      const march = marchesOf(engine)[0];
+      return [
+        draw.uniforms["forward"]?.[3],
+        boundNames(march?.bindings ?? EMPTY).includes("marchIrradiance"),
+      ];
+    };
+    tables.setThickTables(bake, true);
+    expect([tables.thickDeparts, ...drawn()]).toEqual([true, 2, true]);
+    tables.setThickTables(bake);
+    expect([tables.thickDeparts, ...drawn()]).toEqual([false, 1, true]);
+    tables.setThickTables(null, true);
+    expect([tables.thickDeparts, ...drawn()]).toEqual([false, 1, false]);
+    tables.dispose();
   });
 });
 

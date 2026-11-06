@@ -63,6 +63,7 @@ import {
   type SunState,
   TABLE_SIZES,
   tableRadiusM,
+  THICK_DEPARTURE_WGSL,
   THICK_READ_WGSL,
   withDeckRead,
   withThickRead,
@@ -132,14 +133,14 @@ function digestOf(pair: KernelPair): string {
 const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_KERNEL, "3bb14d598c384edb"],
   [AERIAL_PERSPECTIVE_KERNEL, "1ccb804c63ae75c8"],
-  [RAY_MARCH_PER_STEP_KERNEL, "c96113b0bfc6a38f"],
-  [RAY_MARCH_SLOTS_PER_STEP_KERNEL, "d647b20ebe15c315"],
-  [RAY_MARCH_KERNEL, "72e521f64ac81af6"],
-  [RAY_MARCH_SLOTS_KERNEL, "a6dbacbe74d3a931"],
-  [RAY_MARCH_CENTRE_KERNEL, "1622a402e5f23e68"],
-  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "5bc361abb789b03b"],
-  [RAY_MARCH_SPECIAL_KERNEL, "75017a7ef6409902"],
-  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "908ac56bf89b075f"],
+  [RAY_MARCH_PER_STEP_KERNEL, "b503b404b7071f8d"],
+  [RAY_MARCH_SLOTS_PER_STEP_KERNEL, "120b27eaec484323"],
+  [RAY_MARCH_KERNEL, "e39ad7eec4442c3c"],
+  [RAY_MARCH_SLOTS_KERNEL, "391b5d7d0501e81b"],
+  [RAY_MARCH_CENTRE_KERNEL, "c338f0baf3f2e552"],
+  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "90ecce40fc498a39"],
+  [RAY_MARCH_SPECIAL_KERNEL, "4f03e0b5940aa750"],
+  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "846685b7e30b7bb5"],
   [RAY_MARCH_FILL_KERNEL, "fdc424b1001af7c6"],
 ];
 
@@ -154,10 +155,10 @@ const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
 const THICK_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_THICK_KERNEL, "b615d3a929d28bef"],
   [AERIAL_PERSPECTIVE_THICK_KERNEL, "861e34c18a663dca"],
-  [RAY_MARCH_THICK_KERNEL, "1da742ceb7767b1d"],
-  [RAY_MARCH_SLOTS_THICK_KERNEL, "a1e4a78662ec4809"],
-  [RAY_MARCH_THICK_SPECIAL_KERNEL, "85f69bfe5844831f"],
-  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "4c2785c82fe076bf"],
+  [RAY_MARCH_THICK_KERNEL, "29a15ae0d1677bd2"],
+  [RAY_MARCH_SLOTS_THICK_KERNEL, "d2e58f77ed33c002"],
+  [RAY_MARCH_THICK_SPECIAL_KERNEL, "d8e1bc148ec2bb68"],
+  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "20c9ecceaa68f73c"],
 ];
 
 /** Each thick kernel beside the thin one it is made from. */
@@ -196,7 +197,12 @@ const SLOT_SOURCE_AT = "let one = sourceAt(body, start, light, muSun, slot, loca
 /** A ray march's drawn surface keeps its lobes' light beside the correction alone, never on a bake. */
 const SURFACE_LOBES = "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0;";
 const THICK_SURFACE_LOBES =
-  "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && thickCorrectionOnly();";
+  "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && (thickCorrectionOnly() || view.forward.w > 1.5);";
+/** A thick ray march departs from a decked air's bake, its ground's sky the irradiance table's. */
+const DEPARTS = "let departs = false;";
+const THICK_DEPARTS = "let departs = surfaceLobes && !thickCorrectionOnly();";
+const SKY_LIT = "let skyLit = vec3f(0.0);";
+const THICK_SKY_LIT = "let skyLit = thickDepartureSkyAt(body, start, muSun, slot);";
 const THICK_SLOT_SOURCE_AT =
   "let one = thickSourceAt(body, start, light, muSun, slot, local, phased, ray, dir, up);";
 
@@ -212,15 +218,22 @@ describe("the thick read's kernels (R08.T14.c)", () => {
     "makes %s's thick form from its own sources, differing only at the multiple scattering and the lobes, with the read appended (a march's drawn surface's lobes too, fix-r08-decked-air-opacity)",
     (_name, thin, thick) => {
       expect(thick.name).toBe(`${thin.name}, thick`);
-      const appended = `\n${THICK_READ_WGSL}`;
-      expect(thick.reference.endsWith(appended)).toBe(true);
-      const head = thick.reference.slice(0, -appended.length);
       const bySlot = thin === RAY_MARCH_SLOTS_PER_STEP_KERNEL;
       const march = bySlot || thin === RAY_MARCH_PER_STEP_KERNEL;
+      // A march's departure's sky after the read (fix-r08-decked-air-route).
+      const appended = `\n${THICK_READ_WGSL}${march ? `\n${THICK_DEPARTURE_WGSL}` : ""}`;
+      expect(thick.reference.endsWith(appended)).toBe(true);
+      const head = thick.reference.slice(0, -appended.length);
       expect(linesDiffering(thin.reference, head)).toEqual([
         [LOBES, THICK_LOBES],
         [SOURCE_AT, THICK_SOURCE_AT],
-        ...(march ? [[SURFACE_LOBES, THICK_SURFACE_LOBES]] : []),
+        ...(march
+          ? [
+              [SURFACE_LOBES, THICK_SURFACE_LOBES],
+              [DEPARTS, THICK_DEPARTS],
+              [SKY_LIT, THICK_SKY_LIT],
+            ]
+          : []),
         ...(bySlot
           ? [
               [LOBES, THICK_LOBES],
@@ -228,10 +241,12 @@ describe("the thick read's kernels (R08.T14.c)", () => {
             ]
           : []),
       ]);
-      // The appended read declares the table alone; every thin binding stays.
+      // The appended read declares the table alone, and a march's departure's sky its irradiance;
+      // every thin binding stays.
       expect([...kernelBindings(thick.reference).keys()]).toEqual([
         ...kernelBindings(thin.reference).keys(),
         "thickTable",
+        ...(march ? ["marchIrradiance"] : []),
       ]);
       expect(kernelBindings(thick.reference).get("thickTable")).toMatchObject({
         group: 0,
@@ -322,6 +337,8 @@ const SURFACE_STEP =
 const DECK_SURFACE_STEP =
   "// No drawn surface's lobes' light over a deck (fix-r08-decked-air-route).";
 const DECK_SURFACE_LOBES = "let surfaceLobes = false;";
+const BARE = "let bare = depth == 0.0 && hitsGround && ground.x <= tEnd;";
+const DECK_BARE = "let bare = hitsGround && ground.x <= tEnd;";
 const DECK_NEEDED =
   "let needed = view.exact.w > 0.0 || (depth > 0.0 && (tSurface > reach || deckBeforeSurface(uv, tSurface)));";
 
@@ -343,17 +360,22 @@ describe("the deck read's kernels (R08.T15.a.2)", () => {
       const appended = `\n${deckReadWgsl}`;
       expect(deck.reference.endsWith(appended)).toBe(true);
       const head = deck.reference.slice(0, -appended.length);
-      expect(linesDiffering(thick.reference, head)).toEqual([
+      // The thick march's departure's sky goes with its departure (fix-r08-decked-air-route).
+      const departure = `\n${THICK_DEPARTURE_WGSL}`;
+      expect(thick.reference.endsWith(departure)).toBe(true);
+      expect(linesDiffering(thick.reference.slice(0, -departure.length), head)).toEqual([
         [SURFACE_STEP, DECK_SURFACE_STEP],
         [THICK_SURFACE_LOBES, DECK_SURFACE_LOBES],
-        [BARE_GROUND, DECK_DATUM],
+        [BARE, DECK_BARE],
+        [THICK_DEPARTS, DEPARTS],
         [GROUND_LIGHT, DECK_GROUND_LIGHT],
         [ALBEDO, DECK],
+        [THICK_SKY_LIT, SKY_LIT],
         [BARE_GROUND, DECK_DATUM],
         [NEEDED, DECK_NEEDED],
       ]);
       expect([...kernelBindings(deck.reference).keys()]).toEqual([
-        ...kernelBindings(thick.reference).keys(),
+        ...[...kernelBindings(thick.reference).keys()].filter((name) => name !== "marchIrradiance"),
         "deckTable",
       ]);
       expect(kernelBindings(deck.reference).get("deckTable")).toMatchObject({
@@ -384,6 +406,23 @@ describe("the deck read's kernels (R08.T15.a.2)", () => {
   ] as const)("reaches every binding the deck form of %s declares", (_name, pair) => {
     expect(unreachedBindings(pair.reference)).toEqual([]);
   });
+
+  it.each([
+    ["the thick read's ray march", RAY_MARCH_THICK_KERNEL],
+    ["the thick read's ray march by slot", RAY_MARCH_SLOTS_THICK_KERNEL],
+    ["the thick read's specialised ray march", RAY_MARCH_THICK_SPECIAL_KERNEL],
+  ] as const)(
+    "reaches every binding %s declares, the departure's sky's irradiance among them (fix-r08-decked-air-route)",
+    (_name, pair) => {
+      expect(kernelBindings(pair.reference).get("marchIrradiance")).toMatchObject({
+        group: 0,
+        binding: 26,
+        kind: "texture",
+        viewDimension: "2d-array",
+      });
+      expect(unreachedBindings(pair.reference)).toEqual([]);
+    },
+  );
 
   it("takes the deck's bands' count through oblateBandCount, which the specialisation folds", () => {
     const functions = wgslFunctions(RAY_MARCH_DECK_KERNEL.reference);

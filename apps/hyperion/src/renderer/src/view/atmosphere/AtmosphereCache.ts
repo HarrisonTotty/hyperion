@@ -2404,7 +2404,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       const baked = state.tables;
       switch (baked.kind) {
         case "thick":
-          tables.setThickTables(baked.tables);
+          // A decked thin air's bake, whose drawn surfaces depart from it (fix-r08-decked-air-route).
+          tables.setThickTables(baked.tables, held.deckedAir);
           break;
         case "deck":
           // The correction over the deck stands on the J's altitudes, from the split as J's do.

@@ -98,6 +98,7 @@ import {
   geodeticOf,
   marchWeightOf,
   type SpheroidFigure,
+  type DeckedAirSurface,
   type SunState,
   type SurfaceLobes,
   type SurfaceTransmittance,
@@ -267,6 +268,15 @@ export interface TwinOptions {
    * frame takes it on both settings, or `extinguished`, the way back.
    */
   readonly surfaceLobes: SurfaceLobes;
+  /**
+   * Whether {@link TwinOptions.thick} is a decked thin air's bake, and how its drawn surface keeps
+   * its ground's contrast through it (`hillaire.ts`'s `DeckedAirSurface`, fix-r08-decked-air-route):
+   * `departure`, the march's second target T_lobe and its in-scatter less the bake's ground's share
+   * of that light, S̄ (T_lobe − T_direct), S̄ the drawn ground's light at the ray's end with the
+   * medium's ground albedo, lit as the ground is (`surfaceLightingTwin`'s sky); `uniform`, the
+   * route as the bake draws it; `null` by default, a bake that is no decked air's, as `uniform`.
+   */
+  readonly deckedAirSurface: DeckedAirSurface | null;
 }
 
 /** A cloud deck a twin reads as its medium's ground ({@link TwinOptions.deck}; R08.T15.a.2). */
@@ -296,6 +306,7 @@ export const DEFAULT_TWIN_OPTIONS: TwinOptions = {
   multiScatteringSize: MULTI_SCATTERING_SIZE,
   surfaceTransmittance: "channels",
   surfaceLobes: "transmitted",
+  deckedAirSurface: null,
 };
 
 /**
@@ -1026,7 +1037,21 @@ export function referenceTwin(
       : [t[3], t[3], t[3]];
   };
 
-  const marchSettings: RayMarchSettings = { ...sizes, surfaceLobes: settings.surfaceLobes };
+  // A decked air's bake departs where it is one and the settings ask (fix-r08-decked-air-route),
+  // its sky's irradiance the lit ground's.
+  const departs = settings.deckedAirSurface === "departure" && settings.thick !== null;
+  const marchSettings: RayMarchSettings = {
+    ...sizes,
+    surfaceLobes: settings.surfaceLobes,
+    ...(departs
+      ? {
+          departure: {
+            skyIrradiance: (heightM, muSun, latitudeRad, slot) =>
+              lighting.skyIrradiance(heightM, muSun, latitudeRad, slot),
+          },
+        }
+      : {}),
+  };
 
   // The march's texel at the centre of a camera at `originM` along `direction`, over a surface
   // `surfaceM` on (`null` where nothing is drawn), lit ground where `lit` and else black, through

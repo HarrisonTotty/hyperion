@@ -2714,6 +2714,11 @@ class Marcher {
    */
   readonly #lobed: boolean;
   /**
+   * Whether the march departs from a decked air's bake (fix-r08-decked-air-route): a drawn
+   * surface's ray on a bake's table (`thick`) that keeps its lobes' light, `departs` given.
+   */
+  readonly #departs: boolean;
+  /**
    * A drawn surface's optical depth with its lobes' in-lobe scattering kept, slot 0's path less it,
    * at least 0 a step (`rayMarch.wgsl`'s `surfaceDepth`; fix-r08-decked-air-opacity, summed since
    * fix-r08-decked-air-route), where {@link Marcher.#lobed}.
@@ -2734,6 +2739,7 @@ class Marcher {
     reads: MarchReads,
     geometry: MarchGeometry,
     ray: TwinRay,
+    departs = false,
   ) {
     this.#terms = terms;
     this.#pressureBarOf = pressureBarOf;
@@ -2763,7 +2769,9 @@ class Marcher {
     this.#lobes = lobed && (reads.kind === "oblate" || reads.sources.sunOpticalDepth !== undefined);
     this.#thick =
       reads.kind === "oblate" ? reads.reader.thickKind : (reads.sources.thick?.kind ?? null);
-    this.#lobed = lobed && this.#thick !== "thick" && ray.skySegment !== true;
+    const drawn = lobed && ray.skySegment !== true;
+    this.#departs = drawn && departs && this.#thick === "thick";
+    this.#lobed = drawn && (this.#thick !== "thick" || this.#departs);
     this.#thermal =
       reads.kind === "oblate" ? reads.reader.thermal : (reads.sources.thermal ?? null);
     // A path a light slot under an absorber, slot 0's always (the views' mean transmittance), and
@@ -2808,6 +2816,11 @@ class Marcher {
     }
     const depth = this.#surfaceDepth;
     return [exp(-depth[0]), exp(-depth[1]), exp(-depth[2])];
+  }
+
+  /** Whether the march departs from a decked air's bake ({@link Marcher.#departs}). */
+  get departs(): boolean {
+    return this.#departs;
   }
 
   /** A light slot's throughput, slot 0's for a slot with no path of its own. */
@@ -4210,7 +4223,8 @@ export function rayMarchRayAlongTwin(
  * piece's placement may stand to be taken to its other side (`MARCH_TURN_ROUNDING`), each 0 or
  * absent for the kernels' own; and `surfaceLobes`, what a drawn surface keeps of its light scattered
  * within the medium's forward lobes (`hillaire.ts`'s {@link SurfaceLobes}), `transmitted`, the
- * frame's default, where absent.
+ * frame's default, where absent; and `departure`, a decked air's ({@link TwinDeparture}), none
+ * where absent.
  */
 export type RayMarchSettings = Pick<
   TableSizes,
@@ -4219,7 +4233,30 @@ export type RayMarchSettings = Pick<
   readonly otherShareWithinSteps?: number;
   readonly otherTurnWithin?: number;
   readonly surfaceLobes?: SurfaceLobes;
+  readonly departure?: TwinDeparture;
 };
+
+/**
+ * A decked air's departure in the ray march's twin (plan R08, fix-r08-decked-air-route;
+ * `rayMarch.wgsl`'s header, `forward.w` 2): where it is given, a march on a bake's table (`thick`)
+ * keeps a drawn surface's lobes' light and takes the bake's ground's share of it from its
+ * in-scatter, S̄ (T_lobe − T_direct), S̄ the drawn ground's light at the ray's end with the
+ * medium's ground albedo, each source's transmittance to it and this sky's irradiance there.
+ */
+export interface TwinDeparture {
+  /**
+   * The sky's irradiance on a horizontal surface per unit of a source's illuminance (the lit
+   * passes' read, `surfaceLighting.wgsl`'s `atmosphere_sky_irradiance`), at `heightM` above the
+   * datum and geodetic latitude `latitudeRad`, the source at zenith cosine `muSun`, light slot
+   * `slot`.
+   */
+  readonly skyIrradiance: (
+    heightM: number,
+    muSun: number,
+    latitudeRad: number,
+    slot: number,
+  ) => Rgb;
+}
 
 /**
  * One ray-march texel's twin along a clipped ray (`rayMarchRayTwin`, `rayMarchRayAlongTwin`): its
@@ -4294,6 +4331,8 @@ interface RayMarchContext {
    * ({@link RayMarchSettings}' `surfaceLobes`, `transmitted`).
    */
   readonly surfaceLobes: boolean;
+  /** A decked air's departure ({@link RayMarchSettings}' `departure`), or `null`. */
+  readonly departure: TwinDeparture | null;
 }
 
 /** A march's cloud deck at its ground (R08.T15.a.2; `thick/deckRead.ts`). */
@@ -4362,6 +4401,7 @@ function rayMarchContext(
     otherShareWithinSteps: settings.otherShareWithinSteps ?? 0,
     otherTurnWithin: settings.otherTurnWithin ?? 0,
     surfaceLobes: (settings.surfaceLobes ?? "transmitted") === "transmitted",
+    departure: settings.departure ?? null,
     deck:
       planet.deck === undefined
         ? null
@@ -4406,7 +4446,9 @@ function rayMarchTexelInto(
     depthG = skyDepthG(depthAlong, ray);
   }
   const samples = marchSamplesOf(kind, depthG, context.samples, edgesM.length, depthSteps);
-  const marcher = new Marcher(terms, pressureBarOf, reads, geometry, ray);
+  // A decked air's departure, as `forward.w` 2 asks it (fix-r08-decked-air-route).
+  const departure = context.surfaceLobes ? context.departure : null;
+  const marcher = new Marcher(terms, pressureBarOf, reads, geometry, ray, departure !== null);
   // Each side cut into pieces shares its steps by the light each piece can return (R08.T16.a.2),
   // its depths and its first source's light read as the count reads its depth.
   const local = new Float64Array(SAMPLE_FLOATS);
@@ -4479,7 +4521,69 @@ function rayMarchTexelInto(
     meanTransmittance = 0;
     transmittance = [0, 0, 0];
   }
+  // Where the ray departs from a decked air's bake (fix-r08-decked-air-route; `rayMarch.wgsl`'s
+  // header), its in-scatter less the bake's ground's share of its lobes' light, S̄ (T_lobe −
+  // T_direct), at least 0: S̄ the drawn ground's light at the ray's end with the medium's ground
+  // albedo, each source's transmittance to it and the sky's irradiance there.
+  if (departure !== null && marcher.departs) {
+    const o = ray.originM;
+    const d = ray.direction;
+    const endM = {
+      x: o.x + ray.tEndM * d.x,
+      y: o.y + ray.tEndM * d.y,
+      z: o.z + ray.tEndM * d.z,
+    };
+    const toSun: TwinRgb = [0, 0, 0];
+    const lit: [number, number, number] = [0, 0, 0];
+    const lights = ray.sources ?? [{ direction: ray.sun, weight: [1, 1, 1], slot: 0 }];
+    for (const light of lights) {
+      const at = departureLightInto(reads, view.figure, endM, light, toSun);
+      const sky = departure.skyIrradiance(at.heightM, at.muSun, at.latitudeRad, light.slot);
+      for (const c of CHANNELS) {
+        lit[c] += light.weight[c] * (toSun[c] * Math.max(at.muSun, 0) + sky[c]);
+      }
+    }
+    for (const c of CHANNELS) {
+      const kept = Math.max(surface[c] - t[c], 0);
+      luminance[c] = Math.max(
+        luminance[c] - ((lit[c] * medium.groundAlbedo[c]) / Math.PI) * kept,
+        0,
+      );
+    }
+  }
   out.set([...luminance, meanTransmittance, ...transmittance, meanTransmittance]);
+}
+
+/**
+ * One source's transmittance to a drawn surface's place `placeM` at a ray's end into `out`, as the
+ * departure reads it (fix-r08-decked-air-route; `rayMarch.wgsl`'s bare ground's lookup from the
+ * place's own datum point), with the source's cosine against the datum's normal there, the place's
+ * height above the datum and its geodetic latitude: on an oblate body through the sliced lookup from
+ * its geodetic place; on a sphere's tables at its height and cosine.
+ */
+function departureLightInto(
+  reads: MarchReads,
+  figure: SpheroidFigure,
+  placeM: Vec3,
+  light: TwinRaySource,
+  out: TwinRgb,
+): { readonly muSun: number; readonly heightM: number; readonly latitudeRad: number } {
+  const s = light.direction;
+  if (reads.kind === "oblate") {
+    const geodetic = geodeticOf(placeM, figure);
+    const n = geodetic.normal;
+    reads.reader.sunInto(placeM, geodetic, s, light.slot, out, [0, 0, 0], reads.read);
+    return {
+      muSun: s.x * n.x + s.y * n.y + s.z * n.z,
+      heightM: geodetic.heightM,
+      latitudeRad: geodetic.latitudeRad,
+    };
+  }
+  const r = Math.hypot(placeM.x, placeM.y, placeM.z);
+  const muSun = (s.x * placeM.x + s.y * placeM.y + s.z * placeM.z) / r;
+  const heightM = Math.max(r - figure.equatorialRadiusM, 0);
+  reads.sources.sunTransmittance(heightM, muSun, out, light.slot);
+  return { muSun, heightM, latitudeRad: asin(Math.min(Math.max(placeM.z / r, -1), 1)) };
 }
 
 /**
@@ -7405,6 +7509,7 @@ function oblateRayMarchContext(
     otherShareWithinSteps: settings.otherShareWithinSteps ?? 0,
     otherTurnWithin: settings.otherTurnWithin ?? 0,
     surfaceLobes: (settings.surfaceLobes ?? "transmitted") === "transmitted",
+    departure: settings.departure ?? null,
     deck:
       planet.deck === undefined
         ? null

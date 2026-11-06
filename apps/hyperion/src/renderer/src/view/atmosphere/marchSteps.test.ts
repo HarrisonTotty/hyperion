@@ -689,8 +689,14 @@ describe("the kernels' WGSL", () => {
     );
     // The bare ground's light and its sky's transmittance of 0 stay keyed on depth 0, the end on
     // the drawn surface, and its camera side's placement and the warp the drawn surface's.
+    // Since fix-r08-decked-air-route the light's block is shared with the departure, keyed on
+    // `bare`, and the drawn surface's departure is false in a thin kernel.
+    expect(
+      code.match(/let bare = depth == 0\.0 && hitsGround && ground\.x <= tEnd;/gu),
+    ).toHaveLength(1);
+    expect(code).toMatch(/let departs = false;\s*if \(bare \|\| departs\) \{/u);
     expect(code.match(/if \(depth == 0\.0 && hitsGround && ground\.x <= tEnd\) \{/gu)).toHaveLength(
-      2,
+      1,
     );
     expect(code).toMatch(/tEnd = min\(tEnd, tSurface\);/u);
     expect(code).toMatch(/let evenSky = depth == 0\.0 && split\.beforeM > 0\.0/u);

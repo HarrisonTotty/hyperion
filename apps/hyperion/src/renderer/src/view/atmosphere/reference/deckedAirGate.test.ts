@@ -4,7 +4,9 @@
  * draws it, through its route, the bake as a haze route bakes it (`thick/routing.ts`'s
  * `bakedAsHaze`), and through the analytic path beside it, the scalar twin against its trace
  * (`hyperion-fit atmosphere-reference` of the case at its own counts, 22 thread-h) over the disc
- * and the limb from orbit: the record `deckedAirGate.json`. Over two grounds: the check lane's 0.1
+ * and the limb from orbit: the record `deckedAirGate.json`. Since fix-r08-decked-air-route the
+ * route's twin departs from its bake as the frame does (`hillaire.ts`'s `DeckedAirSurface`), which
+ * over the case's uniform ground is the route's to rounding. Over two grounds: the check lane's 0.1
  * (`served-decked-orbit`; `routed`, `analytic`) and 0.3 (`served-decked-orbit-bright`; `bright`),
  * above the cloud-free mean of its drawn class map, 0.267 / 0.259 / 0.244, which the atmosphere
  * cache hands its bake (research-decked-ground). Every verdict is recorded, never asserted;
@@ -30,6 +32,7 @@ import {
   SERVED_DECKED_COUNTS,
   servedDeckedCase,
 } from "../../../test/servedDeckedWorld";
+import { ATMOSPHERE_SETTINGS } from "../settings";
 import { bakeKeptCase } from "../thick/keptBake";
 import {
   caseGateSection,
@@ -116,9 +119,17 @@ async function sectionsOf(ground: GateGround): Promise<Record<string, unknown>> 
   return {
     case: referenceCase.name,
     // A trace without --stokes holds its scalar radiance as its `radiance`, the `vector` reading.
+    // The route as the frame draws it, its drawn surface departing from the bake on both settings
+    // (fix-r08-decked-air-route): over the case's uniform ground the route's to rounding.
     routed: caseGateSection(
       gateCase,
-      valuesOf(caseTwin(referenceCase, { thick: bands }), referenceCase),
+      valuesOf(
+        caseTwin(referenceCase, {
+          thick: bands,
+          deckedAirSurface: ATMOSPHERE_SETTINGS.high.deckedAirSurface,
+        }),
+        referenceCase,
+      ),
       "vector",
     ),
     analytic: caseGateSection(gateCase, valuesOf(caseTwin(referenceCase), referenceCase), "vector"),
@@ -129,7 +140,7 @@ async function sectionsOf(ground: GateGround): Promise<Record<string, unknown>> 
 async function deckedAirRecord(): Promise<unknown> {
   return {
     description:
-      "fix-r08-decked-air-opacity's decked thin air gate: the served Earth-like world 42002cae00000004.0300 (generator version 28; test/servedDeckedWorld.ts) as the client draws it, through its route (its whole column baked as a haze route bakes it) and through the analytic path (Psi_ms, its lobes' surface light kept), the scalar twin against its trace over the disc and the limb from orbit, by image: over a ground of 0.1 (routed, analytic) and over one of 0.3, above the cloud-free mean of its drawn class map (bright). Verdicts recorded, never gated. Written by deckedAirGate.test.ts; do not edit by hand.",
+      "fix-r08-decked-air-opacity's decked thin air gate: the served Earth-like world 42002cae00000004.0300 (generator version 28, the same record at 29; test/servedDeckedWorld.ts) as the client draws it, through its route (its whole column baked as a haze route bakes it, its drawn surface departing from the bake as the frame draws it since fix-r08-decked-air-route) and through the analytic path (Psi_ms, its lobes' surface light kept), the scalar twin against its trace over the disc and the limb from orbit, by image: over a ground of 0.1 (routed, analytic) and over one of 0.3, above the cloud-free mean of its drawn class map (bright). Verdicts recorded, never gated. Written by deckedAirGate.test.ts; do not edit by hand.",
     format: 1,
     ...(await sectionsOf("dark")),
     bright: await sectionsOf("bright"),

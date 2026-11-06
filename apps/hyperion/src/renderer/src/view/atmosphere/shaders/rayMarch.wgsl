@@ -172,6 +172,22 @@
 // a deck's march, which reads a bake's J and never keeps it, compiles it out (`hillaire.ts`'s
 // withDeckRead). A sum rounds otherwise than a product, so the second target moves by f32's
 // rounding where it is kept.
+//
+// Changes (plan R08, fix-r08-decked-air-route; research-leans-46 section 2; `hillaire.ts`'s
+// DeckedAirSurface): under a decked thin air's bake (`forward.w` 2, the thick read alone), whose J
+// re-emits the light of one uniform ground, the bake's, scattered within the medium's forward
+// lobes, a ray that ends on a drawn surface keeps its own surface's lobes' light in its second
+// target, T_lobe, and its in-scatter loses the bake's ground's share of that light,
+// S_bar (T_lobe - T_direct), at least 0, the in-scatter held at 0 or more. S_bar is the drawn
+// ground's light at the ray's end with the bake's ground albedo: each source's transmittance to it
+// and the sky's irradiance there (the table the lit passes read, `thickDeparture.wgsl`), at the
+// datum's normal, times albedo / pi. Over a ground of the bake's albedo the pixel is the route's,
+// L_in + S T_direct; over a drawn map it is L_routed(rho_bar) + (S - S_bar) T_lobe, 6S's form with
+// the surroundings at the bake's mean (Tanre, Herman and Deschamps 1981, Appl. Opt. 20, 3676;
+// Vermote et al. 1997, IEEE TGRS 35, 675), so that the drawn ground keeps its contrast through the
+// lobes. Its lookups are the bare ground's, at their one call site (`rayMarchPieceAt`'s note on
+// SwiftShader's stack), its own work in loops of at most one pass; a thin kernel's `departs` is
+// false and a deck's march compiles it out, and the bare ground's arithmetic is as before.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -987,20 +1003,45 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
   // The bare ground under the atmosphere, seen from above it where nothing is drawn: each source's
   // light on it through the sliced lookup from its own place (R08.T6.f), weighted as the sky is,
   // through its own slot's throughput (R08.T7), and the source's cosine against the datum's normal
-  // there; its light the kernel's read (`rayMarchGroundLightAt`, R08.T8.e).
-  if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
-    let p = origin + ground.x * dir;
-    let datum = datumPointOf(body, p, 0.0);
+  // there; its light the kernel's read (`rayMarchGroundLightAt`, R08.T8.e). Or, where the ray
+  // departs under a decked air's bake (the header's fix-r08-decked-air-route; false in a thin
+  // kernel), the drawn ground's light at the ray's end with the bake's ground, S_bar, through the
+  // same lookups, its sky's irradiance the thick read's (`skyLit`).
+  let bare = depth == 0.0 && hitsGround && ground.x <= tEnd;
+  let departs = false;
+  if (bare || departs) {
+    var p = origin + ground.x * dir;
+    var quadricM2 = 0.0;
+    for (var drawn = departs; drawn; drawn = false) {
+      let place = rayMarchPlaceAt(ray, split.lowestM, tEnd - split.lowestM);
+      p = place.p;
+      quadricM2 = place.quadricM2;
+    }
+    let datum = datumPointOf(body, p, quadricM2);
     let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
     let local = sampleMediumAt(s * datum.heightM);
-    let start = sampleStartOf(body, p, 0.0, datum.heightM, datum.normal, datum.normal, s, local);
+    let start = sampleStartOf(
+      body, p, quadricM2, datum.heightM, datum.normal, datum.normal, s, local
+    );
+    var lit = vec3f(0.0);
     for (var k = 0u; k < count; k++) {
       let source = view.sources[k];
       let slot = skySlotOf(source);
       let muSun = dot(source.direction.xyz, datum.normal);
       let toSun = rayMarchGroundLightAt(body, start, source.direction.xyz, slot);
-      luminance += viewThroughputOf(&march, slot) * source.weight.rgb * toSun
-        * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;
+      if (bare) {
+        luminance += viewThroughputOf(&march, slot) * source.weight.rgb * toSun
+          * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;
+      }
+      for (var drawn = departs; drawn; drawn = false) {
+        let skyLit = vec3f(0.0);
+        lit += source.weight.rgb * (toSun * max(muSun, 0.0) + skyLit);
+      }
+    }
+    for (var drawn = departs; drawn; drawn = false) {
+      let groundShare = lit * medium.groundAlbedo.rgb / PI_VIEW;
+      let kept = max(exp(-surfaceDepth) - march.throughput0, vec3f(0.0));
+      luminance = max(luminance - groundShare * kept, vec3f(0.0));
     }
   }
   // A sky pixel whose ray meets the ground sees nothing of space behind it: no sun's disc there.
