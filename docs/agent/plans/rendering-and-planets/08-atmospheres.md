@@ -25269,3 +25269,5 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     `departs`; `TwinOptions.deckedAirSurface` (`null` by default: no decked air's bake).
     `deckedAirGate.json` re-blessed by hand: both grounds' tallies unchanged, the surface shares
     moved (through T_lobe).
+  - Step 3: `DECKED_AIR_ROUTE_RANGE.mostGroundAlbedo` 0.3; `DECKED_AIR_BRIGHT_GATE_TALLIES` (held to
+    `bright.routed`) and `thickRouteRangesOf`'s `brightTallies`, both grounds' gates required.

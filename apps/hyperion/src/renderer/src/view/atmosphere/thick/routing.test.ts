@@ -59,6 +59,7 @@ import {
   correctionRouted,
   DECK_LOWEST_SUN_SINE,
   DECK_ROUTE_RANGE,
+  DECKED_AIR_BRIGHT_GATE_TALLIES,
   DECKED_AIR_GATE_TALLIES,
   DECKED_AIR_ROUTE,
   DECKED_AIR_ROUTE_RANGE,
@@ -1096,6 +1097,11 @@ describe("the decked thin air's route (fix-r08-decked-air-opacity)", () => {
     expect(DECKED_AIR_GATE_TALLIES).toEqual(talliesOf(committedDecked.routed.images));
   });
 
+  it("holds the bright ground's recorded verdict to deckedAirGate.json's bright routed, image by image (fix-r08-decked-air-route)", () => {
+    expect(DECKED_AIR_BRIGHT_GATE_TALLIES).toEqual(talliesOf(committedDecked.bright.routed.images));
+    expect(deckGatePasses(DECKED_AIR_BRIGHT_GATE_TALLIES)).toBe(true);
+  });
+
   it("opens the route on the recorded verdict, where the analytic path's misses would keep it closed", () => {
     const analytic = talliesOf(committedDecked.analytic.images);
     expect([
@@ -1143,9 +1149,30 @@ describe("the decked thin air's route (fix-r08-decked-air-opacity)", () => {
     expect(thickBakeRouted(classifyRegime(medium, CLEAR_COVER), medium)).toBe(false);
   }, 180_000);
 
-  it("routes it nowhere over the gate's bright ground of 0.3, above its drawn map's cloud-free mean, while the range holds its ground at 0.1 (lean)", async () => {
+  it("routes it over the gate's bright ground of 0.3, above its drawn map's cloud-free mean, by the decked range (fix-r08-decked-air-route)", async () => {
     const { medium } = await servedDeckedCase("bright");
-    expect(thickBakeRouted(classifyRegime(medium, CLEAR_COVER), medium)).toBe(false);
+    const regime = classifyRegime(medium, CLEAR_COVER);
+    expect([thickBakeRouted(regime, medium), deckedAirRouted(regime, medium)]).toEqual([
+      true,
+      true,
+    ]);
+  }, 180_000);
+
+  it("routes it nowhere where its bright ground's gate misses (fix-r08-decked-air-route)", async () => {
+    const { medium, regime } = await servedDrawn();
+    const missing = DECKED_AIR_BRIGHT_GATE_TALLIES.map((image) =>
+      image.image === "disc-p85" ? tallied(image, 2, 1, 0) : image,
+    );
+    const ranges = thickRouteRangesOf(
+      HAZE_GATE_TALLIES,
+      HAZE_GATE_MISSES,
+      HAZE_ROUTE_RANGE,
+      "bake",
+      DECKED_AIR_GATE_TALLIES,
+      DECKED_AIR_ROUTE_RANGE,
+      missing,
+    );
+    expect(thickBakeRouted(regime, medium, ranges)).toBe(false);
   }, 180_000);
 
   it("routes no kept case, Mars's dust, the Venus-class cases nor titan-class by the decked range", () => {
@@ -1160,9 +1187,9 @@ describe("the decked thin air's route (fix-r08-decked-air-opacity)", () => {
   }, 180_000);
 
   it.each(BOUNDS)(
-    "sets the decked air's %s at the served world's extreme, rounded outward at its third figure",
+    "sets the decked air's %s at the served world's extreme, rounded outward at its third figure (the ground the bright case's, fix-r08-decked-air-route)",
     async (key, side, read) => {
-      const { medium } = await servedDeckedCase("dark");
+      const { medium } = await servedDeckedCase(key === "mostGroundAlbedo" ? "bright" : "dark");
       expect(
         outwardSteps(DECKED_AIR_ROUTE_RANGE[key], regimeChannels(medium).map(read), side),
       ).toEqual([expect.toSatisfy((steps: number) => steps >= 0 && steps < 1)]);
