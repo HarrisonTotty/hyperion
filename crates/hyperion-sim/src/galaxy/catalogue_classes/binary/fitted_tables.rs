@@ -658,11 +658,12 @@ const AWD_MISSES: [(AwdSide, usize, f64); 0] = [];
 /// (recalled; the pod reads no web, so not read at source).
 const CATALOGUED_HIGH_MASS: f64 = 152.0;
 
-/// The catalogue's high-mass hosts under the refit at 27, as measured (the same at every seed):
-/// 27.6, a finding. The table's high-mass weights are 0.0068 of the row's 9,931 hosts, 68, of
-/// which the features' lists hold the rest (not drawn here); both are under Fortin et al.'s 152
-/// catalogued (main's ruling of 2026-11-01 took the high-mass hosts for research).
-const PINNED_HIGH_MASS_HOSTS: f64 = 27.596_665_909_209_907;
+/// The catalogue's high-mass hosts under the tables refitted at 29 on the generator's own pairs
+/// (P15.T10.b), as measured (the same at every seed): 2.85, a finding, under Fortin et al.'s 152
+/// catalogued (main's ruling of 2026-11-01 took the high-mass hosts for research). Under the 29
+/// blocks fitted before P11.T12's wind reach the class held 2.89, under train 27's refit on its
+/// engine, which 28 kept, 4.10, and under 27's first refit 27.6.
+const PINNED_HIGH_MASS_HOSTS: f64 = 2.854_041_965_168_350_6;
 
 /// Corral-Santana et al.'s (2016, A&A 587, A61) black-hole transients, as P11.T8.b takes them:
 /// 1,300, ± 400 its tolerance (theirs 1,280 ± 120, a lower limit; recalled).
