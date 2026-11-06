@@ -106,9 +106,11 @@
 //   up to its sub-patch word's levels wherever it is: each of that stride's triangles lies in one
 //   of its page's, so that it draws the surface its stride-1 triangles do.
 // - _Strides past τ′_ (T3.e; `clusters/overCount.ts`): where `shapes.w` is not 0, each cluster a
-//   camera pass draws at a stride above 1 whose own need at it, (E_L + e_s) ÷ τ_rad under its
-//   instance's scale (τ the slewed tolerance its stride was chosen at), lies beyond its sphere's
-//   nearest point d × τ′ ÷ τ, τ′ the pass's tolerance, rad (`scalars.x`, 0 for none), is counted
+//   camera pass draws at a stride above 1 (not by a may-discard template, which draws it at
+//   stride 1 whatever its bands give: R14.T3.c's edge stand-ins' finding) whose own need at it,
+//   (E_L + e_s) ÷ τ_rad under its instance's scale (τ the slewed tolerance its stride was chosen
+//   at), lies beyond its sphere's nearest point d × τ′ ÷ τ, τ′ the pass's tolerance, rad
+//   (`scalars.x`, 0 for none), is counted
 //   into `args` at word `shapes.w` + the pass's index among its buckets (its first bucket ÷ the
 //   templates a pass has): an `atomicAdd`, so that the count is the same whatever the order.
 // - _The bucket_: the record's shape (its flags' bits 0–3) less the consumer's first shape
@@ -681,16 +683,23 @@ fn note_over(cull_pass : CullPass, drawn : bool, over : bool) {
   }
 }
 
+// A may-discard record's shape's may-discard template, NO_DISCARD_TEMPLATE for a record that may not
+// discard or a shape with none (see the module's head).
+fn discard_template(shape : u32, flags : u32) -> u32 {
+  if ((flags & CLUSTER_FLAG_MAY_DISCARD) == 0u || shape >= 8u) {
+    return NO_DISCARD_TEMPLATE;
+  }
+  let word = select(params.shapes.y, params.shapes.z, shape >= 4u);
+  return (word >> (8u * (shape % 4u))) & 0xffu;
+}
+
 // A record's template in the pass (see the module's head) at stride level `level`, the pass's for
 // a strided one, 0 for a DAG one's; a may-discard record's shape's may-discard template where it
-// has one.
+// has one (`discard_template`).
 fn template_of(cull_pass : CullPass, shape : u32, flags : u32, level : u32) -> u32 {
-  if ((flags & CLUSTER_FLAG_MAY_DISCARD) != 0u && shape < 8u) {
-    let word = select(params.shapes.y, params.shapes.z, shape >= 4u);
-    let discarding = (word >> (8u * (shape % 4u))) & 0xffu;
-    if (discarding != NO_DISCARD_TEMPLATE) {
-      return discarding;
-    }
+  let discarding = discard_template(shape, flags);
+  if (discarding != NO_DISCARD_TEMPLATE) {
+    return discarding;
   }
   let dag = (flags & CLUSTER_FLAG_DAG) != 0u;
   return (shape - params.shapes.x) * STRIDE_LEVELS + select(level, 0u, dag);
@@ -806,7 +815,9 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) loca
         let distance = group_distance(stride_centre, stride_record.radius);
         let fraction = select(STRIDE_BAND_FRACTION, STRIDE_MASK_BAND_FRACTION, (sub_word & SUB_PATCH_MASK) != 0u);
         level = camera_stride_level(cull_pass, stride_record, bands, quadrant, hold_fades, distance, fraction);
-        over = drawn_over(cull_pass, stride_record, scale, level, distance);
+        // A cluster its may-discard template draws is drawn at stride 1, never past τ′.
+        let drawn_level = select(level, 0u, discard_template(shape, taken.flags) != NO_DISCARD_TEMPLATE);
+        over = drawn_over(cull_pass, stride_record, scale, drawn_level, distance);
       }
       let t = template_of(cull_pass, shape, taken.flags, level);
       let mark = instance * clusters + c;

@@ -47,7 +47,7 @@ import {
   packClusterRecord,
 } from "./record";
 import { HZB_PARAMS_BYTES } from "./hzb";
-import { TERRAIN_SUB_PATCH_MASK } from "./terrain";
+import { TERRAIN_INPUT_EDGE_MASK, TERRAIN_SUB_PATCH_MASK } from "./terrain";
 import { subPatchWord } from "../terrain/gpu/uniforms";
 import {
   EDGE_BANDS,
@@ -815,6 +815,50 @@ describe("the cluster cull's twin (plan R14, R14.T1.b)", () => {
       pastTolerance(300, 0),
       pastTolerance(300, 0.0066, "appended", { whole: true }),
     ]).toEqual([0, 0, 1, 1, 0, 0, 0]);
+  });
+
+  it("counts a cluster its may-discard template draws at stride 1, never past τ′, an edge mask's strips among them (R14.T3.e; R14.T3.c's edge stand-ins)", () => {
+    // Every block as `pastTolerance(300, 0.0066)`'s, which counts each, but block `discarding` (if
+    // any) may discard, and strip 64 (side 0's first, by block 0's bands for a mask at part (0, 0))
+    // drawn where `strip`.
+    const counted = (discarding: number, strip: boolean, extra: Partial<CullInstance>): number =>
+      cullOverTwin({
+        instances: [
+          {
+            originM: { x: 0, y: 0, z: 0 },
+            page: 0,
+            passMask: 0b1,
+            unitM: 1,
+            strideScale: SCALE,
+            ...extra,
+          },
+        ],
+        records: (_page, c) =>
+          c < 64
+            ? { ...PAGE_BLOCK, mayDiscard: c === discarding, centreM: { x: 0, y: 0, z: -300 } }
+            : c === 64 && strip
+              ? { ...PAGE_BLOCK, shape: "terrain-skirt", centreM: { x: 0, y: 0, z: -300 } }
+              : { ...PAGE_BLOCK, radiusM: -1 },
+        clustersPerPage: 116,
+        rotationColumns: [X, Y, Z],
+        passes: [{ ...CAMERA, strideCap: 8, toleranceRad: 0.0066, order: "appended" }],
+        places: [{ bucketBase: 0, listBase: 0 }],
+        templates: 16,
+        viewAxis: { x: 0, y: 0, z: -1 },
+        discardTemplates: TERRAIN_DISCARD_TEMPLATES,
+      }).get(0) ?? 0;
+    const mask = (TERRAIN_SUB_PATCH_MASK | subPatchWord(1, 0, 0)) >>> 0;
+    const edgeMask = { subWord: mask, standInBits: TERRAIN_INPUT_EDGE_MASK };
+    expect([
+      // A whole patch's 36 blocks off its edges (its edges hold no bands here), and with one of
+      // them may-discard.
+      counted(-1, false, {}),
+      counted(INNER, false, {}),
+      // An interior bake's mask's strip, strided by its side block's bands, and an edge mask's,
+      // drawn by the may-discard template.
+      counted(-1, true, { subWord: mask }) - counted(-1, false, { subWord: mask }),
+      counted(-1, true, edgeMask) - counted(-1, false, edgeMask),
+    ]).toEqual([36, 35, 1, 0]);
   });
 
   it("holds a block or a strip on an edge a finer patch touches at stride 4, and none on another edge (R14.T3.c)", () => {

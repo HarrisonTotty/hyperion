@@ -626,16 +626,12 @@ export function cullOverTwin(
             recordKept(input, pass, p, instance, cluster, record, centre, slackScale) &&
             templateOf(record, cluster, pass, instance, input, centre) < input.templates;
       const at = strideRecordOf(input, instance, cluster, record, centre);
-      if (
-        drawn &&
-        drawnPastTolerance(
-          pass,
-          at.record,
-          instance,
-          at.centreM,
-          cameraPassStrideLevel(pass, at.record, cluster, instance, input, at.centreM),
-        )
-      ) {
+      // A cluster its may-discard template draws is drawn at stride 1, never past τ′.
+      const level =
+        discardTemplateOf(record, cluster, instance, input) === undefined
+          ? cameraPassStrideLevel(pass, at.record, cluster, instance, input, at.centreM)
+          : 0;
+      if (drawn && drawnPastTolerance(pass, at.record, instance, at.centreM, level)) {
         note(p);
       }
     });
@@ -688,9 +684,8 @@ function templateOf(
   centreM: Vec3,
 ): number {
   const code = CLUSTER_SHAPE_CODE[record.shape];
-  const { mayDiscard } = recordClassOf(record, cluster, instance);
-  const discarding = mayDiscard ? input.discardTemplates?.[code] : undefined;
-  if (discarding !== undefined && discarding !== NO_DISCARD_TEMPLATE) {
+  const discarding = discardTemplateOf(record, cluster, instance, input);
+  if (discarding !== undefined) {
     return discarding;
   }
   const shape = code - (input.firstShape ?? 0);
@@ -702,6 +697,24 @@ function templateOf(
         ? cameraPassStrideLevel(pass, at.record, cluster, instance, input, at.centreM)
         : strideLevel(pass, instance.unitM);
   return shape < 0 ? Infinity : shape * STRIDES.length + level;
+}
+
+/**
+ * The may-discard template `record` of cluster `cluster` draws by for `instance`
+ * (`clusterCull.wgsl`'s `discard_template`): its shape's where the cull takes it as one that may
+ * discard and the consumer has one (R14.T1.g), at stride 1 whatever its bands; else `undefined`.
+ */
+function discardTemplateOf(
+  record: ClusterRecord,
+  cluster: number,
+  instance: CullInstance,
+  input: Pick<CullTwinInput, "discardTemplates">,
+): number | undefined {
+  if (!recordClassOf(record, cluster, instance).mayDiscard) {
+    return undefined;
+  }
+  const discarding = input.discardTemplates?.[CLUSTER_SHAPE_CODE[record.shape]];
+  return discarding === undefined || discarding === NO_DISCARD_TEMPLATE ? undefined : discarding;
 }
 
 /**
