@@ -52,6 +52,7 @@ import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
+import { cancelAirPointsOf } from "../bodies/airPoint";
 import {
   CLASS_MAP_POINT_SLICE_MS,
   cancelClassMapPoint,
@@ -820,11 +821,15 @@ export class ClassMapStore implements ClassMapSource {
     map.surface = null;
   }
 
-  /** Releases `held`'s textures, cancels its point's unfinished build and forgets its map. */
+  /**
+   * Releases `held`'s textures, cancels its point's unfinished build and its air points' ratios on
+   * it (R08.T16.b), and forgets its map.
+   */
   #drop(held: HeldBody): void {
     if (held.map !== null) {
       this.#release(held.map);
       cancelClassMapPoint(held.map.texels);
+      cancelAirPointsOf(held.map.texels);
     }
     held.map = null;
   }

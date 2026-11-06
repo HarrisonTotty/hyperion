@@ -40,6 +40,12 @@ import {
 } from "../../test/terrainSessionFixtures";
 import { aBody, FIXTURE_PLANET_CENTRE_M, FIXTURE_SYSTEM } from "../../test/viewFixtures";
 import { lawFor } from "../appearance/phase";
+import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
+import { type AirPointBody, airPointWork, warmAirPoint } from "../bodies/airPoint";
+import { DISC_ANNULI_HIGH } from "../lighting/annuli";
+import { hostAnnuli } from "../lighting/hostLights";
+import { AU_M } from "../scenes/kept";
+import { aHostDisc } from "../../test/litFixtures";
 import {
   classMapPointReflection,
   classMapPointState,
@@ -232,7 +238,45 @@ afterEach(() => {
   if (builds !== 0 || refreshes !== 0) {
     throw new Error(`a test left ${String(builds)} builds and ${String(refreshes)} refreshes`);
   }
+  // And its air points' ratios (R08.T16.b).
+  const air = airPointWork().refreshes;
+  if (air !== 0) {
+    throw new Error(`a test left ${String(air)} air points' ratios queued`);
+  }
 });
+
+/** A body with air as its point's samples take it, under a table of its own that holds nothing. */
+function airPointBody(): AirPointBody {
+  const law = lawFor([0.1, 0.1, 0.1], [1.5, 1.5, 1.5], "lambert");
+  const figure = { equatorialRadiusM: 6.4e6, polarRadiusM: 6.4e6 };
+  const host = aHostDisc();
+  return {
+    air: {
+      table: { bands: 1, slots: 1, sunFloor: -0.2, values: new Float32Array(DISC_LAYER_VALUES) },
+      texture: { kind: "texture", name: "air point's table" },
+      lnBands: [0],
+      gravity: null,
+    },
+    figure,
+    surface: { kind: "uniform", law },
+    airedFigure: figure,
+    airedSurface: { kind: "uniform", law },
+    pole: vec3(0, 0, 1),
+    rotation: null,
+    classMap: null,
+    towardsObserver: vec3(0, 0, 1),
+    lights: [
+      {
+        towardsLight: vec3(1, 0, 0),
+        distanceM: AU_M,
+        radiusM: host.radius_m,
+        annuli: hostAnnuli(host, DISC_ANNULI_HIGH),
+        key: "star 0",
+      },
+    ],
+    airlessIsDisc: true,
+  };
+}
 
 /** A frame drawing the Moon as a point under `surface`: what notes its map near the switch. */
 function drawMoonPoint(surface: ClassMapDiscSurface): void {
@@ -645,6 +689,51 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     }
     states.push(classMapPointState(surface));
     expect([states, steps > 1]).toEqual([["queued", "made"], true]);
+    h.session.dispose();
+  });
+
+  it("finds an air point's ratio in its steps, a slice a step, while a frame draws its body near the switch (R08.T16.b)", async () => {
+    tickingPerformance();
+    const h = await harness();
+    const body = airPointBody();
+    warmAirPoint(body);
+    const queued = airPointWork().refreshes;
+    let steps = 0;
+    while (airPointWork().refreshes > 0 && steps < 10_000) {
+      warmAirPoint(body);
+      h.session.step();
+      steps += 1;
+    }
+    expect([queued, airPointWork().refreshes, steps > 1]).toEqual([1, 0, true]);
+    h.session.dispose();
+  });
+
+  it("steps an air point's ratio only in what the class maps' takes leave of each slice (R08.T16.b)", async () => {
+    tickingPerformance();
+    const h = await harness();
+    const body = airPointBody();
+    // Takes that hold the whole slice at each step.
+    const takes = vi
+      .spyOn(ClassMapStore.prototype, "step")
+      .mockImplementation((budgetMs = 2, now = () => performance.now()) => {
+        const startMs = now();
+        let readings = 0;
+        while (now() - startMs < budgetMs) {
+          readings += 1;
+        }
+        return readings > 0;
+      });
+    for (let k = 0; k < 200; k += 1) {
+      warmAirPoint(body);
+      h.session.step();
+    }
+    const whileTaking = airPointWork().refreshes;
+    takes.mockRestore();
+    for (let k = 0; k < 10_000 && airPointWork().refreshes > 0; k += 1) {
+      warmAirPoint(body);
+      h.session.step();
+    }
+    expect([whileTaking, airPointWork().refreshes]).toEqual([1, 0]);
     h.session.dispose();
   });
 

@@ -62,7 +62,7 @@ import { IDENTITY_QUATERNION, quaternionFromRows } from "../view/camera/quaterni
 import { annulusEdges } from "../view/lighting/annuli";
 import type { Rgb } from "../view/photometry/toneCurve";
 import { AU_M } from "../view/scenes/kept";
-import { log } from "../lib/pinnedMath";
+import { asin, cos, log, sin } from "../lib/pinnedMath";
 
 /** The camera's distance from the centre, m: the boundary's (Design note 13). */
 export const DISC_AIR_DISTANCE_M = 1e9;
@@ -268,7 +268,7 @@ export function integratedRadianceAt(
   const alpha = (phaseDeg * Math.PI) / 180;
   // The view's axes are the galactic ones (the camera's identity), the camera at the origin looking
   // down −z at the centre, the pole along +y; the body-fixed axes (z, x, y) of them.
-  const sun = vec3(Math.sin(alpha), 0, Math.cos(alpha));
+  const sun = vec3(sin(alpha), 0, cos(alpha));
   const camera: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
   const cameraM = vec3(D, 0, 0);
   const twin = twinView(
@@ -281,7 +281,7 @@ export function integratedRadianceAt(
     {
       directionBodyFixed: bodyFixed(sun),
       illuminanceLx: [1, 1, 1],
-      angularRadiusRad: Math.asin(SUN_RADIUS_M / AU_M),
+      angularRadiusRad: asin(SUN_RADIUS_M / AU_M),
     },
     figure,
     NEAR_PLANE_M,
@@ -345,8 +345,8 @@ export function integratedRadianceAt(
     const r = 0.5 * (r0 + r1);
     for (let k = 0; k < azimuths; k += 1) {
       const phi = ((k + 0.5) / azimuths) * 2 * Math.PI;
-      const xi = across * r * Math.cos(phi);
-      const eta = up * r * Math.sin(phi);
+      const xi = across * r * cos(phi);
+      const eta = up * r * sin(phi);
       const weight = across * up * r * (r1 - r0) * ((2 * Math.PI) / azimuths);
       const ray = normalise(vec3(xi, eta, -1));
       const d = bodyFixed(ray);

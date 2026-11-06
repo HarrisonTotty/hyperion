@@ -2040,6 +2040,29 @@ export function shadeDiscPoint(
   return shade(viewBodyOf(record, camera, classMap, lighting), record, q, ray);
 }
 
+/**
+ * The light the twin shades a record's figure with along a view ray, in `f64`, or `null` where the
+ * ray misses the spheroid: {@link shadeDiscPoint} at the ray's hit, the record seen from `camera`
+ * once for every ray, for the point regime's sum over a disc's samples (plan R07, R07.T8.a;
+ * `airPoint.ts`).
+ *
+ * @param classMap - As {@link shadeDiscPoint}'s.
+ * @param lighting - As {@link shadeDiscPoint}'s.
+ * @throws Error as {@link rasteriseDisc}.
+ */
+export function discRadianceAlong(
+  record: DiscRecord,
+  camera: ProjectionCamera,
+  classMap: ClassMapTexels | null = null,
+  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
+): (ray: Vec3) => Rgb | null {
+  const body = viewBodyOf(record, camera, classMap, lighting);
+  return (ray) => {
+    const q = hitSpheroid(body, ray);
+    return q === null ? null : shade(body, record, q, ray).radiance;
+  };
+}
+
 /** One pixel of a rasterised disc: its stored colour and alpha as the two draws leave them. */
 export interface DiscPixel {
   readonly xPx: number;

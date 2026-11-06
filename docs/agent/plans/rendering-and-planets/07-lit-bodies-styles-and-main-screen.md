@@ -10148,3 +10148,18 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     pass where none stands; `ViewFrameDrawn.anchors` drops bodies drawn as symbols and every label.
   - The views check's inspection now captures `-grid-on` in place of `-grid-off`; its first
     capture, and its profile's orbit window, are at `GRID OFF`.
+- **R07.T8.a, an air body's point (2026-11-06, fix-r07-air-point-switch).**
+  - `pointFlux` takes each star's term of a body given `LitBodyInput.air` as its tabled disc
+    reflects it (`bodies/airPoint.ts`' `airPointReflection`): the airless term times that disc's
+    sum over the airless disc's, 32 × 64 samples, or the sum itself under a class map.
+  - Ratios are held per table and light and found only in the frames' slices (`stepAirPoints`,
+    after `stepClassMapPoints` in `TerrainSession.step`; `warmAirPoint` for a disc in the band).
+    A star with none held draws airless; planetshine and eclipses as before; no air, bit for bit.
+  - The sum lights the ground airless, as this task's CPU raster does; the GPU lights it through
+    R08.T9.b's tables, which the CPU cannot read: the point stands up to 10% over a raster lit by
+    their twin on thin airs (a finding). TEST VENUS at 150° is pinned at 4% at 3 px: its raster
+    takes 3.2% under its own exact flux.
+  - `ClassMapStore` drops a map's air ratios with it (`cancelAirPointsOf`). The six cases' tables
+    are fixtures (`view/atmosphere/fixtures/air-switch/`), baked by hand by
+    `airSwitchCases.test.ts` (`HYPERION_AIR_SWITCH=1`); the served class map is synthetic.
+  - The smoke harness's 3 px check holds no air body, and its page steps no air ratio.

@@ -168,6 +168,7 @@ import {
   MAX_DISC_OCCLUDERS,
   packDiscRecords,
 } from "./discShading";
+import { type AirPointBody, airPointReflection, warmAirPoint } from "./airPoint";
 import {
   classMapPointReflection,
   nearClassMapPointSwitch,
@@ -540,7 +541,11 @@ function occludersOf(
  * (`discEclipseVisible`, T10.b), the share of the light the disc regime's pixels sum, so that the
  * flux stays continuous at the 3 px switch through an eclipse; it takes the photometry's limb
  * share under a class map too. Each planetshine source adds its own term, as a point source at its
- * centre's direction and never eclipsed (Design note 7).
+ * centre's direction and never eclipsed (Design note 7). A body given its disc table
+ * ({@link LitBodyInput.air}) takes each star's term as its disc drawn by that table reflects it
+ * (`airPoint.ts`' `airPointReflection`, R08.T16.b), its ratio to the airless term found in the
+ * frames' slices, so that the point meets that disc at the 3 px switch; its planetshine stays
+ * airless.
  *
  * @param hosts - The lights where they are drawn, for a body without its own lighting frame.
  * @param occluders - The bodies that may eclipse its stars (`occludersFor`).
@@ -560,9 +565,13 @@ export function pointFlux(
   const solid = (body.figure.equatorialRadiusM / distanceM) ** 2;
   const blockers = occluders.map(({ centreM, radiusM }) => ({ centreM, radiusM }));
   const reflection = pointReflectionOf(body, toCamera);
+  const lights = lightsOf(body, hosts);
+  // A body with air takes its tabled disc's light of each star (R08.T16.b; `airPoint.ts`).
+  const air = airPointBodyOf(body, lights, toCamera, k);
   const flux: [number, number, number] = [0, 0, 0];
-  for (const light of lightsOf(body, hosts)) {
-    const reflected = reflection(normalise(light.toStarM), starLightKey(light));
+  for (const [slot, light] of lights.entries()) {
+    const airless = reflection(normalise(light.toStarM), starLightKey(light));
+    const reflected = air === null ? airless : airPointReflection(air, slot, airless);
     const visible = discEclipseVisible(
       light.host,
       body,
@@ -587,6 +596,90 @@ export function pointFlux(
 /** A star's key among a body's lights, by which a class map's held ratios are its own. */
 function starLightKey(light: LightAtPoint): string {
   return `star ${String(light.host.disc.star)}`;
+}
+
+/**
+ * A body with air as its point's samples take it (`airPoint.ts`): the disc its table draws, on its
+ * ground's table figure and black beneath a gas envelope's air (R08.T16.b.2), else on its own figure
+ * and surface; the point's own disc; and its stars, with the annuli its records take. `null` for a
+ * body given no disc table.
+ */
+function airPointBodyOf(
+  body: LitBodyInput,
+  lights: ReadonlyArray<LightAtPoint>,
+  towardsObserver: Vec3,
+  annuli: number,
+): AirPointBody | null {
+  const { air, ground } = body;
+  if (air === undefined) {
+    return null;
+  }
+  const surface = drawnSurface(body);
+  const figure = {
+    equatorialRadiusM: body.figure.equatorialRadiusM,
+    polarRadiusM: body.figure.polarRadiusM,
+  };
+  const classMapped = surface.kind === "class-map" ? surface : null;
+  return {
+    air,
+    figure,
+    surface,
+    airedFigure: ground === undefined ? figure : ground.tableFigure,
+    airedSurface: ground === undefined ? surface : GROUND_SURFACE,
+    pole:
+      classMapped === null
+        ? figurePole(body.figure)
+        : rotateToBody(classMapped.rotation, vec3(0, 0, 1)),
+    rotation: classMapped?.rotation ?? null,
+    classMap: classMapped?.texels ?? null,
+    towardsObserver,
+    airlessIsDisc: classMapped === null,
+    lights: lights.map((light) => {
+      const distanceM = norm(light.toStarM);
+      return {
+        towardsLight: scale(light.toStarM, 1 / distanceM),
+        distanceM,
+        radiusM: light.host.disc.radius_m,
+        annuli: hostAnnuli(light.host.disc, annuli),
+        key: starLightKey(light),
+      };
+    }),
+  };
+}
+
+/**
+ * Begins, in the frames' slices, each star's air ratio of a body with air drawn as a disc near the
+ * 3 px switch (`airPoint.ts`' `warmAirPoint`), from the geometry its point would take, so that its
+ * first frame as a point finds each star's held. Nothing for a body without a disc table or past the
+ * band.
+ */
+function warmAirPointOf(
+  body: LitBodyInput,
+  lit: BodyLightSources,
+  options: Pick<BodyFrameOptions, "camera" | "viewport" | "annuli">,
+): void {
+  if (
+    body.air === undefined ||
+    !nearClassMapPointSwitch(
+      angularDiameterPx(
+        body.centreM,
+        body.figure.equatorialRadiusM,
+        options.camera,
+        options.viewport,
+      ),
+    )
+  ) {
+    return;
+  }
+  const air = airPointBodyOf(
+    body,
+    lit.stars,
+    scale(body.centreM, -1 / norm(body.centreM)),
+    options.annuli,
+  );
+  if (air !== null) {
+    warmAirPoint(air);
+  }
 }
 
 /**
@@ -990,9 +1083,11 @@ export function planLitBodies(
     sources.set(body.id, lit);
     closeRun();
     const regime = regimes.get(body.id);
-    // A disc near the 3 px switch begins its point's lights in the slices (R10.T14.f).
+    // A disc near the 3 px switch begins its point's lights in the slices (R10.T14.f), its air's
+    // too (R08.T16.b).
     if (regime !== "terrain") {
       warmPointOf(body, lit, camera, viewport);
+      warmAirPointOf(body, lit, options);
     }
     if (drawnAsMesh(regime)) {
       // Only a body handed over has terrain over its figure to give the surveyed ground to.

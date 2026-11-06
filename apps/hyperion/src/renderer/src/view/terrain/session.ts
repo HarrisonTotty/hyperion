@@ -116,6 +116,7 @@ import {
   type RecordSeasons,
   toBodyDetailRequest,
 } from "../../lib/system/bodiesWire";
+import { stepAirPoints } from "../bodies/airPoint";
 import { CLASS_MAP_POINT_SLICE_MS, stepClassMapPoints } from "../bodies/classMapPoint";
 import type { NormalMapTexels } from "../bodies/discNormals";
 import type { LitRegime } from "../bodies/regime";
@@ -1359,7 +1360,8 @@ export class TerrainSession {
    * (`ClassMapStore.step`; lane perf-main-thread), then in what is left the class-mapped points'
    * work (R10.T14.f, `stepClassMapPoints`), the elements' builds and the ratios' refreshes of the
    * maps whose bodies a frame drew near the 3 px switch lately (`nearClassMapPointSwitch`), none
-   * for a body drawn larger in every view.
+   * for a body drawn larger in every view, and then the air points' ratios of such bodies with air
+   * (R08.T16.b, `stepAirPoints`).
    *
    * @remarks
    * The views' debounces take their time from their own draws (`TerrainViewFrameInput.nowMs`), so
@@ -1377,6 +1379,12 @@ export class TerrainSession {
     const sliceStartMs = sliceClock();
     this.#classMaps.step(CLASS_MAP_POINT_SLICE_MS, sliceClock);
     stepClassMapPoints(
+      Math.max(0, CLASS_MAP_POINT_SLICE_MS - (sliceClock() - sliceStartMs)),
+      sliceClock,
+      "near",
+    );
+    // Then the air points' ratios (R08.T16.b; `airPoint.ts`), of bodies a frame drew near it too.
+    stepAirPoints(
       Math.max(0, CLASS_MAP_POINT_SLICE_MS - (sliceClock() - sliceStartMs)),
       sliceClock,
       "near",

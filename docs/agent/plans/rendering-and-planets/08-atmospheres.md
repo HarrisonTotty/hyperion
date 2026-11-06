@@ -25154,3 +25154,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - "R08.T14.d.4's haze route, opened"'s UX-list draft is withdrawn: Titan-class reads
     `ATMOSPHERE: APPROXIMATE` again, and `ATMOSPHERE: COMPUTING`'s "Titan-class" example no longer
     holds.
+- **R08.T16.b, a tabled body's point (2026-11-06, fix-r07-air-point-switch).** A body given its
+  disc table draws its point by that table's disc (plan 07's "R07.T8.a, an air body's point"),
+  closing T16.b's left item "a body drawn as a point has no air" and T10.b's "a point draws no
+  air"; its planetshine and its eclipses keep its figure and photometry, as T16.a.2 left them. Its
+  air's own light and its ground's emission (R08.T18) are not in the point.
