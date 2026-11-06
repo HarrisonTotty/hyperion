@@ -91,6 +91,12 @@ electron="$here/node_modules/.bin/electron"
 
 adapter_switches=(--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader)
 headless_switches=(--ozone-platform=headless --use-angle=swiftshader --enable-features=Vulkan --use-vulkan=swiftshader)
+# Chromium's GPU watchdog, off, as `viewsCheck.sh`'s software mode has it (its note: the watchdog
+# took SwiftShader's long frames for a hung GPU and ended its process, exit_code=512). It so ended
+# parts of at least 11 gates from 2026-10-21, one of them on a BASE (research-leans-46); a part that
+# hangs now waits for its own watchdog. An array of its own, so that `--drop-adapter-switches`
+# keeps it and the two lists `viewsCheckScript.test.ts` holds equal to `viewsCheck.sh`'s stay so.
+gpu_watchdog_switches=(--disable-gpu-watchdog)
 
 variants=()
 parts=()
@@ -213,6 +219,7 @@ for part in "${parts[@]}"; do
         env -u DISPLAY -u WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent \
             setsid timeout --kill-after=10 "$limit_s" "$electron" \
             ${adapter_switches[@]+"${adapter_switches[@]}"} "${headless_switches[@]}" \
+            "${gpu_watchdog_switches[@]}" \
             "--user-data-dir=${profiles[i]}" "$here/out/main/smoke.js" --smoke-variant="$variant" \
             --smoke-part="$part" --smoke-fixture="$fixture" --smoke-watchdog-scale="$scale" \
             ${captures[@]+"${captures[@]}"} ${geometry[@]+"${geometry[@]}"} \

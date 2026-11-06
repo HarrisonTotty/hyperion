@@ -2751,3 +2751,5 @@ pages are assets and presentation; collision never reads them. No domain tag is 
 - (lean, 2026-11-05) Both sides of occlusion and shading are counted beyond the brief's one counted
   run a setting, since every setting's own way is forward without the pyramid and splits no pass
   (Design note 7); counted at DPR 1 only; a read-only aspect is loaded, not stored.
+- **fix-test-render-headroom** (2026-11-06):
+  - `testRender.sh` launches with `--disable-gpu-watchdog` (`gpu_watchdog_switches`).

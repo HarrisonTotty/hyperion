@@ -1,5 +1,5 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -325,6 +325,79 @@ describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
   it("runs every part from 1 to 19 when none is asked for", () => {
     const parts = /^ {4}parts=\(([\d ]+)\)$/mu.exec(script())?.[1];
     expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
+  });
+});
+
+/** The words of the array `name` that `scripts/testRender.sh` assigns at the start of a line. */
+function scriptArray(name: string): ReadonlyArray<string> {
+  const match = new RegExp(`^${name}=\\(([^)]*)\\)`, "mu").exec(script());
+  if (match?.[1] === undefined) {
+    throw new Error(`testRender.sh assigns no ${name}`);
+  }
+  return match[1].split(/\s+/u).filter((word) => word.length > 0);
+}
+
+/**
+ * Runs a copy of `scripts/testRender.sh` with `args` on a stand-in Electron, which writes the words
+ * it is launched with and exits 0, and gives the script's exit code and each launch's words.
+ */
+function launchesOf(args: ReadonlyArray<string>): {
+  readonly status: number | null;
+  readonly launches: ReadonlyArray<ReadonlyArray<string>>;
+} {
+  const dir = mkdtempSync(join(tmpdir(), "hyperion-test-render-launch-"));
+  try {
+    const launches = join(dir, "launches");
+    for (const sub of ["scripts", "node_modules/electron", "node_modules/.bin", "launches"]) {
+      mkdirSync(join(dir, sub), { recursive: true });
+    }
+    writeFileSync(join(dir, "scripts", "testRender.sh"), script());
+    writeFileSync(join(dir, "node_modules", "electron", "index.js"), "module.exports = '';\n");
+    writeFileSync(
+      join(dir, "node_modules", ".bin", "electron"),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${launches}/$$"\n`,
+      { mode: 0o755 },
+    );
+    const run = spawnSync("bash", [join(dir, "scripts", "testRender.sh"), ...args], {
+      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HYPERION_SMOKE_WATCHDOG_SCALE: "1" },
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    return {
+      status: run.status,
+      launches: readdirSync(launches).map((name) =>
+        readFileSync(join(launches, name), "utf8")
+          .split("\n")
+          .filter((word) => word.length > 0),
+      ),
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// `setsid` is util-linux's, which macOS has only through the justfile's `tools/portable` stand-ins.
+describe.runIf(process.platform === "linux")("testRender.sh's launch", () => {
+  it("launches Electron with Chromium's GPU watchdog off, after the adapter and headless switches", () => {
+    const switches = [
+      ...scriptArray("adapter_switches"),
+      ...scriptArray("headless_switches"),
+      "--disable-gpu-watchdog",
+    ];
+    const run = launchesOf(["--part=1", "--variant=default"]);
+    expect([run.status, run.launches.map((words) => words.slice(0, switches.length))]).toEqual([
+      0,
+      [switches],
+    ]);
+  });
+
+  it("keeps Chromium's GPU watchdog off when the adapter's switches are dropped", () => {
+    const switches = [...scriptArray("headless_switches"), "--disable-gpu-watchdog"];
+    const run = launchesOf(["--part=1", "--variant=default", "--drop-adapter-switches"]);
+    expect([run.status, run.launches.map((words) => words.slice(0, switches.length))]).toEqual([
+      0,
+      [switches],
+    ]);
   });
 });
 
