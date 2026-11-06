@@ -64,6 +64,7 @@ import {
   readoutBodyOf,
 } from "./groundReadout";
 import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
+import { orbitGroundOf } from "./orbitGround";
 import { NONE_OPENED, toggledNote } from "./reasonFolds";
 import { availabilityOf, GRID_AT_OPEN, gridAfterStyle, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
@@ -790,6 +791,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           held: held.current.get(slot) ?? new Set(),
           reducedMotion: reducedMotionRef.current,
           turn: turns.current.get(slot) ?? NO_TURN,
+          // The ground drawn under an ORBIT camera, its floor (plan R15, T4).
+          orbitGround: orbitGroundOf(run, each.terrain),
         });
         turns.current.delete(slot);
         // Where its pipelines could not be made, the view returns to the wireframe and its control

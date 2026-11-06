@@ -11,6 +11,7 @@ import {
   ORBIT_ZOOM_FACTOR,
   orbitAltitudeM,
   orbitDragged,
+  orbitFloorM,
   orbitLooked,
   orbitStart,
   orbitTiltRad,
@@ -62,14 +63,48 @@ describe("the ORBIT camera", () => {
 
   it("zooms the altitude by its factor a step, between its floor and its ceiling", () => {
     const pose = onX(RADIUS_M + 1e6);
-    const nearer = orbitZoomed(pose, 1, RADIUS_M);
+    const nearer = orbitZoomed(pose, 1, RADIUS_M, 0);
     expect(orbitAltitudeM(nearer, RADIUS_M)).toBeCloseTo(1e6 / ORBIT_ZOOM_FACTOR, 3);
-    const floor = orbitZoomed(pose, 200, RADIUS_M);
+    const floor = orbitZoomed(pose, 200, RADIUS_M, 0);
     expect(orbitAltitudeM(floor, RADIUS_M)).toBeCloseTo(ORBIT_FLOOR_M, 6);
-    const ceiling = orbitZoomed(pose, -200, RADIUS_M);
+    const ceiling = orbitZoomed(pose, -200, RADIUS_M, 0);
     expect(norm(ceiling.positionM)).toBeCloseTo(ORBIT_CEILING_RADII * RADIUS_M, 0);
     // The look is kept.
     expect(nearer.orientation).toEqual(pose.orientation);
+  });
+
+  it("stops a zoom at its floor over ground above the datum", () => {
+    const floor = orbitZoomed(onX(RADIUS_M + 1e6), 200, RADIUS_M, 2_000);
+    expect(orbitAltitudeM(floor, RADIUS_M)).toBeCloseTo(2_000 + ORBIT_FLOOR_M, 6);
+  });
+
+  it("comes down to its floor over a dry basin below the datum", () => {
+    const floor = orbitZoomed(onX(RADIUS_M + 1e6), 400, RADIUS_M, -3_000);
+    expect(orbitAltitudeM(floor, RADIUS_M)).toBeCloseTo(-3_000 + ORBIT_FLOOR_M, 6);
+  });
+
+  it("stands its floor 10 m above ground below the datum", () => {
+    expect(orbitFloorM(-3_000)).toBe(-3_000 + ORBIT_FLOOR_M);
+  });
+
+  it("stands its floor 10 m above ground above the datum", () => {
+    expect(orbitFloorM(2_000)).toBe(2_000 + ORBIT_FLOOR_M);
+  });
+
+  it("lifts a camera under its floor to it at no step, along its line from the centre", () => {
+    const lifted = orbitZoomed(onX(RADIUS_M + 500), 0, RADIUS_M, 2_000);
+    expect(orbitAltitudeM(lifted, RADIUS_M)).toBeCloseTo(2_010, 6);
+  });
+
+  it("keeps the look of a camera it lifts", () => {
+    const below = onX(RADIUS_M + 500);
+    expect(orbitZoomed(below, 0, RADIUS_M, 2_000).orientation).toEqual(below.orientation);
+  });
+
+  it("leaves a camera above its floor where it stands at no step", () => {
+    expect(orbitZoomed(onX(RADIUS_M + 3_000), 0, RADIUS_M, 2_000).positionM.x).toBe(
+      RADIUS_M + 3_000,
+    );
   });
 
   it("swings round the body far out and pans over the ground close in, its look with it", () => {

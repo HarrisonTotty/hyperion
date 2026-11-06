@@ -227,6 +227,7 @@ import {
   lineOfSightPointOf,
   readoutBodyOf,
 } from "./groundReadout";
+import { orbitGroundOf } from "./orbitGround";
 import { terrainLowerParts } from "./terrainPlate";
 import { standingReadout, useTerrainLines } from "./useTerrainLines";
 import { ViewSceneContext } from "./ViewSceneProvider";
@@ -1422,6 +1423,8 @@ function ViewStage({
         held: heldRef.current,
         reducedMotion: inputs.reducedMotion,
         turn: turnRef.current,
+        // The ground drawn under an ORBIT camera, its floor (plan R15, T4).
+        orbitGround: orbitGroundOf(runRef.current, inputs.terrain),
       });
       turnRef.current = NO_TURN;
       runRef.current = run;

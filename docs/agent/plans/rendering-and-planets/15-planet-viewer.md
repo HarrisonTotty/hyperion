@@ -247,3 +247,13 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
 - R15.T6 (built, infra): the run waits, within the draw's wait, for its sky's first reply
   (`skyAnswered`) before the ground's, and goes on past it; no limit changed. `--sky-qos background`
   would not help a pod (Linux's twins ignore it); the failure did not reproduce here (outbox).
+- R15.T4 (built, the floor): `ORBIT`'s floor is `orbitFloorM`, `ORBIT_FLOOR_M` above the drawn surface
+  under the camera (the ground, or the sea's surface over it), the datum where none is resident;
+  `FrameInput.orbitGround` (`orbitGround.ts`, `heldGroundUnder` over `TerrainPass.heights`) carries it.
+- R15.T4 (built): `orbitZoomed` takes the surface and holds the floor each frame at no step, lifting a
+  camera under it at once, its look kept; `ViewRun.orbitGround` keeps the last frame's for the wheel;
+  an instrument's `followRun` takes it too.
+- R15.T4 (lean, 2026-11-05): over a dry basin the zoom scales the height above its floor rather than
+  above the datum, so that it comes down to it; elsewhere it scales the altitude above the datum.
+- R15.T4 (built): the planet viewer run seeks ground 500 m above the datum at low orbit (arrows, at
+  most 12 moves) and captures `planet-viewer-floor` looking down from the floor.

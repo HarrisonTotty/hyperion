@@ -11,9 +11,14 @@
  * - **Its altitude** is measured above the body's reference spheroid, its datum, along the camera's
  *   line from the centre ({@link orbitRadiusM}), so that an oblate body's ground is reached at every
  *   latitude: the radius each function takes is the datum's along that line.
- * - **Zoom** steps the altitude above the datum by {@link ORBIT_ZOOM_FACTOR} a step, between
- *   {@link ORBIT_FLOOR_M} and {@link ORBIT_CEILING_RADII} radii, along the line from the centre;
- *   the look is kept.
+ * - **Zoom** steps the altitude above the datum by {@link ORBIT_ZOOM_FACTOR} a step, between the
+ *   floor ({@link orbitFloorM}: {@link ORBIT_FLOOR_M} above the drawn surface under the camera, its
+ *   ground or a sea's surface over it, or above the datum where none is drawn) and
+ *   {@link ORBIT_CEILING_RADII} radii, along the line from the centre; the look is kept.
+ * - **The floor holds** each frame, the zoom's floor at no step: a camera that ground drawn since
+ *   stands over, or that a drag or the arrows bring over higher ground, is lifted to the floor at
+ *   once along its line from the centre, its look kept, since a camera inside rock is worse than a
+ *   jump.
  * - **Tilt and heading** turn the look about the camera's right axis and the local vertical, the
  *   tilt held between straight down at the centre and the horizon, so that close in the camera
  *   looks out along the terrain.
@@ -30,10 +35,19 @@ import { lookAlong, multiply, quaternionFromAxisAngle, rotate } from "./quaterni
 export const ORBIT_ZOOM_FACTOR = 1.25;
 
 /**
- * The least altitude above the body's datum, m: 10, the guide's lowest look at the ground; the
- * camera holds no ground of its own, so terrain above the datum may stand higher.
+ * The least height above the drawn surface under the camera, m: 10, the guide's lowest look at the
+ * ground; the surface is the drawn ground, or a sea's where the ground lies under it, and the datum
+ * where none is drawn ({@link orbitFloorM}).
  */
 export const ORBIT_FLOOR_M = 10;
+
+/**
+ * The floor's altitude above the datum, m, over a drawn surface `surfaceAboveDatumM` above it (0,
+ * the datum, where none is drawn): {@link ORBIT_FLOOR_M} above it.
+ */
+export function orbitFloorM(surfaceAboveDatumM: number): number {
+  return surfaceAboveDatumM + ORBIT_FLOOR_M;
+}
 
 /** A body's reference spheroid as `ORBIT` reads it: its radii and its pole along the galactic axes. */
 export interface OrbitDatum {
@@ -152,21 +166,35 @@ export function orbitDragged(pose: CameraPose, turn: ViewTurn, radiusM: number):
 }
 
 /**
- * `pose` zoomed `steps` steps about a body of `radiusM`: its altitude scaled by
- * {@link ORBIT_ZOOM_FACTOR} to the `-steps` power, in nearer for a positive step, held between the
- * floor and the ceiling, along its line from the centre.
+ * `pose` zoomed `steps` steps about a body of `radiusM` over a drawn surface `surfaceM` above the
+ * datum (0 where none is drawn): its altitude above the datum, or above that surface where it lies
+ * below the datum, scaled by {@link ORBIT_ZOOM_FACTOR} to the `-steps` power, in nearer for a
+ * positive step, held between the floor ({@link orbitFloorM}) and the ceiling, along its line from
+ * the centre; at no step, lifted to the floor where it stands under it.
+ *
+ * @remarks
+ * A scale of the altitude above the datum comes down towards the datum, never under it, so over a
+ * dry basin it scales the height above the basin's floor instead, and comes down to its floor
+ * there too; over the datum and higher ground it scales the altitude above the datum as before.
  */
-export function orbitZoomed(pose: CameraPose, steps: number, radiusM: number): CameraPose {
+export function orbitZoomed(
+  pose: CameraPose,
+  steps: number,
+  radiusM: number,
+  surfaceM: number,
+): CameraPose {
   const distanceM = norm(pose.positionM);
   if (!(distanceM > 0)) {
     return pose;
   }
-  const altitudeM = Math.max(distanceM - radiusM, ORBIT_FLOOR_M);
+  const baseM = Math.min(surfaceM, 0);
+  const floorM = orbitFloorM(surfaceM) - baseM;
+  const heightM = Math.max(distanceM - radiusM - baseM, floorM);
   const next = Math.min(
-    Math.max(altitudeM * ORBIT_ZOOM_FACTOR ** -steps, ORBIT_FLOOR_M),
-    ORBIT_CEILING_RADII * radiusM - radiusM,
+    Math.max(heightM * ORBIT_ZOOM_FACTOR ** -steps, floorM),
+    ORBIT_CEILING_RADII * radiusM - radiusM - baseM,
   );
-  return { ...pose, positionM: scale(pose.positionM, (radiusM + next) / distanceM) };
+  return { ...pose, positionM: scale(pose.positionM, (radiusM + baseM + next) / distanceM) };
 }
 
 /** The look's tilt from straight down at the centre, rad. */

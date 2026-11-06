@@ -1,7 +1,7 @@
 /** `VIEW`'s `ORBIT` camera in a run (plan R15, T4): opened, zoomed, flown and held to the ground. */
 import { describe, expect, it } from "vitest";
 
-import { norm, sub as sub3, type Vec3 } from "../../geometry/vec3";
+import { dot, norm, normalise, sub as sub3, type Vec3 } from "../../geometry/vec3";
 import { sliceEarthInspection } from "../../test/inspectionFixture";
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
 import { ORBIT_FLOOR_M, orbitAltitudeM, orbitRadiusM } from "../../view/camera/orbit";
@@ -11,7 +11,17 @@ import { cameraSceneOf, sceneOrigins } from "../../view/scene/model";
 import { inspectionScene } from "../../view/scenes/inspectionScene";
 import type { KeptScene } from "../../view/scenes/kept";
 import { PRECISION_PLANET, precisionScene } from "../../view/scenes/precision";
-import { commandRun, framedRun, startRun, stepRun, type ViewRun } from "./viewRun";
+import { heldGroundUnder } from "../../view/terrain/grounded";
+import { orbitGroundOver } from "./orbitGround";
+import {
+  commandRun,
+  type FrameInput,
+  framedRun,
+  type OrbitGround,
+  startRun,
+  stepRun,
+  type ViewRun,
+} from "./viewRun";
 
 const CUT = { easedMoves: false, reducedMotion: true } as const;
 
@@ -168,5 +178,138 @@ describe("the ORBIT camera about an oblate body", () => {
     }
     const pose = floor.run.camera.pose;
     expect(orbitAltitudeM(pose, orbitRadiusM(datum, pose.positionM))).toBeCloseTo(ORBIT_FLOOR_M, 3);
+  });
+});
+
+/** The slice's Earth's ORBIT run, opened about it. */
+function earthRun(): ViewRun {
+  return startRun(orbiting(inspectionScene(sliceEarthInspection()), FIXTURE_EARTH));
+}
+
+/**
+ * Ground drawn `groundM` above the slice's Earth's datum everywhere, as a terrain pass's resident
+ * heights give it (`heldGroundUnder` over a stand-in for `TerrainPass.heights`).
+ */
+function groundOf(run: ViewRun, groundM: number): OrbitGround {
+  return orbitGroundOver(FIXTURE_EARTH, earthDatum(run), { groundHeightAtM: () => groundM }, null);
+}
+
+/** The camera's height above ground drawn `groundM` above the datum, m, along its normal. */
+function aboveGround(run: ViewRun, groundM: number): number {
+  return heldGroundUnder(earthDatum(run), { groundHeightAtM: () => groundM })(onGround(run))
+    .heightM;
+}
+
+/** One frame of 0.1 s on, with `input`'s keys, drag and ground. */
+function frame(run: ViewRun, input: Partial<FrameInput> = {}): ViewRun {
+  return stepRun(run, {
+    serverScene: null,
+    dtS: 0.1,
+    held: new Set(),
+    reducedMotion: true,
+    ...input,
+  });
+}
+
+/** `run` zoomed by the wheel to its floor over what it last drew. */
+function zoomedDown(run: ViewRun): ViewRun {
+  const zoomed = commandRun(run, { kind: "zoom", steps: 400 }, CUT);
+  if (zoomed.kind !== "done") {
+    throw new Error("the wheel was refused in ORBIT");
+  }
+  return zoomed.run;
+}
+
+describe("the ORBIT camera over drawn ground (plan R15, T4)", () => {
+  /** Ground 2 km above the datum, a plateau's. */
+  const HIGH_M = 2_000;
+
+  it("stops the wheel's zoom 10 m above ground drawn 2 km above the datum", () => {
+    const run = earthRun();
+    const ground = groundOf(run, HIGH_M);
+    const down = zoomedDown(frame(run, { orbitGround: ground }));
+    expect(aboveGround(down, HIGH_M)).toBeCloseTo(ORBIT_FLOOR_M, 1);
+  });
+
+  it("stops the zoom under W 10 m above that ground", () => {
+    const run = zoomedDown(earthRun());
+    const ground = groundOf(run, HIGH_M);
+    const flown = frame(run, { held: new Set(["w"]), orbitGround: ground });
+    expect(aboveGround(flown, HIGH_M)).toBeCloseTo(ORBIT_FLOOR_M, 1);
+  });
+
+  it("holds a drag over that ground 10 m above it", () => {
+    const run = zoomedDown(earthRun());
+    const ground = groundOf(run, HIGH_M);
+    const dragged = frame(run, { turn: { yawRad: 0.2, pitchRad: 0.1 }, orbitGround: ground });
+    expect(aboveGround(dragged, HIGH_M)).toBeCloseTo(ORBIT_FLOOR_M, 1);
+  });
+
+  it("lifts a still camera that ground drawn since stands over to 10 m above it", () => {
+    const run = frame(zoomedDown(earthRun()));
+    const ground = groundOf(run, HIGH_M);
+    const lifted = frame(run, { orbitGround: ground });
+    expect(aboveGround(lifted, HIGH_M)).toBeCloseTo(ORBIT_FLOOR_M, 1);
+  });
+
+  it("holds its floor above the datum where no ground is drawn", () => {
+    const run = zoomedDown(earthRun());
+    const datum = earthDatum(run);
+    const pose = frame(run).camera.pose;
+    expect(orbitAltitudeM(pose, orbitRadiusM(datum, pose.positionM))).toBeCloseTo(ORBIT_FLOOR_M, 1);
+  });
+
+  it("reads the ground in the body's fixed axes, under the camera alone", () => {
+    const run = zoomedDown(earthRun());
+    const under = normalise(onGround(run));
+    // A plateau only about the camera's own body-fixed direction: read in other axes, it is missed.
+    const plateau = orbitGroundOver(
+      FIXTURE_EARTH,
+      earthDatum(run),
+      { groundHeightAtM: (d) => (dot(normalise(d), under) > 0.999_99 ? HIGH_M : 0) },
+      null,
+    );
+    const lifted = frame(run, { orbitGround: plateau });
+    expect(aboveGround(lifted, HIGH_M)).toBeCloseTo(ORBIT_FLOOR_M, 1);
+  });
+
+  it("holds its floor above the datum over another body's ground", () => {
+    const run = zoomedDown(earthRun());
+    const other = { ...groundOf(run, HIGH_M), body: "0000000000000000.0000" };
+    const pose = frame(run, { orbitGround: other }).camera.pose;
+    const datum = earthDatum(run);
+    expect(orbitAltitudeM(pose, orbitRadiusM(datum, pose.positionM))).toBeCloseTo(ORBIT_FLOOR_M, 1);
+  });
+
+  it("stands 10 m above a sea's surface over a seabed below it", () => {
+    const run = zoomedDown(earthRun());
+    const sea = orbitGroundOver(
+      FIXTURE_EARTH,
+      earthDatum(run),
+      { groundHeightAtM: () => -4_000 },
+      136,
+    );
+    const pose = frame(run, { orbitGround: sea }).camera.pose;
+    const datum = earthDatum(run);
+    expect(orbitAltitudeM(pose, orbitRadiusM(datum, pose.positionM))).toBeCloseTo(
+      136 + ORBIT_FLOOR_M,
+      1,
+    );
+  });
+
+  it("stands 10 m above dry ground below the datum", () => {
+    const run = zoomedDown(earthRun());
+    const basin = groundOf(run, -3_000);
+    const pose = zoomedDown(frame(run, { orbitGround: basin })).camera.pose;
+    expect(aboveGround({ ...run, camera: { ...run.camera, pose } }, -3_000)).toBeCloseTo(
+      ORBIT_FLOOR_M,
+      1,
+    );
+  });
+
+  it("leaves a camera outside ORBIT as it is, whatever ground is drawn", () => {
+    const run = startRun(precisionScene());
+    const ground = groundOf(earthRun(), HIGH_M);
+    expect(frame(run, { orbitGround: ground }).camera).toEqual(frame(run).camera);
   });
 });

@@ -21,9 +21,16 @@
  *    camera zooms its altitude above the datum, `orbitZoomed`, and is held above it, so over ground
  *    below the datum it goes to the height above the datum); once the terrain has streamed and
  *    `AUTO` settled, the page is captured as `planet-viewer-low-orbit`.
+ *    The arrows then move it on over the ground until the ground under it stands
+ *    {@link HIGH_GROUND_M} above the datum, at most {@link HIGH_GROUND_TRIES} moves, so that the
+ *    floor's look is over high ground.
  * 4. Zoomed again to {@link SURFACE_HEIGHT_M} above the ground, the look is tilted to the horizon
  *    under `R`, held on the view's canvas, and the page is captured as `planet-viewer-surface`.
- * 5. Last, `SMA` is moved inside the star and `GENERATE` pressed, which the server refuses, so that
+ * 5. The look is tilted back down under `F` and the wheel takes the camera down to its floor, 10 m
+ *    above the drawn ground under it (plan R15, T4), where the ground at the line of sight must read
+ *    at least half that below it, so that the camera stands over the ground's face, never inside
+ *    it; the page is captured as `planet-viewer-floor`.
+ * 6. Last, `SMA` is moved inside the star and `GENERATE` pressed, which the server refuses, so that
  *    `SMA`'s reason stands under its field and `GENERATE`'s outcome names it, and with `SUN` `HELD`
  *    and `LATITUDE`'s entry refused the column is captured as `planet-viewer-inputs-refused`.
  *
@@ -41,7 +48,7 @@ import type { RequestClient, UniverseInfo } from "@hyperion/protocol";
 
 import type { ViewsCheckApi } from "../../../../../preload/api";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
-import { ORBIT_ZOOM_FACTOR } from "../../../view/camera/orbit";
+import { ORBIT_FLOOR_M, ORBIT_ZOOM_FACTOR } from "../../../view/camera/orbit";
 import { SKY_PENDING } from "../../../view/sky/label";
 import { GENERATE_KEY } from "../../planet/PlanetInputsPanel";
 import { MAXIMIZE_KEY } from "../displayKeys";
@@ -122,6 +129,7 @@ export const PLANET_VIEWER_CAPTURES = [
   "planet-viewer-orbit",
   "planet-viewer-low-orbit",
   "planet-viewer-surface",
+  "planet-viewer-floor",
 ] as const;
 
 /**
@@ -142,6 +150,15 @@ export const PLANET_VIEWER_INPUTS_CAPTURES = [
 /** One of the run's captures. */
 export type PlanetViewerCaptureLabel =
   (typeof PLANET_VIEWER_CAPTURES)[number] | (typeof PLANET_VIEWER_INPUTS_CAPTURES)[number];
+
+/** The ground's height above the datum the floor's look is sought over, m: a high plain's. */
+const HIGH_GROUND_M = 500;
+
+/** The most moves over the ground the run makes seeking it, some 2,000 km at low orbit. */
+const HIGH_GROUND_TRIES = 12;
+
+/** The wheel's steps in that take the camera from 300 m above the ground down to its floor. */
+const FLOOR_ZOOM_STEPS = 40;
 
 /** A wheel's pixels in a zoom step (`ViewCanvas`'s `wheelSteps`, in pixels). */
 const WHEEL_PX_PER_STEP = 100;
@@ -586,6 +603,37 @@ async function viewPlanet(
     fits(what);
   };
 
+  /**
+   * Moves the camera on over the ground under the arrows, from `tries` moves made, until the ground
+   * at its line of sight, under it, stands {@link HIGH_GROUND_M} above the datum, at most
+   * {@link HIGH_GROUND_TRIES} moves; past them the run goes on where it is, saying so.
+   */
+  const seekHighGround = async (tries: number): Promise<void> => {
+    const groundM = elevationM(await groundRead("while seeking high ground"));
+    if (groundM !== null && groundM >= HIGH_GROUND_M) {
+      return;
+    }
+    if (tries >= HIGH_GROUND_TRIES) {
+      console.warn(
+        `views check: no ground ${String(HIGH_GROUND_M)} m above the datum found in ${String(tries)} moves`,
+      );
+      return;
+    }
+    await setMaximized(false);
+    const canvas = primaryCanvas(document);
+    if (canvas === null) {
+      throw new Error("views check: the primary's canvas is not shown");
+    }
+    canvas.focus();
+    stopped();
+    keyOn(canvas, "keydown", "ArrowRight");
+    try {
+      await framesDrawn(timing.tiltFrames, timing.tiltMs);
+    } finally {
+      keyOn(canvas, "keyup", "ArrowRight");
+    }
+    await seekHighGround(tries + 1);
+  };
   /** Opens the group `part` where it has a disclosure, and captures the tab as `label`. */
   const capturePart = async (part: string, label: PlanetViewerCaptureLabel): Promise<void> => {
     if (inputsButton(part) === null) {
@@ -675,6 +723,10 @@ async function viewPlanet(
   await zoomTo(LOW_ORBIT_HEIGHT_M, "in low orbit");
   await capture("planet-viewer-low-orbit", "the planet from low orbit", "required");
 
+  // 3b. Over high ground, for the floor's look: the arrows move the camera on over the ground
+  // until the ground under it stands HIGH_GROUND_M above the datum, or the tries run out.
+  await seekHighGround(0);
+
   // 4. Down to the surface, the look tilted to the horizon, and captured.
   await zoomTo(SURFACE_HEIGHT_M, "near the surface");
   await setMaximized(false);
@@ -694,7 +746,37 @@ async function viewPlanet(
   // there it is logged with what was drawn, and the capture judged by its faults and lighting.
   await capture("planet-viewer-surface", "the planet's surface", "logged");
 
-  // 5. A server's refusal of SMA, its reason under its field, with SUN HELD and LATITUDE refused.
+  // 5. Down to the floor over the ground under the camera, looking down at it, and captured.
+  await setMaximized(false);
+  canvas.focus();
+  stopped();
+  keyOn(canvas, "keydown", "f");
+  try {
+    await framesDrawn(timing.tiltFrames, timing.tiltMs);
+  } finally {
+    keyOn(canvas, "keyup", "f");
+  }
+  stopped();
+  canvas.dispatchEvent(
+    new WheelEvent("wheel", {
+      deltaY: -FLOOR_ZOOM_STEPS * WHEEL_PX_PER_STEP,
+      deltaMode: 0,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  await framesDrawn();
+  const floorLines = await groundRead("at the floor");
+  const belowM = slantRangeM(floorLines);
+  console.warn(`views check: at the floor the lower plate reads ${floorLines.join("; ")}`);
+  if (belowM === null || belowM < ORBIT_FLOOR_M / 2) {
+    throw new Error(
+      `views check: at the floor the camera stands inside the ground or over none (${floorLines.join("; ")})`,
+    );
+  }
+  await capture("planet-viewer-floor", "the planet's ground from the floor", "logged");
+
+  // 6. A server's refusal of SMA, its reason under its field, with SUN HELD and LATITUDE refused.
   if (inputsButton("ORBIT") !== null) {
     await setPartOpen("ORBIT", true);
   }

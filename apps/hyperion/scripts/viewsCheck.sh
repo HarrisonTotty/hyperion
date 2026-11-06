@@ -113,7 +113,10 @@
 # an Earth about a Sun, generated; its planet in VIEW's ORBIT camera, on AUTO and its ground surveyed,
 # captured once AUTO has settled as between-planet-viewer-orbit.png, then zoomed by the wheel to
 # 400 km above the ground as between-planet-viewer-low-orbit.png, then to 300 m above it with its look
-# tilted to the horizon as between-planet-viewer-surface.png, under target/views-check/planet-viewer/.
+# tilted to the horizon as between-planet-viewer-surface.png, then looking down from its floor, 10 m
+# above the drawn ground (R15.T4), as between-planet-viewer-floor.png, under
+# target/views-check/planet-viewer/; before the surface's it moves on over the ground from low orbit
+# until the ground under it stands 500 m above the datum, at most 12 moves.
 # Between the orbit's and the low orbit's it captures the INPUTS column with each part that folds
 # open in turn and at its tallest, and after the surface's with a server's refusal of SMA (R15.T6's
 # fold), as between-planet-viewer-inputs-<shown|orbit|planet|volatiles|tallest|refused>.png (orbit

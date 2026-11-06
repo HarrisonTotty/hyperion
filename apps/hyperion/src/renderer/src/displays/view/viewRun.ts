@@ -101,6 +101,8 @@ import {
   terrainSceneFixture,
 } from "../../view/scenes/terrainScene";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
+import type { BodyFixedVec3 } from "../../view/terrain/planet";
+import { rotateToBodyFixed } from "../../view/coords/rotation";
 import { DECORATION_ON } from "../../view/surface/decoration/decorationSetting";
 import { type SurveyEdgeNote, surveyEdgeNote } from "../../view/terrain/surveyEdge";
 import {
@@ -169,6 +171,26 @@ export interface ViewRun {
   readonly tS: number;
   readonly scene: ViewScene;
   readonly camera: CameraState;
+  /**
+   * The drawn ground under an `ORBIT` camera as its last frame had it ({@link FrameInput}'s), which
+   * a wheel's zoom between frames holds its floor over; none for the datum.
+   */
+  readonly orbitGround?: OrbitGround | undefined;
+}
+
+/**
+ * The drawn ground an `ORBIT` camera's floor stands over (plan R15, T4), handed to the run each
+ * frame (`orbitGround.ts`), so that the camera code reads no pass.
+ */
+export interface OrbitGround {
+  readonly body: BodyIdHex;
+  /**
+   * The drawn surface's height above `body`'s datum under a body-fixed point, m: the terrain pass's
+   * resident ground there (`heldGroundUnder` of `TerrainPass.heights`), 0 where none is resident,
+   * or a sea's surface where the ground lies under it. It is one along the point's line from the
+   * centre, whose parametric direction is one.
+   */
+  readonly groundAboveDatumM: (positionM: BodyFixedVec3) => number;
 }
 
 /**
@@ -252,6 +274,8 @@ export interface FrameInput {
    * `dragTurn`), none where absent.
    */
   readonly turn?: ViewTurn;
+  /** The drawn ground under an `ORBIT` camera's body (plan R15, T4), none for the datum. */
+  readonly orbitGround?: OrbitGround | undefined;
 }
 
 /** Whether every frame a camera's pose refers to is in `scene`: its system, body or craft. */
@@ -302,7 +326,13 @@ export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
     }
   }
   camera = withGround(camera, run.scene, scene);
-  return { ...run, tS, scene, camera: flyCamera(camera, scene, dtS, input) };
+  return {
+    ...run,
+    tS,
+    scene,
+    camera: flyCamera(camera, scene, dtS, input),
+    orbitGround: input.orbitGround,
+  };
 }
 
 /**
@@ -314,16 +344,38 @@ function orbitZoomRun(run: ViewRun, steps: number, scene: CameraScene): CommandR
   if (body === null) {
     return { kind: "refused", reason: "not_orbit" };
   }
+  const { pose } = run.camera;
+  const surfaceM = groundAboveDatumM(pose, run.scene, run.orbitGround);
   return {
     kind: "done",
     run: {
       ...run,
       camera: {
         ...run.camera,
-        pose: orbitZoomed(run.camera.pose, steps, orbitRadiusM(body, run.camera.pose.positionM)),
+        pose: orbitZoomed(pose, steps, orbitRadiusM(body, pose.positionM), surfaceM),
       },
     },
   };
+}
+
+/**
+ * The drawn ground's height above the datum under `pose`'s body-centred position, m, along its line
+ * from the centre (plan R15, T4): `ground`'s there, in the body's fixed axes; 0, the datum, where
+ * `ground` is none or another body's, or the scene gives the body no spin.
+ */
+function groundAboveDatumM(
+  pose: CameraPose,
+  scene: ViewScene,
+  ground: OrbitGround | undefined,
+): number {
+  const frame = pose.frame;
+  if (ground === undefined || frame.kind !== "body" || ground.body !== frame.body) {
+    return 0;
+  }
+  const rotation = sceneOrigins(scene).bodyFixedRotation(frame.body);
+  return rotation === null
+    ? 0
+    : ground.groundAboveDatumM(rotateToBodyFixed(rotation, pose.positionM));
 }
 
 /** The body an `ORBIT` camera is held about, its pose's frame's, or `null` outside `ORBIT`. */
@@ -352,12 +404,13 @@ const ORBIT_LOOK_RAD_PER_S = Math.PI / 4;
  */
 function flyOrbit(
   camera: CameraState,
-  scene: CameraScene,
+  scene: ViewScene,
   dtS: number,
   keys: FreeCameraInput,
   dragged: ViewTurn,
+  ground: OrbitGround | undefined,
 ): CameraState {
-  const body = orbitHeldBody(camera, scene);
+  const body = orbitHeldBody(camera, cameraSceneOf(scene));
   if (body === null) {
     return camera;
   }
@@ -368,7 +421,11 @@ function flyOrbit(
   // The datum's radius along the camera's line, which a frame's turn moves by too little to matter.
   const radiusM = orbitRadiusM(body, camera.pose.positionM);
   let pose = orbitDragged(camera.pose, addTurns(dragged, arrows), radiusM);
-  pose = orbitZoomed(pose, -keys.translate.z * ORBIT_ZOOM_STEPS_PER_S * dtS, radiusM);
+  // The surface where the turn brought it, whose floor the zoom holds every frame, even at no step,
+  // so that ground drawn since, or higher ground the turn came over, lifts the camera to it at once
+  // along its line from the centre (plan R15, T4's lean: a jump, not a camera in rock).
+  const surfaceM = groundAboveDatumM(pose, scene, ground);
+  pose = orbitZoomed(pose, -keys.translate.z * ORBIT_ZOOM_STEPS_PER_S * dtS, radiusM, surfaceM);
   pose = orbitLooked(
     pose,
     keys.translate.y * ORBIT_LOOK_RAD_PER_S * dtS,
@@ -410,7 +467,7 @@ function flyCamera(
   camera: CameraState,
   scene: ViewScene,
   dtS: number,
-  input: Pick<FrameInput, "held" | "reducedMotion" | "turn">,
+  input: Pick<FrameInput, "held" | "reducedMotion" | "turn" | "orbitGround">,
 ): CameraState {
   const cameraScene = cameraSceneOf(scene);
   const keys = flightInput(input.held);
@@ -423,7 +480,7 @@ function flyCamera(
           pitchRad: keys.rotate.x * ARROW_TURN_RAD_PER_S * dtS,
         };
   if (camera.preset === "orbit") {
-    return advanceEasedMove(flyOrbit(camera, cameraScene, dtS, keys, dragged), dtS);
+    return advanceEasedMove(flyOrbit(camera, scene, dtS, keys, dragged, input.orbitGround), dtS);
   }
   const looked = turnLook(camera, addTurns(dragged, arrows), cameraScene);
   const following = turnFreeCamera(followPreset(looked, cameraScene), dragged);
@@ -447,7 +504,7 @@ function flyCamera(
 export function followRun(
   run: ViewRun,
   primary: ViewRun,
-  input: Pick<FrameInput, "dtS" | "held" | "reducedMotion" | "turn">,
+  input: Pick<FrameInput, "dtS" | "held" | "reducedMotion" | "turn" | "orbitGround">,
 ): ViewRun {
   const dtS = Math.min(Math.max(input.dtS, 0), MAX_FREE_STEP_S);
   const { scene } = primary;
@@ -460,6 +517,7 @@ export function followRun(
     tS: primary.tS,
     scene,
     camera: flyCamera(camera, scene, dtS, input),
+    orbitGround: input.orbitGround,
   };
 }
 
