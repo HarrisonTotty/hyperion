@@ -161,16 +161,17 @@ fn donor_kind(phase: Phase) -> AwdDonorKind {
 }
 
 /// The catalogue's entries of `side` in cells about the solar circle, within 2,500 ly of the
-/// Sun-like point along y and out along x, the nearest columns first, in and below the plane,
-/// until there are `n`. At 27 the fast hosts' 2,000 reach 16,000 ly along x and the slow hosts'
-/// 2,000 ly. Until 27 they lay within 5,000 ly, where 27's cells hold 678 fast hosts: the fitted
+/// Sun-like point along y and out along x to 20,000 ly, the nearest columns first, in and below
+/// the plane, until there are `n`. At 27 the fast hosts' 2,000 reach 16,000 ly along x and the
+/// slow hosts' 2,000 ly; at 29, on the tables refitted on the generator's own pairs (P15.T10.b),
+/// 16,000 ly holds 1,930 fast hosts, so the search runs on past it. Until 27 they lay within 5,000 ly, where 27's cells hold 678 fast hosts: the fitted
 /// rows (P15.T10.b's refit at 27, each donor kind scaled to its observed figure) give the fast
 /// hosts about a sixth of the scratch rows' rate at the solar circle (the old thin disc's
 /// 7.6 × 10⁻⁶ hosts per solar mass formed against 4.8 × 10⁻⁵), and the features' lists hold part
 /// of them (P11.T8.f).
 fn catalogue_marks(galaxy: &Galaxy, side: AwdSide, n: usize) -> Vec<Marks> {
     let mut marks = Vec::with_capacity(n + 32);
-    let cells = (0..32_i32)
+    let cells = (0..40_i32)
         .flat_map(|step| {
             if step == 0 {
                 vec![0]
