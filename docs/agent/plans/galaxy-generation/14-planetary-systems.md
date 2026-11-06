@@ -34431,7 +34431,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   `fix-p14-giant-chromophore`, 2026-11-05).** Held at 30 (`photochem::CHROMOPHORE_MIXING_VERSION`;
   `ChromophoreRules::{DiscColumn, HazeMixing}`, `with_chromophore_mixing`, a line in `HeldRules`
   and in the new planetary `testing::with_every_30_hold`; 30, train 29 having frozen); nothing
-  moves at 28 or 29.
+  moves at 28 or 29. `with_every_30_hold` sets every planetary 30 hold (P14.T28.g's merged steps
+  and R08.T17's haze profile are v30's own rules; `every_30_hold_is_in_force_under_...`).
   - _Changed:_ `photochem::chromophore(ammonia_layer, gravity)` returns `Result<Option<Haze>, _>`
     (`None` where the haze is none, from 30). Column `CHROMOPHORE_MIXING_RATIO` (7 × 10⁻⁸) ×
     (`p_NH₃` − 0.1 bar) ÷ g; haze τ `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED` (7).
