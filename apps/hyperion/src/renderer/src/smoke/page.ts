@@ -8,11 +8,11 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in seventeen parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * groups are in twenty-one parts, each a run of its own under the harness's watchdog (perf-smoke,
  * 2026-10-13), parts 2 to 6 and 8 to 14 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
- * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7 and 15
- * R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 17 R08.T8.d's
+ * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7, 15, 20
+ * and 21 R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 17 R08.T8.d's
  * packed far limb's kernels and their general forms' check, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
  * R08.T15.a.2's deck, and part 1 every other; with no part given the page runs them all, in its
  * order.
@@ -40,8 +40,9 @@
  * twins on Earth, R08.T14.f's correction alone against its twins on Earth and its specialised march, and its kernels against their twins on a Saturn-class
  * figure in part 3 after R08.T6.g's heights; and part 7 R10.T10.b's lit terrain, R10.T10.e's
  * classes' curve in the lit-body kernel, R10.T10.c's
- * survey edge, R10.T11's wireframe terrain, R10.T9.b's cascades and R10.T16.b's shared pass (on an
- * engine of its own, whose device it destroys), and part 15 R10.T16.c's frame alone. Three groups
+ * survey edge, R10.T11's wireframe terrain and R10.T9.b's cascades, part 21 R10.T16.b's shared pass
+ * (on an engine of its own, whose device it destroys), part 15 R10.T16.c's frame with relief and
+ * R14's levers' frames on it, and part 20 its surfaces on the datum and its symbology. Three groups
  * of part 1 run only when asked:
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
@@ -187,7 +188,12 @@ import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
 import { checkShadowCascades, checkSharedPass, checkVisibilityCascades } from "./sharedPass";
-import { checkStridesUnderCraft, checkTerrainFrame, checkVisibilityFrame } from "./terrainFrame";
+import {
+  checkStridesUnderCraft,
+  checkTerrainFrame,
+  checkTerrainFrameSymbology,
+  checkVisibilityFrame,
+} from "./terrainFrame";
 import { checkWireframeTerrain } from "./wireframeTerrain";
 import { checkForcedLoss, checkOneLayerArrays, checkTargetsAsyncIndirectTiming } from "./work";
 
@@ -237,8 +243,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * catalogue, 10 R08.T7's several suns, R08.T8.e's slot
  * layers on its binary and R10.T16.g's datum over the image, 11
  * R08.T9.b's Earth and Saturn-class figure and R08.T8.c's far limb's footprint, 12 R08.T11.b's
- * face count, R08.T11.e's Earth and R08.T11.d's specialised march over the shared read), 7 and 15
- * R10's terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b; 15 R10.T16's frame), which took part 6
+ * face count, R08.T11.e's Earth and R08.T11.d's specialised march over the shared read), 7, 15, 20
+ * and 21 R10's terrain groups (R10.T10.b, T10.c, T11, T16 and T9.b; 15 and 20 R10.T16's frame, 21
+ * its shared pass), which took part 6
  * to 163 s at a load of 2 once R10.T9.b's cascades joined them (2026-10-21), and 1 every other
  * group but R05.T12.e's and
  * R05.T12.c's frames, which
@@ -302,9 +309,14 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * (2026-11-03). Part 15 stood at 317 s of its 360 s on a 32-CPU pod (2026-11-05), so plan R14's
  * frame by the visibility buffer (R14.T2.c to T2.e), which streams a pass of its own and compiles
  * the shading's forms, took part 18, alone, and its frame under the high setting's cascades, which
- * streams R10.T9.b's pose's pass of its own, part 19 (part 7 stood at 293 s of its 360 s).
+ * streams R10.T9.b's pose's pass of its own, part 19 (part 7 stood at 293 s of its 360 s). Part 15
+ * still stood at 347 s of its 360 s on a pod (2026-11-06), so the frame's surfaces on the datum
+ * and its symbology over the image, with R14.T3.d over the ridge and R14.T1.e's overlay depths
+ * (some 180 s of it), took part 20, its relief settled again; and part 7 at 323 s, so R10.T16.b's
+ * shared pass (157 s) took part 21.
  */
-type PagePart = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
+type PagePart =
+  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -350,6 +362,10 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 18;
     case "19":
       return 19;
+    case "20":
+      return 20;
+    case "21":
+      return 21;
     default:
       return null;
   }
@@ -406,7 +422,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 16 or all");
+    return failed("the part asked for is not 1 to 21 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -694,6 +710,11 @@ async function run(
   await group(15, "R10.T16 the frame", async () => {
     images = [...images, ...(await checkTerrainFrame(engine, checks, captures, fixture))];
   });
+  // In part 20, alone: the frame's surfaces on the datum and its symbology, which beside the frame's
+  // R14 levers took part 15 to 347 s of 360 s on a pod (2026-11-06).
+  await group(20, "R10.T16 the frame's symbology", () =>
+    checkTerrainFrameSymbology(engine, checks),
+  );
   // In part 16, alone: its own pass streams to the finest level about the craft (R14.T3.c).
   // R08.T8.d's packed far limb's kernels and the cull's specialised centre rays, in part 17 beside
   // the general forms' check, first: parts 8 and 12 hold the specialised forms' checks.
@@ -739,8 +760,9 @@ async function run(
   await group(7, "R10.T9.b the high setting's cascades", async () => {
     images = [...images, ...(await checkShadowCascades(engine, checks, captures))];
   });
-  // On an engine of its own, whose device it destroys mid-stream (R10.T16.b).
-  await group(7, "R10.T16 the shared pass", async () => {
+  // On an engine of its own, whose device it destroys mid-stream (R10.T16.b), in part 21, alone:
+  // beside R10's other terrain groups it took part 7 to 323 s of 360 s on a pod (2026-11-06).
+  await group(21, "R10.T16 the shared pass", async () => {
     const second = await requestAdapterOutcome(navigator.gpu);
     if (second.kind !== "adapter") {
       throw new Error(`no second adapter: ${second.kind}`);

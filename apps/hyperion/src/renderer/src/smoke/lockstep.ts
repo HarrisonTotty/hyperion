@@ -1,7 +1,7 @@
 /**
- * The terrain checks' wait for a pass's streaming to settle (`R10.T16 the frame`'s passes in part
- * 15, R14.T3.c's grounded craft in part 16, R10.T16's shared pass and R10.T9.b's cascades in part
- * 7): the pass stepped in lockstep with its workers, each step selecting only once every bake the
+ * The terrain checks' wait for a pass's streaming to settle (R10.T16's frame's passes in parts 15
+ * and 20, R14.T3.c's grounded craft in part 16, R10.T16's shared pass in part 21 and R10.T9.b's
+ * cascades in part 7): the pass stepped in lockstep with its workers, each step selecting only once every bake the
  * steps before asked for has landed, until a step meets the check's terms, and then stepped again
  * at once, with no bake landing between, until a step's morph bands rest and it draws what the step
  * before drew.

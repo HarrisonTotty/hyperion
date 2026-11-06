@@ -1,8 +1,9 @@
 /**
- * The smoke harness's frame check (plan R10, R10.T16.c, `R10.T16 the frame`): a photorealistic
- * frame with the Moon-like fixture's body handed over to its terrain, drawn as `VIEW` draws it, on
- * the real device; the holder, for the whole of R10.T16, of "no pixel drawn by both surfaces on the
- * datum" (decision-r10-t16-contracts §6).
+ * The smoke harness's frame check (plan R10, R10.T16.c, `R10.T16 the frame` in part 15 and
+ * `R10.T16 the frame's symbology` in part 20): a photorealistic frame with the Moon-like fixture's
+ * body handed over to its terrain, drawn as `VIEW` draws it, on the real device; the holder, for
+ * the whole of R10.T16, of "no pixel drawn by both surfaces on the datum"
+ * (decision-r10-t16-contracts §6).
  *
  * @remarks
  * The world is the Moon-like fixture's first survey, taken by a pool of two height workers made
@@ -1273,17 +1274,35 @@ function poseLookingAt(
 }
 
 /**
- * R10.T16.c's frame: see the module's remarks. With `captures`, R14.T1.a's relief frame by the way
- * back and on the cluster path, at one exposure, and its terrain's mask, for a person to look at and
- * for `scripts/compareCaptures.mjs`.
+ * The frame checks' world (the module's remarks), the field's blocks taken by its workers, and what
+ * draws over it; each part that checks the frame makes its own.
  */
-export async function checkTerrainFrame(
-  engine: RenderEngine,
-  checks: Checks,
-  captures = false,
-  fixture: SmokeFixture = "none",
-): Promise<CapturedImage[]> {
-  const images: CapturedImage[] = [];
+interface FrameWorld {
+  readonly pool: HeightWorkerPool;
+  readonly mask: CoverageMask;
+  /**
+   * A lit pass on the low setting through lanes of the pool, each bake laid by `lay` where one is
+   * given, its changes cut at their first draw; with `clusterCullKernel`, that kernel for its cull.
+   */
+  readonly makePass: (
+    lay: ((bake: BakedPatch) => BakedPatch) | null,
+    clusterCullKernel?: KernelPair,
+  ) => Promise<TerrainPass>;
+  readonly renderer: LitBodyRenderer;
+  readonly photoreal: PhotorealRenderer;
+  readonly wireframe: WireframeRenderer;
+  readonly canvas: RenderView;
+  /** Releases the world: its canvas, renderers, passes, workers and mask. */
+  readonly dispose: () => void;
+}
+
+/**
+ * The frame checks' world for a part, labelled `label`, once its workers hold the field's blocks.
+ *
+ * @throws Error when the workers do not take the blocks in {@link FIELD_TIMEOUT_MS}, the world
+ * released.
+ */
+async function openFrameWorld(engine: RenderEngine, label: string): Promise<FrameWorld> {
   const field = moonLikeFixture("first");
   const pool = new HeightWorkerPool({
     workers: 2,
@@ -1293,7 +1312,7 @@ export async function checkTerrainFrame(
       }),
   });
   const survey = new SurveyedCells();
-  const mask = new CoverageMask(engine, "terrain frame smoke: coverage mask");
+  const mask = new CoverageMask(engine, `${label}: coverage mask`);
   const offChange = pool.onFieldChange((change) => {
     survey.add(change);
     mask.survey(change);
@@ -1325,10 +1344,22 @@ export async function checkTerrainFrame(
     return pass;
   };
   const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
-  const photoreal = new PhotorealRenderer(engine, "terrain frame smoke");
+  const photoreal = new PhotorealRenderer(engine, label);
   const wireframe = new WireframeRenderer(engine);
-  const canvas = engine.createView(addCanvas(), "terrain frame smoke");
+  const canvas = engine.createView(addCanvas(), label);
   canvas.resize(VIEWPORT);
+  const dispose = (): void => {
+    canvas.dispose();
+    wireframe.dispose();
+    photoreal.dispose();
+    renderer.dispose();
+    for (const pass of passes) {
+      pass.dispose();
+    }
+    offChange();
+    pool.terminate();
+    mask.release();
+  };
   try {
     field.blocks.forEach((block, n) => {
       if (n === 0) {
@@ -1344,6 +1375,30 @@ export async function checkTerrainFrame(
     if (!held) {
       throw new Error("the workers did not take the fixture's blocks in time");
     }
+  } catch (error: unknown) {
+    dispose();
+    throw error;
+  }
+  return { pool, mask, makePass, renderer, photoreal, wireframe, canvas, dispose };
+}
+
+/**
+ * R10.T16.c's frame, its first part (part 15): see the module's remarks; the frame with relief, the
+ * R14 levers' frames against it and, under `--fixture=broken-wgsl`, R14.T1.f's fallback. With
+ * `captures`, R14.T1.a's relief frame by the way back and on the cluster path, at one exposure, and
+ * its terrain's mask, and R14.T2.a's, T1.g's, T3.c's and T3.d's frames, for a person to look at and
+ * for `scripts/compareCaptures.mjs`.
+ */
+export async function checkTerrainFrame(
+  engine: RenderEngine,
+  checks: Checks,
+  captures = false,
+  fixture: SmokeFixture = "none",
+): Promise<CapturedImage[]> {
+  const images: CapturedImage[] = [];
+  const world = await openFrameWorld(engine, "terrain frame smoke");
+  try {
+    const { pool, mask, makePass, renderer } = world;
     const pose = poseOver();
     const pixels = VIEWPORT.widthPx * VIEWPORT.heightPx;
     const bodies = PHOTOREAL_PASS_LABELS.bodies;
@@ -1632,6 +1687,39 @@ export async function checkTerrainFrame(
         `the cluster path asked ${asked}, the way back ${back}, the first pass's way back ${digests[1] ?? ""}; ${refusal}`,
       );
     }
+  } finally {
+    world.dispose();
+  }
+  return images;
+}
+
+/**
+ * R10.T16.c's frame, its second part (part 20): see the module's remarks; each surface alone on the
+ * datum, and the symbology over the whole frame through `PhotorealRenderer`: the marks under and over
+ * the ground, the datum's lines, both with the camera's strides, R10.T16.c's grazing fix and its
+ * per-fragment pull, R14.T3.d over the ridge, and R14.T1.e's overlay depths. Its relief pass is
+ * settled over the place as the first part's is, at stride 1 as that part leaves it.
+ *
+ * @remarks
+ * Beside the first part's frames it took part 15 to 347 s of its 360 s on a pod, some 180 s of it
+ * its own, against plan R14's 70% (2026-11-06), so it is a part of its own.
+ */
+export async function checkTerrainFrameSymbology(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<void> {
+  const world = await openFrameWorld(engine, "terrain frame symbology smoke");
+  try {
+    const { pool, mask, makePass, renderer, photoreal, wireframe, canvas } = world;
+    const pose = poseOver();
+    const pixels = VIEWPORT.widthPx * VIEWPORT.heightPx;
+    const bodies = PHOTOREAL_PASS_LABELS.bodies;
+    const relief = await makePass(null);
+    const withRelief = await settled(relief, pool, mask, pose);
+    if (!withRelief.done) {
+      throw new Error(`the relief did not settle over the place: ${withRelief.state}`);
+    }
+    relief.setGeometry(LOW_AT_STRIDE_1);
 
     // On the datum: each surface alone, through the same live path.
     const datum = await makePass(onTheDatum);
@@ -2089,18 +2177,8 @@ export async function checkTerrainFrame(
         .join("; ")} (redraw, cluster, scene depth, redraw)`,
     );
   } finally {
-    canvas.dispose();
-    wireframe.dispose();
-    photoreal.dispose();
-    renderer.dispose();
-    for (const pass of passes) {
-      pass.dispose();
-    }
-    offChange();
-    pool.terminate();
-    mask.release();
+    world.dispose();
   }
-  return images;
 }
 
 /**

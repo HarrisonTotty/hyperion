@@ -2752,4 +2752,9 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   run a setting, since every setting's own way is forward without the pyramid and splits no pass
   (Design note 7); counted at DPR 1 only; a read-only aspect is loaded, not stored.
 - **fix-test-render-headroom** (2026-11-06):
+  - test-render has 21 parts. Part 15 keeps R10.T16's frame with relief and the levers' frames on it
+    (`checkTerrainFrame`, with its captures); part 20, `R10.T16 the frame's symbology`
+    (`checkTerrainFrameSymbology`), its relief settled again, holds the datum check, the marks and
+    lines over the image, the grazing and ridge checks, R14.T3.d over a ridge and R14.T1.e; part 21
+    holds `R10.T16 the shared pass`. The two frame checks make their world by `openFrameWorld`.
   - `testRender.sh` launches with `--disable-gpu-watchdog` (`gpu_watchdog_switches`).

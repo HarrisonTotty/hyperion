@@ -460,7 +460,7 @@ describe("the terrain run's results", () => {
       expectedScriptS: 38.2,
       observedScriptS: 38.5,
     });
-    expect(findings.bothSurfaces).toMatch(/part-6/);
+    expect(findings.bothSurfaces).toMatch(/part-20/);
   });
 
   it.each([

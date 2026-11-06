@@ -40,9 +40,9 @@
  *   answer in flight's blocks, once to each worker; and the mask holding the same cells.
  * - **The teardown**: the session disposed, no height worker left and no GPU bytes of the terrain's.
  *
- * "No pixel drawn by both surfaces on the datum" is held by T16.c's part-6 smoke group
- * (`R10.T16 the frame`, on SwiftShader), which reads both surfaces back; the hidden run records it
- * as held there and probes no production shader.
+ * "No pixel drawn by both surfaces on the datum" is held by T16.c's part-20 smoke group
+ * (`R10.T16 the frame's symbology`, on SwiftShader), which reads both surfaces back; the hidden run
+ * records it as held there and probes no production shader.
  *
  * The patches drawn, the bakes a second, the frame times and the session's memory are recorded,
  * provisional: the run is hidden, and a timed figure on a shared machine is provisional (the load
@@ -163,7 +163,7 @@ const PHASE_PURPOSE: Readonly<Record<TerrainCheckPhaseName, string>> = {
 
 /** Where "no pixel drawn by both surfaces on the datum" is held (decision-r10-t16-contracts §6). */
 export const BOTH_SURFACES_HELD_BY =
-  "held by T16.c's part-6 smoke group, `R10.T16 the frame`, on SwiftShader; not probed here";
+  "held by T16.c's part-20 smoke group, `R10.T16 the frame's symbology`, on SwiftShader; not probed here";
 
 /** The run, as the main process describes it at its start. */
 export interface TerrainCheckRunInput {
