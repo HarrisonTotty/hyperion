@@ -3523,6 +3523,12 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
       floor keeps, and to the held-out half's within that half's sampling error at 1%. A miss is
       pushed with the marks', so that one run reports the slow class too: on v29 it passes, both
       classes' marks at the shape's resolution (46 minutes on 16 threads).
+    - `the_fitted_x_ray_binaries_give_the_milky_way_counts`: the high-mass hosts are 2.85 at every
+      seed on v29 (2.89 under 54d60e7's table, the refit at 27's 27.6), under Fortin et al.'s
+      152, _a finding_, re-pinned. The census of the generator's own pairs shows a displaced
+      record single, so it keeps fewer of the young thin disc's high-mass pairs. The black-hole
+      transients are 1,297, in range. The merger step at 31 moves no X-ray binary's row, and under
+      every 31 hold both counts are the same, so this is beyond its fits.
 - **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
   research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
   - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is
