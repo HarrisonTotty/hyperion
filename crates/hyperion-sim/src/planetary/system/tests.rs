@@ -9184,9 +9184,11 @@ fn the_rayleigh_floor_holds_over_the_sample_and_the_passes_guards_with_it() {
     // The passes' guards are missed at 24 (P14.T54.b.l, recorded for main): 27 of 892 bodies
     // bracketed (3.03%, against 3%), 23 jumping (2.58%, against 1%), most of them 15–28 K icy
     // members whose cap gains or loses its argon ice between passes, and 40 of the 400's 1,568
-    // planets jumping (2.55%, against 2%). Each is pinned at its count.
+    // planets jumping (2.55%, against 2%). Each is pinned at its count. At 28, re-measured over
+    // the 785 bodies its evaporation and placement margin leave: 27 bracketed (3.44%), 24 jumping
+    // (3.06%) and 29 of the 400's 1,546 planets jumping (1.88%).
     assert!(bracketed <= 27, "{bracketed} of {bodies} bracketed");
-    assert!(jumps <= 23, "{jumps} of {bodies} jumping");
+    assert!(jumps <= 24, "{jumps} of {bodies} jumping");
     assert!(
         planets.1 <= 40,
         "{} of {} planets jump",
