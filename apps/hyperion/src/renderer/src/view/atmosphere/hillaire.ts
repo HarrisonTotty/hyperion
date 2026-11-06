@@ -451,24 +451,33 @@ export type SurfaceTransmittance = "channels" | "grey";
  * ground stood at 0.30–0.41 of the tracer's independent-pixel truth (`hyperion-fit
  * atmosphere-reference`, disc p0–p30 from 2,000 km). The march's first target, the
  * aerial-perspective volume, the `grey` way back's mean and a medium with no drawn lobe are the same
- * either way, to the bit. A march that reads a bake's table keeps none either way: the table's J
- * holds that light ({@link withThickRead}).
+ * either way, to the bit. A march that reads a bake's table keeps none either way, the table's J
+ * holding that light ({@link withThickRead}), but for a decked air's bake under
+ * {@link DeckedAirSurface} `departure` (fix-r08-decked-air-route).
  */
 export type SurfaceLobes = "transmitted" | "extinguished";
 
 /**
  * How a drawn surface seen from orbit through a decked thin air's bake keeps its own ground's
- * contrast (plan R08, fix-r08-decked-air-route; research-leans-46 §2): `departure`, the ray march's
- * second target T_lobe under the bake too, as {@link SurfaceLobes} `transmitted` keeps it beside
- * Ψ_ms, and its in-scatter less the bake's ground's share of that light, S̄ (T_lobe − T_direct), at
- * least 0 (`rayMarch.wgsl`'s header; S̄ the drawn ground's light at the ray's end with the bake's
- * ground albedo), so that the pixel is L_routed(ρ̄) + (S − S̄) T_lobe, 6S's form with the
- * surroundings at the bake's mean (Tanré, Herman and Deschamps 1981, Appl. Opt. 20, 3676; Vermote
- * et al. 1997, IEEE TGRS 35, 675); or `uniform`, the way back, the route as the bake draws it, its
- * drawn surface behind T_direct, every ground's forward light the bake's J over one uniform ground.
- * Over a ground of the bake's albedo the two are the same pixel. It takes `transmitted` and the
- * surfaces' transmittance per channel (`channels`), and only a body whose tables hold a decked
- * air's bake (`AtmosphereTables.thickDeparts`); every other route is as before.
+ * contrast (plan R08, fix-r08-decked-air-route; research-leans-46 §2).
+ *
+ * @remarks
+ * `departure`: the ray march's second target is T_lobe under the bake too, as
+ * {@link SurfaceLobes} `transmitted` keeps it beside Ψ_ms, and its in-scatter loses the bake's
+ * ground's share of that light, S̄ (T_lobe − T_direct), at least 0 (`rayMarch.wgsl`'s header; S̄
+ * the drawn ground's light at the ray's end with the bake's ground albedo). The pixel is then
+ * L_routed(ρ̄) + (S − S̄) T_lobe: 6S's form with the surroundings at the bake's mean (Tanré, Herman
+ * and Deschamps 1981, Appl. Opt. 20, 3676; Vermote et al. 1997, IEEE TGRS 35, 675), its pixel's
+ * direct transmittance e^(−τ/μ_v) taken δ-M-scaled as T_lobe (Wiscombe 1977, J. Atmos. Sci. 34,
+ * 1408), the lobes' share of the diffuse light landing within the pixel. That holds where a pixel
+ * is wider than the lobe's spread on the ground, about 0.6 times the deck's height: from 2,000 km
+ * out on the served Earth-like world, whose 1–2 km pixels there are about its spread, so that
+ * closer views keep somewhat more contrast than the truth's. `uniform` is the way back: the route
+ * as the bake draws it, its drawn surface behind T_direct, every ground's forward light the bake's
+ * J over one uniform ground. Over a ground of the bake's albedo the two are the same pixel. It
+ * takes `transmitted` and the surfaces' transmittance per channel (`channels`), and only a body
+ * whose tables hold a decked air's bake (`AtmosphereTables.thickDeparts`); every other route is as
+ * before.
  */
 export type DeckedAirSurface = "departure" | "uniform";
 

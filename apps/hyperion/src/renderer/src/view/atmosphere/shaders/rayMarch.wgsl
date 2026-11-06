@@ -184,8 +184,10 @@
 // datum's normal, times albedo / pi. Over a ground of the bake's albedo the pixel is the route's,
 // L_in + S T_direct; over a drawn map it is L_routed(rho_bar) + (S - S_bar) T_lobe, 6S's form with
 // the surroundings at the bake's mean (Tanre, Herman and Deschamps 1981, Appl. Opt. 20, 3676;
-// Vermote et al. 1997, IEEE TGRS 35, 675), so that the drawn ground keeps its contrast through the
-// lobes. Its lookups are the bare ground's, at their one call site (`rayMarchPieceAt`'s note on
+// Vermote et al. 1997, IEEE TGRS 35, 675), its pixel's direct transmittance taken delta-M-scaled as
+// T_lobe (Wiscombe 1977, J. Atmos. Sci. 34, 1408), the lobes' share of the diffuse light landing
+// within the pixel, so that the drawn ground keeps its contrast through the lobes. That holds where
+// a pixel is wider than the lobe's spread on the ground, about 0.6 times the deck's height. Its lookups are the bare ground's, at their one call site (`rayMarchPieceAt`'s note on
 // SwiftShader's stack), its own work in loops of at most one pass; a thin kernel's `departs` is
 // false and a deck's march compiles it out, and the bare ground's arithmetic is as before.
 

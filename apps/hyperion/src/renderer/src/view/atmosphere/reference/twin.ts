@@ -101,6 +101,7 @@ import {
   type DeckedAirSurface,
   type SunState,
   type SurfaceLobes,
+  surfaceLobesOf,
   type SurfaceTransmittance,
   TABLE_SIZES,
   tableRadiusM,
@@ -1037,9 +1038,19 @@ export function referenceTwin(
       : [t[3], t[3], t[3]];
   };
 
-  // A decked air's bake departs where it is one and the settings ask (fix-r08-decked-air-route),
-  // its sky's irradiance the lit ground's.
-  const departs = settings.deckedAirSurface === "departure" && settings.thick !== null;
+  // A decked air's bake departs where it is one and the settings ask (fix-r08-decked-air-route), as
+  // the frame's `forward.w` 2 asks it (`hillaire.ts`'s surfaceLobesOf): the lobes kept and the
+  // surfaces dimmed per channel. Its sky's irradiance the lit ground's.
+  const departs =
+    settings.thick !== null &&
+    surfaceLobesOf(
+      {
+        surfaceLobes: settings.surfaceLobes,
+        deckedAirSurface: settings.deckedAirSurface ?? "uniform",
+        surfaceTransmittance: settings.surfaceTransmittance,
+      },
+      { thickDeparts: settings.deckedAirSurface !== null },
+    ) === 2;
   const marchSettings: RayMarchSettings = {
     ...sizes,
     surfaceLobes: settings.surfaceLobes,

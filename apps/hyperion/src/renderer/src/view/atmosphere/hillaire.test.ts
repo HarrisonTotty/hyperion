@@ -3272,7 +3272,13 @@ describe("HillaireAtmosphere's decked air's departure (fix-r08-decked-air-route)
     expect(surfaceLobesOf(levers, { thickDeparts })).toBe(w);
   });
 
-  it("departs from a decked air's bake alone, and binds its march the sky's irradiance it reads", async () => {
+  /** Earth's tables over a patterned bake, and a view of them on both settings' levers. */
+  const viewOver = async (): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly tables: AtmosphereTables;
+    readonly bake: ReturnType<typeof patternedThickBake>;
+    readonly view: HillaireAtmosphere;
+  }> => {
     const engine = await countingRenderEngine();
     const kernels = await createAtmosphereFrameKernels(engine);
     const tables = new AtmosphereTables(
@@ -3290,23 +3296,35 @@ describe("HillaireAtmosphere's decked air's departure (fix-r08-decked-air-route)
       kernels,
       ATMOSPHERE_SETTINGS.high,
     );
-    const drawn = (): readonly [number | undefined, boolean] => {
-      engine.dispatched.length = 0;
-      const draw = view.drawFrame(distant, [NOON], SCENE);
-      const march = marchesOf(engine)[0];
-      return [
-        draw.uniforms["forward"]?.[3],
-        boundNames(march?.bindings ?? EMPTY).includes("marchIrradiance"),
-      ];
-    };
-    tables.setThickTables(bake, true);
-    expect([tables.thickDeparts, ...drawn()]).toEqual([true, 2, true]);
-    tables.setThickTables(bake);
-    expect([tables.thickDeparts, ...drawn()]).toEqual([false, 1, true]);
-    tables.setThickTables(null, true);
-    expect([tables.thickDeparts, ...drawn()]).toEqual([false, 1, false]);
+    return { engine, tables, bake, view };
+  };
+
+  it.each([
+    ["a decked air's bake", true, true, 2],
+    ["another bake", true, false, 1],
+    ["no bake", false, true, 1],
+  ] as const)("departs from %s by forward.w", async (_, baked, departs, w) => {
+    const { tables, bake, view } = await viewOver();
+    tables.setThickTables(baked ? bake : null, departs);
+    expect(view.drawFrame(distant, [NOON], SCENE).uniforms["forward"]?.[3]).toBe(w);
     tables.dispose();
   });
+
+  it.each([
+    ["a bake", true, true],
+    ["no bake", false, false],
+  ] as const)(
+    "binds the march the sky's irradiance its departure reads under %s",
+    async (_, baked, bound) => {
+      const { engine, tables, bake, view } = await viewOver();
+      tables.setThickTables(baked ? bake : null);
+      engine.dispatched.length = 0;
+      view.drawFrame(distant, [NOON], SCENE);
+      const march = marchesOf(engine)[0];
+      expect(boundNames(march?.bindings ?? EMPTY).includes("marchIrradiance")).toBe(bound);
+      tables.dispose();
+    },
+  );
 });
 
 describe("HillaireAtmosphere's surfaces dimmed per channel (R08.T9.c)", () => {

@@ -367,30 +367,54 @@ describe("a decked air's departure in the twin (fix-r08-decked-air-route)", () =
     sun: { zenithDeg: 30, azimuthDeg: 0 },
   };
 
+  /** Each twin over the bake, built once. */
+  const twins = new Map<string, ReturnType<typeof referenceTwin>>();
+  const twinOf = (
+    deckedAirSurface: "departure" | "uniform" | null,
+    surfaceTransmittance: "channels" | "grey" = "channels",
+  ): ReturnType<typeof referenceTwin> => {
+    const key = `${String(deckedAirSurface)} ${surfaceTransmittance}`;
+    let twin = twins.get(key);
+    if (twin === undefined) {
+      twin = referenceTwin(MARS_REFERENCE, FIGURE, {
+        thick: bake,
+        deckedAirSurface,
+        surfaceTransmittance,
+      });
+      twins.set(key, twin);
+    }
+    return twin;
+  };
+
+  it("equals the route over a ground of the bake's albedo", { timeout: 120_000 }, () => {
+    const routed = twinOf("uniform").radiance(DISC);
+    const total = twinOf("departure").radiance(DISC);
+    // S̄ is lit as the drawn ground is, so the two differ by the lookups' rounding alone: the disc
+    // measured 3 × 10⁻⁸ apart (2026-11-06).
+    expect(CHANNELS.map((c) => Math.abs(total[c] / routed[c] - 1) < 1e-6)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it("draws its surface's part through T_lobe", { timeout: 120_000 }, () => {
+    const routed = twinOf("uniform").surfaceRadiance(DISC);
+    const departed = twinOf("departure").surfaceRadiance(DISC);
+    expect(CHANNELS.map((c) => departed[c] > 1.2 * routed[c])).toEqual([true, true, true]);
+  });
+
+  it("is the route for a bake that is no decked air's, the default", { timeout: 120_000 }, () => {
+    expect(twinOf(null).radiance(DISC)).toEqual(twinOf("uniform").radiance(DISC));
+  });
+
   it(
-    "equals the route over a ground of the bake's albedo, its drawn surface's part through T_lobe",
+    "is the route with the surfaces dimmed by the mean, as the frame takes it",
     { timeout: 120_000 },
     () => {
-      const route = referenceTwin(MARS_REFERENCE, FIGURE, {
-        thick: bake,
-        deckedAirSurface: "uniform",
-      });
-      const departed = referenceTwin(MARS_REFERENCE, FIGURE, {
-        thick: bake,
-        deckedAirSurface: "departure",
-      });
-      const routed = route.radiance(DISC);
-      const total = departed.radiance(DISC);
-      // S̄ is lit as the drawn ground is, so the two differ by the lookups' rounding alone: the
-      // disc measured 3 × 10⁻⁸ apart (2026-11-06).
-      for (const c of CHANNELS) {
-        expect(Math.abs(total[c] / routed[c] - 1)).toBeLessThan(1e-6);
-        expect(departed.surfaceRadiance(DISC)[c]).toBeGreaterThan(
-          1.2 * route.surfaceRadiance(DISC)[c],
-        );
-      }
-      // No decked air's bake, the default, is the route.
-      expect(referenceTwin(MARS_REFERENCE, FIGURE, { thick: bake }).radiance(DISC)).toEqual(routed);
+      expect(twinOf("departure", "grey").radiance(DISC)).toEqual(
+        twinOf("uniform", "grey").radiance(DISC),
+      );
     },
   );
 });

@@ -4238,10 +4238,13 @@ export type RayMarchSettings = Pick<
 
 /**
  * A decked air's departure in the ray march's twin (plan R08, fix-r08-decked-air-route;
- * `rayMarch.wgsl`'s header, `forward.w` 2): where it is given, a march on a bake's table (`thick`)
- * keeps a drawn surface's lobes' light and takes the bake's ground's share of it from its
- * in-scatter, S̄ (T_lobe − T_direct), S̄ the drawn ground's light at the ray's end with the
- * medium's ground albedo, each source's transmittance to it and this sky's irradiance there.
+ * `rayMarch.wgsl`'s header, `forward.w` 2).
+ *
+ * @remarks
+ * Where it is given, a march on a bake's table (`thick`) keeps a drawn surface's lobes' light and
+ * takes the bake's ground's share of it from its in-scatter, S̄ (T_lobe − T_direct), S̄ the drawn
+ * ground's light at the ray's end with the medium's ground albedo, each source's transmittance to
+ * it and this sky's irradiance there.
  */
 export interface TwinDeparture {
   /**
