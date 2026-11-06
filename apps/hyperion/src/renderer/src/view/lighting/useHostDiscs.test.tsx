@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { FIELD_RETRY_DELAY_MS } from "../terrain/coarseFieldStore";
 import { sunLikeHostDisc } from "./hostDisc";
 import { type HostDiscsAsk, useHostDiscs } from "./useHostDiscs";
 
@@ -76,14 +77,47 @@ describe("useHostDiscs", () => {
     ]).toEqual([true, "0200080020000001", true]);
   });
 
-  it("holds the discs held while it asks another system's, which the lighting tells apart", async () => {
+  it("gives no discs of a system left while it asks another's, nor of another universe's", async () => {
     const { rerender, socket, result } = renderDiscs(askOf("0200080020000000"));
     await answer(socket);
     rerender({ ask: askOf("0200080020000001") });
-    expect([result.current.held?.system, result.current.pending]).toEqual([
-      "0200080020000000",
-      true,
-    ]);
+    const otherSystem = [result.current.held, result.current.pending];
+    rerender({ ask: { ...askOf("0200080020000000"), universe: "000000000000002b" } });
+    expect([otherSystem, result.current.held]).toEqual([[null, true], null]);
+  });
+
+  it("asks again after a busy server's answer, a little later", async () => {
+    vi.useFakeTimers();
+    const { socket, result } = renderDiscs(askOf("0200080020000000"));
+    const [asked] = socket.requestsOfKind("host_discs");
+    await act(async () => {
+      if (asked !== undefined) {
+        socket.serverRejects(asked.id, { code: "queue_full", message: "busy", field: null });
+      }
+      await Promise.resolve();
+    });
+    const beforeRetry = socket.requestsOfKind("host_discs").length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FIELD_RETRY_DELAY_MS);
+    });
+    await answer(socket);
+    expect([
+      beforeRetry,
+      socket.requestsOfKind("host_discs").length,
+      result.current.pending,
+    ]).toEqual([1, 2, false]);
+  });
+
+  it("is not pending while the link is down, when nothing is asked", async () => {
+    vi.useFakeTimers();
+    const { socket, result } = renderDiscs(askOf("0200080020000000"));
+    act(() => {
+      socket.close();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current).toEqual({ held: null, pending: false });
   });
 
   it("holds a refusal, as an older server's unsupported, and does not ask again", async () => {

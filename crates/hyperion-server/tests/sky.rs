@@ -47,10 +47,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use common::{BinaryHeader, Frame, RawFrame, TestClient, TestServer};
 use hyperion_protocol::{
     ConeDto, ErrorCode, EyeDto, GalacticPosition, HostDiscDto, HostDiscsDto, HostDiscsRequest,
-    MAX_SKY_STARS, MassLayer, OpenUniverseRequest, PlanetInputsDto, RequestBody, RequestError,
-    RequestId, ResponseBody, SKY_STAR_BYTES, SKY_TEXEL_BYTES, SeedHex, ServerMessage, SkyGapDto,
-    SkyRequest, SkyResponse, SystemIdHex, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
-    ViewerPlanetRequest,
+    MAX_SKY_STARS, MassLayer, OpenUniverseRequest, RequestBody, RequestError, RequestId,
+    ResponseBody, SKY_STAR_BYTES, SKY_TEXEL_BYTES, ServerMessage, SkyGapDto, SkyRequest,
+    SkyResponse, SystemIdHex, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_server::compute::{BulkGate, SkyCaps, SkyCellCounters};
 use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
@@ -3022,34 +3021,12 @@ fn record_of_discs(layer: Layer, count: usize) -> SystemRecord {
         .unwrap_or_else(|| panic!("a system of {count} discs about the Sun in layer {layer:?}"))
 }
 
-/// A viewer planet generated on `client`'s server in `universe`: an Earth about a Sun, its system
-/// at the viewer's Sun-like point.
+/// A viewer planet's system generated on `client`'s server in `universe`: an Earth about a Sun, at
+/// the viewer's Sun-like point.
 async fn viewer_system(client: &mut TestClient, universe: &UniverseIdHex) -> SystemIdHex {
-    let inputs = PlanetInputsDto {
-        seed: SeedHex::from_u64(0x0e15_0002),
-        star_mass_msun: 1.0,
-        fe_h_dex: 0.0,
-        age_gyr: 4.57,
-        mass_mearth: 1.0,
-        semi_major_axis_au: 1.0,
-        eccentricity: 0.0167,
-        formed_at_au: None,
-        day_hours: Some(24.0),
-        tilt_deg: Some(23.4),
-        water_rank: None,
-        carbon_rank: None,
-        nitrogen_rank: None,
-    };
-    match client
-        .request(RequestBody::ViewerPlanet(ViewerPlanetRequest {
-            universe: universe.clone(),
-            inputs,
-        }))
+    common::viewer::generated(client, universe, common::viewer::earth())
         .await
-    {
-        Ok(ResponseBody::ViewerPlanet(planet)) => planet.system,
-        other => panic!("expected the viewer's planet, got {other:?}"),
-    }
+        .system
 }
 
 /// A `host_discs` request for `system` of `universe` at `time`.
@@ -3220,12 +3197,20 @@ async fn host_discs_are_refused_as_a_skys_exclude_system_is() {
     server.stop().await;
 }
 
-/// `host_discs` sent while a sky's census runs is answered first: its lookup and its discs are
-/// interactive jobs, which the pool's one worker takes before the census's next bulk job, so that a
-/// view lights a new system before its sky's first reply.
+/// `host_discs` sent while a sky's census runs is answered first, and within a bounded wait: its
+/// lookup and its discs are one interactive job, which the pool's one worker takes before the
+/// census's next bulk job, so that a view lights a new system before its sky's first reply.
+///
+/// The wait is counted in jobs and held to an order, as the range query's test holds it: the worker
+/// holds each bulk job at the test's gate, and the test lets one through only while the discs' job is
+/// queued, so that at most the bulk job in hand completes before it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn host_discs_sent_while_a_skys_census_runs_are_answered_first() {
-    let (server, _data_dir) = sky_server(LONG_CAP_LY, 1).await;
+    let gate = BulkGate::default();
+    let caps = SkyCaps::forced(LightYears::new(LONG_CAP_LY)).expect("a small forced cap");
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = sky_config(data_dir.path(), caps, 1).bulk_gate(gate.clone());
+    let server = TestServer::start_with(config.build()).await;
     let (mut client, universe) = opened(&server).await;
     let host = SystemIdHex::from_u64(host_record().id().raw());
     let sky_id = client
@@ -3235,10 +3220,30 @@ async fn host_discs_sent_while_a_skys_census_runs_are_answered_first() {
         }))
         .await;
     census_under_way(&server).await;
+    gate.close();
+    let before = server
+        .stats_until("the worker holds the sky's next job at the gate", |stats| {
+            gate.held() == 1 && stats.pool().queued_interactive() == 0
+        })
+        .await
+        .pool()
+        .completed();
     let discs_id = client
         .send_request(discs_request(&universe, host, UniverseTime::default()))
         .await;
-    match client.next_message().await {
+    let mut let_through = 0;
+    let answer = loop {
+        tokio::select! {
+            message = client.next_message() => break message,
+            _ = server.stats_until("the discs have a job queued behind the held one", |stats| {
+                gate.held() == 1 && stats.pool().queued_interactive() > 0
+            }) => {
+                gate.admit();
+                let_through += 1;
+            }
+        }
+    };
+    match answer {
         ServerMessage::Response {
             id,
             body: ResponseBody::HostDiscs(discs),
@@ -3253,6 +3258,16 @@ async fn host_discs_sent_while_a_skys_census_runs_are_answered_first() {
         pool.running() + pool.queued_bulk() > 0,
         "the sky was still being censused when the discs were answered: {pool:?}"
     );
+    assert!(
+        let_through <= 1,
+        "the worker took the discs' one job once it let a bulk job go: {let_through} let through"
+    );
+    assert_eq!(
+        pool.completed() - before,
+        1 + let_through,
+        "only the discs' job and the bulk jobs let through completed meanwhile: {pool:?}"
+    );
+    gate.open();
     client.cancel(sky_id).await;
     expect_cancelled(&mut client, sky_id).await;
     client.close().await;

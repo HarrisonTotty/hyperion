@@ -197,6 +197,7 @@ export class SpikeSessionView {
       white: null,
       stars: [],
       sky: null,
+      hostDiscs: null,
       selection: frame.selection,
       style: frame.run.camera.style,
       setting: frame.setting,

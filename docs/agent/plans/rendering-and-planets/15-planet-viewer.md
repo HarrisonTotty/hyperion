@@ -266,7 +266,9 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   `exclude_system: null`; a viewer ID is no galaxy record, so its census and payload are the
   unexcluded ones byte for byte (server test). Its discs come from `host_discs` (R07's records).
 - (lean, 2026-11-06) A switch keeps the drawn stars, their bake and the request in flight: `useSky`
-  takes a `SkyKeep` made above the stage, which a new scene's stage takes up (its request rule
-  judging it as ever), and a disposed view's cube is the cache's one spare (`SkyCubeCache.letGo`)
-  until it is taken up or another is baked. It holds for every new scene of the same arrival, a
-  `VIEW BODY` in the server scene's system among them.
+  takes a `SkyKeep` made above the stage, which a new scene's stage that asks a sky takes up (its
+  request rule judging it as ever; a stage asking none lets it go), and a disposed view's cube is
+  the cache's one spare (`SkyCubeCache.letGo`) until it is taken up or another is baked. The
+  request in flight (`SkyFlight`) decodes its own replies, so a remount mid-decode loses none; a
+  failure is not carried. It holds for every new scene of the same arrival, a `VIEW BODY` in the
+  server scene's system among them.

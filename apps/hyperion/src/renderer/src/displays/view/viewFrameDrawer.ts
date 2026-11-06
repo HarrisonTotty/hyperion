@@ -114,9 +114,9 @@ export interface ViewFrameInputs {
   readonly sky: DrawnSky | null;
   /**
    * The scene's system's discs on their own (`host_discs`; plans R06 and R07), which light a served
-   * scene until a sky that names its system is held; absent, none.
+   * scene until a sky that names its system is held, or `null`.
    */
-  readonly hostDiscs?: SystemHostDiscs | null | undefined;
+  readonly hostDiscs: SystemHostDiscs | null;
   readonly selection: CameraTarget | null;
   /** The style its budget draws (`ViewBudget.style`). */
   readonly style: RenderStyle;

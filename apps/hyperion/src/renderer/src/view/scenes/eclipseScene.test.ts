@@ -99,6 +99,7 @@ async function drawnAt(
     white: null,
     list: NO_LIST,
     sky: null,
+    hostDiscs: null,
     band: null,
     discs: new HostDiscLayer(engine),
     cube: null,

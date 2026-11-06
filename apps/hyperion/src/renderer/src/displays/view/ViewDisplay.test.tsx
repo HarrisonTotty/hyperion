@@ -1275,6 +1275,26 @@ describe("the VIEW display's server scene", () => {
     ]).toEqual(["PENDING", null, 10.15, ELSEWHERE, true, false]);
   });
 
+  it("asks a server scene's system's discs once, at its place's time, while its sky is pending (plans R06, R07)", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = setup();
+    await openUniverse(view);
+    await sceneArrives(view.socket, ELSEWHERE);
+    await settle();
+    view.advance(300);
+    await settle();
+    view.advance(1_000);
+    await settle();
+    const asked = view.socket.requestsOfKind("host_discs");
+    const interim = view.socket.requestsOfKind("systems_in_range").at(-1);
+    expect([
+      asked.length,
+      asked[0]?.body.system,
+      JSON.stringify(asked[0]?.body.time) === JSON.stringify(interim?.body.time),
+      starsReading(primaryLabelBlock()),
+    ]).toEqual([1, ELSEWHERE, true, "PENDING"]);
+  });
+
   it("names a system from a server that states no place by its ID, with no stars", async () => {
     const view = setup();
     await openUniverse(view);

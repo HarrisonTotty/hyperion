@@ -8,59 +8,24 @@
 mod common;
 
 use common::surface::field_via_wire;
+use common::viewer::{earth, generated};
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
     BodyDetailRequest, BodyIdHex, BodyStateDto, DetailLevelDto, ErrorCode, PlanetInputsDto,
     RequestBody, ResponseBody, SectionDto, SeedHex, SurfaceFieldRequest, SurveyScopeDto,
     SystemBodiesRequest, SystemIdHex, UniverseIdHex, UniverseTime, ViewerInputsRequest,
-    ViewerPlanetDto, ViewerPlanetRequest, ViewerRandomizeRequest,
+    ViewerPlanetRequest, ViewerRandomizeRequest,
 };
 use hyperion_sim::planetary::viewer::{PlanetInputs, RawPlanetInputs, ViewerSystem};
 
 /// The seed of the universe, the other integration tests' own.
 const SEED: u64 = 0x4d2;
 
-/// An Earth about a Sun, its day and tilt given, everything else drawn.
-fn earth() -> PlanetInputsDto {
-    PlanetInputsDto {
-        seed: SeedHex::from_u64(0x0e15_0002),
-        star_mass_msun: 1.0,
-        fe_h_dex: 0.0,
-        age_gyr: 4.57,
-        mass_mearth: 1.0,
-        semi_major_axis_au: 1.0,
-        eccentricity: 0.0167,
-        formed_at_au: None,
-        day_hours: Some(24.0),
-        tilt_deg: Some(23.4),
-        water_rank: None,
-        carbon_rank: None,
-        nitrogen_rank: None,
-    }
-}
-
 /// The epoch.
 fn epoch() -> UniverseTime {
     UniverseTime {
         seconds: 0,
         nanos: 0,
-    }
-}
-
-async fn generated(
-    client: &mut TestClient,
-    universe: &UniverseIdHex,
-    inputs: PlanetInputsDto,
-) -> ViewerPlanetDto {
-    match client
-        .request(RequestBody::ViewerPlanet(ViewerPlanetRequest {
-            universe: universe.clone(),
-            inputs,
-        }))
-        .await
-    {
-        Ok(ResponseBody::ViewerPlanet(planet)) => *planet,
-        other => panic!("expected the planet, got {other:?}"),
     }
 }
 

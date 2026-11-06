@@ -10185,6 +10185,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     sky's `hosts` where its request left the scene's system out, else those discs. The meter's
     `incidentReadingLx` takes `(run, selection, sky, asked)`; `ViewFrameInputs`,
     `PhotorealInputs` and `InstrumentsFrame` carry `hostDiscs`.
-  - `LIGHTING: PENDING` also stands while the discs are asked and unanswered. The inspection and
-    planet-viewer runs wait out `STARS` `PENDING` too (`starsPending`), since lighting no longer
-    waits on the sky.
+  - `LIGHTING: PENDING` stands while no discs of the system are held and the sky or the discs are
+    asked; discs answered empty read `NOT RECEIVED`, as the meter does. A busy answer is asked
+    again after `FIELD_RETRY_DELAY_MS`, doubling. The inspection run waits out `STARS` `PENDING`
+    too (`starsPending`), since lighting no longer waits on the sky; the planet-viewer run's
+    `warmedUp` (`skyAnswered`, R15.T6's, landed beside) already does.

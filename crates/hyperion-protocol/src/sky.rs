@@ -366,7 +366,7 @@ pub struct HostDiscDto {
 /// sky's `exclude_system`: `unknown_system`, naming `system`. It is additive (plan 04's
 /// convention, `PROTOCOL_VERSION` stays): an older server answers `unsupported`, and the view then
 /// waits for its sky's `hosts`, as before.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct HostDiscsRequest {
     /// The universe.

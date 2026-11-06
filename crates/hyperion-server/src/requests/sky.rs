@@ -36,8 +36,8 @@
 //!
 //! `host_discs` ([`host_discs_answer`]) answers a system's discs on their own, the bytes a sky that
 //! leaves the system out carries as its `hosts` at the same time, with no census: looked up and
-//! drawn in interactive jobs, so that a view lights a new system at once, whatever its sky costs. It
-//! reads no table, and is served with the sky's switch off too.
+//! drawn in one interactive job, so that a view lights a new system at once, whatever its sky
+//! costs. It reads no table, and is served with the sky's switch off too.
 //!
 //! The last skies' final replies are kept ([`kept`], R06.T11.l), in memory and in files under the
 //! data directory (R06.T11.n), and a sky asked again exactly as one of them, before or after a
@@ -312,14 +312,7 @@ async fn computed(
         .prefer_near(key, asked.observer.position());
     let galaxy = state.galaxies.get(key).await?;
     if let (Some(system), Some(named)) = (asked.exclude, &request.exclude_system) {
-        check_exclude(
-            state,
-            (key, &galaxy),
-            system,
-            ("exclude_system", named),
-            token.clone(),
-        )
-        .await?;
+        check_exclude(state, (key, &galaxy), system, named, token.clone()).await?;
     }
     let pool = &state.pool;
     let tables = state.sky_tables.get(key, &galaxy).await?;
@@ -820,10 +813,12 @@ async fn discs(
 }
 
 /// The discs of `system`'s stars in the galaxy `key` names at `t`, as the wire carries them (Design
-/// note 16; R06.T11.c): the system's stars from the server's system cache, generated if they are
-/// not held, then `host_discs`; a viewer system's synthetic star from its store's context
-/// (rendering plan R15). A sky's `hosts` and `host_discs` both take them from here, so that the two
-/// are the same bytes for the same system and time.
+/// note 16; R06.T11.c).
+///
+/// The system's stars come from the server's system cache, generated if they are not held, then
+/// `host_discs`; a viewer system's synthetic star from its store's context (rendering plan R15). A
+/// sky's `hosts` and `host_discs` both take them from here, so that the two are the same bytes for
+/// the same system and time.
 ///
 /// A system whose stars are not generated, a centre member until plan 09's system stage or a rogue
 /// planet, which has none, has no disc to draw, and nor has a viewer system evicted since it was
@@ -831,7 +826,7 @@ async fn discs(
 ///
 /// # Panics
 ///
-/// If `system` names no system of the galaxy, which [`check_exclude`] rules out first.
+/// If `system` names no system of the galaxy, which the request's lookup rules out first.
 #[must_use]
 fn discs_of(
     state: &AppState,
@@ -865,11 +860,13 @@ fn discs_of(
     }
 }
 
-/// A system's stars as discs at a time, on their own (`host_discs`; rendering plans R06 and R07):
-/// the discs a sky whose `exclude_system` is `request.system` carries as its `hosts` at
+/// A system's stars as discs at a time, on their own (`host_discs`; rendering plans R06 and R07).
+///
+/// They are the discs a sky whose `exclude_system` is `request.system` carries as its `hosts` at
 /// `request.time` ([`discs_of`]), with no census, so that a view lights a new system's bodies before
-/// its sky's first reply. The system is looked up as a sky's `exclude_system` is
-/// ([`check_exclude`]), and its discs drawn, each in an interactive pool job under `token`.
+/// its sky's first reply. The system is refused as a sky's `exclude_system` is ([`check_exclude`]):
+/// a viewer system by its store, at once, and a galaxy system by plan 03's `resolve`, in the one
+/// interactive pool job under `token` that then draws its discs.
 ///
 /// # Errors
 ///
@@ -877,7 +874,7 @@ fn discs_of(
 /// `unknown_system` naming `system` for an ID whose bits are not a system ID, that `resolve`
 /// refuses, or a viewer system the store does not hold, as a sky refuses its `exclude_system`; those
 /// of the galaxy cache; `queue_full` if the interactive queue has no room; and `cancelled` or
-/// `internal` from either job.
+/// `internal` from the job.
 pub(crate) async fn host_discs_answer(
     state: Arc<AppState>,
     request: HostDiscsRequest,
@@ -885,24 +882,28 @@ pub(crate) async fn host_discs_answer(
 ) -> Result<ResponseBody, RequestError> {
     let universe = openable_universe(&state, &request.universe)?;
     let t = query_time(&request.time)?;
+    let named = ("system", &request.system);
     let system = SystemId::from_raw(request.system.to_u64())
-        .map_err(|error| unknown_system_named("system", &request.system, error))?;
+        .map_err(|error| unknown_system_named(named.0, named.1, error))?;
     let key = universe.key();
     let galaxy = state.galaxies.get(key).await?;
-    check_exclude(
-        &state,
-        (key, &galaxy),
-        system,
-        ("system", &request.system),
-        token.clone(),
-    )
-    .await?;
+    if is_viewer(system) {
+        held_viewer(&state, key, system, named)?;
+    }
     let shared = Arc::clone(&state);
-    let draw = move |_: &CancelToken| discs_of(&shared, (key, &galaxy), system, t);
+    // The lookup and the discs in one job, so that a busy pool's next bulk job comes between them
+    // never: a viewer system is the store's, which no galaxy resolves (rendering plan R15).
+    let draw = move |_: &CancelToken| {
+        if !is_viewer(system) {
+            resolve(&galaxy, system)?;
+        }
+        Ok::<_, ResolveSystemError>(discs_of(&shared, (key, &galaxy), system, t))
+    };
     let receiver = state.pool.try_submit(Priority::Interactive, token, draw)?;
     let hosts = receiver
         .await
-        .unwrap_or_else(|closed| Err(JobError::from(closed)))?;
+        .unwrap_or_else(|closed| Err(JobError::from(closed)))?
+        .map_err(|error| unknown_system_named(named.0, named.1, error))?;
     Ok(ResponseBody::HostDiscs(HostDiscsDto {
         universe: request.universe,
         system: request.system,
@@ -1143,23 +1144,20 @@ fn unknown_system_named(
     }
 }
 
-/// Looks `system` up in `galaxy` with plan 03's `resolve`, as plan 04 requires of every ID read
-/// from a client, in an interactive pool job, as the scene resolves its frames; `named` is the field
-/// it was read from and its value, which a refusal names.
+/// Looks the `exclude_system` `system` up in `galaxy` with plan 03's `resolve`, as plan 04
+/// requires of every ID read from a client, in an interactive pool job, as the scene resolves its
+/// frames.
 async fn check_exclude(
     state: &AppState,
     (key, galaxy): (GalaxyKey, &Arc<Galaxy>),
     system: SystemId,
-    (field, named): (&'static str, &SystemIdHex),
+    named: &SystemIdHex,
     token: CancelToken,
 ) -> Result<(), RequestError> {
+    let named = ("exclude_system", named);
     // A viewer system is the viewer store's, which no galaxy resolves (rendering plan R15).
     if is_viewer(system) {
-        return state
-            .viewer
-            .get(key, system)
-            .map(|_| ())
-            .ok_or_else(|| unknown_system_named(field, named, ResolveSystemError::NoSuchSystem));
+        return held_viewer(state, key, system, named);
     }
     let galaxy = Arc::clone(galaxy);
     let check = move |_: &CancelToken| resolve(&galaxy, system).map(|_| ());
@@ -1167,9 +1165,24 @@ async fn check_exclude(
     receiver
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))?
-        .map_err(|error| unknown_system_named(field, named, error))
+        .map_err(|error| unknown_system_named(named.0, named.1, error))
 }
 
+/// Whether the viewer store holds the viewer system `system` of the galaxy `key`: refused
+/// `unknown_system` naming the field and value `named` it was read from where it does not (rendering
+/// plan R15).
+fn held_viewer(
+    state: &AppState,
+    key: GalaxyKey,
+    system: SystemId,
+    (field, value): (&'static str, &SystemIdHex),
+) -> Result<(), RequestError> {
+    state
+        .viewer
+        .get(key, system)
+        .map(|_| ())
+        .ok_or_else(|| unknown_system_named(field, value, ResolveSystemError::NoSuchSystem))
+}
 /// The census's answer (R06.T11.a–d) for the universe and observer `asked`: the cut, each layer's
 /// cap, tallies and the radii it is complete to, the counts, the time it holds to, the band's
 /// shape, the host discs `hosts`, what is not modelled and whether it is final, with the manifest

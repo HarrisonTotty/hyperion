@@ -245,6 +245,7 @@ function airFrame(
     white: null,
     list: NO_LIST,
     sky: null,
+    hostDiscs: null,
     band: null,
     discs,
     cube: null,

@@ -12,6 +12,7 @@ pub mod origins;
 pub mod process;
 pub mod scene;
 pub mod surface;
+pub mod viewer;
 
 use std::future::IntoFuture;
 use std::net::SocketAddr;

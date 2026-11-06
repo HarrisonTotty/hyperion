@@ -83,6 +83,7 @@ import {
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
 import {
+  bringsOwnSettings,
   cameraSceneOf,
   type ServedSceneSource,
   type ViewScene,
@@ -91,6 +92,7 @@ import {
 import type { DrawAnchor, DrawnSurveyEdge, LineOfSightPoint } from "../../view/wireframe/drawList";
 import type { StyleAvailability } from "../../view/engine/platform";
 import {
+  heldHostDiscs,
   hostLights,
   lightingState,
   sceneHostDiscs,
@@ -2020,14 +2022,14 @@ function ViewStage({
 
   // The scene's lighting and lit bodies' labels, which every view's photorealistic statements read.
   // A served scene is lit by its held sky's discs where that sky names its system, else by its
-  // system's discs on their own, which arrive at once (plans R06 and R07).
-  const lighting = lightingState(
-    hostLights(
-      shown.run.scene,
-      sceneHostDiscs(shown.run.scene, viewSky.drawn?.model ?? null, hostDiscs),
-    ),
-    viewSky.pending || hostDiscsPending,
-  );
+  // system's discs on their own, which arrive at once (plans R06 and R07); its lighting is awaited
+  // only while neither is held and one of them is asked, as the INCIDENT meter's reading is.
+  const sceneDiscs = sceneHostDiscs(shown.run.scene, viewSky.drawn?.model ?? null, hostDiscs);
+  const discsAwaited =
+    !bringsOwnSettings(shown.run.scene) &&
+    heldHostDiscs(shown.run.scene, viewSky.drawn?.model ?? null, hostDiscs) === null &&
+    (viewSky.pending || hostDiscsPending);
+  const lighting = lightingState(hostLights(shown.run.scene, sceneDiscs), discsAwaited);
   const litLabels = litLabelsOf(shown.run.scene);
   // The primary's STARS line, whose notes depend on the instruments open beside it
   // (decision-r06-t11f-stars-line): the sky's annunciations stand on it alone.

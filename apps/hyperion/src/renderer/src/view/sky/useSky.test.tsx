@@ -181,11 +181,13 @@ function from(camera: SkyCamera, years = 0): SkyProps {
 function KeptStage({
   request,
   keep,
+  createDecoder,
 }: {
-  readonly request: SkyRequest;
+  readonly request: SkyRequest | null;
   readonly keep: SkyKeep;
+  readonly createDecoder: () => SkyDecoder;
 }): ReactNode {
-  const sky = useSky(request, CAMERAS, { createDecoder: inThreadDecoder, keep });
+  const sky = useSky(request, CAMERAS, { createDecoder, keep });
   const model = sky.model;
   let text: string;
   if (sky.pending) {
@@ -199,10 +201,10 @@ function KeptStage({
 }
 
 /** One view's stages over one keep: `stage` remounts the next, as a new scene does. */
-function renderStages(keep: SkyKeep) {
-  const tree = (stage: number, request: SkyRequest) => (
+function renderStages(keep: SkyKeep, createDecoder: () => SkyDecoder = inThreadDecoder) {
+  const tree = (stage: number, request: SkyRequest | null) => (
     <ServerLinkHarness>
-      <KeptStage key={stage} request={request} keep={keep} />
+      <KeptStage key={stage} request={request} keep={keep} createDecoder={createDecoder} />
     </ServerLinkHarness>
   );
   const view = render(tree(1, skyRequest(0)));
@@ -212,7 +214,7 @@ function renderStages(keep: SkyKeep) {
   });
   return {
     socket,
-    remount: (stage: number, request: SkyRequest) => {
+    remount: (stage: number, request: SkyRequest | null) => {
       view.rerender(tree(stage, request));
     },
     shown: () => screen.getByRole("status", { name: "sky" }).textContent,
@@ -674,6 +676,48 @@ describe("useSky", () => {
         "0200080020000001",
         "pending",
       ]);
+    });
+
+    it("decodes a reply once, whose decode the stage before began, and the new stage holds it", async () => {
+      // A decoder that takes its payload's buffers, as the worker's transfer does, and settles
+      // when the test says: a second decode of the same reply would find them gone.
+      const decodes: Array<() => void> = [];
+      const takingDecoder = (): SkyDecoder => ({
+        decode: (job) => {
+          const decodedNow = decodeSkyPayload({ ...job, id: 1 });
+          for (const chunk of job.chunks) {
+            if (chunk.buffer instanceof ArrayBuffer && chunk.buffer.byteLength > 0) {
+              structuredClone(chunk.buffer, { transfer: [chunk.buffer] });
+            }
+          }
+          return new Promise((resolve) => {
+            decodes.push(() => {
+              resolve(decodedNow);
+            });
+          });
+        },
+        dispose: () => undefined,
+      });
+      const { socket, remount, shown } = renderStages(new SkyKeep(), takingDecoder);
+      await replyAt(socket, latestSky(socket).id, 2, [125, 125, 125]);
+      remount(2, skyRequest(0));
+      await act(async () => {
+        decodes.shift()?.();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect([decodes.length, socket.requestsOfKind("sky").length, shown()]).toEqual([
+        0,
+        1,
+        "held 2 partial",
+      ]);
+    });
+
+    it("takes up nothing, and lets the request go, in a stage that asks no sky", () => {
+      const { socket, remount, shown } = renderStages(new SkyKeep());
+      const first = latestSky(socket).id;
+      remount(2, null);
+      expect([socket.cancelledIds(), shown()]).toEqual([[first], "none"]);
     });
 
     it("cancels the request kept once its view has gone", () => {

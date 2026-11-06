@@ -121,9 +121,9 @@ export interface PhotorealInputs {
   readonly sky: DrawnSky | null;
   /**
    * The scene's system's discs on their own (`host_discs`; plans R06 and R07), which light a served
-   * scene until a sky that names its system is held (`heldHostDiscs`); absent, none.
+   * scene until a sky that names its system is held (`heldHostDiscs`), or `null`.
    */
-  readonly hostDiscs?: SystemHostDiscs | null | undefined;
+  readonly hostDiscs: SystemHostDiscs | null;
   /** R06's band layer, uploaded with the sky's band, or `null` with no sky. */
   readonly band: BandLayer | null;
   readonly discs: HostDiscLayer;
@@ -439,8 +439,8 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     orientation: pose.orientation,
     fovXRad: (run.camera.fovDeg * Math.PI) / 180,
   };
-  const discs = sceneHostDiscs(scene, sky?.model ?? null, inputs.hostDiscs ?? null);
-  const lights = framePlacedLights(run, pose, sky, inputs.hostDiscs ?? null);
+  const discs = sceneHostDiscs(scene, sky?.model ?? null, inputs.hostDiscs);
+  const lights = framePlacedLights(run, pose, sky, inputs.hostDiscs);
   const discFrame = inputs.discs.frame(
     hostPlacements(scene, discs, pose),
     camera,

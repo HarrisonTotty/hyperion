@@ -460,6 +460,25 @@ describe("VIEW's body inspection (the owner's request)", () => {
     ]).toEqual([1, FIXTURE_SYSTEM, { seconds: 3_600, nanos: 0 }, true, false, true, true]);
   });
 
+  it("states its lighting not received once its system's discs are answered empty, its sky still pending", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+      inspection: earthOpening(),
+    });
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+    await discsArrive(view, []);
+    view.advance(300);
+    await settle();
+    const block = primaryLabelBlock().textContent;
+    expect([block.includes("LIGHTING: NOT RECEIVED"), starsPendingShown()]).toEqual([true, true]);
+  });
+
   it("is lit by its sky's discs once its sky is held, as before the discs on their own", async () => {
     vi.stubGlobal("Worker", InThreadSkyWorker);
     const fake = fakeViewEngineSource();
