@@ -68,6 +68,7 @@ import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
 import { orbitGroundOf } from "./orbitGround";
 import { NONE_OPENED, toggledNote } from "./reasonFolds";
 import { availabilityOf, GRID_AT_OPEN, gridAfterStyle, styleRefusals } from "./styleRefusals";
+import type { SystemHostDiscs } from "../../view/lighting/hostLights";
 import type { SkyModel } from "../../view/sky/model";
 import {
   type CulledViewSky,
@@ -246,6 +247,11 @@ export interface InstrumentsFrame {
    */
   readonly present: boolean;
   readonly stars: ReadonlyArray<ViewStar>;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), as the primary's frame
+   * reads them, which light a served scene until a sky that names its system is held; or `null`.
+   */
+  readonly hostDiscs: SystemHostDiscs | null;
   /** Reports each instrument's camera to the server's scene, or `null` for a kept scene. */
   readonly reportCamera: ((view: ViewId, pose: SceneKinematics) => void) | null;
   /**
@@ -829,6 +835,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           white: each.white,
           stars: each.stars,
           sky: inputs.sky,
+          hostDiscs: each.hostDiscs,
           selection: inputs.selection,
           style: budget.style,
           setting: each.setting,

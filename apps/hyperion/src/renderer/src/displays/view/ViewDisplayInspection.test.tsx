@@ -3,7 +3,7 @@
  * drawn photorealistically as a kept scene of its served records, and closed back to the scene
  * shown before.
  */
-import { galacticPositionFromLy } from "@hyperion/protocol";
+import { galacticPositionFromLy, type HostDiscDto } from "@hyperion/protocol";
 import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +14,7 @@ import { fakeViewEngineSource } from "../../test/fakeViewEngine";
 import { answerServedField } from "../../test/servedHandoverFixtures";
 import { binaryFrame } from "../../test/binaryFrames";
 import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
-import { sunLikeHostDisc } from "../../view/lighting/hostDisc";
+import { SUN_ABSOLUTE_V, sunLikeHostDisc } from "../../view/lighting/hostDisc";
 import { METER_CLASS, type MeterMode } from "../../view/post/meter";
 import {
   nominalStore,
@@ -187,6 +187,27 @@ async function skyArrivesWithSun(view: ViewDisplayHarness): Promise<void> {
     await vi.advanceTimersByTimeAsync(0);
   });
   await settle();
+}
+
+/** Answers the view's latest `host_discs` request with `hosts`, as the server does at once. */
+async function discsArrive(
+  view: ViewDisplayHarness,
+  hosts: ReadonlyArray<HostDiscDto>,
+): Promise<void> {
+  await act(async () => {
+    view.socket.serverAnswers("host_discs", (body) => ({
+      ...body,
+      hosts: [...hosts],
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await settle();
+}
+
+/** The `EV100` of the first `AUTO` reading among `readings`, or `NaN` with none. */
+function firstAutoEv(readings: ReadonlyArray<string>): number {
+  const first = readings.find((reading) => reading.endsWith(" AUTO"));
+  return Number(/^EV100 (-?\d+\.\d) AUTO$/u.exec(first ?? "")?.[1]);
 }
 
 /** The primary's meter as its `EXPOSURE METER` panel names it. */
@@ -370,6 +391,62 @@ describe("VIEW's body inspection (the owner's request)", () => {
       "EV100 -1.0 MAN",
       null,
       "INCIDENT",
+      true,
+    ]);
+  });
+
+  it("is lit by its system's discs on their own while its sky is pending (plans R06, R07)", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+      inspection: earthOpening(),
+    });
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+    const [asked] = view.socket.requestsOfKind("host_discs");
+    const pending = primaryLabelBlock().textContent;
+    await discsArrive(view, [sunLikeHostDisc({ star: 0 })]);
+    const readings = await readingsOver(view, 4);
+
+    // Asked once, of the inspection's system at its time; lit with no sky held, AUTO at the
+    // incident reading at once, a solar twin at the fixture Earth's 0.985 au (EV100 15.75).
+    expect([
+      view.socket.requestsOfKind("host_discs").length,
+      asked?.body.system,
+      asked?.body.time,
+      pending.includes("LIGHTING: PENDING"),
+      primaryLabelBlock().textContent.includes("LIGHTING: PENDING"),
+      /STARS\s*PENDING/u.test(primaryLabelBlock().textContent),
+      Math.abs(firstAutoEv(readings) - 15.75) <= 0.1,
+    ]).toEqual([1, FIXTURE_SYSTEM, { seconds: 3_600, nanos: 0 }, true, false, true, true]);
+  });
+
+  it("is lit by its sky's discs once its sky is held, as before the discs on their own", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const fake = fakeViewEngineSource();
+    const view = renderViewDisplay({
+      store: await nominalStore(),
+      source: fake.source,
+      engines: fake.engines,
+      inspection: earthOpening(),
+    });
+    await openUniverse(view);
+    view.advance(600);
+    await settle();
+    // The discs on their own a tenth as bright as the sky's own: 2.5 magnitudes fainter.
+    await discsArrive(view, [sunLikeHostDisc({ star: 0, absoluteV: SUN_ABSOLUTE_V + 2.5 })]);
+    const before = firstAutoEv(await readingsOver(view, 4));
+    await skyArrivesWithSun(view);
+    const after = (await readingsOver(view, 8)).at(-1) ?? "";
+
+    // AUTO moves from the fainter discs' reading, 15.75 - log₂ 10 = 12.43, to the sky's, 15.75.
+    const afterEv = Number(/^EV100 (-?\d+\.\d) AUTO$/u.exec(after)?.[1]);
+    expect([Math.abs(before - 12.43) <= 0.15, Math.abs(afterEv - 15.75) <= 0.15]).toEqual([
+      true,
       true,
     ]);
   });

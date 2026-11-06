@@ -326,7 +326,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
   it("shade a body with its sections' figure and photometry, and pass its rotation", () => {
     const { scene, pose } = sliceScene();
     const earth = viewBodyOf(scene, FIXTURE_EARTH);
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null)).find(
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null)).find(
       (body) => body.id === FIXTURE_EARTH,
     );
     expect([lit?.figure, lit?.photometry, lit?.rotation]).toEqual([
@@ -339,7 +339,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
 
   it("shade a body without a photometric section with the provisional photometry", () => {
     const { scene, pose } = sliceScene();
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null)).find(
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null)).find(
       (body) => body.id === FIXTURE_JUPITER,
     );
     expect(lit?.photometry).toBe(PROVISIONAL_PHOTOMETRY);
@@ -359,7 +359,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
         return { kind: "class-map", weights, texels, laws: [dark], elsewhere, normals: null };
       },
     };
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), classMaps);
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null), classMaps);
     const earth = lit.find((body) => body.id === FIXTURE_EARTH);
     const jupiter = lit.find((body) => body.id === FIXTURE_JUPITER);
     if (earth === undefined || jupiter === undefined) {
@@ -397,25 +397,30 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
   it("give each body its ground's temperature field where the source holds one, and none emits without (R08.T18.a)", () => {
     const { scene, pose } = sliceScene();
     const field = surfaceTemperatureFieldOf(lavaWorldSurface());
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), undefined, {}, (body) =>
-      body === FIXTURE_EARTH ? field : null,
+    const lit = litBodiesOf(
+      scene,
+      pose,
+      sceneHostDiscs(scene, null, null),
+      undefined,
+      {},
+      (body) => (body === FIXTURE_EARTH ? field : null),
     );
     expect(lit.find((body) => body.id === FIXTURE_EARTH)?.thermal).toBe(field);
     expect(lit.filter((body) => body.thermal !== undefined)).toHaveLength(1);
-    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null));
     expect(bare.filter((body) => body.thermal !== undefined)).toEqual([]);
   });
 
   it("shade every disc uniform without class maps", () => {
     const { scene, pose } = sliceScene();
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null));
     expect(lit.filter((body) => body.surface !== undefined)).toEqual([]);
   });
 
   it("give each body its relief and its survey's coverage mask where the view's terrain holds them, whole or not, and none hands over without (R10.T10.e, R07.T8.h)", () => {
     const { scene, pose } = sliceScene();
     const mask: TextureHandle = { kind: "texture", name: "slice coverage mask" };
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), undefined, {
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null), undefined, {
       reliefs: { reliefM: (body) => (body === FIXTURE_EARTH ? 18_000 : null) },
       terrain: {
         surveyCoverage: (body) => (body === FIXTURE_EARTH ? mask : null),
@@ -431,7 +436,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     ]);
     expect(jupiter).not.toHaveProperty("handoverReliefM");
     expect(jupiter).not.toHaveProperty("surveyCoverage");
-    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null));
     expect(
       bare.filter(
         (body) => body.handoverReliefM !== undefined || body.surveyCoverage !== undefined,
@@ -442,7 +447,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
   it("give no coverage mask to a body without a rotation to read it in (R10.T10.e)", () => {
     const { scene, pose } = sliceScene();
     const mask: TextureHandle = { kind: "texture", name: "slice coverage mask" };
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), undefined, {
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null), undefined, {
       terrain: { surveyCoverage: () => mask, surveyedWhole: () => true },
     });
     expect(lit.find((body) => body.id === FIXTURE_JUPITER)).not.toHaveProperty("surveyCoverage");
@@ -534,7 +539,7 @@ describe("a served giant's disc beneath its gas envelope's air (R08.T16.a.2)", (
       // The Earth's air is not drawn, so the ground given for it is not taken.
       discGrounds: () => ground,
     });
-    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null));
     const jupiter = litBodyNamed(bare, FIXTURE_JUPITER);
     expect(jupiter).toBeDefined();
     expect([

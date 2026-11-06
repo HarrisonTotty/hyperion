@@ -33,19 +33,38 @@ describe("where the INCIDENT meter reads the light (ux-calls-view, item 3b)", ()
   it("reads nothing yet in a scene lit by its sky's discs before its sky is held, and the light once it is", () => {
     const served: ViewRun = { ...RUN, scene: { ...RUN.scene, provenance: { kind: "server" } } };
     const hosts = RUN.scene.hostDiscs ?? [];
+    const sky = { request: { exclude_system: RUN.scene.system }, response: { hosts } };
     expect([
-      incidentReadingLx(served, null, null),
-      (incidentReadingLx(heldTo(PHASE_PLANETS[0]), null, null) ?? 0) > 0,
-      incidentReadingLx({ ...served, camera: heldTo(PHASE_PLANETS[0]).camera }, null, hosts) ===
-        incidentReadingLx(heldTo(PHASE_PLANETS[0]), null, null),
+      incidentReadingLx(served, null, null, null),
+      (incidentReadingLx(heldTo(PHASE_PLANETS[0]), null, null, null) ?? 0) > 0,
+      incidentReadingLx({ ...served, camera: heldTo(PHASE_PLANETS[0]).camera }, null, sky, null) ===
+        incidentReadingLx(heldTo(PHASE_PLANETS[0]), null, null, null),
     ]).toEqual([null, true, true]);
+  });
+
+  it("reads the light of the system's discs on their own before its sky is held (plans R06, R07)", () => {
+    const served: ViewRun = {
+      ...RUN,
+      scene: { ...RUN.scene, provenance: { kind: "server" } },
+      camera: heldTo(PHASE_PLANETS[0]).camera,
+    };
+    const asked = {
+      universe: "000000000000002a",
+      system: RUN.scene.system,
+      discs: RUN.scene.hostDiscs ?? [],
+    };
+    const otherSystems = { ...asked, system: "0000000000000001" };
+    expect([
+      incidentReadingLx(served, null, null, asked),
+      incidentReadingLx(served, null, null, otherSystems),
+    ]).toEqual([incidentReadingLx(heldTo(PHASE_PLANETS[0]), null, null, null), null]);
   });
 
   it("has nowhere to read with neither, which reads no light", () => {
     expect([
       incidentBodyOf(RUN, null),
       incidentBodyOf(RUN, { kind: "body", body: PHASE_STAR }),
-      incidentReadingLx(RUN, null, null),
+      incidentReadingLx(RUN, null, null, null),
     ]).toEqual([null, null, 0]);
   });
 });

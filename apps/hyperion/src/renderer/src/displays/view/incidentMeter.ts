@@ -2,10 +2,15 @@
  * Where a view's `INCIDENT` meter reads the light, and its reading each frame (ux-calls-view, item
  * 3b, the owner's delegated call, 2026-11-01).
  */
-import type { BodyIdHex, HostDiscDto } from "@hyperion/protocol";
+import type { BodyIdHex } from "@hyperion/protocol";
 
 import type { CameraTarget } from "../../view/camera/state";
-import { sceneHostDiscs } from "../../view/lighting/hostLights";
+import {
+  heldHostDiscs,
+  type HostsOfSky,
+  sceneHostDiscs,
+  type SystemHostDiscs,
+} from "../../view/lighting/hostLights";
 import { bringsOwnSettings } from "../../view/scene/model";
 import { incidentIlluminanceLx } from "../../view/lighting/incident";
 import { isLitBody } from "../../view/lighting/retarded";
@@ -31,23 +36,30 @@ export function incidentBodyOf(run: ViewRun, selection: CameraTarget | null): Bo
  * A view's `INCIDENT` reading this frame, lx: the illuminance on a flat receptor at its body
  * ({@link incidentBodyOf}) facing each host disc (`incidentIlluminanceLx`); 0 where no disc
  * reaches the body, and where the view has no body to read at, so that both read `NO LIGHT`;
- * `null` while the scene's lighting is awaited, a scene lit by its sky's discs before its sky is
- * held (`LIGHTING: PENDING`), so that the meter is not yet metered rather than `NO LIGHT`.
+ * `null` while the scene's lighting is awaited, a served scene none of whose system's discs is
+ * held (`LIGHTING: PENDING`; `heldHostDiscs`), so that the meter is not yet metered rather than
+ * `NO LIGHT`.
  *
- * @param skyHosts - The view's sky's host discs (its `response.hosts`), or `null` where it holds
- *   none; a kept scene of its own brings its own.
+ * @param sky - The view's held sky, or `null` where it holds none; a kept scene of its own brings
+ *   its own discs.
+ * @param asked - The scene's system's discs on their own (`host_discs`), or `null`.
  */
 export function incidentReadingLx(
   run: ViewRun,
   selection: CameraTarget | null,
-  skyHosts: ReadonlyArray<HostDiscDto> | null,
+  sky: HostsOfSky | null,
+  asked: SystemHostDiscs | null,
 ): number | null {
-  if (skyHosts === null && !bringsOwnSettings(run.scene)) {
+  if (!bringsOwnSettings(run.scene) && heldHostDiscs(run.scene, sky, asked) === null) {
     return null;
   }
   const body = incidentBodyOf(run, selection);
   return body === null
     ? 0
-    : (incidentIlluminanceLx(run.scene, body, runPose(run), sceneHostDiscs(run.scene, skyHosts)) ??
-        0);
+    : (incidentIlluminanceLx(
+        run.scene,
+        body,
+        runPose(run),
+        sceneHostDiscs(run.scene, sky, asked),
+      ) ?? 0);
 }

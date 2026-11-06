@@ -7,10 +7,18 @@
  * star's scene body is `formatBodyId({ system, bodyIndex: disc.star })`. A light carries the body,
  * not a centre: each frame takes the star's centre from that frame's scene, at the lit body's
  * emitted time (Design note 4), never from R06's apparent placement of the disc, which is
- * aberrated. A server scene's discs are its held sky's `hosts`; a kept scene's its own
- * `ViewScene.hostDiscs`.
+ * aberrated. A server scene's discs are its held sky's `hosts` where that sky leaves the scene's
+ * system out, else the system's discs asked on their own (`host_discs`, plans R06 and R07), so that
+ * a new system is lit before its sky's first reply; a kept scene's its own `ViewScene.hostDiscs`.
  */
-import { type BodyIdHex, formatBodyId, type HostDiscDto } from "@hyperion/protocol";
+import {
+  type BodyIdHex,
+  formatBodyId,
+  type HostDiscDto,
+  type SkyRequest,
+  type SystemIdHex,
+  type UniverseIdHex,
+} from "@hyperion/protocol";
 
 import { norm, sub, type Vec3 } from "../../geometry/vec3";
 import type { Rgb } from "../photometry/toneCurve";
@@ -43,24 +51,69 @@ export function hostLights(scene: ViewScene, discs: ReadonlyArray<HostDiscDto>):
 }
 
 /**
- * The discs a view lights its scene with: a kept scene's own, a server scene's held sky's, as a kept
- * scene of served bodies' are (`VIEW`'s body inspection, the owner's request, 2026-11-01).
+ * A system's stars' discs on their own, as the server's `host_discs` answers them for the system at
+ * a time (plans R06 and R07): the bytes its sky's `hosts` would carry.
+ */
+export interface SystemHostDiscs {
+  readonly universe: UniverseIdHex;
+  readonly system: SystemIdHex;
+  readonly discs: ReadonlyArray<HostDiscDto>;
+}
+
+/** What of a view's held sky its lighting reads: the system the request left out, and its hosts. */
+export interface HostsOfSky {
+  readonly request: Pick<SkyRequest, "exclude_system">;
+  readonly response: { readonly hosts: ReadonlyArray<HostDiscDto> };
+}
+
+/**
+ * The discs a served scene is lit by, or `null` while none of its system is held: its held sky's
+ * `hosts` where that sky left the scene's system out, as before `host_discs`, so that a picture once
+ * its sky is held is unchanged; else its system's discs asked on their own.
  *
- * @param skyHosts - The view's sky's `response.hosts`, or `null` where it has none.
+ * @param sky - The view's held sky, or `null` where it holds none.
+ * @param asked - The discs `host_discs` answered, or `null` where none are held.
+ * @remarks
+ * A sky asked with no system left out, the planet viewer's one sky for every generated planet
+ * (plan R15), names no system, and its scene is lit by its system's discs alone.
+ */
+export function heldHostDiscs(
+  scene: Pick<ViewScene, "system">,
+  sky: HostsOfSky | null,
+  asked: SystemHostDiscs | null,
+): ReadonlyArray<HostDiscDto> | null {
+  if (sky !== null && sky.request.exclude_system === scene.system) {
+    return sky.response.hosts;
+  }
+  return asked !== null && asked.system === scene.system ? asked.discs : null;
+}
+
+/**
+ * The discs a view lights its scene with: a kept scene's own; a server scene's, and a kept scene of
+ * served bodies' (`VIEW`'s body inspection, the owner's request, 2026-11-01), those
+ * {@link heldHostDiscs} gives, none while none is held.
+ *
+ * @param sky - The view's held sky, or `null` where it holds none.
+ * @param asked - The scene's system's discs on their own (`host_discs`), or `null`.
  */
 export function sceneHostDiscs(
   scene: ViewScene,
-  skyHosts: ReadonlyArray<HostDiscDto> | null,
+  sky: HostsOfSky | null,
+  asked: SystemHostDiscs | null,
 ): ReadonlyArray<HostDiscDto> {
-  return bringsOwnSettings(scene) ? (scene.hostDiscs ?? []) : (skyHosts ?? []);
+  return bringsOwnSettings(scene)
+    ? (scene.hostDiscs ?? [])
+    : (heldHostDiscs(scene, sky, asked) ?? []);
 }
 
 /**
  * The lighting state the label block reads: `lit` with any light; else `pending` while the sky is
- * asked and no sky of its arrival is held, and `hosts-not-received` otherwise.
+ * asked and no sky of its arrival is held, or the system's discs are asked on their own and not
+ * answered, and `hosts-not-received` otherwise.
  *
  * @param skyPending - Whether the view's sky has been asked for and no sky of its arrival is held
- *   (`useSky`'s `pending`; false through a re-ask within the arrival, R06.T12.b).
+ *   (`useSky`'s `pending`; false through a re-ask within the arrival, R06.T12.b), or its system's
+ *   discs are asked and not answered (`useHostDiscs`' `pending`).
  */
 export function lightingState(
   lights: ReadonlyArray<HostLight>,

@@ -82,10 +82,21 @@ import {
   serverSceneAtFrame,
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
-import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
+import {
+  cameraSceneOf,
+  type ServedSceneSource,
+  type ViewScene,
+  type ViewStar,
+} from "../../view/scene/model";
 import type { DrawAnchor, DrawnSurveyEdge, LineOfSightPoint } from "../../view/wireframe/drawList";
 import type { StyleAvailability } from "../../view/engine/platform";
-import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
+import {
+  hostLights,
+  lightingState,
+  sceneHostDiscs,
+  type SystemHostDiscs,
+} from "../../view/lighting/hostLights";
+import { type HostDiscsAsk, useHostDiscs } from "../../view/lighting/useHostDiscs";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { AutoExposure, type Metering, meteringFor } from "../../view/post/autoExposure";
 import {
@@ -513,6 +524,14 @@ interface ViewStageProps {
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), asked above the stage
+   * that a new scene remounts, kept by universe and system: a served scene is lit by them until a
+   * sky that names its system is held. `null` before any are held.
+   */
+  readonly hostDiscs: SystemHostDiscs | null;
+  /** Whether the scene's system's discs are asked and not yet answered or refused. */
+  readonly hostDiscsPending: boolean;
   /** The open universe, about which the sky is asked (R06), or `null`. */
   readonly universe: UniverseIdHex | null;
   /** The quality setting the views are budgeted at, and drawn at. */
@@ -621,6 +640,11 @@ interface LoopInputs {
   readonly stars: ReadonlyArray<ViewStar>;
   /** The sky (R06), drawn in the interim stars' place once it has arrived, or `null`. */
   readonly sky: DrawnSky | null;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), which light a served
+   * scene until a sky that names its system is held, or `null`.
+   */
+  readonly hostDiscs: SystemHostDiscs | null;
   /** The styles the adapter offers (R01's `styleAvailability`). */
   readonly availability: StyleAvailability;
   /** The operator's meter (R07.T13.b's control). */
@@ -905,6 +929,8 @@ function ViewStage({
   onLabelBlock,
   stars,
   countLine,
+  hostDiscs,
+  hostDiscsPending,
   universe,
   setting,
   geometry,
@@ -1002,6 +1028,7 @@ function ViewStage({
     tokens: null,
     stars: [],
     sky: null,
+    hostDiscs: null,
     availability: WIREFRAME_ONLY,
     meter,
     onExposureChange,
@@ -1200,6 +1227,7 @@ function ViewStage({
       tokens: canvas === null || !canvas.isConnected ? null : readTokens(canvas),
       stars,
       sky: skyDrawn,
+      hostDiscs,
       availability,
       meter,
       onExposureChange,
@@ -1221,6 +1249,7 @@ function ViewStage({
     canvas,
     stars,
     skyDrawn,
+    hostDiscs,
     availability,
     meter,
     onExposureChange,
@@ -1487,7 +1516,7 @@ function ViewStage({
         drawer?.takeHistogram(),
         dtS,
         auto.meter === "incident"
-          ? incidentReadingLx(run, inputs.selection, inputs.sky?.model.response.hosts ?? null)
+          ? incidentReadingLx(run, inputs.selection, inputs.sky?.model ?? null, inputs.hostDiscs)
           : undefined,
       );
       if (run.source.kind === "server" && current !== null) {
@@ -1555,7 +1584,7 @@ function ViewStage({
           ? null
           : frameWhiteBalance(
               inputs.whiteBalance,
-              framePlacedLights(run, runPose(run), inputs.sky),
+              framePlacedLights(run, runPose(run), inputs.sky, inputs.hostDiscs),
               white,
             );
       let frameInputs: ViewFrameInputs | null = null;
@@ -1573,6 +1602,7 @@ function ViewStage({
           white,
           stars: inputs.stars,
           sky: inputs.sky,
+          hostDiscs: inputs.hostDiscs,
           selection: inputs.selection,
           style: primaryBudget.style,
           setting: paced.setting,
@@ -1684,6 +1714,7 @@ function ViewStage({
         white,
         present: !auto.holds,
         stars: inputs.stars,
+        hostDiscs: inputs.hostDiscs,
         reportCamera:
           run.source.kind === "server" && current !== null ? current.reportCamera : null,
         terrain: session,
@@ -1979,12 +2010,14 @@ function ViewStage({
   };
 
   // The scene's lighting and lit bodies' labels, which every view's photorealistic statements read.
+  // A served scene is lit by its held sky's discs where that sky names its system, else by its
+  // system's discs on their own, which arrive at once (plans R06 and R07).
   const lighting = lightingState(
     hostLights(
       shown.run.scene,
-      sceneHostDiscs(shown.run.scene, viewSky.drawn?.model.response.hosts ?? null),
+      sceneHostDiscs(shown.run.scene, viewSky.drawn?.model ?? null, hostDiscs),
     ),
-    viewSky.pending,
+    viewSky.pending || hostDiscsPending,
   );
   const litLabels = litLabelsOf(shown.run.scene);
   // The primary's STARS line, whose notes depend on the instruments open beside it
@@ -2928,6 +2961,32 @@ function interimAt(
   return input;
 }
 
+/**
+ * What a stage's system's discs are asked of (`useHostDiscs`): a server scene's place's system, at
+ * the time its interim stars are asked at ({@link interimAt}); a kept scene of served bodies' system,
+ * at its start, in its own universe; nothing for any other kept scene, which brings its own, nor
+ * with no universe open.
+ */
+function hostDiscsAt(
+  universe: UniverseIdHex | null,
+  server: ServerInput | null,
+  served: ServedSceneSource | null,
+  keptStart: Pick<ViewScene, "system" | "time">,
+): HostDiscsAsk | null {
+  if (server !== null) {
+    return universe === null
+      ? null
+      : {
+          universe,
+          system: server.place.system,
+          time: interimAt(universe, server.place, server.model.clock.time).time,
+        };
+  }
+  return served === null
+    ? null
+    : { universe: served.universe, system: keptStart.system, time: keptStart.time };
+}
+
 /** No lines: the upper plate's while `MAXIMIZE VIEW` hides it. */
 const NO_LINES: ReadonlyArray<LabelLine> = [];
 
@@ -3085,6 +3144,10 @@ function ViewPanels({
   // and its atmosphere cache, which ask its bodies' records of the server; its session's fields are
   // training's, gated by the server's scratch log, never the live scene's.
   const served = server === null ? (keptStart.served ?? null) : null;
+  // The scene's system's discs on their own, asked from here, above the stage that a new scene
+  // remounts, so that a served scene is lit at once and one of the same system asks nothing again
+  // (plans R06 and R07).
+  const hostDiscs = useHostDiscs(hostDiscsAt(universe, server, served, keptStart));
   // What the chosen scene loads for itself, started here and not as it is made, in render
   // (`ATMOSPHERE TEST`'s media, R08.T10.b). The load is the page's, shared by every stage that
   // chooses the scene, so leaving the scene stops nothing.
@@ -3322,6 +3385,8 @@ function ViewPanels({
         onLabelBlock={onLabelBlock}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
+        hostDiscs={hostDiscs.held}
+        hostDiscsPending={hostDiscs.pending}
         universe={universe}
         setting={setting}
         geometry={terrainGeometry}

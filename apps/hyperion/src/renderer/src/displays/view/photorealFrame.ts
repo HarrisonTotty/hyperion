@@ -4,7 +4,8 @@
  * loop calls it each photorealistic frame.
  *
  * @remarks
- * The lights are the scene's host discs, a kept scene's own `hostDiscs` or the held sky's `hosts`,
+ * The lights are the scene's host discs, a kept scene's own `hostDiscs`, or the held sky's `hosts`
+ * where it names the scene's system, else the system's discs on their own (`sceneHostDiscs`),
  * placed at their stars' drawn centres in the frame for the painter's order (decision-r07-t8a,
  * item 1); the host discs are drawn by R06's `HostDiscLayer` where the scene draws them (its
  * apparent placement), the lit bodies are the scene's planets, dwarf planets and moons, with their
@@ -43,6 +44,7 @@ import {
   type PlacedLight,
   placeLights,
   sceneHostDiscs,
+  type SystemHostDiscs,
 } from "../../view/lighting/hostLights";
 import type { Occluder } from "../../view/lighting/annuli";
 import { isLitBody, type LitBodyLighting, lightingFramesOf } from "../../view/lighting/retarded";
@@ -117,6 +119,11 @@ export interface PhotorealInputs {
   readonly list: WireframeDrawList;
   /** The view's sky, or `null` while the interim field stands in. */
   readonly sky: DrawnSky | null;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), which light a served
+   * scene until a sky that names its system is held (`heldHostDiscs`); absent, none.
+   */
+  readonly hostDiscs?: SystemHostDiscs | null | undefined;
   /** R06's band layer, uploaded with the sky's band, or `null` with no sky. */
   readonly band: BandLayer | null;
   readonly discs: HostDiscLayer;
@@ -401,16 +408,18 @@ export function litBodiesOf(
 
 /**
  * The host stars that light a view's frame, at their stars' centres from its camera at `pose`
- * (`placeLights`): the scene's discs (`sceneHostDiscs`), a kept scene's own or the view's sky's.
+ * (`placeLights`): the scene's discs (`sceneHostDiscs`): a kept scene's own, the view's sky's, or
+ * the system's asked on their own (`hostDiscs`).
  */
 export function framePlacedLights(
   run: ViewRun,
   pose: CameraPose,
   sky: DrawnSky | null,
+  hostDiscs: SystemHostDiscs | null,
 ): PlacedLight[] {
   const { scene } = run;
   const origins = sceneOrigins(scene);
-  const discs = sceneHostDiscs(scene, sky?.model.response.hosts ?? null);
+  const discs = sceneHostDiscs(scene, sky?.model ?? null, hostDiscs);
   const bodies = new Map(scene.bodies.map((body) => [body.id, body]));
   const centreOf = (id: BodyIdHex): Vec3 | null => {
     const body = bodies.get(id);
@@ -430,8 +439,8 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     orientation: pose.orientation,
     fovXRad: (run.camera.fovDeg * Math.PI) / 180,
   };
-  const discs = sceneHostDiscs(scene, sky?.model.response.hosts ?? null);
-  const lights = framePlacedLights(run, pose, sky);
+  const discs = sceneHostDiscs(scene, sky?.model ?? null, inputs.hostDiscs ?? null);
+  const lights = framePlacedLights(run, pose, sky, inputs.hostDiscs ?? null);
   const discFrame = inputs.discs.frame(
     hostPlacements(scene, discs, pose),
     camera,

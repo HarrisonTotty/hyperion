@@ -15,8 +15,9 @@
  * 3. On `SYSTEM` the body's row is selected in the body list, `FOCUS BODY` pressed, which focuses it
  *    or a moon's planet, and `VIEW BODY` pressed, which opens the body in `VIEW`'s inspection.
  * 4. In `VIEW`, once the primary draws photorealistically and no `ATMOSPHERE: PENDING` stands, and
- *    no `LIGHTING: PENDING` either, its sky's host discs having arrived (fix-retina-frame, after
- *    the owner's Mac profile, whose low orbit window measured an unlit, empty frame), the
+ *    no `LIGHTING: PENDING` either, its system's host discs having arrived (fix-retina-frame, after
+ *    the owner's Mac profile, whose low orbit window measured an unlit, empty frame), nor its
+ *    `STARS` line's `PENDING`, its sky's first reply (`host_discs` lights it before), the
  *    exposure must stand at `AUTO`, which the inspection opens on, and, for a body whose record
  *    (`body_detail`, asked in step 1) has a surface, the ground at the line of sight on the lower
  *    plate must read the body's surveyed ground (`ELEVATION`), the inspection having surveyed it as
@@ -81,6 +82,7 @@ import type { FrameSubmission } from "../../../view/engine/types";
 import { LIGHTING_NOT_RECEIVED, LIGHTING_PENDING } from "../../../view/lighting/hostLights";
 import { PHOTOREAL_PASS_LABELS } from "../../../view/photoreal/passes";
 import { INSPECTION_SCENE_NAME } from "../../../view/scenes/inspectionScene";
+import { SKY_PENDING } from "../../../view/sky/label";
 import { TERRAIN_NOT_MODELLED } from "../../../view/terrain/readouts";
 import { FOCUS_KEY, VIEW_BODY_KEY } from "../../system/OrbitMapPanel";
 import type { SystemTarget } from "../../system/systemTarget";
@@ -239,6 +241,15 @@ export function inspectionLighting(
     return "pending";
   }
   return statements.includes(LIGHTING_NOT_RECEIVED) ? "not received" : "lit";
+}
+
+/**
+ * Whether the primary's `STARS` line reads `PENDING` (`SKY_PENDING`): its sky is asked and no reply
+ * of its arrival is held. Its lighting no longer waits on the sky (`host_discs`, plans R06 and R07),
+ * so a run that captures the sky waits this out beside `LIGHTING: PENDING`.
+ */
+export function starsPending(plate: Pick<PrimaryPlate, "line">): boolean {
+  return plate.line("STARS") === SKY_PENDING;
 }
 
 /**
@@ -731,14 +742,17 @@ async function inspect(
     return found;
   };
   /**
-   * Waits out `LIGHTING: PENDING` within the draw's wait, the sky's first reply with its host discs
-   * (its census may take its cores first), and fails on `LIGHTING: NOT RECEIVED`.
+   * Waits out `LIGHTING: PENDING` within the draw's wait, the system's discs, then the `STARS`
+   * line's `PENDING`, the sky's first reply (its census may take its cores first), so that each
+   * capture and window holds the sky as it did while the lighting waited on the sky; and fails on
+   * `LIGHTING: NOT RECEIVED`.
    */
   const lit = async (what: string): Promise<void> => {
     await drawn.until(
       `${what}'s lighting stayed pending`,
       () => inspectionLighting(plate().statements) !== "pending",
     );
+    await drawn.until(`${what}'s stars stayed pending`, () => !starsPending(plate()));
     if (inspectionLighting(plate().statements) === "not received") {
       throw new Error(`views check: ${what} states ${LIGHTING_NOT_RECEIVED}`);
     }

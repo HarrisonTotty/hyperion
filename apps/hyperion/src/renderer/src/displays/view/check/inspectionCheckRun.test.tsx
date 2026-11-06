@@ -36,6 +36,7 @@ import {
   restedSlantM,
   runInspectionCheck,
   slantRangeM,
+  starsPending,
 } from "./inspectionCheckRun";
 import { lowerYieldLine } from "../viewRoom";
 import { freeRateReading } from "../viewRun";
@@ -285,6 +286,11 @@ function submissionOf(label: string, materials: ReadonlyArray<string>): FrameSub
   };
 }
 
+/** A plate whose `STARS` line reads `stars`, and no other line. */
+function plateWith(stars: string | null): { readonly line: (label: string) => string | null } {
+  return { line: (label) => (label === "STARS" ? stars : null) };
+}
+
 describe("the inspection run's lighting and its bodies drawn (fix-retina-frame)", () => {
   it("reads the lighting as pending, not received, or lit from the statements", () => {
     expect(
@@ -294,6 +300,12 @@ describe("the inspection run's lighting and its bodies drawn (fix-retina-frame)"
         ["ATMOSPHERE: APPROXIMATE"],
       ].map(inspectionLighting),
     ).toEqual(["pending", "not received", "lit"]);
+  });
+
+  it("reads the stars as pending while the STARS line reads PENDING alone (plans R06, R07)", () => {
+    expect(
+      [plateWith("PENDING"), plateWith("V 10.1 mag S CAM"), plateWith(null)].map(starsPending),
+    ).toEqual([true, false, false]);
   });
 
   it("counts a body's disc, its figure's mesh or its terrain in the bodies and discs passes", () => {

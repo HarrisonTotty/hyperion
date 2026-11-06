@@ -10179,3 +10179,12 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - The camera's glare was checked against a camera's veiling glare and kept as it is (the
     figures are in the lane's outbox). `--views-check --planet-viewer --randomize <N>` captures
     `RANDOMIZE`'s first N draws under both balances.
+- **A new system lit at once (feat-host-discs-at-once, 2026-11-06).**
+  - `useHostDiscs` (above the stage, kept by universe and system) asks `host_discs` once a served
+    scene's system is known; `sceneHostDiscs(scene, sky, asked)` and `heldHostDiscs` take the held
+    sky's `hosts` where its request left the scene's system out, else those discs. The meter's
+    `incidentReadingLx` takes `(run, selection, sky, asked)`; `ViewFrameInputs`,
+    `PhotorealInputs` and `InstrumentsFrame` carry `hostDiscs`.
+  - `LIGHTING: PENDING` also stands while the discs are asked and unanswered. The inspection and
+    planet-viewer runs wait out `STARS` `PENDING` too (`starsPending`), since lighting no longer
+    waits on the sky.

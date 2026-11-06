@@ -10169,3 +10169,10 @@ CensusCost)`.
     `CpuPool::new`.
   - `tests/common/alerts.rs`'s `walking_server` (`WALK_WORKERS`, 4) for the two whole-galaxy walks,
     which take four nextest slots, and the caps' rays test three.
+- **A system's discs on their own (feat-host-discs-at-once, 2026-11-06).**
+  - Protocol: `host_discs {universe, system, time}` answers `HostDiscsDto`, its `hosts` the bytes
+    a sky leaving the system out carries as `hosts` at that time; additive, after R15's kinds.
+  - Server: `requests::sky::host_discs_answer`, its lookup and discs interactive jobs; `discs_of`
+    is the one body of both; `unknown_system_named(field, …)` replaces `unknown_exclude`, and
+    `check_exclude` takes `(field, value)`.
+  - Served with `--serve-sky=false` too (lean, 2026-11-06): it reads no table or census.

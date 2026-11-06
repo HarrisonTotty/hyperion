@@ -23,6 +23,7 @@ import type { AtmosphereViewReport } from "../../view/atmosphere/AtmosphereCache
 import type { BodyLightSources } from "../../view/bodies/draw";
 import type { ColourTokens } from "../../spatial/paint";
 import type { LitRegime } from "../../view/bodies/regime";
+import type { SystemHostDiscs } from "../../view/lighting/hostLights";
 import type { CameraPose } from "../../view/camera/pose";
 import type { CameraTarget, RenderStyle } from "../../view/camera/state";
 import type { StyleAvailability } from "../../view/engine/platform";
@@ -111,6 +112,11 @@ export interface ViewFrameInputs {
   readonly stars: ReadonlyArray<ViewStar>;
   /** The sky (R06), or `null` before it arrives. */
   readonly sky: DrawnSky | null;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), which light a served
+   * scene until a sky that names its system is held; absent, none.
+   */
+  readonly hostDiscs?: SystemHostDiscs | null | undefined;
   readonly selection: CameraTarget | null;
   /** The style its budget draws (`ViewBudget.style`). */
   readonly style: RenderStyle;
@@ -758,6 +764,7 @@ export class ViewFrameDrawer {
           white: inputs.white,
           list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
           sky,
+          hostDiscs: inputs.hostDiscs,
           band: sky === null ? null : this.#band,
           discs: this.#discs,
           cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),

@@ -227,7 +227,7 @@ const NO_NOTES: ShownNotes = { edges: NO_SURVEY_EDGES, notes: [] };
  * kept scene's own star discs, with no sky asked, since the spike draws none.
  */
 function spikeLightingOf(scene: ViewScene): ReturnType<typeof lightingState> {
-  return lightingState(hostLights(scene, sceneHostDiscs(scene, null)), false);
+  return lightingState(hostLights(scene, sceneHostDiscs(scene, null, null)), false);
 }
 
 /** The canvas's drawing size, device pixels, from its stage's laid-out size. */
