@@ -31,6 +31,9 @@ export type {
   ViewsCheckTerrainFixture,
 } from "./api";
 
+/** The most draws `--randomize` may ask a planet viewer run for (`MAX_RANDOMIZE_DRAWS`). */
+export const MAX_RANDOMIZE_DRAWS = 32;
+
 /** The switch carrying the options. */
 const VIEWS_CHECK_SWITCH = "--hyperion-views-check=";
 
@@ -131,7 +134,8 @@ export const NAMED_HANDOVER_LOOK_NAMES = [
  * (`passTimes`, `true`) a terrain run alone may record (R14's Mac measurements), the count of
  * WebGPU calls (`countGpuCalls`, `true`) an inspection profile alone may make (plan R14), and the
  * lit passes' probe (`litProbe`, R08.T9.b's measurement) an inspection's frame profile alone may
- * draw under.
+ * draw under, and the `RANDOMIZE` draws (`randomize`, 1 to {@link MAX_RANDOMIZE_DRAWS}) a planet
+ * viewer run alone may capture.
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   const base = readLaunchBase(value);
@@ -152,6 +156,17 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   const counted: ViewsCheckLaunch = countGpuCalls === true ? { ...base, countGpuCalls } : base;
   const probed: ViewsCheckLaunch = litProbe === undefined ? counted : { ...counted, litProbe };
   const timed: ViewsCheckLaunch = passTimes === true ? { ...probed, passTimes } : probed;
+  const { randomize } = value;
+  if (randomize !== undefined) {
+    return base.run === "planet-viewer" &&
+      value["look"] === undefined &&
+      typeof randomize === "number" &&
+      Number.isInteger(randomize) &&
+      randomize >= 1 &&
+      randomize <= MAX_RANDOMIZE_DRAWS
+      ? { ...timed, randomize }
+      : null;
+  }
   if (value["look"] === undefined) {
     return timed;
   }

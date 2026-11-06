@@ -10,7 +10,9 @@
  * port with its `pow(v, 2.2)`), encoded here exactly as the sRGB store encodes the wireframe's
  * sprites: an isolated star on black is identical in both styles before the dither and within one
  * code after it. Cased symbology follows in a second canvas pass that loads this one's colour
- * (`FrameSubmission.colourLoad` `"load"`, T16).
+ * (`FrameSubmission.colourLoad` `"load"`, T16). Under the `HOST` white balance the light is first
+ * adapted to its host star's white by one 3 × 3 (`whiteBalance.ts`); under `D65` the step is
+ * skipped, so that the image is today's to the bit.
  */
 
 import FRAME_WGSL from "../shaders/frame.wgsl?raw";
@@ -22,7 +24,7 @@ import type {
   TextureHandle,
   WgslMaterialSpec,
 } from "../engine/types";
-import { type Rgb, spriteToneCurve } from "../photometry/toneCurve";
+import { applyRows, type Rgb, type Rows3, spriteToneCurve } from "../photometry/toneCurve";
 import { packGlareTerms } from "./bloomChain";
 import type { GlareSpreadTerms } from "./glare";
 import GLARE_WGSL from "./glare.wgsl?raw";
@@ -51,6 +53,10 @@ export const TONEMAP_MATERIAL: WgslMaterialSpec = {
     { name: "glareBroad", type: "vec4f" },
     { name: "glareMisc", type: "vec4f" },
     { name: "dither", type: "f32" },
+    { name: "balance", type: "f32" },
+    { name: "balanceRow0", type: "vec4f" },
+    { name: "balanceRow1", type: "vec4f" },
+    { name: "balanceRow2", type: "vec4f" },
   ],
   samplers: [{ name: "hdrSampler", filter: "linear", address: "clamp-to-edge", binding: 1 }],
   textures: [
@@ -81,16 +87,29 @@ export function tpdf(uniform: number): number {
 }
 
 /**
- * The pass's output for one texel's light, the CPU twin of `fragmentMain`'s last steps: AgX less
- * its floor of the exposed light, encoded, plus the dither in LSB.
+ * The pass's output for one texel's light, the CPU twin of `fragmentMain`'s last steps: the white
+ * balance where there is one, AgX less its floor of the exposed light, encoded, plus the dither in
+ * LSB.
  *
  * @param light - The texel's light in the target's units, after bloom and glare.
  * @param exposure - The exposure scale over the target's pre-exposure.
  * @param noise - The texel's TPDF value per channel, in [−1, 1], or `null` for no dither.
+ * @param balance - The white balance's rows (`BalancedWhite.rows`), or `null` under `D65`, which
+ *   applies nothing.
  * @returns The stored value per channel in [0, 1], before the format's rounding.
  */
-export function tonemapTexel(light: Rgb, exposure: number, noise: Rgb | null): Rgb {
-  const display = spriteToneCurve([light[0] * exposure, light[1] * exposure, light[2] * exposure]);
+export function tonemapTexel(
+  light: Rgb,
+  exposure: number,
+  noise: Rgb | null,
+  balance: Rows3 | null = null,
+): Rgb {
+  const balanced = balance === null ? light : applyRows(balance, light);
+  const display = spriteToneCurve([
+    balanced[0] * exposure,
+    balanced[1] * exposure,
+    balanced[2] * exposure,
+  ]);
   // Black stays black: dithering a 0 would scatter code-1 texels over empty space.
   const encode = (channel: 0 | 1 | 2): number => {
     const encoded = srgbEncode(display[channel]);
@@ -129,10 +148,18 @@ export interface TonemapUniforms {
   readonly terms: GlareSpreadTerms;
   /** Whether to dither: off only for the harness's twin check. */
   readonly dither: boolean;
+  /**
+   * The white balance's rows, linear Rec. 709 (`BalancedWhite.rows`), or `null` (or absent) under
+   * `D65`, whose step is skipped.
+   */
+  readonly balance?: Rows3 | null | undefined;
 }
 
 /** The uniforms as the draw takes them, by `Draw` member name. */
 export function tonemapUniforms(values: TonemapUniforms): Readonly<Record<string, Float32Array>> {
+  const rows = values.balance ?? null;
+  const row = (i: 0 | 1 | 2): Float32Array =>
+    rows === null ? new Float32Array(4) : new Float32Array([...rows[i], 0]);
   return {
     exposure: new Float32Array([values.exposure]),
     threshold: new Float32Array([values.threshold]),
@@ -140,6 +167,10 @@ export function tonemapUniforms(values: TonemapUniforms): Readonly<Record<string
     levelOneWeight: new Float32Array([values.levelOneWeight]),
     sourceCount: new Float32Array([values.sourceCount]),
     dither: new Float32Array([values.dither ? 1 : 0]),
+    balance: new Float32Array([rows === null ? 0 : 1]),
+    balanceRow0: row(0),
+    balanceRow1: row(1),
+    balanceRow2: row(2),
     ...packGlareTerms(values.terms),
   };
 }

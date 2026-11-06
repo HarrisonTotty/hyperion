@@ -69,6 +69,7 @@ import { linearColour } from "../../view/wireframe/submit";
 import type { ViewEngineSource } from "./useViewEngine";
 import { GRID_KEY } from "./displayKeys";
 import { ViewDisplay } from "./ViewDisplay";
+import { ViewFrameDrawer } from "./viewFrameDrawer";
 import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import { ViewSceneProvider } from "./ViewSceneProvider";
 import { runPose, STAR_SOURCE, STARS_WITHOUT_POSITION, startRun, stepRun } from "./viewRun";
@@ -1430,6 +1431,33 @@ describe("the VIEW display's style (R07.T8.a)", () => {
       throw new Error("the view draws PHOTOREALISTIC");
     }
     expect(lastFrame()?.label).not.toBe(PHOTOREAL_PASS_LABELS.symbology);
+  });
+
+  it("draws every frame at the host's white under HOST as it opens, and at none under D65 (2026-11-05)", async () => {
+    const { user, advance } = setup({ store: await nominalStore() });
+    await settle();
+    advance(100);
+    await user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    advance(100);
+    await user.keyboard("4");
+    advance(100);
+    await settle();
+    advance(300);
+    const draw = vi.spyOn(ViewFrameDrawer.prototype, "draw");
+    advance(300);
+    const host = draw.mock.calls.map(([inputs]) => inputs.white?.teffK ?? null);
+    const hostLine = labelBlock().includes("WHITE BALANCEHOST · T EFF 5772 K");
+    draw.mockClear();
+    await user.click(screen.getByRole("button", { name: "D65" }));
+    advance(300);
+    const d65 = draw.mock.calls.map(([inputs]) => inputs.white);
+    draw.mockRestore();
+    expect([
+      host.length > 0 && host.every((teffK) => teffK === 5_772),
+      hostLine,
+      d65.length > 0 && d65.every((white) => white === null),
+      labelBlock().includes("WHITE BALANCED65"),
+    ]).toEqual([true, true, true, true]);
   });
 
   it("switches to the photorealistic style from its control", async () => {

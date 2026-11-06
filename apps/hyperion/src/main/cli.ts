@@ -93,7 +93,10 @@
  * `--atmosphere`. With `--planet-viewer` (plan R15, T6) it runs the planet viewer run instead: the
  * first universe the server lists opened on `GALAXY`, the `PLANET VIEWER`'s default planet generated
  * and captured from orbit, from low orbit and on its surface looking along the ground; it is refused
- * beside `--terrain`, `--atmosphere` or `--inspection`, and with `--universe` or `--body`. With
+ * beside `--terrain`, `--atmosphere` or `--inspection`, and with `--universe` or `--body`; with
+ * `--randomize <COUNT>` (the owner's report, 2026-11-05) it presses `RANDOMIZE` that many times in
+ * place of the three ranges and captures each draw from orbit under each white balance,
+ * `--randomize` being refused without `--planet-viewer`. With
  * `--timing` too (the owner's report, 2026-11-01) the inspection run profiles
  * its frame from orbit, closed in and low over the ground, per pass and per thread, into
  * `target/views-check/timing/`; `--timing` is refused without `--inspection`. With
@@ -163,6 +166,7 @@ import {
 import {
   LIT_PROBE_NAMES,
   MARCH_PROBE_NAMES,
+  MAX_RANDOMIZE_DRAWS,
   NAMED_HANDOVER_LOOK_NAMES,
   type ViewsCheckLaunch,
 } from "../preload/viewsCheckLaunch";
@@ -266,6 +270,17 @@ export function parseWorkers(value: string): number {
     throw new InvalidArgumentError("expected a worker count from 1 to 64");
   }
   return workers;
+}
+
+/** Reads a `--randomize` count: the `RANDOMIZE` draws a planet viewer run captures, 1 to 32. */
+export function parseRandomize(value: string): number {
+  const count = /^\d{1,2}$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isInteger(count) || count < 1 || count > MAX_RANDOMIZE_DRAWS) {
+    throw new InvalidArgumentError(
+      `expected a count of draws from 1 to ${String(MAX_RANDOMIZE_DRAWS)}`,
+    );
+  }
+  return count;
 }
 
 /** Reads a `--device-pixel-ratio` value: 1, 2 or 3. */
@@ -446,6 +461,12 @@ export function buildCommand(version: string): Command {
         "--inspection",
         "the check's inspection run (the owner's request): --body opened from SYSTEM through VIEW BODY, captured",
       ),
+    )
+    .addOption(
+      new Option(
+        "--randomize <COUNT>",
+        "the planet viewer run's RANDOMIZE draws, each captured under both white balances, in place of its three ranges",
+      ).argParser(parseRandomize),
     )
     .addOption(
       new Option(
@@ -650,6 +671,14 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
       options["inspection"] === true)
   ) {
     command.error("error: --planet-viewer is a run of its own beside --views-check; give it alone");
+  }
+  if (
+    options["randomize"] !== undefined &&
+    (options["planetViewer"] !== true || options["viewsCheck"] !== true)
+  ) {
+    command.error(
+      "error: --randomize is an option of --views-check --planet-viewer, which was not given",
+    );
   }
   if (options["inspection"] === true && options["viewsCheck"] !== true) {
     command.error("error: --inspection is an option of --views-check, which was not given");
@@ -894,6 +923,8 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     ...litProbeOf(options),
     // Refused without `--handover` before this is reached; commander holds it to the three names.
     ...lookOf(options),
+    // Refused without `--planet-viewer` before this is reached; commander has checked its count.
+    ...(typeof options["randomize"] === "number" ? { randomize: options["randomize"] } : {}),
     // The terrain run's alone; any other run takes the switch for its timestamps only.
     ...(run === "terrain" && options["hyperionGpuTiming"] === true ? { passTimes: true } : {}),
   };

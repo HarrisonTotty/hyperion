@@ -124,6 +124,10 @@
 # Before the ground's wait it waits, within the draw's, for the server's warm-up, its sky's first
 # reply, and goes on past it: on a cold server the galaxy's tables and the census's first step hold
 # every worker, and a first launch could outwait the ground's wait (R15.T6's finding).
+# With --randomize <COUNT> (the owner's report, 2026-11-05) it presses RANDOMIZE that many times in
+# place of all of these and captures each draw from orbit under WHITE BALANCE HOST and D65, as
+# between-planet-viewer-draw-<n>-host.png and -d65.png with their -maximized twins, each launch's
+# limit 240 s longer a draw.
 # One setting, high unless given; it exits 1 when a step does not take effect or a reading does not
 # come, the planet's ground is not modelled, or a fault line stands on a capture.
 #
@@ -211,6 +215,7 @@ whole=0
 timing=0
 setting=""
 ratio=1
+draws=0
 check_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -222,6 +227,12 @@ while [[ $# -gt 0 ]]; do
         --atmosphere) atmosphere=1; check_args+=("$1"); shift ;;
         --inspection) inspection=1; check_args+=("$1"); shift ;;
         --planet-viewer) planet=1; check_args+=("$1"); shift ;;
+        --randomize)
+            if [[ $# -lt 2 ]]; then
+                echo "views check: --randomize needs a count of draws" >&2
+                exit 2
+            fi
+            draws="$2"; check_args+=("$1" "$2"); shift 2 ;;
         --whole) whole=1; shift ;;
         --timing) timing=1; check_args+=("$1"); shift ;;
         --universe) served=1; check_args+=("$1"); shift ;;
@@ -242,6 +253,12 @@ while [[ $# -gt 0 ]]; do
         *) check_args+=("$1"); shift ;;
     esac
 done
+
+# The count of draws, checked here as well as by the client, since each launch's limit counts it.
+if ! [[ "$draws" =~ ^[0-9]{1,2}$ ]]; then
+    echo "views check: --randomize needs a count of draws from 1 to 32, not $draws" >&2
+    exit 2
+fi
 
 # The ratio, checked here as well as by the client, since the software mode's screen is sized by it.
 if [[ "$ratio" != 1 && "$ratio" != 2 && "$ratio" != 3 ]]; then
@@ -339,7 +356,7 @@ elif [[ $atmosphere -eq 1 ]]; then
 elif [[ $inspection -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 1020) + (timing == 1 ? 1800 : 0) ))
 elif [[ $planet -eq 1 ]]; then
-    limit=$(( smoke == 1 ? 600 : 1020 ))
+    limit=$(( (smoke == 1 ? 600 : 1020) + 240 * draws ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
 fi

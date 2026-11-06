@@ -1184,6 +1184,12 @@ export interface ViewsCheckLaunch {
    */
   readonly look?: HandoverLookName;
   /**
+   * The `RANDOMIZE` draws a `--planet-viewer` launch captures in place of its three ranges
+   * (`--randomize`; the owner's report, 2026-11-05), 1 to 32, each under both white balances;
+   * absent on every other launch.
+   */
+  readonly randomize?: number;
+  /**
    * The terrain run's GPU time by pass (`--hyperion-gpu-timing`; R14's Mac measurements): present,
    * and `true`, only on a `--terrain` launch given the switch, each of whose phases then records
    * its passes' times ({@link TerrainCheckPhaseRecord.passes}); absent on every other launch. The

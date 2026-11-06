@@ -22,6 +22,7 @@ import { type Metering, meterStatus } from "../../view/post/autoExposure";
 import { ENABLE_KEY, INHIBIT_KEY } from "./displayKeys";
 import { readingParts, unbrokenRuns } from "./ViewLabelBlock";
 import { exposureReading } from "./viewRun";
+import { WhiteBalanceControl, type WhiteBalanceControlProps } from "./WhiteBalanceControl";
 
 /** Props of {@link ExposurePanel}. */
 export interface ExposurePanelProps {
@@ -47,6 +48,11 @@ export interface ExposurePanelProps {
    * column, to which the focus goes when the meter's panel goes (R07.T16.b's ruling), or none.
    */
   readonly inhibitRef?: Ref<HTMLButtonElement> | undefined;
+  /**
+   * The photorealistic style's `WHITE BALANCE`, its reading and its choice, after the commands,
+   * while a photorealistic image is drawn (the owner's report, 2026-11-05); none otherwise.
+   */
+  readonly whiteBalance?: WhiteBalanceControlProps | undefined;
 }
 
 /** The decimals a `MAN` entry keeps and shows: one, the reading's precision. */
@@ -552,6 +558,7 @@ export function ExposurePanel({
   id,
   hidden,
   inhibitRef,
+  whiteBalance,
 }: ExposurePanelProps) {
   const titleId = useId();
   // `INHIBIT` shuts the automation down under `AUTO` and takes a system inhibit over, whatever its
@@ -602,6 +609,7 @@ export function ExposurePanel({
           buttonRef={inhibitRef}
         />
       </div>
+      {whiteBalance === undefined ? null : <WhiteBalanceControl {...whiteBalance} />}
     </section>
   );
 }

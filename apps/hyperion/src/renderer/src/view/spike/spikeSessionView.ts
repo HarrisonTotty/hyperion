@@ -193,6 +193,8 @@ export class SpikeSessionView {
       size: frame.stage,
       tokens: frame.tokens,
       exposure: this.#exposure,
+      // The spike draws at D65, as its captures always have.
+      white: null,
       stars: [],
       sky: null,
       selection: frame.selection,

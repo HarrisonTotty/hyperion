@@ -1,4 +1,10 @@
-import type { BodyIdHex, DetailLevelDto, UniverseIdHex, UniverseTime } from "@hyperion/protocol";
+import type {
+  BodyIdHex,
+  DetailLevelDto,
+  SystemIdHex,
+  UniverseIdHex,
+  UniverseTime,
+} from "@hyperion/protocol";
 import {
   type FocusEvent,
   type KeyboardEvent,
@@ -82,12 +88,18 @@ import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { AutoExposure, type Metering, meteringFor } from "../../view/post/autoExposure";
+import {
+  type BalancedWhite,
+  DEFAULT_WHITE_BALANCE,
+  frameWhiteBalance,
+  type WhiteBalance,
+} from "../../view/post/whiteBalance";
 import { histogramMeterOf, type MeterMode } from "../../view/post/meter";
 import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
 import { placeLines, useCameraPlace } from "./cameraPlace";
 import { KeyLegend } from "./KeyLegend";
 import { type DragKind, dragKindOf } from "./useViewDrag";
-import { litLabelsOf } from "./photorealFrame";
+import { framePlacedLights, litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import {
   availabilityOf,
@@ -266,6 +278,7 @@ import {
   targetKey,
   type ViewRun,
   withGridLine,
+  withWhiteBalanceLine,
   withSceneStarsLine,
 } from "./viewRun";
 import { incidentReadingLx } from "./incidentMeter";
@@ -460,6 +473,12 @@ interface ViewStageProps {
   readonly engineState: ViewEngineState;
   readonly exposure: ExposureControl;
   readonly onExposureChange: (exposure: ExposureControl) => void;
+  /**
+   * The photorealistic style's `WHITE BALANCE` (the owner's report, 2026-11-05), held above the
+   * stage as the exposure is, so that a new scene keeps it; every view draws at it.
+   */
+  readonly whiteBalance: WhiteBalance;
+  readonly onWhiteBalanceChange: (balance: WhiteBalance) => void;
   /** The operator's meter, held above the stage as the exposure is, so a new scene keeps it. */
   readonly meter: MeterMode;
   readonly onMeterChange: (meter: MeterMode) => void;
@@ -592,6 +611,8 @@ function budgetOf(budgets: ReadonlyMap<ViewId, ViewBudget>, id: ViewId): ViewBud
 /** What the drawing loop reads of the display, kept current by an effect. */
 interface LoopInputs {
   readonly exposure: ExposureControl;
+  /** The views' white balance (`WHITE BALANCE`), read at each frame. */
+  readonly whiteBalance: WhiteBalance;
   readonly selection: CameraTarget | null;
   readonly reducedMotion: boolean;
   readonly size: ElementSize | null;
@@ -647,6 +668,11 @@ interface Published {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style the frame was drawn in, which the label block states (R07.T8.a). */
   readonly drawnStyle: RenderStyle;
+  /**
+   * The effective temperature of the star the display's `HOST` white balance adapts to, K
+   * (`BalancedWhite.teffK`), which `WHITE BALANCE` states; `null` where it adapts none.
+   */
+  readonly balancedTeffK: number | null;
   /**
    * Whether the frame drew the kept scene's own stars (`ViewFrameDrawn.sceneStars`), which the
    * `STARS` line then states as `SCENE TEST FIELD`, with no count line (R08.T10.b).
@@ -864,6 +890,8 @@ function ViewStage({
   engineState,
   exposure,
   onExposureChange,
+  whiteBalance,
+  onWhiteBalanceChange,
   meter,
   onMeterChange,
   easedMoves,
@@ -902,6 +930,7 @@ function ViewStage({
     run: initial,
     anchors: [],
     drawnStyle: initial.camera.style,
+    balancedTeffK: null,
     sceneStars: false,
     photoreal: "idle",
     terrain: null,
@@ -966,6 +995,7 @@ function ViewStage({
   const labelsRef = useRef(new Map<string, HTMLElement>());
   const inputsRef = useRef<LoopInputs>({
     exposure,
+    whiteBalance,
     selection,
     reducedMotion,
     size,
@@ -1161,6 +1191,7 @@ function ViewStage({
   useLayoutEffect(() => {
     inputsRef.current = {
       exposure,
+      whiteBalance,
       selection,
       reducedMotion,
       size,
@@ -1183,6 +1214,7 @@ function ViewStage({
     };
   }, [
     exposure,
+    whiteBalance,
     selection,
     reducedMotion,
     size,
@@ -1294,6 +1326,12 @@ function ViewStage({
     let animationFrame = -1;
     let primaryMs: number | null = null;
     let drawnStyle: RenderStyle = "wireframe";
+    // The display's white (WHITE BALANCE), found each primary frame from the primary's lights, and
+    // given to every view, as the exposure is; the star it adapted to is kept against a near-equal
+    // one.
+    let white: BalancedWhite | null = null;
+    // The system it was found in: a star's index names a star of its own system alone.
+    let whiteSystem: SystemIdHex | null = null;
     // Whether the last frame drawn drew the photorealistic image, presented or held back.
     let imageDrawn = false;
     // Whether that image was drawn below its setting's resolution (the owner's report).
@@ -1506,6 +1544,20 @@ function ViewStage({
                 grants: served.grants,
                 linkUp: inputs.linkUp,
               };
+      // The white every view of the display draws at: the primary's brightest host star's under
+      // HOST, from the primary's camera, whatever style the primary draws (the UX ruling).
+      if (run.scene.system !== whiteSystem) {
+        whiteSystem = run.scene.system;
+        white = null;
+      }
+      white =
+        inputs.whiteBalance === "d65"
+          ? null
+          : frameWhiteBalance(
+              inputs.whiteBalance,
+              framePlacedLights(run, runPose(run), inputs.sky),
+              white,
+            );
       let frameInputs: ViewFrameInputs | null = null;
       if (drawer !== null) {
         if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
@@ -1518,6 +1570,7 @@ function ViewStage({
           size: inputs.size,
           tokens: inputs.tokens,
           exposure: reading.control,
+          white,
           stars: inputs.stars,
           sky: inputs.sky,
           selection: inputs.selection,
@@ -1628,6 +1681,7 @@ function ViewStage({
         // The primary's applied exposure, and its hold, so that no instrument shows a cut's new
         // scene at the exposure from before it (fix-view-light).
         exposure: reading.control,
+        white,
         present: !auto.holds,
         stars: inputs.stars,
         reportCamera:
@@ -1650,6 +1704,7 @@ function ViewStage({
           run,
           anchors,
           drawnStyle,
+          balancedTeffK: white?.teffK ?? null,
           sceneStars,
           photoreal: drawer?.photorealStatus ?? "idle",
           terrain: terrainAnnunciation,
@@ -1939,6 +1994,10 @@ function ViewStage({
   // The meter's control stands beside a drawn photorealistic image only, and the primary's block
   // states the meter while it does (decision-r07-t19-layout, item 1b).
   const meterStands = shown.drawnStyle === "photorealistic";
+  // The white balance stands while any view of the display draws a photorealistic image, since
+  // every view draws at the primary's white (the UX ruling, 2026-11-06).
+  const balanceStands =
+    meterStands || instruments.slots.some((slot) => slot.shown?.drawnStyle === "photorealistic");
   // The meter as the panels show it: a meter's own status goes at once with the meter that found
   // nothing, in the render of the operator's choice (R07.T16.b).
   const meterShown = meteringFor(metering, meter);
@@ -1971,22 +2030,30 @@ function ViewStage({
     ...primaryPhotoreal,
   ];
   const primaryLines = withPlaceLines(
-    withMeterLine(
-      withQualityLine(
-        withGridLine(
-          withDrawnStyle(
-            withSceneStarsLine(
-              withSkyLine(labelLines(shown.run, exposure, stale, shown.contourIntervalM), skyLine),
-              shown.sceneStars,
+    withWhiteBalanceLine(
+      withMeterLine(
+        withQualityLine(
+          withGridLine(
+            withDrawnStyle(
+              withSceneStarsLine(
+                withSkyLine(
+                  labelLines(shown.run, exposure, stale, shown.contourIntervalM),
+                  skyLine,
+                ),
+                shown.sceneStars,
+              ),
+              shown.drawnStyle,
             ),
+            grid,
             shown.drawnStyle,
           ),
-          grid,
-          shown.drawnStyle,
+          setting,
         ),
-        setting,
+        meterStands ? meter : null,
       ),
-      meterStands ? meter : null,
+      whiteBalance,
+      shown.balancedTeffK,
+      balanceStands,
     ),
     placeLines(place, stale),
   );
@@ -2668,6 +2735,15 @@ function ViewStage({
             id={foldIds.exposure}
             hidden={folded("exposure")}
             inhibitRef={inhibitButtonRef}
+            whiteBalance={
+              balanceStands
+                ? {
+                    balance: whiteBalance,
+                    balancedTeffK: shown.balancedTeffK,
+                    onBalance: onWhiteBalanceChange,
+                  }
+                : undefined
+            }
           />
           {meterStands ? (
             <MeterControl
@@ -2929,6 +3005,8 @@ function ViewPanels({
   const { scene, sceneName, keptName, knownSystem, choose, inspection, closeInspection } = host;
   const engineState = useViewEngine(engineSource);
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
+  // The photorealistic style's white balance, the display's own, kept through every scene.
+  const [whiteBalance, setWhiteBalance] = useState<WhiteBalance>(DEFAULT_WHITE_BALANCE);
   // The operator's meter, with the opening it was chosen in (ux-calls-view, item 3b).
   const [meterChoice, setMeterChoice] = useState<MeterChoice>(DEFAULT_METER_CHOICE);
   const [easedMoves, setEasedMoves] = useState(false);
@@ -3229,6 +3307,8 @@ function ViewPanels({
         engineState={engineState}
         exposure={exposure}
         onExposureChange={setExposure}
+        whiteBalance={whiteBalance}
+        onWhiteBalanceChange={setWhiteBalance}
         meter={meter}
         onMeterChange={onMeterChange}
         easedMoves={easedMoves}

@@ -5185,6 +5185,24 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   contain: inline-size;
 }
 
+/*
+ * The photorealistic style's white balance after the exposure's commands (the owner's report,
+ * 2026-11-05): its reading and its choice, set as the meter's are.
+ */
+.view-exposure__balance {
+  margin: 0.75rem 0 0;
+}
+
+.view-exposure__balance > .field {
+  margin: 0;
+}
+
+/* Room for the longest reading a host allows, `HOST · T EFF 200,000 K`, so that it keeps its width. */
+.view-exposure__balance-reading {
+  display: inline-block;
+  min-width: 22ch;
+}
+
 /* The exposure meter beside the exposure panel (plan R07, T13.b). */
 .view-meter__reading,
 .view-meter__value {

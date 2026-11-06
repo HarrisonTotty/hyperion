@@ -641,6 +641,19 @@ describe("the several-views check's options", () => {
     });
   });
 
+  it("takes --randomize, the planet viewer run's RANDOMIZE draws, beside --planet-viewer alone", () => {
+    expect(
+      parse(["--views-check", "--planet-viewer", "--randomize", "8"]).viewsCheck,
+    ).toMatchObject({ run: "planet-viewer", randomize: 8 });
+    const without = refusal(["--views-check", "--randomize", "8"]);
+    expect([without.exitCode, without.message]).toEqual([
+      1,
+      "error: --randomize is an option of --views-check --planet-viewer, which was not given",
+    ]);
+    expect(refusal(["--views-check", "--planet-viewer", "--randomize", "33"]).exitCode).toBe(1);
+    expect(refusal(["--views-check", "--planet-viewer", "--randomize", "0"]).exitCode).toBe(1);
+  });
+
   it("refuses the planet viewer run beside another run", () => {
     const error = refusal(["--views-check", "--planet-viewer", "--terrain"]);
     expect([error.exitCode, error.message]).toEqual([

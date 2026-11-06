@@ -242,6 +242,7 @@ function airFrame(
     presentedPx: VIEWPORT,
     setting: "high",
     exposureScale: exposureScale(ev100),
+    white: null,
     list: NO_LIST,
     sky: null,
     band: null,

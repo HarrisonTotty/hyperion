@@ -69,6 +69,7 @@ import {
   glareDiscAir,
   type GroundBy,
 } from "../../view/post/glareAir";
+import type { BalancedWhite } from "../../view/post/whiteBalance";
 import {
   exposedSpriteRecord,
   type SpriteRecord,
@@ -106,6 +107,12 @@ export interface PhotorealInputs {
   readonly floorLowest?: boolean | undefined;
   /** The exposure scale (`exposureScale`), the target's pre-exposure. */
   readonly exposureScale: number;
+  /**
+   * The white its tone step adapts the light to (`PhotorealFrame.whiteBalance`): the display's,
+   * found from its `PRIMARY` view's lights under `HOST` (`frameWhiteBalance`), which every view of
+   * the display takes; `null` under `D65`.
+   */
+  readonly white: BalancedWhite | null;
   /** The frame's wireframe draw list, whose sprites are the stars. */
   readonly list: WireframeDrawList;
   /** The view's sky, or `null` while the interim field stands in. */
@@ -392,6 +399,28 @@ export function litBodiesOf(
   );
 }
 
+/**
+ * The host stars that light a view's frame, at their stars' centres from its camera at `pose`
+ * (`placeLights`): the scene's discs (`sceneHostDiscs`), a kept scene's own or the view's sky's.
+ */
+export function framePlacedLights(
+  run: ViewRun,
+  pose: CameraPose,
+  sky: DrawnSky | null,
+): PlacedLight[] {
+  const { scene } = run;
+  const origins = sceneOrigins(scene);
+  const discs = sceneHostDiscs(scene, sky?.model.response.hosts ?? null);
+  const bodies = new Map(scene.bodies.map((body) => [body.id, body]));
+  const centreOf = (id: BodyIdHex): Vec3 | null => {
+    const body = bodies.get(id);
+    return body === undefined
+      ? null
+      : relativeToCamera({ kind: "system", system: scene.system, m: body.centreM }, pose, origins);
+  };
+  return placeLights(hostLights(scene, discs), centreOf);
+}
+
 /** The photorealistic frame of a stage's run. */
 export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
   const { run, pose, viewport, sky, exposureScale } = inputs;
@@ -402,14 +431,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     fovXRad: (run.camera.fovDeg * Math.PI) / 180,
   };
   const discs = sceneHostDiscs(scene, sky?.model.response.hosts ?? null);
-  const bodies = new Map(scene.bodies.map((body) => [body.id, body]));
-  const centreOf = (id: BodyIdHex): Vec3 | null => {
-    const body = bodies.get(id);
-    return body === undefined
-      ? null
-      : relativeToCamera({ kind: "system", system: scene.system, m: body.centreM }, pose, origins);
-  };
-  const lights = placeLights(hostLights(scene, discs), centreOf);
+  const lights = framePlacedLights(run, pose, sky);
   const discFrame = inputs.discs.frame(
     hostPlacements(scene, discs, pose),
     camera,
@@ -498,6 +520,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
       frameGlareAir(atmospheres, litBodies, lights),
     ),
     lights,
+    whiteBalance: inputs.white ?? null,
     bodies: litBodies,
     // A body handed over to terrain writes depth as a mesh does (`drawnAsMesh`), its footprint
     // counted by its regime (R10.T16.c); lit craft will add theirs.

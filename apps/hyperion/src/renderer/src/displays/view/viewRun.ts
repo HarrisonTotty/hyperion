@@ -13,6 +13,7 @@ import {
   formatNumber,
   formatSignedDeg,
   formatSignificant,
+  formatTemperatureK,
   formatUniverseTimeDhms,
 } from "../../lib/format";
 import { norm, sub } from "../../geometry/vec3";
@@ -92,6 +93,7 @@ import {
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { otherStyle, styleName, withStyle } from "../../view/photoreal/style";
+import { type WhiteBalance, whiteBalanceName } from "../../view/post/whiteBalance";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { PHASE_SCENE_NAME, phaseScene } from "../../view/scenes/phaseScene";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
@@ -798,6 +800,57 @@ export function withGridLine(
     : lines.flatMap((line) =>
         line.label === "STYLE" ? [line, { label: "GRID", value: "OFF" }] : [line],
       );
+}
+
+/** The label of the photorealistic style's white balance line, and its control's. */
+export const WHITE_BALANCE_LABEL = "WHITE BALANCE";
+
+/**
+ * The white balance's reading (the owner's report, 2026-11-05; the UX ruling, 2026-11-06): `D65`,
+ * or `HOST` with the effective temperature of the star whose white the display adapts to after a
+ * middle dot, `HOST · T EFF 3444 K` (the star's, never a black body's colour temperature), missing
+ * (`HOST · —`) while no host light is drawn and nothing is adapted.
+ *
+ * @param balancedTeffK - The star's effective temperature, K (`BalancedWhite.teffK`), or `null`
+ *   where nothing is adapted.
+ */
+export function whiteBalanceReading(balance: WhiteBalance, balancedTeffK: number | null): string {
+  const name = whiteBalanceName(balance);
+  let reading: string;
+  switch (balance) {
+    case "d65":
+      reading = name;
+      break;
+    case "host":
+      reading =
+        balancedTeffK === null
+          ? `${name} · ${MISSING_READING}`
+          : `${name} · T EFF ${formatTemperatureK(balancedTeffK)} K`;
+      break;
+  }
+  return reading;
+}
+
+/**
+ * `lines` with `WHITE BALANCE` after `METER` (or after `EXPOSURE` where no `METER` stands) while
+ * it `stands`: while any view of the display draws `PHOTOREALISTIC`, whose tone step it sets
+ * ({@link whiteBalanceReading}); as they are while every view draws the wireframe, which takes none.
+ */
+export function withWhiteBalanceLine(
+  lines: ReadonlyArray<LabelLine>,
+  balance: WhiteBalance,
+  balancedTeffK: number | null,
+  stands: boolean,
+): ReadonlyArray<LabelLine> {
+  if (!stands) {
+    return lines;
+  }
+  const after = lines.some((line) => line.label === "METER") ? "METER" : "EXPOSURE";
+  const line: LabelLine = {
+    label: WHITE_BALANCE_LABEL,
+    value: whiteBalanceReading(balance, balancedTeffK),
+  };
+  return lines.flatMap((each) => (each.label === after ? [each, line] : [each]));
 }
 
 /**

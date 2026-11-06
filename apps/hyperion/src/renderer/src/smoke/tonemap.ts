@@ -1,16 +1,20 @@
 /**
  * R07.T15's smoke checks: the tone-mapping pass on a canvas through its own non-sRGB view against
  * its TypeScript twin at pinned inputs, the dither within one code and unbiased, the upscale of a
- * flat field, and a following pass that loads what it drew (decision 2026-10-02, item 6).
+ * flat field, and a following pass that loads what it drew (decision 2026-10-02, item 6); and the
+ * pass under a `HOST` white balance against its twin, a host-lit grey drawn grey (the owner's
+ * report, 2026-11-05).
  */
 
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { RenderEngine, TextureHandle, ViewSize } from "../view/engine/types";
-import type { Rgb } from "../view/photometry/toneCurve";
+import { starColour } from "../view/photometry/starColour";
+import type { Rgb, Rows3 } from "../view/photometry/toneCurve";
 import { fullScreenTriangle, GLARE_SOURCE_BYTES } from "../view/post/bloomChain";
 import { BLUE_NOISE_SIDE, blueNoiseTile } from "../view/post/blueNoise";
 import { glareSpreadTerms } from "../view/post/glare";
 import { TONEMAP_MATERIAL, tonemapDraw, tonemapTexel } from "../view/post/tonemap";
+import { whiteBalanceRows } from "../view/post/whiteBalance";
 import { addCanvas } from "./frames";
 import { type Checks, halfBits, halfToNumber, show } from "./harness";
 
@@ -115,7 +119,11 @@ export async function checkTonemap(engine: RenderEngine, checks: Checks): Promis
   const view = engine.createView(addCanvas(), "smoke tonemap view");
   view.resize(CANVAS);
 
-  const draw = (hdrColour: TextureHandle, dither: number): ReturnType<typeof tonemapDraw> =>
+  const draw = (
+    hdrColour: TextureHandle,
+    dither: number,
+    balance: Rows3 | null = null,
+  ): ReturnType<typeof tonemapDraw> =>
     tonemapDraw({
       mesh,
       material,
@@ -131,13 +139,18 @@ export async function checkTonemap(engine: RenderEngine, checks: Checks): Promis
         sourceCount: 0,
         terms,
         dither: dither === 1,
+        balance,
       },
     });
-  const frame = (hdr: TextureHandle, dither: number): Parameters<typeof view.render>[0] => ({
+  const frame = (
+    hdr: TextureHandle,
+    dither: number,
+    balance: Rows3 | null = null,
+  ): Parameters<typeof view.render>[0] => ({
     label: "tonemap",
     viewRotation: IDENTITY,
     projection: IDENTITY,
-    draws: [draw(hdr, dither)],
+    draws: [draw(hdr, dither, balance)],
     postProcesses: [],
     encoding: "in-pass",
   });
@@ -166,6 +179,45 @@ export async function checkTonemap(engine: RenderEngine, checks: Checks): Promis
     misses.length === 0
       ? `${CANVAS.widthPx * CANVAS.heightPx} texels`
       : misses.slice(0, 4).join("; "),
+  );
+
+  // The pass under HOST, a 3,000 K host's white balance, against its twin: the pinned inputs, and a
+  // grey the host lights, which it draws grey.
+  const host = starColour(3_000);
+  const balance = whiteBalanceRows(host);
+  view.render(frame(input.texture, 0, balance));
+  const balanced = await view.readBack();
+  const balancedMisses: string[] = [];
+  for (let y = 0; y < CANVAS.heightPx; y += 1) {
+    for (let x = 0; x < CANVAS.widthPx; x += 1) {
+      const expected = tonemapTexel(input.held(x, y), 1, null, balance);
+      for (const c of [0, 1, 2] as const) {
+        const code = codeAt(balanced, x, y, c);
+        if (!(Math.abs(code - expected[c] * 255) <= 1)) {
+          balancedMisses.push(`(${x},${y},${c}) ${code} against ${(expected[c] * 255).toFixed(2)}`);
+        }
+      }
+    }
+  }
+  checks.check(
+    "white balance: the pass under HOST equals its twin within one code at pinned inputs",
+    balancedMisses.length === 0,
+    balancedMisses.length === 0
+      ? `${CANVAS.widthPx * CANVAS.heightPx} texels`
+      : balancedMisses.slice(0, 4).join("; "),
+  );
+  const lit = hdrInput(engine, "smoke tonemap host grey", CANVAS, () => [
+    0.18 * host[0],
+    0.18 * host[1],
+    0.18 * host[2],
+  ]);
+  view.render(frame(lit.texture, 0, balance));
+  const litBytes = await view.readBack();
+  const [red, green, blue] = [0, 1, 2].map((c) => codeAt(litBytes, 0, 0, c));
+  checks.check(
+    "white balance: a grey a 3,000 K host lights is drawn grey under HOST",
+    Math.max(Math.abs((red ?? 0) - (green ?? 0)), Math.abs((green ?? 0) - (blue ?? 0))) <= 1,
+    `codes ${String(red)}, ${String(green)}, ${String(blue)}`,
   );
 
   // The dither: within one code of the undithered pass, and unbiased over a flat field whose

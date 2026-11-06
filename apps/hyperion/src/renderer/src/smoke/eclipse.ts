@@ -88,6 +88,7 @@ function eclipseFrame(
     presentedPx: viewport,
     setting: "high",
     exposureScale: preExposure,
+    white: null,
     list: NO_LIST,
     sky: null,
     band: null,

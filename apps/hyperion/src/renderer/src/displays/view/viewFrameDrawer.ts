@@ -40,6 +40,7 @@ import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/re
 import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
 import type { HistogramMeter } from "../../view/post/meter";
+import type { BalancedWhite } from "../../view/post/whiteBalance";
 import {
   type GeometrySettings,
   type QualitySetting,
@@ -99,6 +100,13 @@ export interface ViewFrameInputs {
    * control and for an instrument the display's control (Design note 11).
    */
   readonly exposure: ExposureControl;
+  /**
+   * The white its photorealistic frames' tone step adapts the light to (`WHITE BALANCE`; the
+   * owner's report, 2026-11-05): the display's, found from the `PRIMARY` view's lights under
+   * `HOST` (`frameWhiteBalance`), which every view takes, as it takes the primary's exposure;
+   * `null` under `D65`. The wireframe takes none.
+   */
+  readonly white: BalancedWhite | null;
   /** The interim stars (R02.T16), drawn until the sky arrives. */
   readonly stars: ReadonlyArray<ViewStar>;
   /** The sky (R06), or `null` before it arrives. */
@@ -747,6 +755,7 @@ export class ViewFrameDrawer {
           atmosphereLevers: inputs.atmosphereLevers,
           floorLowest: inputs.floorLowest,
           exposureScale: exposed,
+          white: inputs.white,
           list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
           sky,
           band: sky === null ? null : this.#band,

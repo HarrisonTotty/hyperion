@@ -2,7 +2,8 @@
 // colour upscaled from its internal resolution, the bloom chain's light above the display's range
 // gathered back, each glare source's veil in closed form, the exposure, R02's AgX (`agx`, Filament's
 // port, included unchanged from `toneCurve.wgsl`), the sRGB encoding, and a static blue-noise TPDF
-// dither of +-1 LSB in the encoded domain. Drawn as a material on a full-screen triangle into the
+// dither of +-1 LSB in the encoded domain. Under the HOST white balance the light is adapted to its
+// host star's white by one 3 x 3 before the exposure (`whiteBalance.ts`); under D65 nothing is applied. Drawn as a material on a full-screen triangle into the
 // canvas through its own non-sRGB view (`FrameSubmission.encoding` "in-pass"), so that the dither
 // is applied after the encoding. Its TypeScript twin is `tonemapTexel` in `tonemap.ts`.
 //
@@ -27,6 +28,12 @@ struct Draw {
   glareMisc : vec4f,
   // 1 to dither, 0 not to (the harness's twin check).
   dither : f32,
+  // 1 to adapt the light by the rows below (the HOST white balance), 0 to leave it (D65).
+  balance : f32,
+  // The white balance's rows, linear Rec. 709 (`whiteBalanceRows`), each in xyz.
+  balanceRow0 : vec4f,
+  balanceRow1 : vec4f,
+  balanceRow2 : vec4f,
 }
 
 @group(1) @binding(0) var<uniform> draw : Draw;
@@ -74,6 +81,14 @@ fn tpdf(u : f32) -> f32 {
     var source = glareSources[i];
     source.direction = normalize((frame.viewRotation * vec4f(source.direction, 0.0)).xyz);
     light += glare_veil(source, pixel, terms);
+  }
+  // Skipped, not multiplied by the identity, so that D65 draws today's image to the bit.
+  if (draw.balance > 0.5) {
+    light = vec3f(
+      dot(draw.balanceRow0.xyz, light),
+      dot(draw.balanceRow1.xyz, light),
+      dot(draw.balanceRow2.xyz, light),
+    );
   }
   // agxSprite, the curve less its floor, as the wireframe's sprites write it: an isolated star on
   // black is identical in both styles before the dither.

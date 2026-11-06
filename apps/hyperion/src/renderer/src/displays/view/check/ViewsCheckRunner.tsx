@@ -216,6 +216,7 @@ export function ViewsCheckRunner({
               views: probe,
               requests: run.requests,
               timing: planetViewerCheckTimingOf(PLANET_VIEWER_CHECK_TIMING, launchMode),
+              randomize: api.launch.randomize,
             }),
           controller.signal,
         );

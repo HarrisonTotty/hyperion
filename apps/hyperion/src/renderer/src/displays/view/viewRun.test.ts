@@ -61,6 +61,7 @@ import {
   frameName,
   freeRateReading,
   instrumentPhotorealStatements,
+  type LabelLine,
   labelLines,
   type LabelStatement,
   labelStatements,
@@ -81,7 +82,9 @@ import {
   statementGroups,
   statementText,
   surveyEdgeNotes,
+  whiteBalanceReading,
   withGridLine,
+  withWhiteBalanceLine,
   withSceneStarsLine,
 } from "./viewRun";
 
@@ -1219,5 +1222,38 @@ describe("the own ship's FRAME in a served system (R10.T12; decision-r10-ship-fr
   it("keeps the Earth's frame for a FREE camera detached from the ship in the sphere's band, at 0.95 of its Hill radius", () => {
     const free = done(commandRun(servedRunInBand(), { kind: "preset", preset: "free" }, CUT));
     expect(free.camera.pose.frame).toEqual({ kind: "body", body: FIXTURE_EARTH });
+  });
+});
+
+describe("the label block's WHITE BALANCE line", () => {
+  const lines: ReadonlyArray<LabelLine> = [
+    { label: "STYLE", value: "PHOTOREALISTIC" },
+    { label: "EXPOSURE", value: "EV100 9.6 AUTO" },
+    { label: "METER", value: "INCIDENT" },
+    { label: "STARS", value: "V 9.5 mag CAM" },
+  ];
+
+  it("stands after METER while a photorealistic image is drawn", () => {
+    expect(withWhiteBalanceLine(lines, "host", 3_444, true).map((line) => line.label)).toEqual([
+      "STYLE",
+      "EXPOSURE",
+      "METER",
+      "WHITE BALANCE",
+      "STARS",
+    ]);
+    expect(withWhiteBalanceLine(lines, "d65", null, true)[3]?.value).toBe("D65");
+  });
+
+  it("stands after EXPOSURE where no METER stands, and not at all in the wireframe", () => {
+    const noMeter = lines.filter((line) => line.label !== "METER");
+    expect(withWhiteBalanceLine(noMeter, "host", 5_772, true)[2]).toEqual({
+      label: "WHITE BALANCE",
+      value: "HOST · T EFF 5772 K",
+    });
+    expect(withWhiteBalanceLine(lines, "host", 3_444, false)).toBe(lines);
+  });
+
+  it("groups a hot star's temperature in threes from five digits", () => {
+    expect(whiteBalanceReading("host", 31_400)).toBe("HOST · T EFF 31,400 K");
   });
 });

@@ -155,6 +155,8 @@ import {
   PhotorealRenderer,
 } from "./renderer";
 import { TONEMAP_PASS } from "../post/tonemap";
+import { whiteBalanceRows } from "../post/whiteBalance";
+import { starColour } from "../photometry/starColour";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 
 const VIEWPORT = { widthPx: 64, heightPx: 36 };
@@ -248,6 +250,23 @@ describe("the photorealistic renderer", () => {
       ...passes.slice(2),
     ]);
     expect(view.frames.map((f) => [f.label, f.encoding])).toEqual([["tonemap", "in-pass"]]);
+    renderer.dispose();
+  });
+
+  it("tones under the frame's white balance only where it has one (the owner's report, 2026-11-05)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const rows = whiteBalanceRows(starColour(3_000));
+    renderer.render(view, frameWith([]));
+    renderer.render(view, { ...frameWith([]), whiteBalance: { rows, star: 0, teffK: 3_000 } });
+    const tones = view.frames.map((f) => f.draws[0]?.uniforms ?? {});
+    expect(tones.map((u) => Array.from(u["balance"] ?? []))).toEqual([[0], [1]]);
+    expect(Array.from(tones[1]?.["balanceRow2"] ?? [])).toEqual(
+      Array.from(new Float32Array([...rows[2], 0])),
+    );
     renderer.dispose();
   });
 

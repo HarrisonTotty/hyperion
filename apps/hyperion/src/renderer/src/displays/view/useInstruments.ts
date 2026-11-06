@@ -49,6 +49,7 @@ import type { StyleAvailability } from "../../view/engine/platform";
 import { useGraphicsStatus } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
 import type { ExposureControl } from "../../view/photometry/exposure";
+import type { BalancedWhite } from "../../view/post/whiteBalance";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import type { GeometrySettings, QualitySetting } from "../../view/quality/qualitySetting";
 import { cameraKinematics } from "../../view/scene/fromServer";
@@ -234,6 +235,11 @@ export interface InstrumentsFrame {
   readonly geometry: GeometrySettings | undefined;
   /** The primary view's exposure, which each instrument draws at. */
   readonly exposure: ExposureControl;
+  /**
+   * The display's white, found from the primary view's lights (`frameWhiteBalance`), which each
+   * instrument's photorealistic frames take as they take its exposure; `null` under `D65`.
+   */
+  readonly white: BalancedWhite | null;
   /**
    * Whether the primary's frame is presented: an instrument holds its photorealistic frames back
    * while the primary's exposure awaits a cut's reading (`AutoExposure.holds`; fix-view-light).
@@ -820,6 +826,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           size: inputs.size,
           tokens: inputs.tokens,
           exposure: each.exposure,
+          white: each.white,
           stars: each.stars,
           sky: inputs.sky,
           selection: inputs.selection,

@@ -10163,3 +10163,19 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     are fixtures (`view/atmosphere/fixtures/air-switch/`), baked by hand by
     `airSwitchCases.test.ts` (`HYPERION_AIR_SWITCH=1`); the served class map is synthetic.
   - The smoke harness's 3 px check holds no air body, and its page steps no air ratio.
+- **`WHITE BALANCE` (the owner's report, 2026-11-05; planet-variety-white-balance).**
+  - `view/post/whiteBalance.ts`: `D65` or `HOST`, `HOST` as a view opens (the UX ruling,
+    2026-11-06). Under `HOST` one linear Bradford 3 × 3 (`whiteBalanceRows`) adapts the light to
+    the host's white at its own luminance in `tonemap.wgsl`, after the glare, before AgX. Under
+    `D65` the step is skipped (`balance` 0), so the image is today's to the bit.
+  - The display finds its `BalancedWhite` each primary frame from the primary's lights
+    (`framePlacedLights`, `frameWhiteBalance`; the brightest host at the camera, held against
+    another until it is 1.25 times brighter). Every view takes it as `ViewFrameInputs.white`,
+    then `PhotorealInputs.white`, then `PhotorealFrame.whiteBalance`. The meter and histogram
+    read the light before it.
+  - The control is in the `Exposure` panel and the line on the primary's block, after `METER`,
+    while any view draws photorealistic. An instrument's block states neither (no room at
+    1280 × 720).
+  - The camera's glare was checked against a camera's veiling glare and kept as it is (the
+    figures are in the lane's outbox). `--views-check --planet-viewer --randomize <N>` captures
+    `RANDOMIZE`'s first N draws under both balances.

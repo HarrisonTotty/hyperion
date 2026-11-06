@@ -35,7 +35,13 @@
  *    and `LATITUDE`'s entry refused the column is captured as `planet-viewer-inputs-refused`.
  *
  * Each capture is taken twice: of the whole tab, and with `MAXIMIZE VIEW` on (`-maximized`), its
- * label block and panels hidden, so that the planet fills the view. Where the lower plate holds its
+ * label block and panels hidden, so that the planet fills the view.
+ *
+ * Given a count of draws (`--randomize`; the owner's report, 2026-11-05), the run instead presses
+ * `RANDOMIZE` that many times, draw seeds 1 on, and captures each draw's planet from orbit under
+ * each `WHITE BALANCE`, `HOST` then `D65` ({@link randomizeCaptureLabel}), once its own scene is
+ * drawn, lit, its air and its terrain no longer pending and `AUTO` settled, logging each draw's
+ * inputs and white balance line; a draw's lit body is logged rather than required. Where the lower plate holds its
  * readout back for the room it is read under `MAXIMIZE VIEW` too. The run fails,
  * naming its step, where the server refuses what it asks, where a control does not take effect or
  * a reading does not come within its wait, where the tab overflows the window or the `INPUTS`
@@ -51,6 +57,9 @@ import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
 import { ORBIT_FLOOR_M, ORBIT_ZOOM_FACTOR } from "../../../view/camera/orbit";
 import { SKY_PENDING } from "../../../view/sky/label";
 import { GENERATE_KEY } from "../../planet/PlanetInputsPanel";
+import { RANDOMIZE_KEY } from "../../planet/PlanetViewerBar";
+import { type WhiteBalance, whiteBalanceName } from "../../../view/post/whiteBalance";
+import { MISSING_READING as MISSING, WHITE_BALANCE_LABEL } from "../viewRun";
 import { MAXIMIZE_KEY } from "../displayKeys";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
 import {
@@ -160,6 +169,23 @@ const HIGH_GROUND_TRIES = 12;
 /** The wheel's steps in that take the camera from 300 m above the ground down to its floor. */
 const FLOOR_ZOOM_STEPS = 40;
 
+/** A capture of a `RANDOMIZE` run's draw of the whole tab ({@link randomizeCaptureLabel}). */
+export type RandomizeCaptureLabel = `planet-viewer-draw-${number}-${WhiteBalance}`;
+
+/** One of the run's captures of the whole tab: a range's, or a `RANDOMIZE` draw's. */
+export type PlanetViewerRunCapture = PlanetViewerCaptureLabel | RandomizeCaptureLabel;
+
+/** The white balances each `RANDOMIZE` draw is captured under, in order. */
+export const RANDOMIZE_BALANCES: ReadonlyArray<WhiteBalance> = ["host", "d65"];
+
+/**
+ * The capture of a `RANDOMIZE` run's draw `index` (from 1) under `balance`, of the whole tab:
+ * `planet-viewer-draw-1-host`; its `-maximized` twin follows it.
+ */
+export function randomizeCaptureLabel(index: number, balance: WhiteBalance): RandomizeCaptureLabel {
+  return `planet-viewer-draw-${index}-${balance}`;
+}
+
 /** A wheel's pixels in a zoom step (`ViewCanvas`'s `wheelSteps`, in pixels). */
 const WHEEL_PX_PER_STEP = 100;
 
@@ -176,6 +202,10 @@ export interface PlanetViewerCheckDeps {
   /** Stops the run: before its next step, wait or call it throws `STOPPED` (`viewsCheckRun.ts`). */
   readonly signal: AbortSignal;
   readonly timing: PlanetViewerCheckTiming;
+  /**
+   * The `RANDOMIZE` draws to capture in place of the run's three ranges (`--randomize`), or none.
+   */
+  readonly randomize?: number | undefined;
 }
 
 /**
@@ -315,7 +345,7 @@ function pressKey(target: EventTarget, key: string): void {
  */
 export async function runPlanetViewerCheck(
   deps: PlanetViewerCheckDeps,
-): Promise<ReadonlyArray<PlanetViewerCaptureLabel>> {
+): Promise<ReadonlyArray<PlanetViewerRunCapture>> {
   const bodies = new LitBodyDraws();
   const draws = new PrimaryDraws();
   const unwatch = deps.views.watch(bodies);
@@ -336,11 +366,11 @@ async function viewPlanet(
   deps: PlanetViewerCheckDeps,
   bodies: LitBodyDraws,
   draws: PrimaryDraws,
-): Promise<ReadonlyArray<PlanetViewerCaptureLabel>> {
+): Promise<ReadonlyArray<PlanetViewerRunCapture>> {
   const { document, timing } = deps;
   const { stopped, wait, until, press, controls } = viewDriver(deps);
   /** The captures taken so far, in order, each of the whole tab. */
-  const taken: PlanetViewerCaptureLabel[] = [];
+  const taken: PlanetViewerRunCapture[] = [];
   const drawn = viewDriver({ ...deps, timing: { ...timing, waitMs: timing.drawWaitMs } });
   const grounded = viewDriver({ ...deps, timing: { ...timing, waitMs: timing.groundWaitMs } });
   const plate = (): PrimaryPlate => {
@@ -519,7 +549,7 @@ async function viewPlanet(
    * them and captures; then the same with `MAXIMIZE VIEW` on, and off again.
    */
   const capture = async (
-    label: PlanetViewerCaptureLabel,
+    label: PlanetViewerRunCapture,
     what: string,
     litBody: "required" | "logged",
   ): Promise<void> => {
@@ -643,6 +673,90 @@ async function viewPlanet(
     await captureInputs(label, `with ${part} open`);
   };
 
+  const randomizeButton = (): HTMLButtonElement | null =>
+    document.querySelector<HTMLButtonElement>(
+      `.planet-viewer__draw button[aria-keyshortcuts="${RANDOMIZE_KEY.toUpperCase()}"]`,
+    );
+  const lastDraw = (): string =>
+    document.querySelector(".planet-viewer__last-draw .field__value")?.textContent ?? "";
+  const shareString = (): string =>
+    document.querySelector<HTMLInputElement>(".planet-viewer__string")?.value ?? "";
+  const balanceButton = (balance: WhiteBalance): HTMLButtonElement | null =>
+    [...document.querySelectorAll<HTMLButtonElement>(".view-exposure__balance button")].find(
+      (button) => button.textContent === whiteBalanceName(balance),
+    ) ?? null;
+  const balanceRead = (balance: WhiteBalance): boolean =>
+    plate().line(WHITE_BALANCE_LABEL)?.startsWith(whiteBalanceName(balance)) === true;
+  /** Draw `index`'s planet captured under each of `balances` in turn; returns the labels. */
+  const captureUnder = async (
+    index: number,
+    balances: ReadonlyArray<WhiteBalance>,
+  ): Promise<ReadonlyArray<RandomizeCaptureLabel>> => {
+    const [balance, ...rest] = balances;
+    if (balance === undefined) {
+      return [];
+    }
+    const name = whiteBalanceName(balance);
+    await setMaximized(false);
+    if (!balanceRead(balance)) {
+      await press(() => balanceButton(balance), `WHITE BALANCE ${name}`);
+      await until(`WHITE BALANCE did not read ${name}`, () => balanceRead(balance));
+    }
+    const label = randomizeCaptureLabel(index, balance);
+    await drawn.until(
+      `draw ${String(index)}'s atmosphere stayed pending`,
+      () => !plate().statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
+    );
+    await capture(label, `draw ${String(index)} under WHITE BALANCE ${name}`, "logged");
+    console.warn(
+      `views check: ${label}: LAST DRAW ${lastDraw()}, WHITE BALANCE ${plate().line(WHITE_BALANCE_LABEL) ?? MISSING}, EXPOSURE ${plate().line("EXPOSURE") ?? MISSING}, ${shareString()}`,
+    );
+    return [label, ...(await captureUnder(index, rest))];
+  };
+  /** `RANDOMIZE` pressed for draws `index` to `count`, each captured under each white balance. */
+  const randomizeDraws = async (
+    index: number,
+    count: number,
+  ): Promise<ReadonlyArray<RandomizeCaptureLabel>> => {
+    if (index > count) {
+      return [];
+    }
+    await setMaximized(false);
+    const before = lastDraw();
+    // No block stands before the first planet is shown.
+    const beforeFrame = primaryPlate(document)?.line("FRAME") ?? null;
+    await until(
+      "RANDOMIZE was held back",
+      () => randomizeButton()?.getAttribute("aria-disabled") !== "true",
+    );
+    await press(randomizeButton, "RANDOMIZE");
+    await drawn.until(
+      `draw ${String(index)}'s planet was not shown`,
+      () => lastDraw() !== before && lastDraw() !== MISSING,
+    );
+    // The new planet's scene, not the last one's still drawn: its frame names its own body.
+    await drawn.until(
+      `draw ${String(index)}'s scene was not drawn`,
+      () => (primaryPlate(document)?.line("FRAME") ?? null) !== beforeFrame,
+    );
+    await drawn.until(
+      `draw ${String(index)} was not drawn photorealistic`,
+      () => controls.styleOf(PRIMARY_NAME) === "photorealistic",
+    );
+    await drawn.until(
+      `draw ${String(index)}'s lighting and atmosphere stayed pending`,
+      () =>
+        inspectionLighting(plate().statements) !== "pending" &&
+        !plate().statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
+    );
+    const labels = await captureUnder(index, RANDOMIZE_BALANCES);
+    // Each draw is opened under HOST, the default, as the operator meets it.
+    await setMaximized(false);
+    await press(() => balanceButton("host"), "WHITE BALANCE HOST");
+    await until("WHITE BALANCE did not read HOST", () => balanceRead("host"));
+    return [...labels, ...(await randomizeDraws(index + 1, count))];
+  };
+
   // 1. The first universe opened on GALAXY, and the PLANET VIEWER shown.
   const deadlineMs = deps.nowMs() + timing.waitMs;
   /** The server's universes, asked until the link answers, within the wait. */
@@ -675,6 +789,9 @@ async function viewPlanet(
       `.planet-inputs button[aria-keyshortcuts="${GENERATE_KEY.toUpperCase()}"]`,
     );
   await until("the PLANET VIEWER was not shown", () => generate() !== null);
+  if (deps.randomize !== undefined) {
+    return randomizeDraws(1, deps.randomize);
+  }
 
   // 2. The panel's inputs generated, drawn photorealistic from orbit, and captured.
   await until("GENERATE was held back", () => generate()?.getAttribute("aria-disabled") !== "true");
@@ -805,7 +922,7 @@ export type PlanetViewerCheckEnding = Pick<ViewsCheckApi, "end">;
  */
 export async function recordPlanetViewerCheck(
   api: PlanetViewerCheckEnding,
-  run: () => Promise<ReadonlyArray<PlanetViewerCaptureLabel>>,
+  run: () => Promise<ReadonlyArray<PlanetViewerRunCapture>>,
   signal: AbortSignal,
 ): Promise<void> {
   let failure: string | null = null;

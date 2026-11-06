@@ -5,6 +5,8 @@ import type { FrameSubmission } from "../../../view/engine/types";
 import {
   consoleOverflowPx,
   PLANET_VIEWER_CHECK_TIMING,
+  RANDOMIZE_BALANCES,
+  randomizeCaptureLabel,
   runPlanetViewerCheck,
   PrimaryDraws,
   elevationM,
@@ -54,6 +56,19 @@ describe("the planet viewer run's wait for the server's warm-up", () => {
     expect([skyAnswered("V 10.2 mag CAM · BEYOND 250 ly: STREAMING"), skyAnswered(null)]).toEqual([
       true,
       true,
+    ]);
+  });
+});
+
+describe("the planet viewer run's RANDOMIZE captures (the owner's report, 2026-11-05)", () => {
+  it("are named for each draw and white balance, HOST first", () => {
+    expect(
+      [1, 8].flatMap((index) => RANDOMIZE_BALANCES.map((b) => randomizeCaptureLabel(index, b))),
+    ).toEqual([
+      "planet-viewer-draw-1-host",
+      "planet-viewer-draw-1-d65",
+      "planet-viewer-draw-8-host",
+      "planet-viewer-draw-8-d65",
     ]);
   });
 });

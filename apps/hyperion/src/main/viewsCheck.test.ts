@@ -536,6 +536,20 @@ describe("a views check's directories and watchdog", () => {
     }
   });
 
+  it("gives a planet viewer run four minutes more for each RANDOMIZE draw", () => {
+    const launch = {
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "planet-viewer",
+      fixture: "terrain-test",
+    } as const;
+    expect(
+      viewsCheckWatchdogMs({ ...launch, randomize: 8 }, "vulkan") -
+        viewsCheckWatchdogMs(launch, "vulkan"),
+    ).toBe(32 * 60_000);
+  });
+
   it("keeps every other mode's watchdog as before", () => {
     for (const mode of ["default", "vulkan", "safe"] as const) {
       expect(LAUNCHES.map((launch) => viewsCheckWatchdogMs(launch, mode) / 60_000)).toEqual([

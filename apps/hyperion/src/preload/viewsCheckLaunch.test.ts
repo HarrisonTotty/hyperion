@@ -112,6 +112,15 @@ describe("the views check's launch switch", () => {
     ]).toEqual([launch, null]);
   });
 
+  it("carries a planet viewer run's RANDOMIZE draws, 1 to 32, on that run alone", () => {
+    const launch: ViewsCheckLaunch = { ...LAUNCH, run: "planet-viewer", randomize: 8 };
+    expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    expect(
+      [0, 33, 2.5, "8"].map((randomize) => readViewsCheckLaunch({ ...launch, randomize })),
+    ).toEqual([null, null, null, null]);
+    expect(readViewsCheckLaunch({ ...LAUNCH, run: "inspection", randomize: 8 })).toBeNull();
+  });
+
   it("carries the inspection run's body, which it always names (the owner's request)", () => {
     const launch: ViewsCheckLaunch = {
       ...LAUNCH,

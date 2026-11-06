@@ -114,6 +114,7 @@ import { type GlareSource, glareSpreadTerms } from "../post/glare";
 import { HISTOGRAM_KERNEL, type Histogram, HistogramReader } from "../post/histogram";
 import type { HistogramMeter } from "../post/meter";
 import { TONEMAP_MATERIAL, TONEMAP_PASS, tonemapDraw } from "../post/tonemap";
+import type { BalancedWhite } from "../post/whiteBalance";
 import { OVERLAY_SCENE_DEPTH_MATERIAL, overlaySceneDepthDraw, sizesAgree } from "./overlayDepth";
 import {
   type GeometrySettings,
@@ -342,6 +343,11 @@ export interface PhotorealFrame {
   readonly hostDraws: ReadonlyMap<number, ReadonlyArray<DrawItem>>;
   /** R06's glare sources (`HostDiscLayer.glareSources`). */
   readonly glareSources: ReadonlyArray<GlareSource>;
+  /**
+   * The white balance its tone step applies (`frameWhiteBalance`): the adaptation to its brightest
+   * host star's white under `HOST`; `null`, or absent, under `D65`, whose step is skipped.
+   */
+  readonly whiteBalance?: BalancedWhite | null | undefined;
   /**
    * The lights at their stars' drawn centres in this frame (`placeLights`), which keep the hosts'
    * places in the painter's order and light a body without its own lighting frame.
@@ -1186,6 +1192,7 @@ export class PhotorealRenderer {
             sourceCount: frame.glareSources.length,
             terms,
             dither: true,
+            balance: frame.whiteBalance?.rows ?? null,
           },
         }),
       ],

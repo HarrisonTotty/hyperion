@@ -96,6 +96,7 @@ async function drawnAt(
     presentedPx: viewport,
     setting: "high",
     exposureScale: EXPOSURE,
+    white: null,
     list: NO_LIST,
     sky: null,
     band: null,

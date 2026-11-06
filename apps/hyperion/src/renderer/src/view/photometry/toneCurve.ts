@@ -46,7 +46,8 @@ function fromColumns(m: readonly number[]): Rows3 {
   ];
 }
 
-function times(a: Rows3, b: Rows3): Rows3 {
+/** `a · b`, as rows. */
+export function times(a: Rows3, b: Rows3): Rows3 {
   const cell = (i: 0 | 1 | 2, j: 0 | 1 | 2): number =>
     a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
   return [
@@ -78,7 +79,8 @@ export function applyRows(m: Rows3, v: Rgb): Rgb {
 }
 
 // Filament's ColorSpaceUtils.h, as written there (columns).
-const SRGB_TO_XYZ = fromColumns([
+/** Linear sRGB (D65) to CIE XYZ, as rows: Filament's `sRGB_to_XYZ`. */
+export const SRGB_TO_XYZ = fromColumns([
   0.412456, 0.212673, 0.0193339, 0.357576, 0.715152, 0.119192, 0.180438, 0.072175, 0.950304,
 ]);
 /** CIE XYZ to linear sRGB (D65), as rows: Filament's `XYZ_to_sRGB`. */
