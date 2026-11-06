@@ -6,10 +6,10 @@
 //! other plan-14 census. Each is generated whole and walked as the audit walks it
 //! ([`audit_walk_system`]): every planet, member and moon present at the epoch with a bulk section,
 //! its record as `snapshot_at` builds it and its derivation. The ordinary census reads
-//! [`ORDINARY_SYSTEMS`] systems, at least 10⁵ bodies, and the slow one [`SLOW_SYSTEMS`], at least
-//! 10⁶, two slow tests, each on threads of its own (`.config/nextest.toml` reserves their
-//! slots). The counts do not depend on the
-//! threads: each share's systems are fixed, and the shares are merged in order.
+//! [`ORDINARY_SYSTEMS`] systems, at least [`ORDINARY_BODIES`] bodies, and the slow one
+//! [`SLOW_SYSTEMS`], at least 10⁶, two slow tests, each on threads of its own
+//! (`.config/nextest.toml` reserves their slots). The counts do not depend on the threads: each
+//! share's systems are fixed, and the shares are merged in order.
 //!
 //! It prints, by host class ([`HostClass`]):
 //!
@@ -62,8 +62,13 @@ use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
 /// The ordinary census's systems: about 15 bodies each with a bulk section (91,781 in the first
-/// 6,000), so at least 10⁵.
+/// 6,000), so some 10⁵ ([`ORDINARY_BODIES`]).
 const ORDINARY_SYSTEMS: usize = 6_800;
+
+/// The fewest bodies the ordinary census walks over [`ORDINARY_SYSTEMS`]: 99,900, under 10⁵ since
+/// generator version 28, whose evaporation (P14.T55.b.a) takes 553 of 27's 100,637 and whose
+/// placement margin (P14.T9.d) 114, leaving 99,970.
+const ORDINARY_BODIES: usize = 99_900;
 
 /// The slow census's systems, for at least 10⁶ bodies.
 const SLOW_SYSTEMS: usize = 68_000;
@@ -1347,15 +1352,15 @@ fn run(title: &str, systems: usize, threads: usize) -> Census {
     census
 }
 
-/// The ordinary census (P14.T33.c), over [`ORDINARY_SYSTEMS`] systems: at least 10⁵ bodies, every
-/// registry row reached or listed with its reason (a listed row it reaches is printed), none of the
-/// findings 25's and 26's holds fixed ([`FIXED_UNDER_26`]) and no envelope changing section inside
-/// the clock window.
+/// The ordinary census (P14.T33.c), over [`ORDINARY_SYSTEMS`] systems: at least
+/// [`ORDINARY_BODIES`] bodies, every registry row reached or listed with its reason (a listed row
+/// it reaches is printed), none of the findings 25's and 26's holds fixed ([`FIXED_UNDER_26`]) and
+/// no envelope changing section inside the clock window.
 #[test]
 #[ignore = "slow: 10⁵ bodies of 6,800 systems, on sixteen threads"]
 fn composition_census_reaches_every_row_or_lists_why() {
     let census = run("the ordinary census", ORDINARY_SYSTEMS, ORDINARY_THREADS);
-    assert!(census.bodies >= 100_000, "{} bodies", census.bodies);
+    assert!(census.bodies >= ORDINARY_BODIES, "{} bodies", census.bodies);
     census.assert_reached();
     census.assert_fixed_under_26();
     census.assert_no_envelope_changes();
@@ -1518,9 +1523,7 @@ fn steam_census(
 #[ignore = "slow: 10⁵ bodies of 6,800 systems, on eight threads"]
 fn composition_census_s_steam_envelopes_are_a_runaway_s_under_every_28_hold() {
     let at_28 = steam_census("at the version's rules", |run| run());
-    // 99,970 at 28: P14.T55.b.a's evaporation takes 553 of 27's bodies and P14.T9.d's placement
-    // margin 114, under the census's 10⁵.
-    assert!(at_28.len() >= 99_900, "{} bodies", at_28.len());
+    assert!(at_28.len() >= ORDINARY_BODIES, "{} bodies", at_28.len());
     let listed = |on: &SteamCensus, id: &str| {
         on.iter()
             .any(|(label, body)| label.contains(id) && body.off_a_runaway_s_state())
@@ -1765,7 +1768,7 @@ fn composition_census_under_every_27_hold_holds_no_ammonia_beside_water_above_th
     }
     let report = count.report(melts);
     eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
-    assert!(count.bodies >= 100_000, "{} bodies", count.bodies);
+    assert!(count.bodies >= ORDINARY_BODIES, "{} bodies", count.bodies);
     assert!(
         count.movers.is_empty(),
         "a body holds NH3 beside H2O above their eutectic: P14.T51.m is no longer ruled out\n{report}"
