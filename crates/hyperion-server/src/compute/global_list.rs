@@ -44,9 +44,9 @@
 //! tables are kept in the [`TubeTableCache`]: each built when the open's warm-up reaches it, at
 //! bulk priority, or for the first `stream_track` or range query that asks, at interactive
 //! priority, or inside the job that resolves one of its members ([`ListedTubes`]). A build that a
-//! request of a higher priority joins queues the rest of its jobs at that priority
-//! ([`BuildClass`]), so that a range query is not held behind the bulk jobs a sky or the warm-up
-//! queued meanwhile (R06.T11.d). A list and a table are pure
+//! request of a higher priority joins has its jobs not yet taken moved to that priority's queue,
+//! and queues the rest there ([`JobClass`]), so that a range query is not held behind the bulk
+//! jobs a sky or the warm-up queued before it or meanwhile (R06.T11.d). A list and a table are pure
 //! functions of their galaxy, so eviction never changes an answer, and neither does the order in
 //! which the warm-up's tables, several in flight at once, finish and are kept. Each table's
 //! envelope is written to disk as it is kept, and a list built again, after its eviction or a
@@ -73,7 +73,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Instant;
 
@@ -97,7 +96,7 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 use super::{
-    CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyCache, GalaxyKey, JobError,
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyCache, GalaxyKey, JobClass, JobError,
     JobReceiver, ListedTubes, Listing, Priority, SingleFlight, TubeKey, TubeTableCache,
 };
 use crate::cache::{ByteLru, HeapBytes, LruCounters, SharedByteLru};
@@ -215,54 +214,12 @@ impl From<BuildLeapfrogError> for BuildTubeOnPoolError {
     }
 }
 
-/// The class a build's jobs are queued at: the highest any of its waiters asked, raised as a
-/// waiter of a higher class joins it, so that every job the build queues after the raise is queued
-/// at the raised class (P10.T10.b, R06.T11.d). A range query that joins a list or a table the
-/// warm-up or a sky started at bulk priority so has the rest of it built at its own class, ahead of
-/// the bulk jobs queued meanwhile. A job queued already keeps its place: a build queues its jobs a
-/// step at a time, each step once the last's replies are in, so it waits behind the bulk queue for
-/// the step in hand at most. The class is scheduling only: no job's value depends on it.
-#[derive(Debug)]
-pub(crate) struct BuildClass(AtomicU8);
-
-impl BuildClass {
-    /// `priority`'s rank, the lower the higher: [`Priority`]'s order.
-    const fn rank(priority: Priority) -> u8 {
-        match priority {
-            Priority::Interactive => 0,
-            Priority::Bulk => 1,
-            Priority::Background => 2,
-        }
-    }
-
-    /// A build's class, at `priority` until raised.
-    #[must_use]
-    pub(crate) const fn new(priority: Priority) -> Self {
-        Self(AtomicU8::new(Self::rank(priority)))
-    }
-
-    /// The class the build's next job is queued at.
-    #[must_use]
-    pub(crate) fn priority(&self) -> Priority {
-        match self.0.load(Ordering::Acquire) {
-            0 => Priority::Interactive,
-            1 => Priority::Bulk,
-            _ => Priority::Background,
-        }
-    }
-
-    /// Raises the class to `priority` if that is higher, and leaves it as it is otherwise.
-    pub(crate) fn raise(&self, priority: Priority) {
-        self.0.fetch_min(Self::rank(priority), Ordering::AcqRel);
-    }
-}
-
-/// The class of each build in flight, by its key ([`BuildClass`]), for the waiters that join it.
+/// The class of each build in flight, by its key ([`JobClass`]), for the waiters that join it.
 ///
 /// It keeps no build alive: each entry is a weak handle to the class its build holds, so that an
 /// ended build's entry is dead and is cleared at the next call.
 struct BuildClasses<K> {
-    classes: Mutex<HashMap<K, Weak<BuildClass>>>,
+    classes: Mutex<HashMap<K, Weak<JobClass>>>,
 }
 
 impl<K: Eq + Hash> BuildClasses<K> {
@@ -273,25 +230,30 @@ impl<K: Eq + Hash> BuildClasses<K> {
         }
     }
 
-    /// The class of the build of `key` in flight, raised to `priority`, or a new class at
-    /// `priority` for the caller's own: the class the caller's flight runs at if it starts it.
+    /// The class of the build of `key` in flight, raised on `pool` to `priority`, its jobs still
+    /// queued there moved up with it ([`CpuPool::raise`]), or a new class at `priority` for the
+    /// caller's own: the class the caller's flight runs at if it starts it.
     ///
     /// Called before the flight is joined or started, so that a waiter that arrives while it is
     /// starting finds its class. A caller that finds a build just ended may raise the class its
     /// successor starts with, which a build that finds its value kept then never queues a job at.
-    fn joined(&self, key: K, priority: Priority) -> Arc<BuildClass> {
-        // Each critical section retains, looks up or inserts, which leave the map whole even if
-        // a key's `Hash` panicked part-way, so a poisoned lock still guards a usable map.
-        let mut classes = self.classes.lock().unwrap_or_else(PoisonError::into_inner);
-        // So that the map holds only the builds in flight: a few lists or tables at once.
-        classes.retain(|_, class| class.strong_count() > 0);
-        if let Some(class) = classes.get(&key).and_then(Weak::upgrade) {
-            class.raise(priority);
-            return class;
-        }
-        let class = Arc::new(BuildClass::new(priority));
-        classes.insert(key, Arc::downgrade(&class));
-        class
+    fn joined(&self, key: K, priority: Priority, pool: &CpuPool) -> Arc<JobClass> {
+        let in_flight = {
+            // Each critical section retains, looks up or inserts, which leave the map whole even
+            // if a key's `Hash` panicked part-way, so a poisoned lock still guards a usable map.
+            let mut classes = self.classes.lock().unwrap_or_else(PoisonError::into_inner);
+            // So that the map holds only the builds in flight: a few lists or tables at once.
+            classes.retain(|_, class| class.strong_count() > 0);
+            let Some(class) = classes.get(&key).and_then(Weak::upgrade) else {
+                let class = Arc::new(JobClass::new(priority));
+                classes.insert(key, Arc::downgrade(&class));
+                return class;
+            };
+            class
+        };
+        // Outside the map's lock: the pool's is taken to move the jobs.
+        pool.raise(&in_flight, priority);
+        in_flight
     }
 
     /// The class of the build of `key` in flight, if there is one, left as it is.
@@ -331,6 +293,23 @@ pub(super) async fn queue<R: Send + 'static>(
         .map_err(ComputeError::Submit)
 }
 
+/// `job` queued on `pool` in `class`, at its priority as it stands, behind `token`, waiting for
+/// room in its queue, to be moved with the class's other jobs if it is raised while the job waits.
+///
+/// # Errors
+///
+/// [`ComputeError::Submit`] if the pool is shutting down or faulted.
+async fn queue_in<R: Send + 'static>(
+    pool: &CpuPool,
+    class: &Arc<JobClass>,
+    token: CancelToken,
+    job: impl FnOnce(&CancelToken) -> R + Send + 'static,
+) -> Result<JobReceiver<R>, ComputeError> {
+    pool.submit_in(class, token, job)
+        .await
+        .map_err(ComputeError::Submit)
+}
+
 /// What a job sent back, or why it sent nothing.
 pub(super) async fn reply<R>(receiver: JobReceiver<R>) -> Result<R, ComputeError> {
     receiver
@@ -345,14 +324,14 @@ async fn force_of(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
     (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
-    class: &BuildClass,
+    class: &Arc<JobClass>,
     token: &CancelToken,
 ) -> Result<Force, ComputeError> {
     if let Some(force) = forces.get(key) {
         return Ok(Force::Held(force));
     }
     let galaxy = Arc::clone(galaxy);
-    let receiver = queue(pool, class.priority(), token, move |_: &CancelToken| {
+    let receiver = queue_in(pool, class, token.clone(), move |_: &CancelToken| {
         SprayForce::new(galaxy.potential()).map(Arc::new)
     })
     .await?;
@@ -453,19 +432,19 @@ pub async fn global_list_on(
         pool,
         forces,
         at,
-        (&BuildClass::new(priority), shares),
+        (&Arc::new(JobClass::new(priority)), shares),
         token,
     )
     .await
 }
 
 /// [`global_list_on`] with each job queued at `class` as it then stands, so that a waiter that
-/// joins the build at a higher class raises the jobs queued after it ([`BuildClass`]).
+/// joins the build at a higher class raises its jobs not yet taken ([`JobClass`]).
 async fn list_on(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
     (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
-    (class, shares): (&BuildClass, Shares),
+    (class, shares): (&Arc<JobClass>, Shares),
     token: &CancelToken,
 ) -> Result<GlobalList, ComputeError> {
     check_key(galaxy, key);
@@ -474,14 +453,14 @@ async fn list_on(
     let centre = {
         let galaxy = at(galaxy);
         // Its model is kept in the galaxy; the finish reads it, and fails as it does if it fails.
-        queue(pool, class.priority(), token, move |_: &CancelToken| {
+        queue_in(pool, class, token.clone(), move |_: &CancelToken| {
             galaxy.centre().is_ok()
         })
         .await?
     };
     let planned = {
         let galaxy = at(galaxy);
-        queue(pool, class.priority(), token, move |_: &CancelToken| {
+        queue_in(pool, class, token.clone(), move |_: &CancelToken| {
             Arc::new(Debris::plan(&galaxy))
         })
         .await?
@@ -498,7 +477,7 @@ async fn list_on(
                 .map(|k| (k, plan.orphan(&galaxy, k)))
                 .collect::<Vec<_>>()
         };
-        drawing.push(queue(pool, class.priority(), token, job).await?);
+        drawing.push(queue_in(pool, class, token.clone(), job).await?);
     }
     let mut orphans: Vec<Option<StreamSpec>> = vec![
         None;
@@ -513,7 +492,7 @@ async fn list_on(
     }
     let assembled = {
         let legs = shares.legs.min(workers);
-        queue(pool, class.priority(), token, move |_: &CancelToken| {
+        queue_in(pool, class, token.clone(), move |_: &CancelToken| {
             let list = ListPlan::of_debris(Arc::unwrap_or_clone(plan).finish(orphans));
             let dealt = by_steps(list.legs(), legs);
             (Arc::new(list), dealt)
@@ -535,7 +514,7 @@ async fn list_on(
                 .zip(radii_over_ly(&force, &legs))
                 .collect::<Vec<_>>()
         };
-        stepping.push(queue(pool, class.priority(), token, job).await?);
+        stepping.push(queue_in(pool, class, token.clone(), job).await?);
     }
     let mut radii = vec![[f64::NAN; 2]; list.legs().len()];
     for receiver in stepping {
@@ -547,7 +526,7 @@ async fn list_on(
     // job sent back is the finish's to find again.
     let _ = reply(centre).await?;
     let galaxy = at(galaxy);
-    let finished = queue(pool, class.priority(), token, move |_: &CancelToken| {
+    let finished = queue_in(pool, class, token.clone(), move |_: &CancelToken| {
         Arc::unwrap_or_clone(list).finish(&galaxy, &radii)
     })
     .await?;
@@ -575,18 +554,18 @@ pub async fn tube_table_on(
     (priority, shares): (Priority, Shares),
     token: &CancelToken,
 ) -> Result<TubeTable, BuildTubeOnPoolError> {
-    let class = BuildClass::new(priority);
+    let class = Arc::new(JobClass::new(priority));
     table_on(pool, forces, at, spec, (&class, shares), token).await
 }
 
 /// [`tube_table_on`] with each job queued at `class` as it then stands, so that a waiter that
-/// joins the build at a higher class raises the jobs queued after it ([`BuildClass`]).
+/// joins the build at a higher class raises its jobs not yet taken ([`JobClass`]).
 async fn table_on(
     pool: &CpuPool,
     forces: &Arc<SharedSprayForces>,
     (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
     spec: &StreamSpec,
-    (class, shares): (&BuildClass, Shares),
+    (class, shares): (&Arc<JobClass>, Shares),
     token: &CancelToken,
 ) -> Result<TubeTable, BuildTubeOnPoolError> {
     let tracers = tracers_on(
@@ -599,7 +578,7 @@ async fn table_on(
     )
     .await?;
     let (galaxy, spec) = (Arc::clone(galaxy), spec.clone());
-    let reduced = queue(pool, class.priority(), token, move |_: &CancelToken| {
+    let reduced = queue_in(pool, class, token.clone(), move |_: &CancelToken| {
         TubeTable::from_tracers(
             galaxy.seed(),
             galaxy.mean_system_mass(Population::Halo),
@@ -630,7 +609,7 @@ pub(crate) async fn tracers_on(
     forces: &Arc<SharedSprayForces>,
     (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
     (spec, params): (&StreamSpec, SprayParams),
-    (class, shares): (&BuildClass, Shares),
+    (class, shares): (&Arc<JobClass>, Shares),
     token: &CancelToken,
 ) -> Result<Vec<Tracer>, BuildTubeOnPoolError> {
     check_key(galaxy, key);
@@ -648,7 +627,7 @@ pub(crate) async fn tracers_on(
     let dealt = dealt(u64::from(count), share_count);
     let planned = {
         let (galaxy, force, spec) = (Arc::clone(galaxy), Arc::clone(&force), spec.clone());
-        queue(pool, class.priority(), token, move |_: &CancelToken| {
+        queue_in(pool, class, token.clone(), move |_: &CancelToken| {
             SprayPlan::new(galaxy.seed(), &force, galaxy.potential(), &spec, &params).map(Arc::new)
         })
         .await?
@@ -669,7 +648,7 @@ pub(crate) async fn tracers_on(
                 .zip(spray.tracers_at(&indices))
                 .collect::<Vec<_>>()
         };
-        spraying.push(queue(pool, class.priority(), token, job).await?);
+        spraying.push(queue_in(pool, class, token.clone(), job).await?);
     }
     let mut tracers = vec![None; usize::try_from(count).expect("a u32 fits a usize")];
     for receiver in spraying {
@@ -855,8 +834,8 @@ impl GlobalListService {
     }
 
     /// The global list of the galaxy `key` names, built at `priority` if it is not held already.
-    /// A build in flight is joined, and the jobs it queues from then on are raised to `priority`
-    /// if that is higher than its own.
+    /// A build in flight is joined and, if `priority` is higher than its own, raised to it: its
+    /// jobs not yet taken move to `priority`'s queue, and it queues the rest there.
     ///
     /// # Errors
     ///
@@ -872,8 +851,8 @@ impl GlobalListService {
 
     /// The tube table of `spec`'s stream in `galaxy`, the galaxy `key` names: the cache's, or its
     /// tracers sprayed on the pool's workers at `priority` and kept. A build in flight for the
-    /// stream is joined, and the jobs it queues from then on are raised to `priority` if that is
-    /// higher than its own.
+    /// stream is joined and, if `priority` is higher than its own, raised to it, as
+    /// [`get`](Self::get) raises a list's.
     ///
     /// # Errors
     ///
@@ -892,12 +871,12 @@ impl GlobalListService {
     }
 
     /// The tube tables of `specs`' streams in `galaxy`, the galaxy `key` names, that the cache
-    /// lacks, built a few at once at `priority` as the warm-up builds them ([`tables_in_flight`]),
-    /// each joining a build in flight for its stream, raised to `priority` if that is higher than
-    /// its own: what a sky's handler asks at bulk priority
-    /// for a step's streams before that step's members' jobs read them (rendering plan R06,
-    /// R06.T16.a's cost), and a range query's at interactive priority for the streams it reads
-    /// (P10.T10.b). One at a time, the 121 tables of a cold Sun-like 50 ly query took 20.1 s on
+    /// lacks, built a few at once at `priority` as the warm-up builds them, and two more at once at
+    /// interactive priority ([`tables_in_flight_at`]), each joining a build in flight for its
+    /// stream, raised to `priority` if that is higher than its own: what a sky's handler asks at
+    /// bulk priority for a step's streams before that step's members' jobs read them (rendering
+    /// plan R06, R06.T16.a's cost), and a range query's at interactive priority for the streams it
+    /// reads (P10.T10.b). One at a time, the 121 tables of a cold Sun-like 50 ly query took 20.1 s on
     /// eight workers, three at a time 10.0 s (perf-range-census-streams, the test profile, pod, 16
     /// vCPU, 2026-11-05). Until it returns, the warm-ups start no table of their own (module
     /// documentation, "Asked first").
@@ -922,7 +901,7 @@ impl GlobalListService {
             .map(|spec| SprayParams::of_stream(galaxy, spec).tracers())
             .min()
             .unwrap_or_else(|| SprayParams::default().tracers());
-        let room = tables_in_flight(self.lists.pool.workers(), fewest);
+        let room = tables_in_flight_at(self.lists.pool.workers(), fewest, priority);
         let mut next = specs.iter();
         let mut building = FuturesUnordered::new();
         loop {
@@ -951,7 +930,9 @@ impl GlobalListService {
 
     /// What resolving `id` in the galaxy `key` names reads of its global list: for a stream's or a
     /// dwarf core's member, the galaxy's list and its tables ([`Listing::Listed`]), the list built
-    /// if it is not held; for any other system, nothing.
+    /// at interactive priority if it is not held, as the player's request that asks waits on it, a
+    /// build in flight joined and raised to it ([`get`](Self::get)); for any other system,
+    /// nothing.
     ///
     /// For a stream's member, the table of the stream its ID names is built too, if the list has
     /// that stream and the cache lacks its table, on the pool's workers at interactive priority as
@@ -976,7 +957,7 @@ impl GlobalListService {
             | SystemIdKind::Pinned(_)
             | SystemIdKind::Catalogue(_) => return Ok(Listing::Unlisted),
         };
-        let list = self.lists.get(key, Priority::Bulk).await?;
+        let list = self.lists.get(key, Priority::Interactive).await?;
         let galaxy = self.lists.galaxies.get(key).await?;
         // A number the list has no stream for resolves to no system, reading no table.
         if let Some(spec) = stream.and_then(|number| list.list().stream(number)) {
@@ -1099,7 +1080,7 @@ impl Lists {
         if let Some(list) = self.held.get(&key) {
             return Ok(list);
         }
-        let class = self.classes.joined(key, priority);
+        let class = self.classes.joined(key, priority, &self.pool);
         let (pool, galaxies, forces, held, tubes) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.galaxies),
@@ -1124,7 +1105,7 @@ impl Lists {
                 // The cores' models, some milliseconds, on the pool as the list was.
                 let modelled = {
                     let galaxy = Arc::clone(&galaxy);
-                    queue(&pool, class.priority(), &token, move |_: &CancelToken| {
+                    queue_in(&pool, &class, token.clone(), move |_: &CancelToken| {
                         HeldGlobalList::new(&galaxy, list)
                     })
                     .await?
@@ -1161,7 +1142,7 @@ impl Lists {
         if let Some(table) = self.tubes.get(&tube_key) {
             return Ok(table);
         }
-        let class = self.tube_classes.joined(tube_key, priority);
+        let class = self.tube_classes.joined(tube_key, priority, &self.pool);
         let (pool, forces, tubes, galaxy, spec) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.forces),
@@ -1359,6 +1340,37 @@ fn tables_in_flight(workers: NonZeroUsize, tracers: u32) -> usize {
     workers.get().div_ceil(shares) + 1
 }
 
+/// How many tables more than a warm-up's ([`tables_in_flight`]) a caller at interactive priority
+/// builds at once ([`GlobalListService::tubes`]): two (R06.T11.d). A player waits on them, and a
+/// worker freed between one table's steps (its plan, its last shares and its reduction, each of
+/// which leaves the table nothing queued) that finds no interactive job queued takes a bulk one, a
+/// sky's census slice of some 0.25 s, and runs it to its end before it takes the query's next.
+///
+/// At a warm-up's count, a sky beside a cold Sun-like query on eight workers took 32.6 of the
+/// pool's 114.9 worker-seconds while the query ran, and the query 14.4 s against 10.7 s alone; two
+/// tables more, the sky took 8.2 of 89.8, and the query 11.2 s against 10.4 s; on four workers,
+/// 31.4 and 32.3 s beside a sky, then 24.3 and 20.9 s, against 20.4 to 24.9 s alone as the node's
+/// load varied (the test build, the eight- and four-worker rows of `--test sky
+/// cold_range_queries_alone_and_beside_a_sky`, pod, 2026-11-06). Alone it changes nothing, the
+/// pool being busy throughout. A table has at most eight shares (2,000
+/// tracers), so an asked build queues at most 16 interactive jobs more than at a warm-up's count,
+/// beside the interactive queue's 64 ([`INTERACTIVE_QUEUE_CAPACITY`]).
+///
+/// [`INTERACTIVE_QUEUE_CAPACITY`]: crate::limits::INTERACTIVE_QUEUE_CAPACITY
+const ASKED_TABLES_BEYOND: usize = 2;
+
+/// How many tables [`GlobalListService::tubes`] builds at once at `priority` on a pool of
+/// `workers` when its tables spray `tracers` tracers or more: a warm-up's ([`tables_in_flight`]),
+/// and at interactive priority [`ASKED_TABLES_BEYOND`] more.
+#[must_use]
+fn tables_in_flight_at(workers: NonZeroUsize, tracers: u32, priority: Priority) -> usize {
+    let warm_up = tables_in_flight(workers, tracers);
+    match priority {
+        Priority::Interactive => warm_up.saturating_add(ASKED_TABLES_BEYOND),
+        Priority::Bulk | Priority::Background => warm_up,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -1381,6 +1393,7 @@ mod tests {
         NoCache, ResolveSystemError, SystemOrigin, SystemRecord,
     };
     use hyperion_sim::galaxy::query::{RangeQuery, range_query};
+    use hyperion_sim::id::{DwarfCoreMemberId, Layer, MemberSlot};
     use hyperion_sim::units::LightYears;
 
     use super::*;
@@ -1491,7 +1504,7 @@ mod tests {
                 &forces,
                 (&galaxy, key()),
                 (&spec, params),
-                (&BuildClass::new(Priority::Bulk), shares),
+                (&Arc::new(JobClass::new(Priority::Bulk)), shares),
                 &CancelToken::new(),
             ))
             .await
@@ -1936,6 +1949,18 @@ mod tests {
         assert_eq!(tables_in_flight(workers(8), 1), 9);
     }
 
+    /// R06.T11.d: a range query's tables, asked at interactive priority, two more at once than a
+    /// warm-up's, and a sky's, at bulk, as many as a warm-up's.
+    #[test]
+    fn an_asked_build_keeps_two_tables_more_in_flight_than_a_warm_up() {
+        let asked = |n| tables_in_flight_at(workers(n), 2_000, Priority::Interactive);
+        assert_eq!([1, 4, 8, 16].map(asked), [4, 4, 4, 5]);
+        for priority in [Priority::Bulk, Priority::Background] {
+            let at = |n| tables_in_flight_at(workers(n), 1_000, priority);
+            assert_eq!([1, 4, 8, 16].map(at), [2, 2, 3, 5], "{priority:?}");
+        }
+    }
+
     /// P10.T10.b: a warm-up with tables in flight builds the tables one at a time builds, bit for
     /// bit, starts them in number order, and stops where one at a time stops: here, with room for
     /// three on four workers, two in flight, after the third, with nothing evicted.
@@ -2318,51 +2343,58 @@ mod tests {
         }
     }
 
-    /// A build's class is raised by a higher one and never lowered (R06.T11.d).
-    #[test]
-    fn a_build_s_class_is_raised_and_never_lowered() {
-        let class = BuildClass::new(Priority::Background);
-        class.raise(Priority::Bulk);
-        assert_eq!(class.priority(), Priority::Bulk);
-        class.raise(Priority::Background);
-        assert_eq!(class.priority(), Priority::Bulk, "never lowered");
-        class.raise(Priority::Interactive);
-        assert_eq!(class.priority(), Priority::Interactive);
-        class.raise(Priority::Bulk);
-        assert_eq!(class.priority(), Priority::Interactive, "never lowered");
-    }
-
     /// A waiter joining a key's build in flight is given its class, raised to its own; once the
     /// build has ended, the next caller is given a class of its own at its priority (R06.T11.d).
-    #[test]
-    fn a_waiter_raises_the_class_of_the_build_in_flight_and_no_later_one() {
+    #[tokio::test]
+    async fn a_waiter_raises_the_class_of_the_build_in_flight_and_no_later_one() {
+        let pool = pool(1);
         let classes = BuildClasses::new();
-        let started = classes.joined(1_u32, Priority::Bulk);
-        let joined = classes.joined(1, Priority::Interactive);
+        let started = classes.joined(1_u32, Priority::Bulk, &pool);
+        let joined = classes.joined(1, Priority::Interactive, &pool);
         assert!(
             Arc::ptr_eq(&started, &joined),
             "the build in flight's class"
         );
         assert_eq!(started.priority(), Priority::Interactive);
-        let other = classes.joined(2, Priority::Bulk);
+        let other = classes.joined(2, Priority::Bulk, &pool);
         assert_eq!(
             other.priority(),
             Priority::Bulk,
             "another key's build is its own"
         );
         drop((started, joined));
-        let next = classes.joined(1, Priority::Bulk);
+        let next = classes.joined(1, Priority::Bulk, &pool);
         assert_eq!(
             next.priority(),
             Priority::Bulk,
             "the ended build's class is gone"
         );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A caller that joins a list's build in flight ([`gated_list_build`]).
+    #[derive(Debug, Clone, Copy)]
+    enum Waiter {
+        /// [`GlobalListService::get`] at its priority.
+        Get(Priority),
+        /// [`GlobalListService::listing`] of a dwarf core's member, which reads the list alone.
+        Listing,
+    }
+
+    impl Waiter {
+        /// The class the build is raised to when it joins.
+        fn priority(self) -> Priority {
+            match self {
+                Self::Get(priority) => priority,
+                Self::Listing => Priority::Interactive,
+            }
+        }
     }
 
     /// The jobs of a list's build at bulk priority on one worker whose bulk jobs a closed gate
-    /// holds, letting each through as it is held, that a waiter at `waiter`, if any, joins once the
-    /// build's first job is held: the jobs let through, and the list.
-    async fn gated_list_build(waiter: Option<Priority>) -> (usize, Arc<HeldGlobalList>) {
+    /// holds, letting each through as it is held, that `waiter`, if any, joins once the build's
+    /// first job is held and its next are queued: the jobs let through, and the list.
+    async fn gated_list_build(waiter: Option<Waiter>) -> (usize, Arc<HeldGlobalList>) {
         let gate = BulkGate::default();
         let pool = Arc::new(
             CpuPool::with_bulk_gate(
@@ -2389,23 +2421,55 @@ mod tests {
             tokio::spawn(async move { service.get(key(), Priority::Bulk).await })
         };
         let joined = match waiter {
-            Some(priority) => {
+            Some(waiter) => {
+                let priority = waiter.priority();
+                // The build's first job held at the gate, and the others of its first step queued
+                // behind it at bulk.
                 within(async {
-                    while gate.held() == 0 {
+                    while gate.held() == 0 || pool.counters().queued_bulk() == 0 {
                         tokio::task::yield_now().await;
                     }
                 })
                 .await;
                 let joining = Arc::clone(&service);
-                let joined = tokio::spawn(async move { joining.get(key(), priority).await });
-                // Joined before the build's first job is let through, so that every job it
-                // queues after those it had queued already is queued at the waiter's class.
+                let joined = tokio::spawn(async move {
+                    match waiter {
+                        Waiter::Get(priority) => {
+                            Some(joining.get(key(), priority).await.expect("the list"))
+                        }
+                        Waiter::Listing => {
+                            let slot = MemberSlot::InCell {
+                                band: Layer::A,
+                                level: 0,
+                                cell: [0, 0, 0],
+                                index: 0,
+                            };
+                            let core = DwarfCoreMemberId::new(0, slot).expect("a core member ID");
+                            let listing = joining.listing(key(), SystemId::from(core)).await;
+                            assert!(
+                                matches!(listing, Ok(Listing::Listed(_))),
+                                "a core member's listing reads the list"
+                            );
+                            None
+                        }
+                    }
+                });
+                // Joined before the build's first job is let through: the jobs it had queued at
+                // bulk move to the waiter's queue, none of them taken, since the one worker is
+                // held, and every job it queues later is queued there.
                 within(async {
-                    while service.lists.classes.priority_of(&key()) != Some(priority) {
+                    while service.lists.classes.priority_of(&key()) != Some(priority)
+                        || pool.counters().queued_bulk() > 0
+                    {
                         tokio::task::yield_now().await;
                     }
                 })
                 .await;
+                assert!(
+                    pool.counters().queued_interactive() > 0,
+                    "the build's queued jobs moved to the interactive queue: {:?}",
+                    pool.counters()
+                );
                 Some(joined)
             }
             None => None,
@@ -2422,8 +2486,9 @@ mod tests {
         })
         .await;
         let list = bulk.await.expect("the build's task").expect("the list");
-        if let Some(joined) = joined {
-            let theirs = joined.await.expect("the waiter's task").expect("the list");
+        if let Some(joined) = joined
+            && let Some(theirs) = joined.await.expect("the waiter's task")
+        {
             assert!(Arc::ptr_eq(&theirs, &list), "one build between them");
         }
         gate.open();
@@ -2432,17 +2497,31 @@ mod tests {
     }
 
     /// A list's build that a range query joins at interactive priority, started at bulk priority
-    /// as a sky's or the warm-up's is, queues the rest of its jobs at the query's class: on one
-    /// worker whose bulk jobs a test's gate holds, fewer of its jobs wait at the gate than when it
-    /// is built alone, and the list is the same, bit for bit (R06.T11.d, P10.T10.b).
+    /// as a sky's or the warm-up's is, has its jobs queued already moved to the interactive queue
+    /// and queues the rest there: on one worker whose bulk jobs a test's gate holds, only the job
+    /// held when the query joined waits at the gate, where every job waits when it is built alone,
+    /// and the list is the same, bit for bit (R06.T11.d, P10.T10.b).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_bulk_build_a_query_joins_queues_its_later_jobs_at_the_query_s_class() {
+    async fn a_bulk_build_a_query_joins_has_its_jobs_not_yet_taken_moved_to_the_query_s_class() {
         let (alone, built) = gated_list_build(None).await;
-        let (joined, raised) = gated_list_build(Some(Priority::Interactive)).await;
-        assert!(
-            0 < joined && joined < alone,
+        let (joined, raised) = gated_list_build(Some(Waiter::Get(Priority::Interactive))).await;
+        assert_eq!(
+            (joined, alone > 1),
+            (1, true),
             "the jobs that waited at the gate: {joined} joined, {alone} alone"
         );
         assert_eq!(raised.list(), built.list(), "the same list");
+    }
+
+    /// A member's listing, a player's system, observe, scene or extinction request, asks the list
+    /// at interactive priority: joining a list's build started at bulk, it has the build's jobs
+    /// not yet taken moved to the interactive queue, as a range query does (P10.T10.b).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_listing_that_joins_a_bulk_build_raises_it_to_interactive() {
+        let (joined, _) = gated_list_build(Some(Waiter::Listing)).await;
+        assert_eq!(
+            joined, 1,
+            "only the job held when the listing joined waited at the gate"
+        );
     }
 }

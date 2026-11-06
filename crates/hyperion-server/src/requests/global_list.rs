@@ -4,11 +4,12 @@
 //! before any other field is read, and takes the universe's galaxy from the
 //! [`GalaxyCache`](crate::compute::GalaxyCache) and its global list from the
 //! [`GlobalListService`](crate::compute::GlobalListService), which builds it once a galaxy on the
-//! pool's workers (P10.T5.b). `global_features` is answered in one interactive job on the CPU pool,
-//! never on the runtime, each stream's track `ready` if the service holds its tube table
-//! (P10.T10.b). `stream_track` reads the stream's table from the service, which has its tracers
-//! sprayed on the pool's workers at interactive priority and keeps it if it holds none, and thins
-//! its knots on the runtime, some 512 copied, which no job is worth.
+//! pool's workers (P10.T5.b), at interactive priority as a player waits on it, a build a sky or
+//! the warm-up started at bulk joined and raised to it (P10.T10.b). `global_features` is answered
+//! in one interactive job on the CPU pool, never on the runtime, each stream's track `ready` if the
+//! service holds its tube table (P10.T10.b). `stream_track` reads the stream's table from the
+//! service, which has its tracers sprayed on the pool's workers at interactive priority and keeps
+//! it if it holds none, and thins its knots on the runtime, some 512 copied, which no job is worth.
 
 use std::sync::Arc;
 
@@ -38,7 +39,7 @@ pub(crate) async fn features(
 ) -> Result<ResponseBody, RequestError> {
     let universe = openable_universe(&state, &request.universe)?;
     let key = universe.key();
-    let list = state.global_lists.get(key, Priority::Bulk).await?;
+    let list = state.global_lists.get(key, Priority::Interactive).await?;
     let galaxy = state.galaxies.get(key).await?;
     let shared = Arc::clone(&state);
     let answer = move |_: &CancelToken| {
@@ -65,7 +66,7 @@ pub(crate) async fn track(
 ) -> Result<ResponseBody, RequestError> {
     let universe = openable_universe(&state, &request.universe)?;
     let key = universe.key();
-    let list = state.global_lists.get(key, Priority::Bulk).await?;
+    let list = state.global_lists.get(key, Priority::Interactive).await?;
     let number = stream_track_number(list.list(), &request)?;
     let galaxy = state.galaxies.get(key).await?;
     let spec = list.list().stream(number).expect("the stream was checked");

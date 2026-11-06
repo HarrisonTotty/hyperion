@@ -83,6 +83,7 @@ pub use global_list::{
 };
 pub use global_list::{GlobalListService, HeldGlobalList};
 pub use key::GalaxyKey;
+pub(crate) use pool::JobClass;
 pub use pool::{
     BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, PoolThread, Priority, Promotion,
     ShutDownPoolError, StartPoolError, SubmitJobError,

@@ -2507,3 +2507,17 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
   - _Left._ No job is split: no single build is most of the cold query (the list 0.7 %, the
     largest table 1.7 %). `listing`, `GlobalFeatures` and `StreamTrack` still build the list at
     bulk. A joined build's jobs queued already keep their bulk place.
+- **P10.T10.b, a joined build's queued jobs and an asked query's tables in flight (lane
+  `perf-range-joined-builds`, 2026-11-06, at 28; no output moved).**
+  - _Server._ `BuildClass` is now `compute::pool::JobClass`, crate-private: a build queues its
+    jobs with `CpuPool::submit_in`, and `CpuPool::raise` (which `BuildClasses::joined` calls) moves
+    its jobs still queued to the back of the raised class's queue, as `promote` moves a background
+    job; `tracers_on` takes a `&Arc<JobClass>`. `listing`, `global_features` and `stream_track` ask
+    the list at interactive; the sky and the warm-up still ask at bulk.
+  - _Tables in flight._ `GlobalListService::tubes` at interactive builds `ASKED_TABLES_BEYOND` (2)
+    tables more at once than `tables_in_flight` (`tables_in_flight_at`): the raise alone left a
+    cold query beside a sky at +35 to +40 % on eight workers, a sky job taken between a table's
+    steps each time; with two more, +3 to +8 %. An asked build so holds up to 16 more of the
+    interactive queue's 64 places: 40 at eight workers, 56 at sixteen.
+  - _Left._ No job is split. A build's job still waiting for room in the bulk queue when its
+    class is raised waits for that room, then is queued at interactive.

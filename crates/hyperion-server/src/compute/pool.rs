@@ -19,6 +19,13 @@
 //!   of the bulk queue when the promotion is raised ([`CpuPool::promote`]), as an asked request
 //!   that joins a prefetched pass raises it, or goes there at once if it was raised first.
 //!
+//! A build that queues its jobs a few at a time may queue them in a class of its own
+//! (`JobClass`, through `CpuPool::submit_in`), the highest any of its waiters asked: when a waiter
+//! of a higher class joins it, the class is raised (`CpuPool::raise`), and its jobs still queued
+//! move to the back of the raised class's queue, as a promotion moves a prefetched pass, so that a
+//! range query that joins a list or a table a sky or the warm-up started at bulk is not held behind
+//! the bulk jobs queued before it joined (galaxy-generation plan 10, P10.T10.b; R06.T11.d).
+//!
 //! Each worker, `hyperion-cpu-N`, has a twin, `hyperion-low-N`, that runs the bulk and background
 //! jobs the worker takes, at a lower OS priority it sets once when it starts
 //! ([`lower_this_thread`]): macOS's quality-of-service class utility, Linux's nice 10 and
@@ -57,8 +64,8 @@ use std::fmt;
 use std::io;
 use std::num::NonZeroUsize;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering as AtomicOrdering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -598,7 +605,8 @@ impl CpuPool {
             .acquire_owned()
             .await
             .map_err(|_| SubmitJobError::ShutDown)?;
-        self.queue(Priority::Background, permit, token, Some(promotion), job)
+        let promotion = Raiser::Promotion(promotion);
+        self.queue(Priority::Background, permit, token, promotion, job)
     }
 
     /// Raises `promotion`: the background job queued with it moves to the back of the bulk queue,
@@ -613,12 +621,75 @@ impl CpuPool {
         let held = state
             .background
             .iter()
-            .position(|queued| queued.is_raised_by(promotion));
+            .position(|queued| queued.is_promoted_by(promotion));
         if let Some(mut queued) = held.and_then(|at| state.background.remove(at)) {
             queued.priority = Priority::Bulk;
             state.bulk.push_back(queued);
             state.refresh_depths();
         }
+    }
+
+    /// Queues `job` in `class`, at its priority as it stands, waiting for room in that queue: to be
+    /// moved with the class's other jobs still queued when the class is raised
+    /// ([`raise`](Self::raise)), or queued in the raised class's queue if it was raised meanwhile.
+    ///
+    /// Cancellation-safe: if this future is dropped while it waits, nothing is queued.
+    ///
+    /// # Errors
+    ///
+    /// As [`submit`](Self::submit).
+    pub(crate) async fn submit_in<F, T>(
+        &self,
+        class: &Arc<JobClass>,
+        token: CancelToken,
+        job: F,
+    ) -> Result<JobReceiver<T>, SubmitJobError>
+    where
+        F: FnOnce(&CancelToken) -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        if self.shared.is_faulted() {
+            return Err(SubmitJobError::Faulted);
+        }
+        let priority = class.priority();
+        let permit = Arc::clone(self.semaphore(priority))
+            .acquire_owned()
+            .await
+            .map_err(|_| SubmitJobError::ShutDown)?;
+        let class = Raiser::Class(Arc::downgrade(class));
+        self.queue(priority, permit, token, class, job)
+    }
+
+    /// Raises `class` to `priority` if that is higher, and does nothing otherwise: its jobs still
+    /// queued move to the back of `priority`'s queue in the order they were queued, to be taken as
+    /// the jobs queued there before them are, and a job queued in it later goes there at once. A
+    /// job a worker has taken already is left as it is.
+    ///
+    /// Each job moved keeps the place it holds in its old queue until a worker takes it, as a
+    /// promoted job does ([`promote`](Self::promote)), so `priority`'s queue may hold a build's few
+    /// jobs in flight more than its depth.
+    pub(crate) fn raise(&self, class: &Arc<JobClass>, priority: Priority) {
+        if !class.raise(priority) {
+            return;
+        }
+        let mut state = self.shared.lock();
+        let State {
+            interactive,
+            bulk,
+            background,
+            ..
+        } = &mut *state;
+        // Every job of a class still queued is in its class's queue as it stood (`queue` reads the
+        // class under this lock), but each lower queue is searched all the same.
+        match priority {
+            Priority::Interactive => {
+                move_class(class, bulk, (interactive, priority));
+                move_class(class, background, (interactive, priority));
+            }
+            Priority::Bulk => move_class(class, background, (bulk, priority)),
+            Priority::Background => {}
+        }
+        state.refresh_depths();
     }
 
     /// Queues `job`, waiting for room in its queue.
@@ -716,18 +787,19 @@ impl CpuPool {
         F: FnOnce(&CancelToken) -> T + Send + 'static,
         T: Send + 'static,
     {
-        self.queue(priority, permit, token, None, job)
+        self.queue(priority, permit, token, Raiser::None, job)
     }
 
-    /// Queues `job` at `priority`, or in the bulk queue for a background job whose `promotion` is
-    /// raised, the flag read under the queues' lock so that [`promote`](Self::promote) either finds
-    /// the job queued or has raised the flag first.
+    /// Queues `job` at `priority`, in the bulk queue for a background job whose promotion is
+    /// raised, or in its class's queue for a job queued in a class, the flag and the class read
+    /// under the queues' lock so that [`promote`](Self::promote) and [`raise`](Self::raise) either
+    /// find the job queued or have raised it first.
     fn queue<F, T>(
         &self,
         priority: Priority,
         permit: OwnedSemaphorePermit,
         token: CancelToken,
-        promotion: Option<Promotion>,
+        raiser: Raiser,
         job: F,
     ) -> Result<JobReceiver<T>, SubmitJobError>
     where
@@ -738,7 +810,7 @@ impl CpuPool {
         let mut queued = Queued {
             permit,
             priority,
-            promotion,
+            raiser,
             enqueued: Instant::now(),
             job: Box::new(Job {
                 token,
@@ -753,17 +825,21 @@ impl CpuPool {
             } else if state.stopping {
                 Some((queued, SubmitJobError::ShutDown))
             } else {
-                let raised = queued
-                    .promotion
-                    .as_ref()
-                    .is_some_and(|promotion| promotion.raised.load(AtomicOrdering::SeqCst));
-                match priority {
+                queued.priority = match &queued.raiser {
+                    Raiser::Promotion(promotion)
+                        if priority == Priority::Background && promotion.is_raised() =>
+                    {
+                        Priority::Bulk
+                    }
+                    // The class only rises, and its build holds it while it queues a job.
+                    Raiser::Class(class) => class
+                        .upgrade()
+                        .map_or(priority, |class| class.priority().min(priority)),
+                    Raiser::None | Raiser::Promotion(_) => priority,
+                };
+                match queued.priority {
                     Priority::Interactive => state.interactive.push_back(queued),
                     Priority::Bulk => state.bulk.push_back(queued),
-                    Priority::Background if raised => {
-                        queued.priority = Priority::Bulk;
-                        state.bulk.push_back(queued);
-                    }
                     Priority::Background => state.background.push_back(queued),
                 }
                 state.refresh_depths();
@@ -1133,8 +1209,8 @@ enum Release {
 struct Queued {
     permit: OwnedSemaphorePermit,
     priority: Priority,
-    /// What moves a background job to the bulk queue ([`CpuPool::promote`]).
-    promotion: Option<Promotion>,
+    /// What may move it to a higher queue.
+    raiser: Raiser,
     enqueued: Instant,
     job: Box<dyn Runnable>,
 }
@@ -1142,11 +1218,55 @@ struct Queued {
 impl Queued {
     /// Whether this job was queued with `promotion`.
     #[must_use]
-    fn is_raised_by(&self, promotion: &Promotion) -> bool {
-        self.promotion
-            .as_ref()
-            .is_some_and(|held| held.same_as(promotion))
+    fn is_promoted_by(&self, promotion: &Promotion) -> bool {
+        match &self.raiser {
+            Raiser::Promotion(held) => held.same_as(promotion),
+            Raiser::None | Raiser::Class(_) => false,
+        }
     }
+
+    /// Whether this job was queued in `class`.
+    #[must_use]
+    fn is_in(&self, class: &Arc<JobClass>) -> bool {
+        match &self.raiser {
+            Raiser::Class(held) => std::ptr::eq(held.as_ptr(), Arc::as_ptr(class)),
+            Raiser::None | Raiser::Promotion(_) => false,
+        }
+    }
+}
+
+/// What may move a queued job to a higher queue.
+#[derive(Debug)]
+enum Raiser {
+    /// Nothing: it is taken from the queue it was given.
+    None,
+    /// A background job's promotion, which moves it to the bulk queue ([`CpuPool::promote`]).
+    Promotion(Promotion),
+    /// The class it was queued in, which moves it to the raised class's queue
+    /// ([`CpuPool::raise`]). Held weakly: a build's class is alive while the build is, so that a
+    /// waiter that looks for the build in flight by its class finds an ended one gone, even with
+    /// its skipped jobs still queued.
+    Class(Weak<JobClass>),
+}
+
+/// Moves `class`'s jobs queued in `from` to the back of `to`, in their order, to be taken at
+/// `priority`, `to`'s ([`CpuPool::raise`]).
+fn move_class(
+    class: &Arc<JobClass>,
+    from: &mut VecDeque<Queued>,
+    (to, priority): (&mut VecDeque<Queued>, Priority),
+) {
+    if !from.iter().any(|queued| queued.is_in(class)) {
+        return;
+    }
+    let (moved, kept): (VecDeque<Queued>, VecDeque<Queued>) = std::mem::take(from)
+        .into_iter()
+        .partition(|queued| queued.is_in(class));
+    *from = kept;
+    to.extend(moved.into_iter().map(|mut queued| {
+        queued.priority = priority;
+        queued
+    }));
 }
 
 /// A background job's claim to the bulk queue ([`CpuPool::submit_promotable`],
@@ -1173,6 +1293,54 @@ impl Promotion {
     #[must_use]
     pub fn same_as(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.raised, &other.raised)
+    }
+}
+
+/// The class a build's jobs are queued in ([`CpuPool::submit_in`]): the highest priority any of
+/// the build's waiters asked, raised as a waiter of a higher class joins it ([`CpuPool::raise`]),
+/// which moves the build's jobs still queued to the raised class's queue, so that every job of the
+/// build not yet taken is taken at the raised class (galaxy-generation plan 10, P10.T10.b;
+/// rendering plan R06, R06.T11.d). A range query that joins a list or a table the warm-up or a sky
+/// started at bulk priority so has the rest of it built at its own class, ahead of the bulk jobs
+/// queued meanwhile and before it joined. A job a worker has taken already runs to its end, and one
+/// still waiting for room in its old queue when the class is raised waits for that room and is
+/// then queued at the raised class, so only a full queue holds a raised build back. It is
+/// scheduling only: no job's value depends on it.
+#[derive(Debug)]
+pub(crate) struct JobClass(AtomicU8);
+
+impl JobClass {
+    /// `priority`'s rank, the lower the higher: [`Priority`]'s order.
+    #[must_use]
+    const fn rank(priority: Priority) -> u8 {
+        match priority {
+            Priority::Interactive => 0,
+            Priority::Bulk => 1,
+            Priority::Background => 2,
+        }
+    }
+
+    /// A class at `priority` until raised.
+    #[must_use]
+    pub(crate) const fn new(priority: Priority) -> Self {
+        Self(AtomicU8::new(Self::rank(priority)))
+    }
+
+    /// The class its next job is queued at.
+    #[must_use]
+    pub(crate) fn priority(&self) -> Priority {
+        match self.0.load(AtomicOrdering::Acquire) {
+            0 => Priority::Interactive,
+            1 => Priority::Bulk,
+            _ => Priority::Background,
+        }
+    }
+
+    /// Raises the class to `priority` if that is higher, and leaves it as it is otherwise: whether
+    /// it was raised. Only [`CpuPool::raise`] raises it, which then moves its queued jobs.
+    fn raise(&self, priority: Priority) -> bool {
+        let rank = Self::rank(priority);
+        self.0.fetch_min(rank, AtomicOrdering::AcqRel) > rank
     }
 }
 
@@ -1435,7 +1603,7 @@ fn work(shared: &Shared, twin: &Twin) {
         Queued {
             permit,
             priority,
-            promotion: _,
+            raiser: _,
             enqueued,
             job,
         },
@@ -1768,6 +1936,182 @@ mod tests {
         );
         held.release().await;
         assert_eq!(result(receiver).await, Ok("promoted"));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A job class is raised by a higher priority and never lowered (R06.T11.d).
+    #[test]
+    fn a_job_class_is_raised_and_never_lowered() {
+        let class = JobClass::new(Priority::Background);
+        assert!(class.raise(Priority::Bulk));
+        assert_eq!(class.priority(), Priority::Bulk);
+        assert!(!class.raise(Priority::Background));
+        assert_eq!(class.priority(), Priority::Bulk, "never lowered");
+        assert!(class.raise(Priority::Interactive));
+        assert_eq!(class.priority(), Priority::Interactive);
+        assert!(!class.raise(Priority::Bulk));
+        assert_eq!(class.priority(), Priority::Interactive, "never lowered");
+    }
+
+    /// A raised class's jobs still queued move to the back of the raised class's queue in their
+    /// order: taken after the jobs queued there before the raise and before those queued after
+    /// it, with the class's later jobs queued there at once, and ahead of the jobs of the queue
+    /// they left (P10.T10.b, R06.T11.d).
+    #[tokio::test]
+    async fn a_raised_class_s_queued_jobs_are_taken_as_jobs_of_its_new_class_queued_then() {
+        let pool = pool(1, 8, 8);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let held = hold(&pool).await;
+        let class = Arc::new(JobClass::new(Priority::Bulk));
+        let mut receivers = Vec::new();
+        for (in_class, label) in [(true, "class 1"), (false, "bulk"), (true, "class 2")] {
+            let job = record(&log, label);
+            let token = CancelToken::new();
+            receivers.push(if in_class {
+                pool.submit_in(&class, token, job).await.unwrap()
+            } else {
+                pool.submit(Priority::Bulk, token, job).await.unwrap()
+            });
+        }
+        let job = record(&log, "interactive before");
+        receivers.push(
+            pool.try_submit(Priority::Interactive, CancelToken::new(), job)
+                .unwrap(),
+        );
+        let counters = pool.counters();
+        assert_eq!(
+            (counters.queued_interactive(), counters.queued_bulk()),
+            (1, 3)
+        );
+        pool.raise(&class, Priority::Interactive);
+        let counters = pool.counters();
+        assert_eq!(
+            (counters.queued_interactive(), counters.queued_bulk()),
+            (3, 1),
+            "the class's two queued jobs moved"
+        );
+        // Raised no higher, nothing moves.
+        pool.raise(&class, Priority::Bulk);
+        assert_eq!(class.priority(), Priority::Interactive);
+        let job = record(&log, "class after");
+        receivers.push(
+            pool.submit_in(&class, CancelToken::new(), job)
+                .await
+                .unwrap(),
+        );
+        let job = record(&log, "interactive after");
+        receivers.push(
+            pool.try_submit(Priority::Interactive, CancelToken::new(), job)
+                .unwrap(),
+        );
+        held.release().await;
+        for receiver in receivers {
+            assert_eq!(result(receiver).await, Ok(()));
+        }
+        assert_eq!(
+            *log.lock().unwrap(),
+            [
+                "interactive before",
+                "class 1",
+                "class 2",
+                "class after",
+                "interactive after",
+                "bulk"
+            ]
+        );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A job whose class is raised while it waits for room in its class's old queue is queued at
+    /// the raised class once it has room (P10.T10.b, R06.T11.d).
+    #[tokio::test]
+    async fn a_job_whose_class_is_raised_while_it_waits_for_room_is_queued_at_the_raised_class() {
+        let one = NonZeroUsize::MIN;
+        let gate = BulkGate::default();
+        let pool = Arc::new(CpuPool::with_bulk_gate(one, one, one, gate.clone()).unwrap());
+        gate.close();
+        // One bulk job held at the gate by the one worker, and one more filling the bulk queue.
+        let held = pool
+            .submit(Priority::Bulk, CancelToken::new(), |_| "held")
+            .await
+            .unwrap();
+        timeout(WAIT, async {
+            while gate.held() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the worker holds the job");
+        let filler = pool
+            .submit(Priority::Bulk, CancelToken::new(), |_| "filler")
+            .await
+            .unwrap();
+        let class = Arc::new(JobClass::new(Priority::Bulk));
+        let waiting = {
+            let (pool, class) = (Arc::clone(&pool), Arc::clone(&class));
+            tokio::spawn(async move {
+                pool.submit_in(&class, CancelToken::new(), |_| "class")
+                    .await
+            })
+        };
+        // The test's one runtime thread runs it until it waits for the bulk queue's one place.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        assert!(!waiting.is_finished(), "it waits for room");
+        let counters = pool.counters();
+        assert_eq!(
+            (counters.queued_interactive(), counters.queued_bulk()),
+            (0, 1)
+        );
+        pool.raise(&class, Priority::Interactive);
+        // The held job let through, the worker takes the filler and is held with it in turn,
+        // which frees the filler's place.
+        gate.admit();
+        let receiver = timeout(WAIT, waiting)
+            .await
+            .expect("it has room")
+            .unwrap()
+            .unwrap();
+        let counters = pool.counters();
+        assert_eq!(
+            (counters.queued_interactive(), counters.queued_bulk()),
+            (1, 0),
+            "queued at the raised class"
+        );
+        gate.open();
+        assert_eq!(result(held).await, Ok("held"));
+        assert_eq!(result(filler).await, Ok("filler"));
+        assert_eq!(result(receiver).await, Ok("class"));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A class raised from background to bulk moves its queued background jobs to the bulk queue,
+    /// and a job left queued keeps no class alive.
+    #[tokio::test]
+    async fn a_class_raised_from_background_moves_its_jobs_to_the_bulk_queue() {
+        let pool = pool(1, 4, 4);
+        let held = hold(&pool).await;
+        let class = Arc::new(JobClass::new(Priority::Background));
+        let receivers = [
+            pool.submit_in(&class, CancelToken::new(), |_| "class")
+                .await
+                .unwrap(),
+            pool.submit(Priority::Background, CancelToken::new(), |_| "background")
+                .await
+                .unwrap(),
+        ];
+        assert_eq!(Arc::strong_count(&class), 1, "a queued job holds it weakly");
+        pool.raise(&class, Priority::Bulk);
+        let counters = pool.counters();
+        assert_eq!(
+            (counters.queued_bulk(), counters.queued_background()),
+            (1, 1)
+        );
+        held.release().await;
+        let [first, second] = receivers;
+        assert_eq!(result(first).await, Ok("class"));
+        assert_eq!(result(second).await, Ok("background"));
         pool.shutdown().await.unwrap();
     }
 
