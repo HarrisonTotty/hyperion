@@ -566,8 +566,8 @@ fn the_census_is_its_oracle_for_the_dwarfs_near_the_sun() {
 /// kept is answered `Detached` at the system's age then and its state is not its own model's, as
 /// `sky::census::cell`'s realised check knows one. From generator version 27 a wide pair's
 /// main-sequence star takes its partner's wind (P11.T12), which the bound's `Detached` verdict
-/// reaches only at 29 (its wind reach, retargeted by train 27 and again by train 28), so such a
-/// star can outshine the bound the census skips its record by.
+/// reaches from 29, its wind reach on the record: to 28 such a star could outshine the bound the
+/// census skips its record by.
 #[cfg(not(target_family = "wasm"))]
 fn wind_fed_star(
     g: &Galaxy,
@@ -665,9 +665,9 @@ fn wind_fed_apart(
 
 /// The census of C to E within 1,000 ly of the Sun is its oracle, star for star and bit for bit,
 /// but for the stars a partner's wind moved off their own models past the bound the census skips
-/// their records by ([`wind_fed_apart`]): from generator version 27 (P11.T12), until the bound's
-/// `Detached` takes the wind's reach at 29, they are set apart from the oracle's and counted, a
-/// finding pinned as measured. At 27 they are 14 of C's 20,246 accepted and 1 of D's 6,376, each
+/// their records by ([`wind_fed_apart`]), which it sets apart from the oracle's and counts. From
+/// generator version 29 the bound's `Detached` takes the wind's reach (P11.T12) and there are none,
+/// as measured. At 27 and 28 they were 14 of C's 20,246 accepted and 1 of D's 6,376, each
 /// of a Detached pair: giants, core-helium burners and blue stragglers its partner's wind grew,
 /// up to 4.20 mag past their bounds (`0x42006cd5fbc00004`'s early-AGB companion, M<sub>V</sub>
 /// −0.23 against 3.97), the brightest D's `0x6202d8880e000009`, a giant of M<sub>V</sub> −0.96.
@@ -690,14 +690,26 @@ fn the_census_is_its_oracle_1000_ly_from_the_sun() {
     eprintln!("{what}: the wind-fed stars set apart, by layer: {apart:?}");
     assert_eq!(
         apart,
-        [(Layer::C, 14), (Layer::D, 1)],
+        Vec::<(Layer, u64)>::new(),
         "{what}: the wind-fed stars set apart, by layer"
     );
     generates_under_a_quarter(
         "C to E near the Sun",
         &generated,
-        &[Layer::C],
-        &[Layer::D, Layer::E],
+        &[],
+        &[Layer::C, Layer::D, Layer::E],
+    );
+    // R06.T8.g's quarter, missed from 29 (a finding): the bound skips fewer of C's records since
+    // its `Detached` takes the wind's reach, and the census generates 302,178 of its oracle's
+    // 1,097,661 systems of C near the Sun, 0.275 of them. Pinned under 0.28 as measured.
+    let (_, census, brute) = generated
+        .iter()
+        .copied()
+        .find(|&(layer, ..)| layer == Layer::C)
+        .expect("the census generates C near the Sun");
+    assert!(
+        census * 100 < brute * 28,
+        "{what}: C generates {census} of {brute} systems"
     );
 }
 
