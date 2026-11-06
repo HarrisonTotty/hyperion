@@ -359,18 +359,22 @@ fn figures(census: &Census) -> CvFigures {
     }
 }
 
-/// The census's figures under every 27 hold, as measured (2026-11-05, at generator version 27).
+/// The census's figures under the version's rules, as measured at generator version 29
+/// (2026-11-06): 5,678 members, 4,542 variables, 2,755 of them below the gap and 615 above six
+/// hours, under 29's rules on the record (P11.T4's whole dwarf limit, its kept cores' endings and
+/// swollen dwarfs, and P15.T10.b's tables refitted on the generator's own pairs, whose class shares
+/// the field's thinning reads; not split). At 27 and 28 (2026-11-05) 5,706, 4,555, 2,756 and 625.
 /// At 26 (2026-11-04, with the heavy donors' white dwarfs' wind) it found 5,708 members, 4,557
 /// variables and 2,758 below the gap. P15.T10.b's refits of the fitted binary rows at 27, whose
 /// carved shares the field's thinning reads, each take one below-gap variable out of the census's
 /// records (`binary_awd`'s on 7cf1f39e's engine and the binary classes' on 27's); the engine's
 /// segment cap of 256 and the floored step's stop at the pin move none.
 const CENSUS_FIGURES: CvFigures = CvFigures {
-    members: 5_706,
-    variables: 4_555,
+    members: 5_678,
+    variables: 4_542,
     heavy: 152,
-    below_gap: 2_756,
-    above_six_hours: 625,
+    below_gap: 2_755,
+    above_six_hours: 615,
 };
 
 /// A census of 10⁷ slab records' accreting white dwarfs ([`slab_census`]) under every 27 hold: at
