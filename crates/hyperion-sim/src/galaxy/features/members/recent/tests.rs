@@ -729,7 +729,10 @@ fn centre_tally(galaxy: &Galaxy) -> Tally {
 /// epoch, each ended at its bubble's wall, against 853 of the field's 1,183). From 27 a feature's
 /// runaways die in the field (P09.T33.b), so the features' share of the core collapses is the 27
 /// test's, about φ̄ (1 − 0.19) ≈ 0.67, and both shares are pinned to 10⁻³ as measured: 0.692 of
-/// 4,318 core collapses, and 0.321 of 10,107 shells, inside the plan's 0.15–0.35 (a finding).
+/// 4,318 core collapses, and at 29 0.443 of 12,315 shells, past the plan's 0.15–0.35 (a finding):
+/// 5,241 of the features' 9,185 core-collapse entries are shells at the epoch, where from 29 a
+/// superbubble, whose wall ends a shell, merges at its remnants' speed and keeps its swept-up wall
+/// (P09.T5). At 27 and 28, 0.321 of 10,107 shells.
 #[test]
 #[ignore = "slow: every catalogue feature's list and two classes' cells of the Milky Way"]
 fn the_features_hold_most_core_collapses_and_some_of_the_shells() {
@@ -757,7 +760,7 @@ fn the_features_hold_most_core_collapses_and_some_of_the_shells() {
     );
     assert!((in_features / 0.6918 - 1.0).abs() < 1e-3, "{in_features}");
     assert!(
-        (features_shells / 0.3211 - 1.0).abs() < 1e-3,
+        (features_shells / 0.4428 - 1.0).abs() < 1e-3,
         "{features_shells}"
     );
 }
