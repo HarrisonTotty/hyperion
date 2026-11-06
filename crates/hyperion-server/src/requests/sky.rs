@@ -300,6 +300,11 @@ async fn computed(
     replies: &Replies,
     started: Instant,
 ) -> Result<Answer, RequestError> {
+    // The galaxy's warm-up starts the tables of the streams nearest the observer first, which
+    // the census's first steps read.
+    state
+        .global_lists
+        .prefer_near(key, asked.observer.position());
     let galaxy = state.galaxies.get(key).await?;
     if let (Some(system), Some(named)) = (asked.exclude, &request.exclude_system) {
         check_exclude(state, (key, &galaxy), system, named, token.clone()).await?;

@@ -2774,6 +2774,44 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
     server.stop().await;
 }
 
+/// The first reply to the sky `id`, which `client` sent: whether it is the final one, when it came
+/// after `started`, and its JSON with its payload's length and FNV-1a digest, which a relaunch
+/// must send alike.
+async fn first_sky_reply(
+    client: &mut TestClient,
+    id: RequestId,
+    started: std::time::Instant,
+) -> (bool, std::time::Duration, String) {
+    let mut payload = Vec::new();
+    let (finished, body) = loop {
+        match client.next_frame().await {
+            Frame::Binary(_, bytes) => payload.extend(bytes),
+            Frame::Message(ServerMessage::PartialResponse { id: answered, body })
+                if answered == id =>
+            {
+                break (false, body);
+            }
+            Frame::Message(ServerMessage::Response {
+                id: answered, body, ..
+            }) if answered == id => break (true, body),
+            Frame::Message(other) => panic!("expected the sky's reply, got {other:?}"),
+        }
+    };
+    let replied = started.elapsed();
+    let digest = payload.iter().fold(0xcbf2_9ce4_8422_2325_u64, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    let json = serde_json::to_string(&body).expect("a reply's body is JSON");
+    (
+        finished,
+        replied,
+        format!(
+            "{json} and {} payload bytes, digest {digest:016x}",
+            payload.len()
+        ),
+    )
+}
+
 /// perf-galaxy-build-start's table: on a server of eight workers that serves the sky to its
 /// derived caps and warms the global list at an open, as a played server does, the seconds from a
 /// universe's open to its open's answer, which waits for the galaxy, and to the first answer
@@ -2781,7 +2819,7 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
 /// 50 ly, and on another the first reply of a sky near the Sun, after which the sky is cancelled.
 /// Each is asked at a first launch over a fresh data directory and again after a relaunch over
 /// it. Its figures depend on the machine and the build, so it asserts only that the relaunched
-/// range answer is the first's.
+/// range answer, and the relaunched sky's first reply, its JSON and its payload, are the first's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "measurement, run by hand: cargo test --release -p hyperion-server --test sky \
             first_answers_after_a_launch_and_a_relaunch -- --ignored --nocapture"]
@@ -2841,22 +2879,9 @@ async fn first_answers_after_a_launch_and_a_relaunch() {
                 started.elapsed()
             } else {
                 let sky_id = client.send_request(RequestBody::Sky(sky(&id))).await;
-                let (finished, replied) = loop {
-                    match client.next_frame().await {
-                        Frame::Binary(..) => {}
-                        Frame::Message(ServerMessage::PartialResponse { id: answered, .. })
-                            if answered == sky_id =>
-                        {
-                            break (false, started.elapsed());
-                        }
-                        Frame::Message(ServerMessage::Response { id: answered, .. })
-                            if answered == sky_id =>
-                        {
-                            break (true, started.elapsed());
-                        }
-                        Frame::Message(other) => panic!("expected the sky's reply, got {other:?}"),
-                    }
-                };
+                let (finished, replied, reply) =
+                    first_sky_reply(&mut client, sky_id, started).await;
+                answers.push(reply);
                 if !finished {
                     client.cancel(sky_id).await;
                     loop {
@@ -2882,7 +2907,7 @@ async fn first_answers_after_a_launch_and_a_relaunch() {
             server.stop().await;
         }
         if let [first, relaunched] = &answers[..] {
-            assert_eq!(relaunched, first, "the relaunched range answer");
+            assert_eq!(relaunched, first, "the relaunched {asked}");
         }
     }
 }

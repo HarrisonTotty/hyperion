@@ -10150,3 +10150,12 @@ CensusCost)`.
   - _Left._ With the global list warmed at the open (the default), a cold galaxy's first sky
     waits on the list's tube tables, which the warm-up builds at the sky's own bulk priority; the
     split's gain reaches its first reply only with the warm-up off.
+- **R06, a cold sky's step tables ahead of the warm-up's (lane `perf-sky-tables-on-disk`, part 3,
+  2026-11-06, at 29; no output moved).**
+  - _Server._ `GlobalListService::tubes` holds a claim (`Lists::asking`) under which every
+    warm-up starts no table; `GlobalListService::prefer_near(key, at)`, called where a sky starts,
+    has its galaxy's warm-up start the streams whose shells come nearest the observer first
+    (lean, 2026-11-06). Neither uses the pool's background class.
+  - _Left._ The warm-up's budget counts no table built beside it once it has begun (as before).
+    A relaunched range test that stops before its first launch's tables are written rebuilds them
+    beside its query.
