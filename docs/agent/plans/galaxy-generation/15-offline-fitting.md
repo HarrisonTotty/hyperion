@@ -3509,6 +3509,20 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     goldens (`alerts::listed`'s three, `gas_merging`, the alerts' century) are byte for byte
     land/next's: the hold moves none of them. Nine golden tests fail on land/next 3d74d21a
     itself, their files' headers at 27 under version 28, and fail the same here.
+  - _Two slow tests after it, on v29 (hold-ci's round 8, 2026-11-06; test figures only,
+    nothing generated moves)._
+    - `the_accreting_white_dwarf_samplers_against_the_engine` held the fast table's mean of 1 ÷ P
+      to 10% of the held-out half's. That mean is a few short recurrences': two of the held-out
+      half's 2,432 fast hosts make some 0.30 of it, a Kish size of about 19 for the mean (the
+      fitted half's 90), so the halves' means are 0.825 of each other.
+    - On v29 train 29's refit keeps the fitted half's mean to 0.005 (5.469 against 5.441 × 10⁻⁵
+      a year), 0.829 of the held-out half's 6.598 × 10⁻⁵, whose standard error is 1.50 × 10⁻⁵.
+      54d60e7's refit, fitted before the census moved, is 1.43 of the fitted half's (1.18 of the
+      held-out half's, as hold-ci found).
+    - The test now holds the table to 10% of the fitted half's mean, which its rate-preserving
+      floor keeps, and to the held-out half's within that half's sampling error at 1%. A miss is
+      pushed with the marks', so that one run reports the slow class too: on v29 it passes, both
+      classes' marks at the shape's resolution (46 minutes on 16 threads).
 - **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
   research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
   - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is
