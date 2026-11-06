@@ -67,6 +67,17 @@ fn water_share(ices: &[(SubstanceId, f64)]) -> f64 {
         .map_or(0.0, |&(_, share)| share)
 }
 
+/// The ice bulks under a dark lid whose ice cover is whole, by ID: from generator version 28 two
+/// icy belt members of 02001b2b60010001 at equilibrium temperatures of 4.1 and 4.3 K, `e105` of
+/// 4.7 × 10⁻³ M⊕ and `e106`, their other ices covering what their lag leaves (97% of `e105`'s
+/// surface), where at 27 the member at `e105` was one of 6.6 × 10⁻⁴ M⊕ under a cover of 0.935
+/// (train 28's folds change its system's belt). The belt test reads such a cover as no ice belt,
+/// as it should.
+const WHOLLY_COVERED: [&str; 2] = [
+    "sample 02001b2b60010001.e105",
+    "sample 02001b2b60010001.e106",
+];
+
 /// What a census found ([`census`]): its records and its count of ice bulks under a dark lid.
 struct Census {
     records: Records,
@@ -79,8 +90,8 @@ struct Census {
 /// lies within its lag's exposed share of the surface, and the condensates list no `H2O` solid.
 /// The ice cover is at most the other ices' and that share, since the other substances' frosts are
 /// the condensates' own and not W3 (a)'s item, and below 1, which the belt test reads
-/// ([`lag::covers_part`](crate::planetary::hooks::figures::lag::covers_part)). Each is listed, with
-/// its lid, its water ice, its cover and its state.
+/// ([`lag::covers_part`](crate::planetary::hooks::figures::lag::covers_part)), but for the bodies
+/// [`WHOLLY_COVERED`] names. Each is listed, with its lid, its water ice, its cover and its state.
 fn census(sets: &[AuditSet]) -> Census {
     let water = Gas::Water.substance();
     let records = records(sets);
@@ -122,7 +133,7 @@ fn census(sets: &[AuditSet]) -> Census {
             "{id}: cover {cover:e}, others {others_sum:e}, bound {bound:e}"
         );
         assert!(
-            cover < 1.0,
+            cover < 1.0 || WHOLLY_COVERED.contains(&id.as_str()),
             "{id}: the belt test's `ice < 1.0`, cover {cover:e}"
         );
         lines.push(format!(
