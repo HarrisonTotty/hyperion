@@ -1059,9 +1059,6 @@ fn listed_in_the_background(
     pinned(listed, host, name)
 }
 
-/// The lists' supernova, 0.2 ly spinward of its site, through a V sensor that reaches 700 ly over
-/// [200, 300) years: from 29 its onset is seen, on its list's member, beside the cells', 0.2 years
-/// after its explosion, which its explosion event names.
 /// The lists' told deaths' entries, kept between walks of other windows, change no walk's answer,
 /// in any order (perf-alert-walks-cpu): the core collapses about the listed supernova through a V
 /// sensor that reaches 700 ly, over three centuries, walked forwards, backwards, shuffled and alone
@@ -1079,7 +1076,7 @@ fn kept_told_entries_change_no_walk_in_any_order() {
         .into_iter()
         .map(|window| sensor_query(ClassId::CORE_COLLAPSE, at, v.clone(), window))
         .collect();
-    let galaxy = seed_9(true);
+    let galaxy = seed_9();
     let kept = KeepLists::default();
     assert_order_independent(&queries, |query| alerts(galaxy, query, &kept));
     for query in &queries {
@@ -1091,6 +1088,9 @@ fn kept_told_entries_change_no_walk_in_any_order() {
     assert!(kept.told() > 0, "told entries kept");
 }
 
+/// The lists' supernova, 0.2 ly spinward of its site, through a V sensor that reaches 700 ly over
+/// [200, 300) years: from 29 its onset is seen, on its list's member, beside the cells', 0.2 years
+/// after its explosion, which its explosion event names.
 #[test]
 fn from_29_a_listed_supernova_is_seen_beside_the_cells() {
     let host = SystemId::from_raw(LISTED_SUPERNOVA).unwrap();
