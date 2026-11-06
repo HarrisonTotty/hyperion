@@ -2098,10 +2098,10 @@ mod tests {
     /// of C, D and E, as P11.T16's `hierarchy_bound` lists them, near the Sun and in the bulge,
     /// and pairs of theirs with a star below 0.1 M☉, each in an old and a young window, on a seed
     /// of its own:
-    /// - no `Detached` pair interacts before the window's end, or holds a departing star, but those
-    ///   whose wind alone does ([`wind_fed_by`]; P11.T12, which `Detached` reaches only at 29):
-    ///   counted apart, a finding pinned as measured at 27, 15,652 windows (C 7,537, D 7,985,
-    ///   E 130, every one old but D's 35), a departing star among them as bright as
+    /// - no `Detached` pair interacts before the window's end, or holds a departing star, its
+    ///   wind's alone counted apart ([`wind_fed_by`]): none from generator version 29, whose
+    ///   `Detached` verdict takes the wind's reach (P11.T12); at 27 and 28, 15,652 windows (C 7,537,
+    ///   D 7,985, E 130, every one old but D's 35), a departing star among them as bright as
     ///   M<sub>V</sub> −6.38;
     /// - no `Unchanged` pair holds a departing living star or a living product in the window;
     /// - no `Remnants` pair holds a living star or product in the window;
@@ -2131,7 +2131,7 @@ mod tests {
         }
         println!("{wind_fed} wind-fed Detached pairs counted apart; {violations} violations");
         assert_eq!(
-            wind_fed, 15_652,
+            wind_fed, 0,
             "Detached pairs the engine contradicts through their wind alone"
         );
         assert_eq!(violations, 0, "verdicts the engine contradicts");
