@@ -30,6 +30,7 @@ import type { TraceConfig } from "electron";
 import type {
   AtmosphereLeversOverride,
   CompositeProbeName,
+  FramePacingName,
   InspectionAtmosphereRead,
   InspectionGpuAttachment,
   InspectionGpuCall,
@@ -58,7 +59,12 @@ import {
   type ProfiledFunction,
 } from "./pageProfile";
 import { readTraceFileEvents, TraceReducer } from "./reduceTrace";
-import { formatAsPrettier, ADDED_FILE_LIMIT_BYTES, type ResultsFiles } from "./results";
+import {
+  formatAsPrettier,
+  ADDED_FILE_LIMIT_BYTES,
+  measuredVsyncOf,
+  type ResultsFiles,
+} from "./results";
 import type { ViewsCheckRunInput } from "./viewsCheckResults";
 
 /** The file's schema name. */
@@ -71,9 +77,10 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
  * since each window's React commits and each thread's React work (lane perf-render-thread-2), 6
  * since each thread's longest task (lane perf-render-thread-ground), 7 since each window's render
  * passes' attachments and each body's atmosphere read (R14.T2.e; a file before it has neither), 8
- * since the run's long tasks (lane perf-page-long-tasks).
+ * since the run's long tasks (lane perf-page-long-tasks), 9 since the run's pacing and offscreen
+ * frame clock and each window's callbacks, frame intervals and measured vsync period (R07.T19).
  */
-export const INSPECTION_TIMING_VERSION = 8;
+export const INSPECTION_TIMING_VERSION = 9;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -836,6 +843,13 @@ export interface InspectionTimingWindowResults {
   readonly draws: number;
   /** Its draws a second over the window. */
   readonly drawsPerSecond: number;
+  /** The animation frames' callbacks in it, the primary's draws among them (R07.T19). */
+  readonly callbacks: number;
+  /**
+   * The vsync period its animation frames measure by the renderer's rule (`vsyncPeriodOf`), the P
+   * a `rate` pacing draws by, or why it is missing.
+   */
+  readonly measuredVsyncMs: Measured<number>;
   readonly canvas: ViewsCheckCanvas;
   readonly scales: ReadonlyArray<number>;
   /** The samples a ray of the atmosphere's march takes at the sizes its air was drawn at. */
@@ -884,7 +898,7 @@ export interface InspectionTimingWindowResults {
   /** The renderer's own times, as it measured them. */
   readonly samples: Pick<
     InspectionTimingWindow,
-    "intervalsMs" | "mainThreadMs" | "submitMs" | "gpuMs"
+    "intervalsMs" | "frameIntervalsMs" | "mainThreadMs" | "submitMs" | "gpuMs"
   >;
 }
 
@@ -903,6 +917,10 @@ export interface InspectionTimingResults {
     readonly shown: boolean;
     readonly window: ViewsCheckRunInput["window"];
     readonly devicePixelRatio: number;
+    /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+    readonly framePacing: FramePacingName;
+    /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+    readonly frameRateHz: number | null;
     readonly served: ServedWorldNames | null;
     readonly timer: SpikePassTimer;
     /**
@@ -1007,6 +1025,8 @@ function windowResults(
     durationMs,
     draws,
     drawsPerSecond: durationMs > 0 ? (1000 * draws) / durationMs : 0,
+    callbacks: window.mainThreadMs.length,
+    measuredVsyncMs: measuredVsyncOf(window.frameIntervalsMs),
     canvas: window.canvas,
     scales: window.scales,
     marchSamples: window.marchSamples,
@@ -1032,6 +1052,7 @@ function windowResults(
     trace: trace ?? missing("no trace was recorded over the window"),
     samples: {
       intervalsMs: window.intervalsMs,
+      frameIntervalsMs: window.frameIntervalsMs,
       mainThreadMs: window.mainThreadMs,
       submitMs: window.submitMs,
       gpuMs: window.gpuMs,
@@ -1177,6 +1198,8 @@ export function buildInspectionTimingResults(
       shown: run.shown,
       window: run.window,
       devicePixelRatio: record.devicePixelRatio,
+      framePacing: run.framePacing,
+      frameRateHz: run.frameRateHz,
       served: input.served,
       timer: record.timer,
       compositeProbe: input.compositeProbe,
@@ -1416,6 +1439,7 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
   return [
     `## ${window.name}: ${String(window.draws)} draws in ${(window.durationMs / 1000).toFixed(1)} s, ${window.drawsPerSecond.toFixed(2)} a second`,
     "",
+    `- **Pacing:** ${String(window.callbacks)} animation frames for ${String(window.draws)} draws; measured vsync ${window.measuredVsyncMs.value === null ? `— (${window.measuredVsyncMs.reason})` : `${window.measuredVsyncMs.value.toFixed(2)} ms`}`,
     `- **Primary:** ${String(window.canvas.widthPx)} × ${String(window.canvas.heightPx)} px; internal scale ${window.scales.length === 0 ? "—" : window.scales.map((scale) => scale.toFixed(3)).join(" → ")}; frames not timed in full ${String(window.untimedFrames)}`,
     `- **Position:** ${cell(window.position ?? "—")}`,
     `- **Statements:** ${cell(window.statements.length === 0 ? "—" : window.statements.join(" · "))}`,
@@ -1517,7 +1541,7 @@ export function inspectionTimingMarkdown(results: InspectionTimingResults): stri
     `- **Body:** ${run.served === null ? "—" : `\`${run.served.body}\` of universe \`${run.served.universe}\``}`,
     `- **Machine:** ${cell(run.machine.cpu)}, ${String(run.machine.logicalCores)} threads; GPU ${cell(gpu)}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}${leversText(run.atmosphereLevers)}${run.litProbe === null ? "" : `; lit probe ${run.litProbe}, not the picture a player sees`}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}${leversText(run.atmosphereLevers)}${run.litProbe === null ? "" : `; lit probe ${run.litProbe}, not the picture a player sees`}`,
     "- **A profile, not a measurement:** nothing is judged; a hidden run's frames are never presented, and the machine may be shared.",
     "",
     ...results.windows.flatMap(windowMarkdown),

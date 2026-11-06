@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type { GpuProcessGoneReport, HyperionApi } from "./api";
 import { compileBudgetFromArgv } from "./compileBudgetLaunch";
+import { framePacingFromArgv } from "./framePacingLaunch";
 import { geometryFromArgv } from "./geometryLaunch";
 import { graphicsLaunchFromArgv, subscribeGpuProcessGone } from "./graphicsLaunch";
 import { performanceThreadsFromArgv } from "./machineLaunch";
@@ -27,6 +28,7 @@ const api: HyperionApi = {
     },
   },
   setting: qualityFromArgv(process.argv),
+  framePacing: framePacingFromArgv(process.argv),
   performanceThreads: performanceThreadsFromArgv(process.argv),
   planetViewer: planetViewerFromArgv(process.argv),
   versions: {

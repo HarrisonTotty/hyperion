@@ -47,6 +47,8 @@ function input(
       smoke: false,
       switches: [],
       shown: false,
+      framePacing: "display",
+      frameRateHz: 60,
       window: { widthDip: 1926, heightDip: 1086 },
       captures: measured("target/views-check/atmosphere/captures-x"),
     },
@@ -165,7 +167,7 @@ describe("the atmosphere run's results", () => {
   it("pass the fixture's record", () => {
     const results = buildAtmosphereCheckResults(input());
     expect([results.schema, results.version, results.overall, atmosphereFailures(results)]).toEqual(
-      [ATMOSPHERE_CHECK_SCHEMA, 5, "pass", ""],
+      [ATMOSPHERE_CHECK_SCHEMA, 6, "pass", ""],
     );
   });
 
@@ -182,6 +184,8 @@ describe("the atmosphere run's results", () => {
         "smoke",
         "switches",
         "shown",
+        "framePacing",
+        "frameRateHz",
         "window",
         "devicePixelRatio",
         "captures",
@@ -437,7 +441,7 @@ describe("the atmosphere run's files", () => {
     );
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.atmosphere-results",
-      version: 5,
+      version: 6,
       overall: "pass",
       mediaReadyMs: 4200,
     });

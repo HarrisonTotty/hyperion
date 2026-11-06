@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { FramePacingName } from "../../../../preload/api";
 import { binaryFrame } from "../../test/binaryFrames";
 import { describedText, statusLine } from "../../test/statusLine";
 import {
@@ -75,6 +76,7 @@ async function setup(
     readonly store?: GraphicsStatusStore;
     readonly setting?: QualitySetting;
     readonly stagePx?: { readonly widthPx: number; readonly heightPx: number };
+    readonly framePacing?: FramePacingName;
   } = {},
 ): Promise<Setup> {
   const fake = timedEngineSource();
@@ -84,6 +86,7 @@ async function setup(
     engines: fake.engines,
     ...(options.setting === undefined ? {} : { setting: options.setting }),
     ...(options.stagePx === undefined ? {} : { stagePx: options.stagePx }),
+    ...(options.framePacing === undefined ? {} : { framePacing: options.framePacing }),
   });
   await settle();
   harness.advance(100);
@@ -563,18 +566,32 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
     );
   });
 
-  it("draws a 30 Hz photorealistic primary in every second animation frame on low", async () => {
-    const view = await setup({ store: await nominalStore(), setting: "low" });
-    await photorealControls(view);
-    const tonemapped = (): number =>
-      view
-        .views()
-        .find((each) => each.name === "view")
-        ?.frames.filter((frame) => frame.label === TONEMAP_PASS).length ?? 0;
-    const before = tonemapped();
+  it("draws a 30 Hz instrument in every second frame of a 60 Hz primary when paced by rate on a 60 Hz clock (R07.T19)", async () => {
+    const view = await setup({ framePacing: "rate" });
+    await openInstrument(view, "INSTRUMENT 1");
+    const primary = framesOf(view, "view");
+    const instrument = framesOf(view, "instrument-1");
     view.advance(16 * 20);
-    expect(tonemapped() - before).toBe(10);
+    expect([framesOf(view, "view") - primary, framesOf(view, "instrument-1") - instrument]).toEqual(
+      [20, 10],
+    );
   });
+
+  it.each(["display", "rate"] as const)(
+    "draws a 30 Hz photorealistic primary in every second animation frame on low, paced by %s",
+    async (framePacing) => {
+      const view = await setup({ store: await nominalStore(), setting: "low", framePacing });
+      await photorealControls(view);
+      const tonemapped = (): number =>
+        view
+          .views()
+          .find((each) => each.name === "view")
+          ?.frames.filter((frame) => frame.label === TONEMAP_PASS).length ?? 0;
+      const before = tonemapped();
+      view.advance(16 * 20);
+      expect(tonemapped() - before).toBe(10);
+    },
+  );
 });
 
 describe("VIEW's one frame path (R07.T19.c)", () => {

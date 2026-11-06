@@ -50,6 +50,7 @@ import type { QualitySetting } from "./view/quality/qualitySetting";
 import { selectionViewport } from "./view/terrain/handover";
 import type {
   AtmosphereLeversOverride,
+  FramePacingName,
   GeometryOverride,
   GraphicsLaunchMode,
   ServedWorldNames,
@@ -81,6 +82,8 @@ interface DisplayInputs {
   readonly checkedView: CheckedView | null;
   /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
   readonly setting: QualitySetting;
+  /** How `VIEW` paces its views, the launch's `--frame-pacing` (R07.T19). */
+  readonly framePacing: FramePacingName;
   /** The platform the client runs on, whose primary modifier `VIEW`'s rate chord takes (R07.T19.f). */
   readonly platform: string;
   /**
@@ -311,6 +314,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           sceneOptions={inputs.checkedView?.sceneOptions}
           watchTerrain={inputs.checkedView?.watchTerrain}
           setting={inputs.setting}
+          framePacing={inputs.framePacing}
           platform={inputs.platform}
           performanceThreads={inputs.performanceThreads}
           geometry={inputs.geometry}
@@ -323,6 +327,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       content = (
         <PlanetViewerDisplay
           setting={inputs.setting}
+          framePacing={inputs.framePacing}
           platform={inputs.platform}
           performanceThreads={inputs.performanceThreads}
           geometry={inputs.geometry}
@@ -535,6 +540,7 @@ export function App() {
     planetOpening,
     checkedView: probes === null ? null : checkedViewOf(probes),
     setting: window.hyperion.setting,
+    framePacing: window.hyperion.framePacing,
     platform: window.hyperion.platform,
     performanceThreads: window.hyperion.performanceThreads,
     geometry: window.hyperion.geometry,

@@ -16,6 +16,7 @@ import {
   type PhaseTraceFigures,
   softwareViewsCheckFailures,
   type ViewsCheckInput,
+  type ViewsCheckResults,
   viewsCheckMarkdown,
   writeViewsCheckResults,
 } from "./viewsCheckResults";
@@ -112,6 +113,11 @@ function traces(
   );
 }
 
+/** A phase's T in `results`, ms to two decimals. */
+function periodOf(results: ViewsCheckResults, phase: ViewsCheckPhaseName): string | undefined {
+  return results.phases.find((each) => each.name === phase)?.periodMs.value?.toFixed(2);
+}
+
 function input(overrides: Partial<ViewsCheckInput> = {}): ViewsCheckInput {
   return {
     run: {
@@ -133,6 +139,8 @@ function input(overrides: Partial<ViewsCheckInput> = {}): ViewsCheckInput {
       switches: ["--use-angle=vulkan"],
       shown: true,
       displayHz: VSYNC_HZ,
+      framePacing: "display",
+      frameRateHz: null,
       window: { widthDip: 1920, heightDip: 1080 },
       captures: measured("/repo/target/views-check/captures"),
     },
@@ -179,6 +187,24 @@ describe("the views check's results", () => {
     expect(cockpit?.rateHz).toBe(30);
     expect(cockpit?.periodMs.value).toBeCloseTo(2 * T_MS);
     expect(cockpit?.criteria.rows.find((row) => row.id === "p95")?.limit).toBe(35);
+  });
+
+  it("reads T on a 120 Hz panel as the vsyncs its pacing draws each rate on, and records the pacing and the measured vsync (R07.T19)", () => {
+    const at = (framePacing: "rate" | "display"): ViewsCheckResults =>
+      buildViewsCheckResults(
+        input({ run: { ...input().run, setting: "low", displayHz: 120, framePacing } }),
+      );
+    const rate = at("rate");
+    const counted = at("display");
+    expect([
+      periodOf(rate, "photoreal-two-wireframe"),
+      periodOf(rate, "wireframe-two-wireframe"),
+      periodOf(counted, "photoreal-two-wireframe"),
+      periodOf(counted, "wireframe-two-wireframe"),
+      rate.run.framePacing,
+      rate.phases[0]?.measuredVsyncMs.value?.toFixed(2),
+      viewsCheckMarkdown(rate).includes(", pacing rate"),
+    ]).toEqual(["33.33", "16.67", "16.67", "8.33", "rate", T_MS.toFixed(2), true]);
   });
 
   it("reads the low setting's wireframe primary at 60 Hz, as T20's low cases ask", () => {

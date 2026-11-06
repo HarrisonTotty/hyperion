@@ -6,7 +6,11 @@ import { isTextEntry } from "../../lib/textEntry";
 import { useElementSize } from "../../lib/useElementSize";
 import { useUniverse } from "../../lib/universe";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
-import type { AtmosphereLeversOverride, GeometryOverride } from "../../../../preload/api";
+import type {
+  AtmosphereLeversOverride,
+  FramePacingName,
+  GeometryOverride,
+} from "../../../../preload/api";
 import { ViewDisplay } from "../view/ViewDisplay";
 import type { ViewEngineSource } from "../view/useViewEngine";
 import { ViewSceneProvider } from "../view/ViewSceneProvider";
@@ -22,6 +26,8 @@ export interface PlanetViewerDisplayProps {
   /** Where `VIEW`'s engine comes from: R01's by default, the probe's on a views check (R15.T6). */
   readonly engineSource?: ViewEngineSource | undefined;
   readonly setting: QualitySetting;
+  /** How `VIEW` paces its views (R07.T19), the launch's `--frame-pacing`. */
+  readonly framePacing: FramePacingName;
   readonly platform: string;
   readonly performanceThreads: number | null;
   readonly geometry: GeometryOverride | undefined;
@@ -58,6 +64,7 @@ export interface PlanetViewerDisplayProps {
 function PlanetViewerPanels({
   engineSource,
   setting,
+  framePacing,
   platform,
   performanceThreads,
   geometry,
@@ -111,6 +118,7 @@ function PlanetViewerPanels({
         sceneOptions={NO_KEPT_SCENES}
         hostStatements={hostStatements}
         setting={setting}
+        framePacing={framePacing}
         platform={platform}
         performanceThreads={performanceThreads}
         geometry={geometry}
@@ -120,6 +128,7 @@ function PlanetViewerPanels({
     [
       engineSource,
       setting,
+      framePacing,
       platform,
       performanceThreads,
       geometry,

@@ -63,6 +63,7 @@ const RUN: RunDescription = {
   switches: [],
   shown: false,
   displayHz: null,
+  framePacing: "display",
   nvidiaBaselineBytes: null,
 };
 

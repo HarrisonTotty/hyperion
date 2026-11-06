@@ -56,9 +56,9 @@ export const ATMOSPHERE_CHECK_SCHEMA = "hyperion.views-check.atmosphere-results"
  * (a fixture's or the night's, the night's with no designation, range or phase) and its
  * `exposureSettleMs`; 3 with the flight's `stages`; 4 with each capture's drawn `style` and the
  * faults' `verdict` and `reasons` (R08.T10.g); 5 with each capture's `primaryScale` and
- * `airSetting` (fix-retina-frame).
+ * `airSetting` (fix-retina-frame); 6 with the run's `framePacing` and `frameRateHz` (R07.T19).
  */
-export const ATMOSPHERE_CHECK_VERSION = 5;
+export const ATMOSPHERE_CHECK_VERSION = 6;
 
 /**
  * The run, as the main process describes it at its start: the terrain run's description, without
@@ -122,6 +122,10 @@ export interface AtmosphereCheckResults {
     readonly smoke: boolean;
     readonly switches: ReadonlyArray<string>;
     readonly shown: boolean;
+    /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+    readonly framePacing: AtmosphereCheckRunInput["framePacing"];
+    /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+    readonly frameRateHz: AtmosphereCheckRunInput["frameRateHz"];
     readonly window: AtmosphereCheckRunInput["window"];
     readonly devicePixelRatio: number;
     readonly captures: Measured<string>;
@@ -252,6 +256,8 @@ export function buildAtmosphereCheckResults(input: AtmosphereCheckInput): Atmosp
       smoke: run.smoke,
       switches: run.switches,
       shown: run.shown,
+      framePacing: run.framePacing,
+      frameRateHz: run.frameRateHz,
       window: run.window,
       devicePixelRatio: record.devicePixelRatio,
       captures: run.captures,
@@ -370,7 +376,7 @@ export function atmosphereCheckMarkdown(results: AtmosphereCheckResults): string
     `- **Overall:** ${results.overall}`,
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"} (${run.provisional})`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; the primary ${String(results.canvas.widthPx)} × ${String(results.canvas.heightPx)} px; pass timer ${results.timer}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}, pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}; the primary ${String(results.canvas.widthPx)} × ${String(results.canvas.heightPx)} px; pass timer ${results.timer}`,
     `- **Media ready:** ${(results.mediaReadyMs / 1000).toFixed(1)} s after the scene's choice`,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
     `- **Faults:** fault lines ${String(findings.captures.atmosphereFaults)} atmosphere, ${String(findings.captures.graphicsFaults)} graphics; ${String(findings.faults.record.length)} engine faults, ${String(findings.faults.gpuProcessExits)} GPU-process exits; recorded, not judged: console errors ${String(errors.count)}${errors.first.length === 0 ? "" : ` (${errors.first.join(" | ")})`}`,

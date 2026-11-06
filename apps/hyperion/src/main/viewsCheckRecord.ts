@@ -1661,6 +1661,7 @@ function timingWindow(value: unknown): ReadTimingWindow | null {
   const size = canvas(value["canvas"]);
   const scales = numbers(value["scales"]);
   const intervalsMs = times(value["intervalsMs"]);
+  const frameIntervalsMs = times(value["frameIntervalsMs"]);
   const mainThreadMs = times(value["mainThreadMs"]);
   const submitMs = times(value["submitMs"]);
   const gpuMs = times(value["gpuMs"]);
@@ -1682,6 +1683,7 @@ function timingWindow(value: unknown): ReadTimingWindow | null {
     size === null ||
     scales === null ||
     intervalsMs === null ||
+    frameIntervalsMs === null ||
     mainThreadMs === null ||
     submitMs === null ||
     gpuMs === null ||
@@ -1718,6 +1720,7 @@ function timingWindow(value: unknown): ReadTimingWindow | null {
     canvas: size,
     scales,
     intervalsMs,
+    frameIntervalsMs,
     mainThreadMs,
     submitMs,
     gpuMs,

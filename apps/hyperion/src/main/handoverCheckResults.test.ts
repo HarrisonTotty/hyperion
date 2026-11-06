@@ -45,6 +45,8 @@ function input(
       fixture: "terrain-test",
       switches: [],
       shown: false,
+      framePacing: "display",
+      frameRateHz: 60,
       window: { widthDip: 1926, heightDip: 1086 },
       captures: measured("target/views-check/terrain/captures-x"),
     },
@@ -552,7 +554,7 @@ describe("the hand-over check's files", () => {
     const { json } = await writeHandoverResults("/out", buildHandoverCheckResults(input()), files);
     expect(JSON.parse(written.get(json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.handover-results",
-      version: 5,
+      version: 6,
       overall: "pass",
       rangeM: 1.5419e7,
     });
@@ -631,6 +633,8 @@ describe("the hand-over check's files", () => {
         "smoke",
         "switches",
         "shown",
+        "framePacing",
+        "frameRateHz",
         "window",
         "devicePixelRatio",
         "captures",

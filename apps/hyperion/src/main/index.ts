@@ -18,12 +18,14 @@ import {
 } from "electron";
 
 import type {
+  FramePacingName,
   GeometryOverride,
   QualitySettingName,
   SpikeLaunch,
   ViewsCheckLaunch,
 } from "../preload/api";
 import { type CompileBudgetLaunch, compileBudgetSwitch } from "../preload/compileBudgetLaunch";
+import { framePacingSwitch } from "../preload/framePacingLaunch";
 import { geometrySwitch, geometryText } from "../preload/geometryLaunch";
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
 import { performanceThreadsSwitch } from "../preload/machineLaunch";
@@ -35,6 +37,7 @@ import { viewsCheckSwitch } from "../preload/viewsCheckLaunch";
 import { CdpTracing } from "./cdpTracing";
 import {
   type ClientArgs,
+  DEFAULT_CHECK_FRAME_RATE_HZ,
   parseClientArgs,
   serverUrlOf,
   userArgs,
@@ -164,12 +167,18 @@ interface ViewsCheckWindowRun {
    * (`--device-pixel-ratio`; the owner's Retina report, 2026-11-01): 1 on a shown run.
    */
   readonly zoom: ViewsCheckPixelRatio;
+  /**
+   * The offscreen frame clock of a hidden run, animation frames a second (`--frame-rate`, R07.T19):
+   * Electron's 60 unless given; a shown run's display gives its own.
+   */
+  readonly frameRateHz: number;
 }
 
 function createWindow(
   serverUrl: string,
   graphics: GraphicsLaunch,
   setting: QualitySettingName,
+  framePacing: FramePacingName,
   spike: SpikeWindow | null,
   check: ViewsCheckWindowRun | null = null,
   planetViewer = false,
@@ -207,6 +216,7 @@ function createWindow(
         serverUrlSwitch(serverUrl),
         ...graphicsArguments(graphics.launchMode, graphics.gpuTiming),
         qualitySwitch(setting),
+        framePacingSwitch(framePacing),
         // Read at each window's making: once a launch, a few milliseconds on macOS, none elsewhere.
         performanceThreadsSwitch(machinePerformanceThreads()),
         planetViewerSwitch(planetViewer),
@@ -226,6 +236,14 @@ function createWindow(
   if (run?.hidden !== true) {
     window.once("ready-to-show", () => {
       window.show();
+    });
+  }
+  if (check?.hidden === true && check.frameRateHz !== DEFAULT_CHECK_FRAME_RATE_HZ) {
+    // A hidden check's animation frames follow its offscreen frame clock, Electron's 60 Hz unless
+    // set, so that it can pace as a faster panel would (R07.T19).
+    window.webContents.setFrameRate(check.frameRateHz);
+    window.webContents.once("did-finish-load", () => {
+      logLine(`views check: offscreen frame clock ${String(window.webContents.getFrameRate())} Hz`);
     });
   }
 
@@ -323,6 +341,7 @@ function startSpikeSession(
   switches: ReadonlyArray<ChromiumSwitch>,
   hidden: boolean,
   nvidiaBaselineBytes: number | null,
+  framePacing: FramePacingName,
 ): void {
   const trace = new SpikeTrace(
     new CdpTracing(window.webContents.debugger, {
@@ -375,6 +394,7 @@ function startSpikeSession(
       ),
       shown: !hidden,
       displayHz: hidden ? null : screen.getDisplayMatching(window.getBounds()).displayFrequency,
+      framePacing,
       nvidiaBaselineBytes,
     }),
     trace,
@@ -478,6 +498,7 @@ function startViewsCheckSession(
   graphics: GraphicsLaunch,
   switches: ReadonlyArray<ChromiumSwitch>,
   hidden: boolean,
+  pacing: { readonly framePacing: FramePacingName; readonly frameRateHz: number },
 ): void {
   const startedAt = new Date();
   const stamp = startedAt.toISOString().replaceAll(/[-:]/g, "").slice(0, 15);
@@ -521,6 +542,8 @@ function startViewsCheckSession(
       ),
       shown: !hidden,
       displayHz: hidden ? null : screen.getDisplayMatching(window.getBounds()).displayFrequency,
+      framePacing: pacing.framePacing,
+      frameRateHz: hidden ? pacing.frameRateHz : null,
     }),
     windowSize: () => {
       const [widthDip = 0, heightDip = 0] = window.getContentSize();
@@ -698,13 +721,21 @@ async function main(): Promise<void> {
     const hidden = spike.smoke || process.env[SPIKE_HIDDEN_ENV] === "1";
     logGeometry("descent spike", args.geometry);
     logCompileBudget("descent spike", args.compileBudget);
-    const window = createWindow(serverUrl, graphics, args.setting, {
+    const window = createWindow(serverUrl, graphics, args.setting, args.framePacing, {
       launch: spike,
       hidden,
       geometry: args.geometry,
       compileBudget: args.compileBudget,
     });
-    startSpikeSession(window, spike, graphics, switches, hidden, nvidiaBaselineBytes);
+    startSpikeSession(
+      window,
+      spike,
+      graphics,
+      switches,
+      hidden,
+      nvidiaBaselineBytes,
+      args.framePacing,
+    );
     return;
   }
   const viewsCheck = args.viewsCheck;
@@ -718,12 +749,21 @@ async function main(): Promise<void> {
       app.exit(2);
       return;
     }
+    const frameRateHz = args.viewsCheckFrameRateHz ?? DEFAULT_CHECK_FRAME_RATE_HZ;
+    if (!hidden && frameRateHz !== DEFAULT_CHECK_FRAME_RATE_HZ) {
+      process.stderr.write(
+        "--frame-rate is an option of a hidden run: a shown window's frames follow its display\n",
+      );
+      app.exit(2);
+      return;
+    }
     logGeometry("views check", args.geometry);
     logCompileBudget("views check", args.compileBudget);
     const window = createWindow(
       serverUrl,
       graphics,
       args.setting,
+      args.framePacing,
       null,
       {
         launch: viewsCheck,
@@ -731,20 +771,24 @@ async function main(): Promise<void> {
         geometry: args.geometry,
         compileBudget: args.compileBudget,
         zoom,
+        frameRateHz,
       },
       // The planet viewer run drives the PLANET VIEWER, which its launch offers (plan R15, T6).
       viewsCheck.run === "planet-viewer",
     );
-    startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);
+    startViewsCheckSession(window, viewsCheck, graphics, switches, hidden, {
+      framePacing: args.framePacing,
+      frameRateHz,
+    });
     return;
   }
   // The PLANET VIEWER, a development tool (plan R15), on a development build or where asked for.
   const planetViewer = !app.isPackaged || args.planetViewer === true;
-  createWindow(serverUrl, graphics, args.setting, null, null, planetViewer);
+  createWindow(serverUrl, graphics, args.setting, args.framePacing, null, null, planetViewer);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(serverUrl, graphics, args.setting, null, null, planetViewer);
+      createWindow(serverUrl, graphics, args.setting, args.framePacing, null, null, planetViewer);
     }
   });
 }

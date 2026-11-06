@@ -159,6 +159,8 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
         switches: [],
         shown: true,
         displayHz: 59.94,
+        framePacing: "display",
+        frameRateHz: null,
       }),
     windowSize: () => ({ widthDip: 2458, heightDip: 1382 }),
     tracing: {
@@ -683,6 +685,7 @@ describe("the inspection run's frame profile (the owner's report)", () => {
         canvas: { widthPx: 1140, heightPx: 640 },
         scales: [1],
         intervalsMs: [50],
+        frameIntervalsMs: [25],
         mainThreadMs: [10, 12],
         submitMs: [3, 4],
         gpuMs: [40, 44],

@@ -12,8 +12,15 @@
  * controller holds to the budget: {@link PrimaryFrameTimes} gives each primary frame every resolve
  * submitted from its start to the next one's, since R01 numbers resolves (`PassTimes.frame`, read
  * as `RenderEngine.passTimesFrame`), one a submission, not animation frames.
+ *
+ * That counting is the launch's `display` pacing (`--frame-pacing`), at up to the display's rate:
+ * on a 120 Hz panel a 60 Hz view draws at 120 Hz and a 30 Hz one at 60. Under `rate` each view
+ * draws at its design rate by time, on a whole number of the measured vsync period
+ * (`lib/vsyncPacing.ts`; the owner's frame rate). {@link FramePacer} holds either for a loop.
  */
 
+import type { FramePacingName } from "../../../../preload/api";
+import { drawsNow, VsyncClock, vsyncsPerDraw } from "../../lib/vsyncPacing";
 import type { PassTimes } from "../engine/types";
 import { gpuTimeMs, ResolutionController, type ScaleBounds } from "./resolutionController";
 import type { ViewBudget } from "./viewBudget";
@@ -29,6 +36,98 @@ function frameDivisor(rateHz: 60 | 30): number {
  */
 export function drawsInFrame(frame: number, rateHz: 60 | 30): boolean {
   return frame % frameDivisor(rateHz) === 0;
+}
+
+/** One rate's beat under `rate`: the frame it was last asked in, its answer, and its last draw. */
+interface Beat {
+  readonly frame: number;
+  readonly draws: boolean;
+  /** The timestamp of its last draw, ms, or `null` before its first. */
+  readonly drawnMs: number | null;
+}
+
+/**
+ * Paces a loop's views at their rates in its animation frames (R07.T19; the owner's frame rate):
+ * by counting frames under `display` ({@link drawsInFrame}), by time under `rate`
+ * (`lib/vsyncPacing.ts`' `drawsNow`, on its `VsyncClock`'s measured period).
+ *
+ * @remarks
+ * Every view at one rate draws in the same frames, its rate's beat: so the 30 Hz instruments draw
+ * together, in frames the primary draws (they are asked only there, `withinHz` the primary's
+ * rate, so that their beat keeps to the primary's), and the readouts' publish, asked at their rate,
+ * falls in a frame every instrument draws, as counted frames had it. A beat is asked any number of
+ * times in a frame with one answer, the first ask's, and moves on only in a frame it is asked.
+ *
+ * @example
+ * ```ts
+ * const pacer = new FramePacer(window.hyperion.framePacing);
+ * const tick = (nowMs: number): void => {
+ *   pacer.frame(nowMs);
+ *   if (pacer.draws(primaryBudget.rateHz)) {
+ *     // draw the primary, then each instrument where
+ *     // `pacer.draws(budget.rateHz, primaryBudget.rateHz)`
+ *   }
+ * };
+ * ```
+ */
+export class FramePacer {
+  readonly #mode: FramePacingName;
+  readonly #clock = new VsyncClock();
+  readonly #beats = new Map<number, Beat>();
+  #frame = -1;
+  #nowMs = 0;
+
+  constructor(mode: FramePacingName) {
+    this.#mode = mode;
+  }
+
+  /** The pacing it keeps. */
+  get mode(): FramePacingName {
+    return this.#mode;
+  }
+
+  /** The vsync period the loop's frames measure, ms (`VsyncClock`), whatever the mode. */
+  get periodMs(): number {
+    return this.#clock.periodMs;
+  }
+
+  /** Starts an animation frame at its timestamp, ms: once a callback, before any {@link draws}. */
+  frame(nowMs: number): void {
+    this.#frame += 1;
+    this.#nowMs = nowMs;
+    this.#clock.note(nowMs);
+  }
+
+  /**
+   * Whether the views at `rateHz` draw in this frame.
+   *
+   * @param withinHz - The rate of the views in whose draws alone these are asked, so that their
+   *   beat keeps to those draws' (the instruments in the primary's frames); none where they are
+   *   asked in every frame.
+   */
+  draws(rateHz: 60 | 30, withinHz?: 60 | 30): boolean {
+    if (this.#mode === "display") {
+      return drawsInFrame(this.#frame, rateHz);
+    }
+    const beat = this.#beats.get(rateHz);
+    if (beat?.frame === this.#frame) {
+      return beat.draws;
+    }
+    const drawnMs = beat?.drawnMs ?? null;
+    const periodMs = this.#clock.periodMs;
+    const draws = drawsNow(
+      drawnMs === null ? Number.POSITIVE_INFINITY : this.#nowMs - drawnMs,
+      rateHz,
+      periodMs,
+      withinHz === undefined ? 1 : vsyncsPerDraw(withinHz, periodMs),
+    );
+    this.#beats.set(rateHz, {
+      frame: this.#frame,
+      draws,
+      drawnMs: draws ? this.#nowMs : drawnMs,
+    });
+    return draws;
+  }
 }
 
 /**

@@ -208,6 +208,7 @@ export class InspectionProfiler {
       canvas: primary?.canvas ?? { widthPx: 0, heightPx: 0 },
       scales: primary?.scales ?? [],
       intervalsMs: figures.primaryIntervalsMs,
+      frameIntervalsMs: figures.frameIntervalsMs,
       mainThreadMs: figures.mainThreadMs,
       submitMs: primary?.submitMs ?? [],
       gpuMs: figures.frameGpuMs,

@@ -10,6 +10,7 @@ import {
   buildInspectionTimingResults,
   gpuAttachmentFigures,
   gpuCallKind,
+  type InspectionTimingInput,
   inspectionTimingMarkdown,
   inspectionTimingTraceConfig,
   type InspectionTimingResults,
@@ -219,6 +220,7 @@ const RECORD: InspectionTimingRecord = {
       canvas: { widthPx: 1140, heightPx: 640 },
       scales: [1, 0.85],
       intervalsMs: [1_000],
+      frameIntervalsMs: [1_000],
       mainThreadMs: [120, 140],
       submitMs: [8, 9],
       gpuMs: [900, 1_100],
@@ -320,7 +322,21 @@ function results(
   record: InspectionTimingRecord = RECORD,
   profile: PageProfile | null = null,
 ): InspectionTimingResults {
-  return buildInspectionTimingResults({
+  return buildInspectionTimingResults(
+    inputOf(compositeProbe, marchProbe, atmosphereLevers, litProbe, record, profile),
+  );
+}
+
+/** What {@link results} builds its file from. */
+function inputOf(
+  compositeProbe: InspectionTimingResults["run"]["compositeProbe"] = null,
+  marchProbe: InspectionTimingResults["run"]["marchProbe"] = null,
+  atmosphereLevers: InspectionTimingResults["run"]["atmosphereLevers"] = null,
+  litProbe: InspectionTimingResults["run"]["litProbe"] = null,
+  record: InspectionTimingRecord = RECORD,
+  profile: PageProfile | null = null,
+): InspectionTimingInput {
+  return {
     run: {
       startedAt: new Date("2026-11-01T12:00:00Z"),
       machine: {
@@ -343,6 +359,8 @@ function results(
       setting: "low",
       switches: [],
       shown: false,
+      framePacing: "rate",
+      frameRateHz: 120,
       window: { widthDip: 1280, heightDip: 720 },
     },
     served: { universe: "9ada16dcbdbd080a", body: "41ffecb200000002.0400" },
@@ -375,7 +393,7 @@ function results(
         }),
       ],
     ]),
-  });
+  };
 }
 
 /**
@@ -461,6 +479,35 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect(
       readInspectionTimingRecord({ ...RECORD, windows: [{ ...window, marchCensus: undefined }] }),
     ).toBeNull();
+  });
+
+  it("records the run's pacing and each window's callbacks and measured vsync (R07.T19)", () => {
+    const [window] = RECORD.windows;
+    if (window === undefined) {
+      throw new Error("the record has no window");
+    }
+    const ticked = buildInspectionTimingResults({
+      ...inputOf(),
+      record: {
+        ...RECORD,
+        windows: [
+          {
+            ...window,
+            frameIntervalsMs: Array.from({ length: 40 }, () => 1000 / 120),
+            mainThreadMs: Array.from({ length: 41 }, () => 2),
+          },
+        ],
+      },
+    });
+    const text = inspectionTimingMarkdown(ticked);
+    expect([
+      ticked.run.framePacing,
+      ticked.run.frameRateHz,
+      ticked.windows[0]?.callbacks,
+      ticked.windows[0]?.measuredVsyncMs.value?.toFixed(2),
+      results().windows[0]?.measuredVsyncMs.reason,
+      text.includes("- **Pacing:** 41 animation frames for 2 draws; measured vsync 8.33 ms"),
+    ]).toEqual(["rate", 120, 41, "8.33", "fewer than 30 animation frames measured", true]);
   });
 
   it("summarises each window's frames, its passes the dearest first with their share", () => {
@@ -971,7 +1018,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 8,
+      version: 9,
       run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
     });
   });
@@ -997,7 +1044,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     }).toEqual({
       json: "/timing/2026-11-01-pod-low-inspection-timing-composite-transmittance-off.json",
       launch:
-        "- **Launch:** linux, software mode, setting low, window hidden 1280 × 720 DIP at a device-pixel ratio of 1; pass timer quantized; composite probe transmittance-off, not the picture a player sees",
+        "- **Launch:** linux, software mode, setting low, window hidden 1280 × 720 DIP at a device-pixel ratio of 1; pacing rate, offscreen frame clock 120 Hz; pass timer quantized; composite probe transmittance-off, not the picture a player sees",
       plain: false,
     });
   });

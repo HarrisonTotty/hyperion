@@ -14,7 +14,9 @@
  * 21's criteria at 60 Hz. Each is a finding here with its verdict.
  *
  * The frame rows are Design note 21's, read from presentation times (the trace's), against T the
- * display's vsync period, or twice it for the low setting's 30 Hz photorealistic primary. A hidden
+ * display's vsync period times the vsyncs the launch's pacing draws the primary's rate on
+ * (`periodVsyncs`): under `display` once, or twice for the low setting's 30 Hz photorealistic
+ * primary; under `rate` k of them, 2 and 4 on a 120 Hz panel. A hidden
  * run has no window, so T and the presentation figures are missing with "no window shown"; such a
  * run proves the harness and the file, not the criterion, as the descent spike's hidden runs do.
  *
@@ -32,6 +34,7 @@
  */
 
 import type {
+  FramePacingName,
   SpikePassTimer,
   ViewsCheckPhaseName,
   ViewsCheckPhaseRecord,
@@ -50,10 +53,12 @@ import {
   type MachineDescription,
   type Measured,
   measured,
+  measuredVsyncOf,
   missing,
   nearestRank,
   ofPeriod,
   overallOf,
+  periodVsyncs,
   type ResultsFiles,
   row,
   type SpikeSetting,
@@ -68,9 +73,10 @@ export const VIEWS_CHECK_SCHEMA = "hyperion.views-check.results";
 
 /**
  * The schema's version; bumped with any change to the file's shape: 2 with each phase's
- * `imageLimited` (fix-retina-frame).
+ * `imageLimited` (fix-retina-frame), 3 with the run's `framePacing` and `frameRateHz` and each
+ * phase's `measuredVsyncMs`, its T the vsyncs the pacing draws its rate on (R07.T19).
  */
-export const VIEWS_CHECK_VERSION = 2;
+export const VIEWS_CHECK_VERSION = 3;
 
 /**
  * The primary label block's statement while its image stands below its setting's resolution or air
@@ -152,6 +158,10 @@ export interface ViewsCheckRunInput {
   readonly shown: boolean;
   /** The display's refresh rate (`Display.displayFrequency`), Hz; `null` hidden. */
   readonly displayHz: number | null;
+  /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+  readonly framePacing: FramePacingName;
+  /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+  readonly frameRateHz: number | null;
   /**
    * The window's content size when the run ended, DIP; times the record's device-pixel ratio, in
    * pixels. A tiling window manager sizes it to its tile.
@@ -243,8 +253,16 @@ export interface PhaseFigures {
   readonly held: boolean;
   /** The primary's rate: 30 Hz for a photorealistic primary on the low setting, else 60 Hz. */
   readonly rateHz: 60 | 30;
-  /** T for this phase: the vsync period, or twice it at 30 Hz. */
+  /**
+   * T for this phase: the vsync period times the vsyncs the pacing draws {@link rateHz} on, so
+   * twice it at 30 Hz under `display`.
+   */
   readonly periodMs: Measured<number>;
+  /**
+   * The vsync period its animation frames measure by the renderer's rule (`vsyncPeriodOf`), the P
+   * a `rate` pacing draws by, or why it is missing.
+   */
+  readonly measuredVsyncMs: Measured<number>;
   readonly windowS: number;
   readonly views: ReadonlyArray<ViewFigures>;
   /** Intervals between animation frames and between the primary's draws, from their timestamps. */
@@ -315,6 +333,10 @@ export interface ViewsCheckResults {
     readonly displayHz: Measured<number>;
     /** The display's vsync period, ms. */
     readonly vsyncMs: Measured<number>;
+    /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+    readonly framePacing: FramePacingName;
+    /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+    readonly frameRateHz: number | null;
     readonly captures: Measured<string>;
     readonly quiet: { readonly provisional: boolean; readonly note: string | null };
   };
@@ -433,13 +455,14 @@ function phaseFigures(
   trace: PhaseTraceFigures | undefined,
   vsyncMs: Measured<number>,
   setting: SpikeSetting,
+  pacing: FramePacingName,
 ): PhaseFigures {
   const expected = PHASE_VIEWS[record.name];
   const held =
     record.views.length === expected.length &&
     record.views.every((view, i) => view.style === expected[i]);
   const rateHz = setting === "low" && expected[0] === "photorealistic" ? 30 : 60;
-  const periodMs = ofPeriod(vsyncMs, (t) => (rateHz === 30 ? 2 * t : t));
+  const periodMs = ofPeriod(vsyncMs, (t) => periodVsyncs(pacing, rateHz, t) * t);
   const period = periodMs.value;
   const primaryDrawCount = record.views[0]?.draws ?? 0;
   const presentation: PhaseFigures["presentation"] =
@@ -501,6 +524,7 @@ function phaseFigures(
     held,
     rateHz,
     periodMs,
+    measuredVsyncMs: measuredVsyncOf(record.frameIntervalsMs),
     windowS: (record.endMs - record.startMs) / 1000,
     views: record.views.map(viewFigures),
     animationFrames: frameStats(record.frameIntervalsMs, vsyncMs.value),
@@ -664,7 +688,7 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
   const vsyncMs: Measured<number> =
     displayHz.value === null ? missing(displayHz.reason) : measured(1000 / displayHz.value);
   const phases = record.phases.map((phase) =>
-    phaseFigures(phase, input.traces.get(phase.name), vsyncMs, run.setting),
+    phaseFigures(phase, input.traces.get(phase.name), vsyncMs, run.setting, run.framePacing),
   );
   const copyPasses = [
     ...new Set(
@@ -720,6 +744,8 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
       timer: record.timer,
       displayHz,
       vsyncMs,
+      framePacing: run.framePacing,
+      frameRateHz: run.frameRateHz,
       captures: run.captures,
       quiet: { provisional, note: provisional ? `provisional: ${quietNote}` : null },
     },
@@ -901,7 +927,7 @@ export function viewsCheckMarkdown(results: ViewsCheckResults): string {
     "",
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; governor ${textOf(run.machine.governor, (governor) => governor)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"}${run.quiet.note === null ? "" : ` (${run.quiet.note})`}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP (${String(Math.round(run.window.widthDip * run.devicePixelRatio))} × ${String(Math.round(run.window.heightDip * run.devicePixelRatio))} px at a device-pixel ratio of ${String(run.devicePixelRatio)}), vsync ${textOf(run.vsyncMs, (value) => `${ms(value)} ms`)}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP (${String(Math.round(run.window.widthDip * run.devicePixelRatio))} × ${String(Math.round(run.window.heightDip * run.devicePixelRatio))} px at a device-pixel ratio of ${String(run.devicePixelRatio)}), vsync ${textOf(run.vsyncMs, (value) => `${ms(value)} ms`)}, pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}`,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
     "",
     "## T20's checks",
@@ -928,11 +954,11 @@ export function viewsCheckMarkdown(results: ViewsCheckResults): string {
     "",
     "Intervals as p50 / p95 / p99 ms; durations as p50 / p95 ms.",
     "",
-    "| Phase | Held | T | Primary's draws | Presented (dropped) | Main thread | GPU frame | GPU process a frame | Verdict |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Phase | Held | T | Measured vsync | Primary's draws | Presented (dropped) | Main thread | GPU frame | GPU process a frame | Verdict |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...phases.map(
       (phase) =>
-        `| ${phase.name} | ${phase.held ? "yes" : "NO"} | ${textOf(phase.periodMs, (value) => `${ms(value)} ms`)} | ${intervals(phase.primaryDraws)} | ${textOf(phase.presentation, (stats) => `${intervals(stats)} (${String(stats.dropped)})`)} | ${durations(phase.mainThreadMs)} | ${durations(phase.frameGpuMs)} | ${textOf(phase.gpuProcess, (value) => `${ms(value.busyMsPerFrame)} ms (${value.slicesMsPerFrame.map((slice) => `${slice.name} ${ms(slice.ms)}`).join(", ")})`)} | ${phase.criteria.overall} |`,
+        `| ${phase.name} | ${phase.held ? "yes" : "NO"} | ${textOf(phase.periodMs, (value) => `${ms(value)} ms`)} | ${textOf(phase.measuredVsyncMs, (value) => `${ms(value)} ms`)} | ${intervals(phase.primaryDraws)} | ${textOf(phase.presentation, (stats) => `${intervals(stats)} (${String(stats.dropped)})`)} | ${durations(phase.mainThreadMs)} | ${durations(phase.frameGpuMs)} | ${textOf(phase.gpuProcess, (value) => `${ms(value.busyMsPerFrame)} ms (${value.slicesMsPerFrame.map((slice) => `${slice.name} ${ms(slice.ms)}`).join(", ")})`)} | ${phase.criteria.overall} |`,
     ),
     "",
     "## Views",

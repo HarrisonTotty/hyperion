@@ -152,6 +152,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     ratios: [1, 2],
     countSides: true,
   },
+  {
+    name: "pacing-120",
+    decides:
+      "R07.T19, the frame pacing on a 120 Hz clock: frames counted, up to 120 Hz (A), against each view at its own rate (B)",
+    a: ["--frame-rate", "120", "--frame-pacing", "display"],
+    b: ["--frame-rate", "120", "--frame-pacing", "rate"],
+    ratios: [1],
+    countSides: false,
+  },
 ];
 
 /** The lever named `name`, or `undefined`. */
@@ -452,6 +461,25 @@ export interface ProfiledWindow {
   readonly attachments?: InspectionTimingWindowResults["attachments"];
   /** Each body's atmosphere read; absent before the file's version 7, as none known. */
   readonly atmosphereReads?: InspectionTimingWindowResults["atmosphereReads"];
+  /** The primary's draws in it. */
+  readonly draws?: InspectionTimingWindowResults["draws"];
+  /** Its animation frames' callbacks; absent before the file's version 9 (R07.T19). */
+  readonly callbacks?: InspectionTimingWindowResults["callbacks"];
+  /** The vsync period its animation frames measure; absent before the file's version 9. */
+  readonly measuredVsyncMs?: InspectionTimingWindowResults["measuredVsyncMs"];
+}
+
+/**
+ * A window's pacing in words (R07.T19): its callbacks for its draws and its measured vsync, or
+ * `not recorded` before the file's version 9.
+ */
+function pacingText(window: ProfiledWindow): string {
+  const { callbacks, measuredVsyncMs } = window;
+  if (callbacks === undefined || measuredVsyncMs === undefined) {
+    return "not recorded";
+  }
+  const vsync = measuredVsyncMs.value === null ? "—" : `${measuredVsyncMs.value.toFixed(2)} ms`;
+  return `${String(callbacks)} for ${window.draws === undefined ? "—" : String(window.draws)} draws, vsync ${vsync}`;
 }
 
 /**
@@ -701,8 +729,8 @@ function windowsTable(
   kept: ReadonlyMap<string, KeptRun>,
 ): string[] {
   return [
-    "| Run | Window | Interval median | p95 | fps at the median | GPU median | Dearest passes, median ms (share of the GPU) | Atmosphere read |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Run | Window | Interval median | p95 | fps at the median | Callbacks, draws, vsync | GPU median | Dearest passes, median ms (share of the GPU) | Atmosphere read |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...matrix.flatMap((run) =>
       (kept.get(run.id)?.timing.windows ?? []).map((window) => {
         const passes = window.passes
@@ -713,6 +741,7 @@ function windowsTable(
         return (
           `| ${run.id} | ${window.name} | ${msText(window.frame.intervalMs.medianMs)} | ` +
           `${msText(window.frame.intervalMs.p95Ms)} | ${fps(window.frame.intervalMs.medianMs)} | ` +
+          `${pacingText(window)} | ` +
           `${msText(window.frame.gpuMs.medianMs)} | ${cell(passes.length > 0 ? passes.join(", ") : "—")} | ` +
           `${cell(readsText(window))} |`
         );

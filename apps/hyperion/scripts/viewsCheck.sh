@@ -8,7 +8,7 @@
 #
 #   viewsCheck.sh [--hidden] [--software] [--setting high|low] [--smoke] [--out <dir>]
 #                 [--geometry <field>=<value>[,...]]
-#                 [--device-pixel-ratio <N>]
+#                 [--device-pixel-ratio <N>] [--frame-pacing rate|display] [--frame-rate <HZ>]
 #                 [--terrain [--handover [--universe <ID> --body <ID>]] [--weathered | --whole]
 #                            [--hyperion-gpu-timing]
 #                  | --atmosphere
@@ -172,6 +172,13 @@
 # size at a zoom factor of N, its layout the setting's size in CSS px and its canvases N times it.
 # A software launch's headless screen is N times 1920 x 1080 too, which would otherwise clamp the
 # window to it. The client refuses it on a shown run, whose display gives its ratio.
+#
+# --frame-pacing, passed to the client, is how VIEW paces its views (plan R07, T19): display counts
+# animation frames, at up to the display's rate; rate draws each view at its own rate by time; the
+# client's DEFAULT_FRAME_PACING (display until the owner rules) without it. --frame-rate <HZ>, passed to the client, sets a hidden run's offscreen frame clock,
+# 1 to 240 animation frames a second (60 unless given), so that a hidden run paces as a 120 Hz panel
+# would; the client refuses it on a shown run. Each results file records the pacing and the vsync
+# period its frames measure.
 #
 # --software runs any of these checks hidden on SwiftShader, Chromium's CPU Vulkan, with no GPU and
 # no display, as a pod or a CI machine has (plan R01, R01.T16): Linux only (exit 2 elsewhere), and

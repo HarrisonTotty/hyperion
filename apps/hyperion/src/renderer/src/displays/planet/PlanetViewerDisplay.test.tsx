@@ -101,6 +101,7 @@ async function renderViewer(
             <main className="console__work console__work--planet">
               <PlanetViewerDisplay
                 setting="high"
+                framePacing="display"
                 platform="linux"
                 performanceThreads={null}
                 geometry={undefined}

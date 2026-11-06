@@ -51,6 +51,7 @@ const WINDOW: InspectionTimingWindow = {
   canvas: { widthPx: 1, heightPx: 1 },
   scales: [],
   intervalsMs: [],
+  frameIntervalsMs: [],
   mainThreadMs: [],
   submitMs: [],
   gpuMs: [],

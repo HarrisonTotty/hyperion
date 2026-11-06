@@ -5,7 +5,7 @@
  *
  * @remarks
  * Each instrument follows the scene its primary drew in the same frame (`followRun`), at its own
- * rate: its budget's 30 Hz, in frames the primary draws (`drawsInFrame`), so that its passes are
+ * rate: its budget's 30 Hz, in frames the primary draws (`FramePacer.draws`), so that its passes are
  * counted in the primary's frame, and it draws through the primary's own frame path
  * (`ViewFrameDrawer`) but for the histogram, which it does not take. It draws at the primary's
  * exposure, which its label block says (`SOURCE PRIMARY`, Design note 11), and culls the sky for
@@ -32,7 +32,6 @@ import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
 import type { SceneKinematics } from "../../lib/scene/model";
 import type { ViewBudget, ViewSpec } from "../../view/budget/viewBudget";
-import { drawsInFrame } from "../../view/budget/framePacing";
 import {
   flightKey,
   flightKeyAction,
@@ -220,8 +219,12 @@ export interface Instrument {
 export interface InstrumentsFrame {
   /** The animation frame's timestamp, ms. */
   readonly nowMs: number;
-  /** The animation frame's index since the loop started, by which each rate is paced. */
-  readonly frame: number;
+  /**
+   * Whether the views at a rate draw in this frame, by the primary's loop's pacing (R07.T19;
+   * `FramePacer.draws`): asked only in frames the primary draws, every instrument at one rate in
+   * the same frames.
+   */
+  readonly draws: (rateHz: 60 | 30) => boolean;
   /** Whether the readouts change in this frame (4 Hz), the primary's with them. */
   readonly publish: boolean;
   /** The primary's run as it drew this frame. */
@@ -792,7 +795,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           run === undefined ||
           inputs?.open !== true ||
           budget === undefined ||
-          !drawsInFrame(each.frame, budget.rateHz)
+          !each.draws(budget.rateHz)
         ) {
           continue;
         }

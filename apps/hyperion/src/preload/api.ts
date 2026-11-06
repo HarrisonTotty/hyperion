@@ -30,6 +30,14 @@ export interface GraphicsApi {
 /** A quality setting's name as the command line gives it (`--setting`, R05 Design note 26). */
 export type QualitySettingName = "high" | "low";
 
+/**
+ * How `VIEW` paces its views (`--frame-pacing`, plan R07, T19; the owner's frame rate): `display`
+ * counts animation frames, every view at up to the display's rate (a 60 Hz view every frame, a
+ * 30 Hz one every second); `rate` draws each at its design rate by time, on a whole number of the
+ * measured vsync period, whatever the display's rate.
+ */
+export type FramePacingName = "rate" | "display";
+
 /** The spike's quality setting (R05 Design note 26). */
 export type SpikeSettingName = QualitySettingName;
 
@@ -193,6 +201,11 @@ export interface HyperionApi {
    * unless it gave `low`; a spike's or a check's launch gives its own.
    */
   readonly setting: QualitySettingName;
+  /**
+   * How `VIEW` paces its views, from the launch's `--frame-pacing` (plan R07, T19): the launch's
+   * default unless it gave one.
+   */
+  readonly framePacing: FramePacingName;
   /**
    * The machine's performance cores' hardware threads, where its OS tells them from its efficiency
    * cores (Apple silicon's, `hw.perflevel0.logicalcpu`), with a third of its efficiency cores'
@@ -2434,6 +2447,11 @@ export interface InspectionTimingWindow {
   readonly scales: ReadonlyArray<number>;
   /** The intervals between the primary's draws, ms. */
   readonly intervalsMs: ReadonlyArray<number>;
+  /**
+   * The intervals between the window's animation frames, ms, whether the primary drew in them or
+   * not (R07.T19): its vsync period, by the renderer's rule.
+   */
+  readonly frameIntervalsMs: ReadonlyArray<number>;
   /** Each animation frame's callbacks on the main thread, ms: every view's encoding among them. */
   readonly mainThreadMs: ReadonlyArray<number>;
   /** The primary's renders' encoding and submission in each of its draws, ms. */

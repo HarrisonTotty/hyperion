@@ -136,6 +136,15 @@
  * layout is the setting's size in CSS px and its canvases N times it. It is refused without
  * `--views-check`, and the main process refuses it on a shown run, whose display gives its ratio.
  *
+ * `--frame-pacing rate|display` is how `VIEW` paces its views (plan R07, T19; the owner's frame
+ * rate), on any launch: `display` counts animation frames, a 60 Hz view in every one and a 30 Hz
+ * view in every second, so at up to the display's rate; `rate` draws each at its design rate by
+ * time, on a whole number of the measured vsync period (`lib/vsyncPacing.ts`). `display` unless
+ * given (`DEFAULT_FRAME_PACING`), until the owner rules. `--frame-rate <HZ>` sets a hidden check's
+ * offscreen frame clock (`webContents.setFrameRate`), 1 to 240 animation frames a second, 60
+ * unless given, so that a hidden run can pace as a 120 Hz panel would; it is refused without
+ * `--views-check`, and the main process refuses it on a shown run, whose display gives its clock.
+ *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
  * not the same thing.
@@ -146,6 +155,7 @@ import { Command, InvalidArgumentError, Option } from "commander";
 import type {
   AtmosphereLeversOverride,
   CompositeProbeName,
+  FramePacingName,
   GeometryOverride,
   MarchProbeName,
   HandoverLookName,
@@ -154,6 +164,7 @@ import type {
   ServedWorldNames,
 } from "../preload/api";
 import { type CompileBudgetLaunch, parseCompileBudget } from "../preload/compileBudgetLaunch";
+import { DEFAULT_FRAME_PACING } from "../preload/framePacingLaunch";
 import { geometryText, parseGeometryOverride } from "../preload/geometryLaunch";
 import { GPU_TIMING_SWITCH } from "../preload/graphicsLaunch";
 import {
@@ -195,6 +206,8 @@ export interface ClientArgs {
    * own setting.
    */
   readonly setting: QualitySettingName;
+  /** How `VIEW` paces its views (`--frame-pacing`, R07.T19): {@link DEFAULT_FRAME_PACING} unless given. */
+  readonly framePacing: FramePacingName;
   /** The descent spike's options when `--descent-spike` is given, else `undefined`. */
   readonly spike?: SpikeLaunch;
   /** The several-views check's options when `--views-check` is given, else `undefined`. */
@@ -212,11 +225,19 @@ export interface ClientArgs {
    */
   readonly viewsCheckPixelRatio?: ViewsCheckPixelRatio;
   /**
+   * The check's hidden window's offscreen frame clock (`--frame-rate`), animation frames a second,
+   * 1 to 240: {@link DEFAULT_CHECK_FRAME_RATE_HZ} by default; `undefined` without `--views-check`.
+   */
+  readonly viewsCheckFrameRateHz?: number;
+  /**
    * Whether `--planet-viewer` offers the `PLANET VIEWER` (plan R15) on a packaged client, which
    * offers it only so; a development build offers it always. Absent unless given, on the consoles.
    */
   readonly planetViewer?: true;
 }
+
+/** A hidden check's offscreen frame clock without `--frame-rate`, Hz: Electron's own, 60. */
+export const DEFAULT_CHECK_FRAME_RATE_HZ = 60;
 
 /** A views check's device-pixel ratio, by its window's zoom (`--device-pixel-ratio`). */
 export type ViewsCheckPixelRatio = 1 | 2 | 3;
@@ -289,6 +310,18 @@ export function parseDevicePixelRatio(value: string): ViewsCheckPixelRatio {
     return value === "1" ? 1 : value === "2" ? 2 : 3;
   }
   throw new InvalidArgumentError("expected a device-pixel ratio of 1, 2 or 3");
+}
+
+/**
+ * Reads a `--frame-rate` value: 1 to 240 animation frames a second, the range Electron's
+ * `webContents.setFrameRate` accepts for an offscreen window without a shared texture.
+ */
+export function parseFrameRate(value: string): number {
+  const hz = /^\d{1,3}$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isInteger(hz) || hz < 1 || hz > 240) {
+    throw new InvalidArgumentError("expected a frame rate from 1 to 240 Hz");
+  }
+  return hz;
 }
 
 /** Reads a `--universe` value: a universe's ID, 16 lowercase hexadecimal digits. */
@@ -428,6 +461,18 @@ export function buildCommand(version: string): Command {
         "--setting <SETTING>",
         "the quality setting VIEW draws at, or the spike's or the check's (default high)",
       ).choices(["high", "low"]),
+    )
+    .addOption(
+      new Option(
+        "--frame-pacing <PACING>",
+        `how VIEW paces its views: at up to the display's rate (display), or each at its own rate by time (rate) (default ${DEFAULT_FRAME_PACING})`,
+      ).choices(["rate", "display"]),
+    )
+    .addOption(
+      new Option(
+        "--frame-rate <HZ>",
+        `the check's hidden window's offscreen frame clock, 1 to 240 Hz (default ${String(DEFAULT_CHECK_FRAME_RATE_HZ)})`,
+      ).argParser(parseFrameRate),
     )
     .addOption(
       new Option("--terrain", "the check's terrain run on TERRAIN TEST (plan R10), not T20's"),
@@ -690,6 +735,11 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   if (ratio !== undefined && options["viewsCheck"] !== true) {
     command.error("error: --device-pixel-ratio is an option of --views-check, which was not given");
   }
+  const frameRate: unknown = options["frameRate"];
+  if (frameRate !== undefined && options["viewsCheck"] !== true) {
+    command.error("error: --frame-rate is an option of --views-check, which was not given");
+  }
+  const framePacing = framePacingOf(options);
   if (options["compositeProbe"] !== undefined && options["timing"] !== true) {
     command.error("error: --composite-probe is an option of --timing, which was not given");
   }
@@ -739,9 +789,13 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
       address,
       port,
       setting: viewsCheck.setting,
+      framePacing,
       viewsCheck,
       // Parsed by `parseDevicePixelRatio`, so 1, 2 or 3 where given.
       viewsCheckPixelRatio: ratio === 2 || ratio === 3 ? ratio : 1,
+      // Parsed by `parseFrameRate`, so a whole number from 1 to 240 where given.
+      viewsCheckFrameRateHz:
+        typeof frameRate === "number" ? frameRate : DEFAULT_CHECK_FRAME_RATE_HZ,
       ...geometryOf(options),
       ...compileBudgetOf(options),
     };
@@ -759,6 +813,7 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
       address,
       port,
       setting: settingOf(options),
+      framePacing,
       ...(options["planetViewer"] === true ? { planetViewer: true } : {}),
     };
   }
@@ -775,6 +830,7 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     address,
     port,
     setting: spike.setting,
+    framePacing,
     spike,
     ...geometryOf(options),
     ...compileBudgetOf(options),
@@ -795,6 +851,12 @@ function geometryOf(
 ): { readonly geometry: GeometryOverride } | Record<string, never> {
   const geometry = options["geometry"];
   return typeof geometry === "string" ? { geometry: parseGeometryOverride(geometry) } : {};
+}
+
+/** The `--frame-pacing` given, {@link DEFAULT_FRAME_PACING} without one (commander has checked its choices). */
+function framePacingOf(options: Readonly<Record<string, unknown>>): FramePacingName {
+  const pacing = options["framePacing"];
+  return pacing === "rate" || pacing === "display" ? pacing : DEFAULT_FRAME_PACING;
 }
 
 /** The `--setting` given, `high` without one (commander has checked its choices). */

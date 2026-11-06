@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { vi } from "vitest";
 
-import type { AtmosphereLeversOverride } from "../../../preload/api";
+import type { AtmosphereLeversOverride, FramePacingName } from "../../../preload/api";
 import { UniverseProvider } from "../components/UniverseProvider";
 import { rootRemPx } from "../lib/useElementSize";
 import type { ViewEngineSource } from "../displays/view/useViewEngine";
@@ -469,6 +469,8 @@ export function renderViewDisplay(options: {
   readonly inspection?: InspectionOpening;
   /** A frame profile's atmosphere levers over the setting's (R08.T8.d): none by default. */
   readonly atmosphereLevers?: AtmosphereLeversOverride;
+  /** How the views are paced (`--frame-pacing`, R07.T19): `display`, ViewDisplay's own, by default. */
+  readonly framePacing?: FramePacingName;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
@@ -504,6 +506,7 @@ export function renderViewDisplay(options: {
                   <ViewDisplay
                     engineSource={options.source}
                     setting={options.setting}
+                    framePacing={options.framePacing}
                     heightWorkers={startHeightWorker}
                     opticsWorkers={startOpticsWorker}
                     sceneOptions={options.sceneOptions}

@@ -43,8 +43,10 @@ import { join } from "node:path";
 
 import type { ProcessMetric } from "electron";
 
+import { VSYNC_SEEN_FRAMES, vsyncPeriodOf, vsyncsPerDraw } from "../renderer/src/lib/vsyncPacing";
 import type {
   DescentSpikeReport,
+  FramePacingName,
   SpikeGeometryReport,
   GraphicsLaunchMode,
   SpikeLaunch,
@@ -115,15 +117,19 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * lit pass's geometry settings and counts by segment (`geometryResults.ts`); a version 6 file, R05's
  * recorded runs' and the native replay's, which holds none, is still read
  * ({@link RESULTS_VERSIONS_READ}). Version 8 (plan R14, R14.T6.b) adds `farCascadeRate` to the
- * geometry block's settings; a version 7 file's, without it, reads as rate 1.
+ * geometry block's settings; a version 7 file's, without it, reads as rate 1. Version 9 (plan R07,
+ * R07.T19) adds `run.pacing`: the launch's `--frame-pacing` and the vsync period the run's
+ * animation frames measure (`lib/vsyncPacing.ts`); and takes T as the vsyncs the pacing draws the
+ * setting's rate on times the display's period. A version 8 file, and the native replay's, holds
+ * none, and its T is the period, doubled on `low`.
  */
-export const RESULTS_VERSION = 8;
+export const RESULTS_VERSION = 9;
 
 /**
- * The versions {@link validateResults} reads: version 8's, version 7's with its geometry's four
- * settings, and version 6's without its geometry.
+ * The versions {@link validateResults} reads: version 9's, version 8's without its pacing, version
+ * 7's with its geometry's four settings, and version 6's without its geometry.
  */
-export const RESULTS_VERSIONS_READ: ReadonlyArray<number> = [6, 7, RESULTS_VERSION];
+export const RESULTS_VERSIONS_READ: ReadonlyArray<number> = [6, 7, 8, RESULTS_VERSION];
 
 /**
  * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
@@ -320,6 +326,8 @@ export interface RunDescription {
   readonly shown: boolean;
   /** The display's refresh rate (`Display.displayFrequency`), Hz, or `null` without one. */
   readonly displayHz: number | null;
+  /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19), by which T is read. */
+  readonly framePacing: FramePacingName;
   /** `nvidia-smi`'s device memory used before the launch, bytes, or `null` off NVIDIA. */
   readonly nvidiaBaselineBytes: number | null;
 }
@@ -882,7 +890,7 @@ export interface PassFigures {
 /** The results file of one run. */
 export interface DescentResults {
   readonly schema: typeof RESULTS_SCHEMA;
-  readonly version: 6 | 7 | typeof RESULTS_VERSION;
+  readonly version: 6 | 7 | 8 | typeof RESULTS_VERSION;
   readonly run: {
     readonly startedAt: string;
     readonly machine: RecordedMachine;
@@ -903,7 +911,21 @@ export interface DescentResults {
     readonly switches: ReadonlyArray<string>;
     readonly timer: SpikePassTimer;
     readonly shown: boolean;
-    /** T, the period the criterion is read against, ms: the vsync period, doubled on `low`. */
+    /**
+     * How the launch paced `VIEW` (`--frame-pacing`, R07.T19), and the vsync period the run's
+     * animation frames after the warm-up measure, ms (`vsyncPeriodOf`), or why it is missing;
+     * absent from a file before version 9 and from the native replay's. The spike's own loop draws
+     * in every callback whatever the pacing, which sets only its T.
+     */
+    readonly pacing?: {
+      readonly framePacing: FramePacingName;
+      readonly measuredVsyncMs: Measured<number>;
+    };
+    /**
+     * T, the period the criterion is read against, ms: the display's vsync period times the vsyncs
+     * the pacing draws the setting's rate on ({@link periodVsyncs}), so doubled on `low` under
+     * `display`.
+     */
     readonly periodMs: Measured<number>;
     readonly warmupS: number;
     readonly canvas: DescentSpikeReport["canvas"];
@@ -1250,6 +1272,23 @@ export function ofPeriod(
   return periodMs.value === null ? missing(periodMs.reason) : measured(limit(periodMs.value));
 }
 
+/**
+ * The vsyncs a view at `rateHz` draws on under `pacing` (plan R07, T19), by which T is read: the
+ * counted frames' 1 at 60 Hz and 2 at 30 under `display`; under `rate`, `vsyncsPerDraw` of the
+ * display's period, the renderer's rule (2 and 4 at 120 Hz, as 1 and 2 at 60).
+ */
+export function periodVsyncs(pacing: FramePacingName, rateHz: 60 | 30, vsyncMs: number): number {
+  return pacing === "display" ? 60 / rateHz : vsyncsPerDraw(rateHz, vsyncMs);
+}
+
+/** The vsync period `intervalsMs` measure by the renderer's rule, or why it is missing. */
+export function measuredVsyncOf(intervalsMs: ReadonlyArray<number>): Measured<number> {
+  const periodMs = vsyncPeriodOf(intervalsMs);
+  return periodMs === null
+    ? missing(`fewer than ${String(VSYNC_SEEN_FRAMES)} animation frames measured`)
+    : measured(periodMs);
+}
+
 /** The frame rows of Design note 21 for one set of intervals. */
 export function frameRows(
   stats: Measured<FrameStats>,
@@ -1402,7 +1441,7 @@ export function buildResults(input: ResultsInput): DescentResults {
     ? missing("no window shown")
     : vsyncMs === null
       ? missing("the display reports no refresh rate")
-      : measured(setting === "low" ? 2 * vsyncMs : vsyncMs);
+      : measured(periodVsyncs(run.framePacing, setting === "low" ? 30 : 60, vsyncMs) * vsyncMs);
   const t = periodMs.value;
 
   // Frames: presentation times from the trace, else the rAF timestamps; the frames at the trace's
@@ -1666,6 +1705,10 @@ export function buildResults(input: ResultsInput): DescentResults {
       switches: run.switches,
       timer: report.timer,
       shown: run.shown,
+      pacing: {
+        framePacing: run.framePacing,
+        measuredVsyncMs: measuredVsyncOf(pick(frames.rafIntervalsMs, warm)),
+      },
       periodMs,
       warmupS: report.warmupS,
       canvas: report.canvas,
@@ -1889,6 +1932,14 @@ export function validateResults(value: unknown): string[] {
       );
     }
     checkLoadAverage(run, problems);
+    const pacing = run["pacing"];
+    if (
+      value["version"] === RESULTS_VERSION &&
+      (!isRecord(pacing) ||
+        (pacing["framePacing"] !== "rate" && pacing["framePacing"] !== "display"))
+    ) {
+      problems.push("run.pacing.framePacing is neither rate nor display");
+    }
     if (!Array.isArray(run["switches"])) {
       problems.push("run.switches is not a list");
     }
@@ -1927,7 +1978,7 @@ export function validateResults(value: unknown): string[] {
   if (value["sizes"] !== undefined) {
     problems.push(...sizesResultsProblems(value["sizes"]));
   }
-  // A generated world's geometry (plan R14), in a version 7 or 8 file alone.
+  // A generated world's geometry (plan R14), in a version 7, 8 or 9 file alone.
   problems.push(...geometryResultsProblems(value["geometry"], value["version"]));
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
@@ -2951,7 +3002,7 @@ export function summaryMarkdown(results: DescentResults): string {
     `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${load.value === null ? `none (${load.reason})` : load.value.map((average) => average.toFixed(2)).join(", ")}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, world ${run.world}${typeof run.options["body"] === "string" ? ` (body ${run.options["body"]} of universe ${String(run.options["universe"])})` : ""}${run.style === null ? "" : `, style ${run.style}`}${typeof run.options["sizes"] === "string" ? `, sizes ${run.options["sizes"]}` : ""}${run.options["horizon"] === "off" ? ", horizon map off (the A/B's)" : ""}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
-    `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,
+    `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s${run.pacing === undefined ? "" : `; pacing ${run.pacing.framePacing}, measured vsync ${textOr(run.pacing.measuredVsyncMs, (period) => `${formatMs(period)} ms`)}`}`,
     `- **Trace:** ${textOr(run.trace, describeTrace)}`,
     `- **Incomplete pass times:** ${textOr(results.gpu.incompleteFrames, describeIncomplete)}`,
     `- **GPU clocks:** ${textOr(results.gpu.clocks, (clocks) => describeClocks(clocks, memory.series.tMs, run.warmupS))}`,

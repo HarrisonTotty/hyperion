@@ -63,6 +63,7 @@ export function stubHyperionApi(
     serverUrl,
     graphics,
     setting,
+    framePacing: "display",
     performanceThreads: null,
     planetViewer: false,
     versions: { electron: "44.4.3", chrome: "142.0.0.0", node: "22.21.1" },

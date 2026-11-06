@@ -50,6 +50,7 @@
  */
 
 import type {
+  FramePacingName,
   InspectionTimingPass,
   SpikePassTimer,
   TerrainCheckBytes,
@@ -76,6 +77,7 @@ import {
   freeResultsName,
   type MachineDescription,
   type Measured,
+  measuredVsyncOf,
   NODE_PARTIAL_FILES,
   PARTIAL_SUFFIX,
   type PartialResultsFiles,
@@ -93,10 +95,11 @@ export const TERRAIN_CHECK_SCHEMA = "hyperion.views-check.terrain-results";
  * `terrainFaults`; 3: R10.T14.d's `noStall`, each view's `longestGapEndScriptS`, the `sessions`,
  * the `opening`, the `span` and the `phaseWindows`; 4: each phase's `gpuPasses`, R14's Mac
  * measurements; 5: each phase's `cachePressure` and the whole finding's `cachePressureDraws` and
- * `drawnOverBudgetShare`, R10.T16.i's pins. A file of an earlier version lacks each and reads it as
+ * `drawnOverBudgetShare`, R10.T16.i's pins; 6: the run's `framePacing` and `frameRateHz` and each
+ * phase's `measuredVsyncMs`, R07.T19. A file of an earlier version lacks each and reads it as
  * `null`).
  */
-export const TERRAIN_CHECK_VERSION = 5;
+export const TERRAIN_CHECK_VERSION = 6;
 
 /**
  * The longest from a view's hand-over to its first terrain draw, ms: the lit material compiles and
@@ -184,6 +187,10 @@ export interface TerrainCheckRunInput {
   readonly fixture: ViewsCheckTerrainFixture;
   readonly switches: ReadonlyArray<string>;
   readonly shown: boolean;
+  /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+  readonly framePacing: FramePacingName;
+  /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+  readonly frameRateHz: number | null;
   /** The window's content size when the run ended, DIP. */
   readonly window: { readonly widthDip: number; readonly heightDip: number };
   /** Where the page's captures were saved, or why none were. */
@@ -299,6 +306,8 @@ export interface TerrainPhaseFigures {
   readonly script: { readonly startS: number; readonly endS: number };
   readonly views: ReadonlyArray<TerrainViewFigures>;
   readonly animationFrames: DurationStats | null;
+  /** The vsync period its animation frames measure by the renderer's rule (R07.T19), or why not. */
+  readonly measuredVsyncMs: Measured<number>;
   readonly mainThreadMs: DurationStats | null;
   readonly frameGpuMs: DurationStats | null;
   /** The patches drawn at the primary's draws while the body had a pass. */
@@ -367,6 +376,8 @@ export interface TerrainCheckResults {
     readonly fixture?: Exclude<ViewsCheckTerrainFixture, "terrain-test">;
     readonly switches: ReadonlyArray<string>;
     readonly shown: boolean;
+    readonly framePacing: TerrainCheckRunInput["framePacing"];
+    readonly frameRateHz: TerrainCheckRunInput["frameRateHz"];
     readonly window: TerrainCheckRunInput["window"];
     readonly devicePixelRatio: number;
     readonly timer: SpikePassTimer;
@@ -525,6 +536,7 @@ function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): T
       nonFiniteTexels: view.nonFiniteTexels,
     })),
     animationFrames: durationStats(record.frameIntervalsMs),
+    measuredVsyncMs: measuredVsyncOf(record.frameIntervalsMs),
     mainThreadMs: durationStats(record.mainThreadMs),
     frameGpuMs: durationStats(record.frameGpuMs),
     patchesDrawn:
@@ -1007,6 +1019,8 @@ function runBlock(
     ...fixtureRecord(run.fixture),
     switches: run.switches,
     shown: run.shown,
+    framePacing: run.framePacing,
+    frameRateHz: run.frameRateHz,
     window: run.window,
     devicePixelRatio,
     timer,
@@ -1018,8 +1032,11 @@ function runBlock(
 /** The schema name of a terrain run's finished phases, written as each ends. */
 export const TERRAIN_PHASES_SCHEMA = "hyperion.views-check.terrain-phases";
 
-/** The finished phases' schema's version; bumped with any change to the file's shape. */
-export const TERRAIN_PHASES_VERSION = 1;
+/**
+ * The finished phases' schema's version; bumped with any change to the file's shape: 2 with the
+ * run's pacing and each phase's measured vsync, as the results file's version 6 (R07.T19).
+ */
+export const TERRAIN_PHASES_VERSION = 2;
 
 /** What a terrain run's finished phases are built from: its phases' records as each ended. */
 export interface TerrainPhasesInput {
@@ -1224,7 +1241,7 @@ function runLines(run: TerrainCheckResults["run"]): ReadonlyArray<string> {
   return [
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; governor ${textOf(run.machine.governor, (governor) => governor)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"} (${run.provisional})`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}, pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}`,
     ...fixtureNaming(run.fixture).lines,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
   ];

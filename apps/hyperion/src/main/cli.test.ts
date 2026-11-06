@@ -62,7 +62,12 @@ describe("the client's command line", () => {
   });
 
   it("links to a server on this machine when given nothing", () => {
-    expect(parse([])).toEqual({ address: DEFAULT_ADDRESS, port: DEFAULT_PORT, setting: "high" });
+    expect(parse([])).toEqual({
+      address: DEFAULT_ADDRESS,
+      port: DEFAULT_PORT,
+      setting: "high",
+      framePacing: "display",
+    });
     expect(url([])).toBe("ws://127.0.0.1:7878/ws");
   });
 
@@ -1147,6 +1152,7 @@ describe("the quality setting VIEW draws at (R07.T17)", () => {
       address: DEFAULT_ADDRESS,
       port: DEFAULT_PORT,
       setting,
+      framePacing: "display",
     });
   });
 
@@ -1160,6 +1166,62 @@ describe("the quality setting VIEW draws at (R07.T17)", () => {
   it("refuses a setting that is neither high nor low", () => {
     expect(refusal(["--setting", "medium"]).exitCode).toBe(1);
   });
+});
+
+describe("the frame pacing and a hidden check's frame clock (R07.T19)", () => {
+  beforeEach(() => {
+    for (const stream of [process.stdout, process.stderr]) {
+      vi.spyOn(stream, "write").mockImplementation(() => true);
+    }
+  });
+
+  it("paces by counting frames unless --frame-pacing rate is given, on every launch", () => {
+    expect([
+      parse([]).framePacing,
+      parse(["--frame-pacing", "rate"]).framePacing,
+      parse(["--descent-spike", "--frame-pacing=rate"]).framePacing,
+      parse(["--views-check", "--frame-pacing", "display"]).framePacing,
+      parse(["--views-check", "--frame-pacing", "rate"]).framePacing,
+    ]).toEqual(["display", "rate", "rate", "display", "rate"]);
+  });
+
+  it("refuses a pacing that is neither rate nor display", () => {
+    expect(refusal(["--frame-pacing", "vsync"]).exitCode).toBe(1);
+  });
+
+  it("gives a check's offscreen clock 60 Hz unless --frame-rate is given", () => {
+    expect([
+      parse(["--views-check"]).viewsCheckFrameRateHz,
+      parse(["--views-check", "--frame-rate", "120"]).viewsCheckFrameRateHz,
+      parse([
+        "--views-check",
+        "--inspection",
+        "--timing",
+        "--universe",
+        UNIVERSE,
+        "--body",
+        BODY,
+        "--frame-rate=240",
+      ]).viewsCheckFrameRateHz,
+      parse(["--views-check", "--frame-rate", "1"]).viewsCheckFrameRateHz,
+      parse([]).viewsCheckFrameRateHz,
+    ]).toEqual([60, 120, 240, 1, undefined]);
+  });
+
+  it.each([["0"], ["241"], ["119.88"], ["fast"]])("refuses a frame rate of %s", (hz) => {
+    expect(refusal(["--views-check", "--frame-rate", hz]).message).toContain(
+      "expected a frame rate from 1 to 240 Hz",
+    );
+  });
+
+  it.each([[["--frame-rate", "120"]], [["--descent-spike", "--frame-rate", "120"]]])(
+    "refuses --frame-rate without --views-check: %j",
+    (args) => {
+      expect(refusal(args).message).toBe(
+        "error: --frame-rate is an option of --views-check, which was not given",
+      );
+    },
+  );
 });
 
 describe("userArgs", () => {

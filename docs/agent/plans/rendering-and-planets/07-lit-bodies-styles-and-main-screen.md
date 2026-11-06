@@ -10214,3 +10214,21 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `figureResolveDraws(plan, ids)`; passes `figure id raster` and `figure resolve`
     (`PHOTOREAL_PASS_LABELS.figureIds`, `figureResolve`). Forward until the screen pipelines are
     prepared, the same bits.
+- **R07.T19, pacing by rate (fix-frame-pacing-rate, 2026-11-06; the owner's frame rate).**
+  - The switch: `--frame-pacing rate|display` on any launch (`cli.ts`; `preload/framePacingLaunch.ts`,
+    `HyperionApi.framePacing`, `ViewDisplay`'s `framePacing`). `display`, today's frame counting,
+    stays the default (`DEFAULT_FRAME_PACING`, the one constant to flip) until the owner rules: the
+    lane's brief, as `rate` halves low on a 120 Hz Mac and the owner's frame rate comes first.
+  - The rule: `lib/vsyncPacing.ts` (pure, shared with the main process) holds `VsyncClock`,
+    `vsyncsPerDraw` and `drawsNow`; `framePacing.ts`'s `FramePacer` joins them with the mode.
+  - As built: one beat per rate, not a last draw per view, so the instruments and `publish` share
+    frames; `InstrumentsFrame.draws(rateHz)` replaces `frame`. A beat asked only in the primary's
+    frames keeps to its grid (k a multiple of the primary's): an instrument at 36 Hz on 144 Hz.
+  - `--frame-rate <HZ>` (1–240, 60 by default) sets a hidden check's `webContents.setFrameRate`;
+    refused on a shown run. `MAC_PROFILE_LEVERS` gains `pacing-120`.
+  - Results record the mode and P: spike v9 (`run.pacing`), views check v3, inspection timing v9
+    (each window's `callbacks`, `frameIntervalsMs`), terrain v6 (phases v2), hand-over and
+    atmosphere v6 (mode only: their records hold no frame intervals). T is `periodVsyncs` × vsync.
+  - As built: P is `vsyncPeriodOf` over each phase's or window's recorded intervals, in main; T's k
+    reads the reported `displayHz`. The spike draws every callback; its pacing sets only its T.
+  - Pending: the owner's runs, the Mac's `pacing-120` pairs and the shown runs (advice §4).

@@ -35,7 +35,7 @@ import { type ColourTokens, readTokens } from "../../spatial/paint";
 import { pick } from "../../spatial/pick";
 import type { ScreenBoxPx } from "../../spatial/symbols";
 import { maxFreeRateStep } from "../../view/camera/freeCamera";
-import { BudgetedScale, drawsInFrame, PrimaryFrameTimes } from "../../view/budget/framePacing";
+import { BudgetedScale, FramePacer, PrimaryFrameTimes } from "../../view/budget/framePacing";
 import {
   IMAGE_DETAIL_LIMITED,
   INSTRUMENT_RATE_HZ,
@@ -163,7 +163,11 @@ import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { type DrawnSky, primarySkyPlace, type SkyLineReading, useViewSky } from "./useViewSky";
 import { renderViewport } from "../../view/photoreal/internalScale";
 import { decorationStatement } from "../../view/surface/decoration/decorationSetting";
-import type { AtmosphereLeversOverride, GeometryOverride } from "../../../../preload/api";
+import type {
+  AtmosphereLeversOverride,
+  FramePacingName,
+  GeometryOverride,
+} from "../../../../preload/api";
 import {
   type GeometrySettings,
   geometryOf,
@@ -400,6 +404,12 @@ interface ViewDisplayProps {
    */
   readonly setting?: QualitySetting | undefined;
   /**
+   * How the views are paced (R07.T19), the launch's `--frame-pacing`: `display` counts animation
+   * frames, `rate` draws each view at its own rate by time. Every launch passes its own; a mount
+   * without it (a test's) counts frames, as before the switch.
+   */
+  readonly framePacing?: FramePacingName | undefined;
+  /**
    * The platform the client runs on, `window.hyperion.platform` (R07.T19.f): its primary modifier,
    * ⌘ on macOS and Ctrl elsewhere, steps the free camera's rate with the arrows, and the key
    * legend names it; Linux's by default.
@@ -544,6 +554,8 @@ interface ViewStageProps {
   readonly universe: UniverseIdHex | null;
   /** The quality setting the views are budgeted at, and drawn at. */
   readonly setting: QualitySetting;
+  /** How the loop paces the views at their rates (R07.T19), the launch's `--frame-pacing`. */
+  readonly framePacing: FramePacingName;
   /**
    * How the views draw their geometry (plan R14, Design note 17): a launch's `--geometry` over the
    * setting's, as the terrain session's passes take it; `undefined`, the setting's.
@@ -942,6 +954,7 @@ function ViewStage({
   skyKeep,
   universe,
   setting,
+  framePacing,
   geometry,
   atmosphereLevers,
   modifier,
@@ -1362,8 +1375,8 @@ function ViewStage({
     const unsubscribeTimesRestored = engine.onRestored(() => {
       primaryTimes.reset(engine.passTimesFrame);
     });
-    // Animation frames since the loop started, by which each view's rate is paced.
-    let animationFrame = -1;
+    // Each view's frames at its rate, counted or by time (R07.T19), from the loop's start.
+    const pacer = new FramePacer(framePacing);
     let primaryMs: number | null = null;
     let drawnStyle: RenderStyle = "wireframe";
     // The display's white (WHITE BALANCE), found each primary frame from the primary's lights, and
@@ -1446,14 +1459,14 @@ function ViewStage({
     const poseIntervals = new PoseIntervals();
     let frame = 0;
     const tick = (nowMs: number): void => {
-      animationFrame += 1;
+      pacer.frame(nowMs);
       const paced = budgetRef.current;
       const primaryBudget = budgetOf(paced.budgets, VIEW_ID);
-      // A 30 Hz primary draws on every second vsync, and its instruments only in its frames. Its
-      // labels are placed on every vsync, at the last drawn frame's marks, so that a readout's
-      // commit between two drawn frames, which can widen a plate or the chrome, is never painted
-      // with a label in part (R07.T16.i).
-      if (!drawsInFrame(animationFrame, primaryBudget.rateHz)) {
+      // A 30 Hz primary draws on every second vsync of a 60 Hz display, and its instruments only
+      // in its frames. Its labels are placed on every vsync, at the last drawn frame's marks, so
+      // that a readout's commit between two drawn frames, which can widen a plate or the chrome, is
+      // never painted with a label in part (R07.T16.i).
+      if (!pacer.draws(primaryBudget.rateHz)) {
         const between = inputsRef.current;
         if (between.size !== null) {
           placeMarkLabels(
@@ -1709,11 +1722,11 @@ function ViewStage({
       // (R10.T12.b).
       const publish =
         nowMs - publishedMs >= READOUT_INTERVAL_MS &&
-        drawsInFrame(animationFrame, INSTRUMENT_RATE_HZ);
+        pacer.draws(INSTRUMENT_RATE_HZ, primaryBudget.rateHz);
       // The instruments in the primary's frame, so that their passes count in it.
       paced.instruments({
         nowMs,
-        frame: animationFrame,
+        draws: (rateHz) => pacer.draws(rateHz, primaryBudget.rateHz),
         publish,
         primary: runRef.current,
         budgets: paced.budgets,
@@ -1781,7 +1794,7 @@ function ViewStage({
       // The drawer disposes of the view with itself.
       releaseDrawer();
     };
-  }, [engineState, canvas]);
+  }, [engineState, canvas, framePacing]);
 
   const command = useCallback(
     (action: ViewKeyAction): void => {
@@ -3055,6 +3068,7 @@ function toggledLabelBlock(maximize: Maximize): Maximize {
 function ViewPanels({
   engineSource = DEFAULT_ENGINE_SOURCE,
   setting = "high",
+  framePacing = "display",
   platform = "linux",
   performanceThreads = null,
   geometry: override,
@@ -3411,6 +3425,7 @@ function ViewPanels({
         skyKeep={skyKeep}
         universe={universe}
         setting={setting}
+        framePacing={framePacing}
         geometry={terrainGeometry}
         atmosphereLevers={atmosphereLevers}
         modifier={primaryModifierOf(platform)}

@@ -106,6 +106,7 @@ function runOf(overrides: Partial<RunDescription> = {}): RunDescription {
     switches: ["--disable-dawn-features=timestamp_quantization"],
     shown: true,
     displayHz: 60,
+    framePacing: "display",
     nvidiaBaselineBytes: 168 * MIB,
     ...overrides,
   };
@@ -486,6 +487,48 @@ describe("a results file", () => {
     expect(results.criteria.segments.map(({ segment }) => segment)).toEqual([
       "orbit coast",
       "descent arc",
+    ]);
+  });
+
+  it("reads T as the vsyncs its pacing draws the setting's rate on, and records the pacing and the vsync its frames measure (R07.T19)", () => {
+    const runAt = (
+      framePacing: RunDescription["framePacing"],
+      setting: RunDescription["setting"],
+    ): DescentResults["run"] =>
+      buildResults({
+        run: runOf({ framePacing, setting, displayHz: 120 }),
+        report: reportOf(),
+        trace: traceOf(),
+        memory: MEMORY,
+      }).run;
+    const counted = runAt("display", "low");
+    const rate = runAt("rate", "low");
+    expect([
+      counted.periodMs.value?.toFixed(2),
+      rate.periodMs.value?.toFixed(2),
+      runAt("rate", "high").periodMs.value?.toFixed(2),
+      // The frames after the warm-up, 33.3 ms apart but for a long one in each hundred.
+      rate.pacing,
+    ]).toEqual([
+      "16.67",
+      "33.33",
+      "16.67",
+      { framePacing: "rate", measuredVsyncMs: measured(33.3) },
+    ]);
+  });
+
+  it("refuses a version 9 file whose pacing is neither, and reads a version 8 file without one (R07.T19)", () => {
+    const { pacing, ...unpaced } = twoWindowResults().run;
+    const file = (version: number, run: object): unknown =>
+      JSON.parse(JSON.stringify({ ...twoWindowResults(), version, run }));
+    expect([
+      validateResults(file(9, { ...unpaced, pacing: { ...pacing, framePacing: "vsync" } })),
+      validateResults(file(9, unpaced)),
+      validateResults(file(8, unpaced)),
+    ]).toEqual([
+      ["run.pacing.framePacing is neither rate nor display"],
+      ["run.pacing.framePacing is neither rate nor display"],
+      [],
     ]);
   });
 
@@ -2352,7 +2395,10 @@ describe("the schema check", () => {
     const v1: unknown = JSON.parse(
       JSON.stringify({ ...results, version: 1, memory: { samples: MEMORY, ...peaks } }),
     );
-    expect(validateResults(v1)).toEqual(["version is not 6 or 7 or 8", "memory.series is missing"]);
+    expect(validateResults(v1)).toEqual([
+      "version is not 6 or 7 or 8 or 9",
+      "memory.series is missing",
+    ]);
   });
 
   it.each<readonly [string, Readonly<Record<string, unknown>>, string]>([
@@ -2689,9 +2735,9 @@ describe("the schema check", () => {
 
   it("refuses version 5", () => {
     const results = twoWindowResults();
-    expect(RESULTS_VERSION).toBe(8);
+    expect(RESULTS_VERSION).toBe(9);
     expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 5 })))).toEqual([
-      "version is not 6 or 7 or 8",
+      "version is not 6 or 7 or 8 or 9",
     ]);
   });
 
@@ -2756,11 +2802,11 @@ describe("the schema check", () => {
         ),
       ),
     ]).toEqual([
-      8,
+      9,
       geometry,
       [],
       [],
-      ["geometry is a version 7 or 8 file's, not this version's"],
+      ["geometry is a version 7, 8 or 9 file's, not this version's"],
       ["geometry is not the settings and each segment's counts, every figure of its kind"],
     ]);
     const markdown = summaryMarkdown(results);

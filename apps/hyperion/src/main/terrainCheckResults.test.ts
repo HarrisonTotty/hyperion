@@ -8,7 +8,7 @@ import type {
   TerrainWholeRecord,
 } from "../preload/api";
 import { DESTROYED_AT_MS, LOSS_WINDOW, TERRAIN_RECORD } from "./fixtures/terrainRecord";
-import { measured, type PartialResultsFiles } from "./results";
+import { measured, missing, type PartialResultsFiles } from "./results";
 import {
   buildTerrainCheckResults,
   buildTerrainPhases,
@@ -61,6 +61,8 @@ function input(overrides: Partial<TerrainCheckInput> = {}): TerrainCheckInput {
       fixture: "terrain-test",
       switches: [],
       shown: false,
+      framePacing: "display",
+      frameRateHz: 60,
       window: { widthDip: 1926, heightDip: 1086 },
       captures: measured("/repo/target/views-check/terrain/captures"),
     },
@@ -101,6 +103,19 @@ describe("the terrain run's results", () => {
       "terrain-loss",
     ]);
     expect(TERRAIN_PHASES.low[1]?.views).toEqual(["photorealistic", "wireframe"]);
+  });
+
+  it("record the run's pacing and each phase's measured vsync, or why it is missing (R07.T19)", () => {
+    const results = buildTerrainCheckResults({
+      ...input(),
+      run: { ...input().run, framePacing: "rate", frameRateHz: 120 },
+    });
+    expect([
+      results.run.framePacing,
+      results.run.frameRateHz,
+      results.phases[0]?.measuredVsyncMs,
+      terrainCheckMarkdown(results).includes(", pacing rate, offscreen frame clock 120 Hz"),
+    ]).toEqual(["rate", 120, missing("fewer than 30 animation frames measured"), true]);
   });
 
   it("fail a run whose phases are not its setting's", () => {
@@ -845,7 +860,7 @@ describe("the terrain run's summary and its files", () => {
     expect(smoke.markdown).toBe("/out/2026-10-19-effect-high-terrain-smoke.md");
     expect(JSON.parse(written.get(first.json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.terrain-results",
-      version: 5,
+      version: 6,
       overall: "pass",
       findings: { terrainFaults: { verdict: "pass", reasons: [], record: [] } },
     });
@@ -875,7 +890,7 @@ describe("the terrain run's summary and its files", () => {
     ]);
     expect(JSON.parse(written.get(second.json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.terrain-phases",
-      version: 1,
+      version: 2,
       run: { timer: "quantized", devicePixelRatio: 2 },
       phases: [{ name: "terrain-alone" }, { name: "terrain-photoreal-wireframe" }],
     });
@@ -938,6 +953,8 @@ describe("the terrain run's summary and its files", () => {
         "smoke",
         "switches",
         "shown",
+        "framePacing",
+        "frameRateHz",
         "window",
         "devicePixelRatio",
         "timer",

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { INSPECTION_TIMING_SCHEMA } from "./inspectionTiming";
+import { measured, missing } from "./measured";
 import {
   batchIn,
   cargoExecutable,
@@ -122,10 +123,10 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, nine pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
+    // Four own runs, ten pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
     // then two counted settings and the occlusion's, figure-shading's and both shading pairs' two
     // counted sides each.
-    expect(matrix).toHaveLength(4 + 9 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
+    expect(matrix).toHaveLength(4 + 10 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -160,6 +161,11 @@ describe("the Mac batch's matrix", () => {
       "2",
       "--geometry",
       "shading=visibility,occlusion=hzb",
+    ]);
+    // The pacing pair (R07.T19): both sides on a 120 Hz offscreen clock, counted against by rate.
+    expect([args("pacing-120-high-dpr1-a1"), args("pacing-120-high-dpr1-b2")]).toEqual([
+      ["--frame-rate", "120", "--frame-pacing", "display"],
+      ["--frame-rate", "120", "--frame-pacing", "rate"],
     ]);
   });
 
@@ -391,7 +397,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 66 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 70 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(
@@ -402,7 +408,7 @@ describe("a lever's pair", () => {
       /\| march-sources-high-dpr1-a1 \| high \| 1 \| march-sources A1 \| 0 \| 50 s \| [^\n]* \| 40% \| 0, 1 \| — → — \|/u,
     );
     expect(text).toContain(
-      "| march-sources-high-dpr1-b2 | orbit | 54.0 | 64.8 | 18.5 | 51.0 | march 22.0 (43%), bodies 11.0 (22%) |",
+      "| march-sources-high-dpr1-b2 | orbit | 54.0 | 64.8 | 18.5 | not recorded | 51.0 | march 22.0 (43%), bodies 11.0 (22%) |",
     );
     expect(text).toContain("| orbit | 2, 2 | 42.0 | 52.0 | +10.0 | +23.8% | 23.8 | 19.2 |");
     expect(text).toContain("| orbit | march | 13.0 | 21.0 | +8.0 |");
@@ -412,6 +418,40 @@ describe("a lever's pair", () => {
     // A timing file before version 7 holds no reads.
     expect(text).toContain("| orbit | not recorded | not recorded |");
     expect(text).toContain("## The height-worker sweep\n\nNot written yet.");
+  });
+
+  it("writes each window's callbacks, draws and measured vsync where its file holds them (R07.T19)", () => {
+    const window = (
+      callbacks: number,
+      draws: number,
+      vsync: NonNullable<ProfiledWindow["measuredVsyncMs"]>,
+    ): ProfiledWindow => ({
+      ...windowOf("orbit", 1000 / 60, 5, { bodies: 4 }),
+      callbacks,
+      draws,
+      measuredVsyncMs: vsync,
+    });
+    const text = macProfileSummaryLines({
+      machine: "pod",
+      tree: "e9966e0",
+      body: "41ffecb200000002.0400",
+      options: MAC_PROFILE_DEFAULTS,
+      kept: [
+        keptAs(matrix, "pacing-120-high-dpr1-a1", [window(240, 240, measured(1000 / 120))]),
+        keptAs(matrix, "pacing-120-high-dpr1-b1", [
+          window(20, 10, missing("fewer than 30 animation frames measured")),
+        ]),
+      ],
+      sweep: { table: null, runs: [] },
+    }).join("\n");
+    expect([
+      text.includes(
+        "| pacing-120-high-dpr1-a1 | orbit | 16.7 | 20.0 | 60.0 | 240 for 240 draws, vsync 8.33 ms |",
+      ),
+      text.includes(
+        "| pacing-120-high-dpr1-b1 | orbit | 16.7 | 20.0 | 60.0 | 20 for 10 draws, vsync — |",
+      ),
+    ]).toEqual([true, true]);
   });
 });
 

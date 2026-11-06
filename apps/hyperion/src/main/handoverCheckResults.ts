@@ -78,9 +78,10 @@ export const HANDOVER_CHECK_SCHEMA = "hyperion.views-check.handover-results";
  * the disc's frame at their ground points, not over the pixels both frames give it, and each
  * switch's `resampleGaps`; 5 from research-leans-36's light floor, each cell's `flooredLog2` and
  * `passedByFloor`, each switch's `lightFlooredTexels` and the bounds' `lightFloorShare`, none of
- * which a file of version 4 or earlier holds: a reader takes them there as `null`.
+ * which a file of version 4 or earlier holds: a reader takes them there as `null`; 6 from R07.T19's
+ * `run.framePacing` and `run.frameRateHz`.
  */
-export const HANDOVER_CHECK_VERSION = 5;
+export const HANDOVER_CHECK_VERSION = 6;
 
 /**
  * The bound on a change across a switch, stops (log₂ of the ratio): plan 10's T10.e and T10.g, a
@@ -273,6 +274,10 @@ export interface HandoverCheckResults {
     readonly look?: HandoverLookName;
     readonly switches: ReadonlyArray<string>;
     readonly shown: boolean;
+    /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+    readonly framePacing: TerrainCheckRunInput["framePacing"];
+    /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+    readonly frameRateHz: TerrainCheckRunInput["frameRateHz"];
     readonly window: TerrainCheckRunInput["window"];
     readonly devicePixelRatio: number;
     readonly captures: Measured<string>;
@@ -562,6 +567,8 @@ export function buildHandoverCheckResults(input: HandoverCheckInput): HandoverCh
       ...(run.look === undefined ? {} : { look: run.look }),
       switches: run.switches,
       shown: run.shown,
+      framePacing: run.framePacing,
+      frameRateHz: run.frameRateHz,
       window: run.window,
       devicePixelRatio: record.devicePixelRatio,
       captures: run.captures,
@@ -662,7 +669,7 @@ export function handoverCheckMarkdown(results: HandoverCheckResults): string {
     `- **Overall:** ${results.overall}`,
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"} (${run.provisional})`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}, pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}`,
     ...fixtureNaming(run.fixture).lines,
     ...(run.served === undefined
       ? []
