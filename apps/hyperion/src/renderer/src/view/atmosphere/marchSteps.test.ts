@@ -663,10 +663,10 @@ describe("the kernels' WGSL", () => {
       /fn rayMarchWalkStepOf\([^)]*\) -> MarchStep \{\s*if \(evenSky\) \{\s*return marchWalkEvenStep\(walk, i\);\s*\}\s*return rayMarchWalkStep\(walk, placement, i\);/,
     );
     expect(rayMarchWgsl).toMatch(
-      /for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(\s*&march, &surface, ray, body, rayMarchStepOf\(split, i, evenSky, warp\), lobes, surfaceLobes\s*\);/,
+      /for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(\s*&march,\s*&surfaceDepth,\s*ray,\s*body,\s*rayMarchStepOf\(split, i, evenSky, warp\),\s*lobes,\s*surfaceLobes,\s*\);/,
     );
     expect(rayMarchWgsl).toMatch(
-      /if \(evenSky\) \{\s*marchWalkEvenReady\(&walk, warp\);\s*\} else \{\s*marchWalkReady\(&walk\);\s*rayMarchDepthShares\(&walk, &placement, ray, body\);\s*\}\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(\s*&march,\s*&surface,\s*ray,\s*body,\s*rayMarchWalkStepOf\(&walk, &placement, i, evenSky\),\s*lobes,\s*surfaceLobes,\s*\);/,
+      /if \(evenSky\) \{\s*marchWalkEvenReady\(&walk, warp\);\s*\} else \{\s*marchWalkReady\(&walk\);\s*rayMarchDepthShares\(&walk, &placement, ray, body\);\s*\}\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*rayMarchStep\(\s*&march,\s*&surfaceDepth,\s*ray,\s*body,\s*rayMarchWalkStepOf\(&walk, &placement, i, evenSky\),\s*lobes,\s*surfaceLobes,\s*\);/,
     );
     // The sky view and the multiple-scattering kernel keep R05.T12.e's placement.
     for (const wgsl of [skyViewWgsl, multiScatteringWgsl]) {
@@ -718,11 +718,11 @@ describe("the kernels' WGSL", () => {
       // No edge: R05.T12.e's steps, and no walk declared; edges: the walk, made ready first. The
       // ray march chooses each step in its loop, its two-sided sky segments' warped (R08.T8).
       expect(wgsl).toMatch(
-        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(\s*&march, (&surface, )?ray, (body, (frame, )?)?(marchStep\(split, i\)|rayMarchStepOf\(split, i, evenSky, warp\))(, lobes(, surfaceLobes)?)?\s*\);/,
+        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(\s*&march,\s*(&surfaceDepth,\s*)?ray,\s*(body,\s*(frame,\s*)?)?(marchStep\(split, i\)|rayMarchStepOf\(split, i, evenSky, warp\))(,\s*lobes(,\s*surfaceLobes,)?)?\s*\);/,
       );
       expect(wgsl).toMatch(/var walk : MarchWalk;\s*marchWalkStart\(&walk, split\);/);
       expect(wgsl).toMatch(
-        /marchWalkReady\(&walk\);\s*(rayMarchDepthShares\(&walk, &placement, ray, body\);\s*)?(\}\s*)?for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(\s*&march,\s*(&surface,\s*)?ray,\s*(body,\s*(frame,\s*)?)?(marchWalkStep\(&walk, i\)|rayMarchWalkStepOf\(&walk, &placement, i, evenSky\))(,\s*lobes(,\s*surfaceLobes,)?)?\s*\);/,
+        /marchWalkReady\(&walk\);\s*(rayMarchDepthShares\(&walk, &placement, ray, body\);\s*)?(\}\s*)?for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(\s*&march,\s*(&surfaceDepth,\s*)?ray,\s*(body,\s*(frame,\s*)?)?(marchWalkStep\(&walk, i\)|rayMarchWalkStepOf\(&walk, &placement, i, evenSky\))(,\s*lobes(,\s*surfaceLobes,)?)?\s*\);/,
       );
     }
     // Only the ray march shares a cut side's steps by the light each piece returns, and takes its

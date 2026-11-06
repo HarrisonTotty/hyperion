@@ -174,7 +174,11 @@ export const SKY_SUN_CAP: Readonly<Record<QualitySetting, number>> = {
  * `transmitted` (plan R08, fix-r08-decked-air-opacity) keeps a drawn surface's light scattered
  * within the medium's forward lobes in the march's second target on both settings, its cost one sum
  * over the medium's terms and one `exp` a march step where the medium has a drawn lobe, none
- * elsewhere; `extinguished` is the way back.
+ * elsewhere; `extinguished` is the way back. Since fix-r08-decked-air-route the term is formed only
+ * on a ray that ends on a drawn surface, in a loop of at most one pass, its optical depth summed
+ * with one `exp` a ray, and a deck's march compiles it out. On SwiftShader its code costs the
+ * march's compile (test-render's venus-92bar row, part 2: 341 s against BASE's 252 s, side by side
+ * on a pod, from 374–381 s before the deck's march compiled it out), not its frames.
  *
  * `packed` (plan R08, R08.T8.d) takes the far limb's node rays one an invocation on both settings:
  * byte for byte the per-texel march on SwiftShader, and from orbit in the inspection profile (pod,

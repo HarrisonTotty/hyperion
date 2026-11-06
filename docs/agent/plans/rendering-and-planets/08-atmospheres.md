@@ -25247,3 +25247,13 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - The twin at disc-p0: the route's black-ground veil 0.0764 / 0.1192 / 0.2391 against the
     independent-pixel truth's 0.078 / 0.118 / 0.230 (Ψ_ms 0.1223 / 0.1795 / 0.3291); its ground's
     part over 0.3 0.233 / 0.220 / 0.170 against the drawn medium's trace, 0.240 / 0.230 / 0.185.
+- **The decked air routed, its drawn ground's contrast kept** (fix-r08-decked-air-route,
+  2026-11-06; research-leans-46). Step 1, the lobe term's cost:
+  - `rayMarch.wgsl`: `surfaceLobes` needs `depth > 0.0`; `rayMarchStep` takes `surfaceDepth`
+    (summed, one `exp` a ray at the end), its per-step work in `rayMarchSurfaceStep`, a loop of
+    one pass. `THICK_READ`'s `surfaceLobes` line carries the depth test.
+  - `withDeckRead` compiles the term out of a deck's marches (`DECK_NO_SURFACE_LOBES`).
+  - The twin: `Marcher`'s lobed surface needs a drawn surface (`!ray.skySegment`); its depth is
+    summed. `caseGate.json`, `sweepBoundary.json` and `vectorGate.json` hold unchanged (by hand;
+    `vectorGate.json`'s `jupiterEnvelope` differs on BASE too, kept as committed).
+  - Pending: the term's compile cost on SwiftShader (the outbox's findings).

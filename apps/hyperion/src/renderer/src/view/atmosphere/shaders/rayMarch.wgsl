@@ -160,6 +160,18 @@
 // the tracer's (`hyperion-fit atmosphere-reference`). Its own path from the first step, never the
 // throughput times e^(x P), so that a deep path whose throughput f32 cannot hold keeps its own. The
 // first target, its mean and a medium with no lobe are as before, to the bit.
+//
+// Changes (plan R08, fix-r08-decked-air-route; research-leans-46 section 1): the term is formed only
+// on a ray that ends on a drawn surface (depth above 0), the only ray whose second target the
+// composite reads (`composite.wgsl`'s `marchedAt`), and its optical depth is summed along the path,
+// max(step depth - P sigma_s dt, 0) a step, with one exp a ray at its end, in place of one a step.
+// Each step forms it in a loop of at most one pass, not an `if`: SwiftShader, the checks' software
+// adapter, runs both sides of a branch under its lanes' mask whatever they take, and a loop only
+// while a lane is in it, so that a march whose rays keep no term (a sky's, a limb's) pays for none
+// of its steps there. Its code still costs SwiftShader's compile of every march that holds it, so
+// a deck's march, which reads a bake's J and never keeps it, compiles it out (`hillaire.ts`'s
+// withDeckRead). A sum rounds otherwise than a product, so the second target moves by f32's
+// rounding where it is kept.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -279,12 +291,12 @@ fn rayMarchLobeScatteringOf(local : SampleMedium) -> vec3f {
 // One step of the march, at its midpoint: its ground quadric, about t* beyond h0 = a / 2 and from
 // the camera within it, its datum point (its height and the datum's normal there) and s at its
 // latitude, then the medium at h* = s h, its sources through the sliced lookup and their
-// in-scattering (R08.T6.f). Where `surfaceLobes`, a drawn surface's own transmittance `surface` one
-// step on: slot 0's step depth, as `viewMarchStep` forms it, less the step's in-lobe scattering
-// (fix-r08-decked-air-opacity).
+// in-scattering (R08.T6.f). Where `surfaceLobes`, a drawn surface's own optical depth `surfaceDepth`
+// one step on: slot 0's step depth, as `viewMarchStep` forms it, less the step's in-lobe scattering,
+// at least 0 (fix-r08-decked-air-opacity; summed since fix-r08-decked-air-route).
 fn rayMarchStep(
   march : ptr<function, ViewMarch>,
-  surface : ptr<function, vec3f>,
+  surfaceDepth : ptr<function, vec3f>,
   ray : MarchRay,
   body : OblateBody,
   stepAt : MarchStep,
@@ -307,10 +319,26 @@ fn rayMarchStep(
   let shares = rayMarchSourcesAt(body, start, datum.normal, ray.dir, lobes, local);
   let absorbedBefore = (*march).path0.depth;
   viewMarchStep(march, local, shares, stepAt.dtM);
-  if (surfaceLobes) {
-    let stepDepth = local.extinction * stepAt.dtM + ((*march).path0.depth - absorbedBefore);
-    let kept = rayMarchLobeScatteringOf(local) * stepAt.dtM;
-    *surface = *surface * exp(-max(stepDepth - kept, vec3f(0.0)));
+  rayMarchSurfaceStep(surfaceDepth, march, local, absorbedBefore, stepAt.dtM, surfaceLobes);
+}
+
+// A drawn surface's own optical depth `surfaceDepth` one step `dtM` on, where `surfaceLobes`
+// (fix-r08-decked-air-opacity; summed since fix-r08-decked-air-route): slot 0's step depth, as
+// `viewMarchStep` forms it, its absorbers' depth since `absorbedBefore`, less the step's in-lobe
+// scattering, at least 0. A loop of at most one pass, not an `if` (the header's
+// fix-r08-decked-air-route). A deck's march compiles its call out (`hillaire.ts`'s withDeckRead).
+fn rayMarchSurfaceStep(
+  surfaceDepth : ptr<function, vec3f>,
+  march : ptr<function, ViewMarch>,
+  local : SampleMedium,
+  absorbedBefore : vec3f,
+  dtM : f32,
+  surfaceLobes : bool,
+) {
+  for (var lobed = surfaceLobes; lobed; lobed = false) {
+    let stepDepth = local.extinction * dtM + ((*march).path0.depth - absorbedBefore);
+    let kept = rayMarchLobeScatteringOf(local) * dtM;
+    *surfaceDepth += max(stepDepth - kept, vec3f(0.0));
   }
 }
 
@@ -910,16 +938,23 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
   var march = viewMarchStart();
   let lobes = hasForwardLobes();
   // A drawn surface's transmittance with its lobes' in-lobe scattering kept (forward.w, the view's
-  // SurfaceLobes; fix-r08-decked-air-opacity), the same for every pixel.
-  let surfaceLobes = lobes && view.forward.w > 0.5;
-  var surface = vec3f(1.0);
+  // SurfaceLobes; fix-r08-decked-air-opacity), on a ray that ends on a drawn surface alone, whose
+  // second target the composite reads (fix-r08-decked-air-route): its optical depth, summed.
+  let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0;
+  var surfaceDepth = vec3f(0.0);
   // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk.
   // One loop a path, each step chosen in it (R08.T8), so that the step's work is compiled twice,
   // not once a placement and path.
   if (edgeCount == 0u) {
     for (var i = 0u; i < samples; i++) {
       rayMarchStep(
-        &march, &surface, ray, body, rayMarchStepOf(split, i, evenSky, warp), lobes, surfaceLobes
+        &march,
+        &surfaceDepth,
+        ray,
+        body,
+        rayMarchStepOf(split, i, evenSky, warp),
+        lobes,
+        surfaceLobes,
       );
     }
   } else {
@@ -939,7 +974,7 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
     for (var i = 0u; i < samples; i++) {
       rayMarchStep(
         &march,
-        &surface,
+        &surfaceDepth,
         ray,
         body,
         rayMarchWalkStepOf(&walk, &placement, i, evenSky),
@@ -972,7 +1007,7 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
   var meanTransmittance = viewMeanTransmittance(&march);
   var transmittanceRgb = march.throughput0;
   if (surfaceLobes) {
-    transmittanceRgb = surface;
+    transmittanceRgb = exp(-surfaceDepth);
   }
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     meanTransmittance = 0.0;

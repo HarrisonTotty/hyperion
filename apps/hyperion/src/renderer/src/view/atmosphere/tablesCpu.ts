@@ -2708,14 +2708,17 @@ class Marcher {
    * Whether a drawn surface keeps its light scattered within the medium's forward lobes: a term with
    * a drawn lobe, and no bake's table (`thick`), whose J re-emits the truncated lobe's diffuse field,
    * the ground's light among it, into each direction (`thick/bake.ts`'s E, its first term), so that
-   * the lobes' light is the table's there; the correction alone beside Ψ_ms keeps it.
+   * the lobes' light is the table's there; the correction alone beside Ψ_ms keeps it. Since
+   * fix-r08-decked-air-route on a ray that ends on a drawn surface alone (no sky segment), as
+   * `rayMarch.wgsl` forms it where the scene's depth is above 0.
    */
   readonly #lobed: boolean;
   /**
-   * A drawn surface's transmittance with its lobes' in-lobe scattering kept, slot 0's path less it
-   * (`rayMarch.wgsl`'s `surface`; fix-r08-decked-air-opacity), where {@link Marcher.#lobed}.
+   * A drawn surface's optical depth with its lobes' in-lobe scattering kept, slot 0's path less it,
+   * at least 0 a step (`rayMarch.wgsl`'s `surfaceDepth`; fix-r08-decked-air-opacity, summed since
+   * fix-r08-decked-air-route), where {@link Marcher.#lobed}.
    */
-  readonly #surface: TwinRgb = [1, 1, 1];
+  readonly #surfaceDepth: TwinRgb = [0, 0, 0];
   /** The thick table's kind where the tables hold one, read with Ψ_ms (R08.T14.c, R08.T14.f). */
   readonly #thick: ThickTableKind | null;
   readonly #thickRead: TwinRgb = [0, 0, 0];
@@ -2760,7 +2763,7 @@ class Marcher {
     this.#lobes = lobed && (reads.kind === "oblate" || reads.sources.sunOpticalDepth !== undefined);
     this.#thick =
       reads.kind === "oblate" ? reads.reader.thickKind : (reads.sources.thick?.kind ?? null);
-    this.#lobed = lobed && this.#thick !== "thick";
+    this.#lobed = lobed && this.#thick !== "thick" && ray.skySegment !== true;
     this.#thermal =
       reads.kind === "oblate" ? reads.reader.thermal : (reads.sources.thermal ?? null);
     // A path a light slot under an absorber, slot 0's always (the views' mean transmittance), and
@@ -2795,11 +2798,16 @@ class Marcher {
    * lobes (`hillaire.ts`'s SurfaceLobes `transmitted`; `rayMarch.wgsl`): slot 0's path with each
    * step's in-lobe scattering Σ P σ_s dropped from its depth, R08.T7's δ-M (Wiscombe 1977, J. Atmos.
    * Sci. 34, 1408), carried from the first step, never as the throughput times e^(x P), so that a
-   * deep path keeps its own; the throughput itself, to the bit, where no term has a drawn lobe or a
-   * bake's table is read ({@link Marcher.#lobed}).
+   * deep path keeps its own, its optical depth summed and taken through one exp at the end
+   * (fix-r08-decked-air-route); the throughput itself, to the bit, where no term has a drawn lobe, a
+   * bake's table is read or the ray ends on no drawn surface ({@link Marcher.#lobed}).
    */
   get surfaceThroughput(): TwinRgb {
-    return this.#lobed ? this.#surface : this.throughput;
+    if (!this.#lobed) {
+      return this.throughput;
+    }
+    const depth = this.#surfaceDepth;
+    return [exp(-depth[0]), exp(-depth[1]), exp(-depth[2])];
   }
 
   /** A light slot's throughput, slot 0's for a slot with no path of its own. */
@@ -3044,7 +3052,7 @@ class Marcher {
         throughput[c] *= exp(-stepDepth);
         if (slot === 0 && this.#lobed) {
           const kept = (local[LOBE_AT + c] ?? Number.NaN) * dtM;
-          this.#surface[c] *= exp(-Math.max(stepDepth - kept, 0));
+          this.#surfaceDepth[c] += Math.max(stepDepth - kept, 0);
         }
       }
     }

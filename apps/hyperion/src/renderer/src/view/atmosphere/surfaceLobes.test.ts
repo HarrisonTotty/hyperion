@@ -7,7 +7,9 @@ import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES, referenceSunIlluminanceLx } fr
 import { forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
 import {
   type AtmosphereCamera,
+  RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_DECK_KERNEL,
   RAY_MARCH_THICK_KERNEL,
   type SpheroidFigure,
   type SunState,
@@ -297,10 +299,10 @@ describe("a drawn surface's lobes on a bake's table (fix-r08-decked-air-opacity)
 
   it("keeps none in a thick ray march's kernel unless its table is the correction alone", () => {
     expect(RAY_MARCH_THICK_KERNEL.reference).toContain(
-      "let surfaceLobes = lobes && view.forward.w > 0.5 && thickCorrectionOnly();",
+      "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && thickCorrectionOnly();",
     );
     expect(RAY_MARCH_KERNEL.reference).toContain(
-      "let surfaceLobes = lobes && view.forward.w > 0.5;",
+      "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0;",
     );
   });
 });
@@ -308,17 +310,30 @@ describe("a drawn surface's lobes on a bake's table (fix-r08-decked-air-opacity)
 describe("the ray march's second target with the lobes' light kept (fix-r08-decked-air-opacity)", () => {
   const code = rayMarchWgsl.replaceAll(/\/\/[^\n]*/gu, "");
 
-  it("keeps it only where the medium has a lobe and the view's forward.w asks", () => {
-    expect(code).toMatch(/let surfaceLobes = lobes && view\.forward\.w > 0\.5;/u);
+  it("keeps it only on a ray that ends on a drawn surface, where the medium has a lobe and the view's forward.w asks (fix-r08-decked-air-route)", () => {
+    expect(code).toMatch(/let surfaceLobes = lobes && view\.forward\.w > 0\.5 && depth > 0\.0;/u);
     expect(code).toMatch(
-      /var transmittanceRgb = march\.throughput0;\s*if \(surfaceLobes\) \{\s*transmittanceRgb = surface;\s*\}/u,
+      /var transmittanceRgb = march\.throughput0;\s*if \(surfaceLobes\) \{\s*transmittanceRgb = exp\(-surfaceDepth\);\s*\}/u,
     );
   });
 
-  it("steps it by slot 0's step depth less the step's in-lobe scattering, from the first step", () => {
+  it("sums slot 0's step depth less the step's in-lobe scattering from the first step, in a loop of at most one pass, with one exp a ray (fix-r08-decked-air-route)", () => {
     expect(code).toMatch(
-      /let stepDepth = local\.extinction \* stepAt\.dtM \+ \(\(\*march\)\.path0\.depth - absorbedBefore\);\s*let kept = rayMarchLobeScatteringOf\(local\) \* stepAt\.dtM;\s*\*surface = \*surface \* exp\(-max\(stepDepth - kept, vec3f\(0\.0\)\)\);/u,
+      /let absorbedBefore = \(\*march\)\.path0\.depth;\s*viewMarchStep\(march, local, shares, stepAt\.dtM\);\s*rayMarchSurfaceStep\(surfaceDepth, march, local, absorbedBefore, stepAt\.dtM, surfaceLobes\);/u,
     );
-    expect(code).toMatch(/var surface = vec3f\(1\.0\);/u);
+    expect(code).toMatch(
+      /for \(var lobed = surfaceLobes; lobed; lobed = false\) \{\s*let stepDepth = local\.extinction \* dtM \+ \(\(\*march\)\.path0\.depth - absorbedBefore\);\s*let kept = rayMarchLobeScatteringOf\(local\) \* dtM;\s*\*surfaceDepth \+= max\(stepDepth - kept, vec3f\(0\.0\)\);\s*\}/u,
+    );
+    expect(code).toMatch(/var surfaceDepth = vec3f\(0\.0\);/u);
+    expect(code.split("exp(-surfaceDepth)").length - 1).toBe(1);
+    expect(code).not.toMatch(/if \(surfaceLobes\)\s*\{\s*let stepDepth/u);
+  });
+
+  it("compiles it out of a deck's march, whose bake's J holds that light (fix-r08-decked-air-route)", () => {
+    for (const pair of [RAY_MARCH_DECK_KERNEL, RAY_MARCH_SLOTS_DECK_KERNEL]) {
+      const deck = pair.reference.replaceAll(/\/\/[^\n]*/gu, "");
+      expect(deck).not.toMatch(/rayMarchSurfaceStep\(surfaceDepth/u);
+      expect(deck).toMatch(/let surfaceLobes = false;/u);
+    }
   });
 });

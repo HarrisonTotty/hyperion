@@ -1499,8 +1499,9 @@ const THICK_READ: ReadonlyArray<{
     most: 1,
   },
   {
-    general: "let surfaceLobes = lobes && view.forward.w > 0.5;",
-    thick: "let surfaceLobes = lobes && view.forward.w > 0.5 && thickCorrectionOnly();",
+    general: "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0;",
+    thick:
+      "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && thickCorrectionOnly();",
     least: 0,
     most: 1,
   },
@@ -1948,12 +1949,33 @@ const DECK_NEEDED: readonly [string, string] = [
 ];
 
 /**
+ * The deck read's rewrites of a thick ray march's drawn surface's forward lobes' light (plan R08,
+ * fix-r08-decked-air-route; `hillaire.ts`'s {@link SurfaceLobes}): none, compiled out. A deck's
+ * march reads a bake's table, whose J holds that light, so the thick march never forms the term
+ * there, yet its code costs SwiftShader's compile of every march that holds it, whatever its form:
+ * test-render's venus-92bar row (part 2) took 374–381 s with it against BASE's 249–265 s, and 341 s
+ * with the deck's marches compiled clear of it (pod, side by side). Each stands once in each march.
+ */
+const DECK_NO_SURFACE_LOBES: ReadonlyArray<readonly [string, string]> = [
+  [
+    "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && thickCorrectionOnly();",
+    "let surfaceLobes = false;",
+  ],
+  [
+    "rayMarchSurfaceStep(surfaceDepth, march, local, absorbedBefore, stepAt.dtM, surfaceLobes);",
+    "// No drawn surface's lobes' light over a deck (fix-r08-decked-air-route).",
+  ],
+];
+
+/**
  * `pair`, a thick ray march's ({@link withThickRead}), reading a cloud deck as its ground (plan
  * R08, R08.T15.a.2; Design note 9; `thick/deckRead.ts`): the bare ground's light is the deck's
  * ({@link DECK_READ}), read wherever the ray reaches the deck's datum before a drawn surface
  * ({@link DECK_GROUND}, R08.T16.b.2), and such a surface within the volume's reach marched
- * ({@link DECK_NEEDED}), its table bound at `deckTable` beside the thick table. Every other line is
- * the thick kernel's own, so that a body with no deck keeps its kernels to the byte.
+ * ({@link DECK_NEEDED}), its table bound at `deckTable` beside the thick table; and since
+ * fix-r08-decked-air-route its drawn surface's lobes' light compiled out
+ * ({@link DECK_NO_SURFACE_LOBES}). Every other line is the thick kernel's own, so that a body with
+ * no deck keeps its kernels to the byte.
  *
  * @throws Error naming the kernel when its sources hold a rewritten line other than once (the bare
  *   ground's test other than twice), or it does not read the thick table.
@@ -1970,7 +1992,7 @@ export function withDeckRead(pair: KernelPair): KernelPair {
       }
       return text.replaceAll(general, deck);
     };
-    const code = [...DECK_READ, DECK_NEEDED].reduce(
+    const code = [...DECK_READ, DECK_NEEDED, ...DECK_NO_SURFACE_LOBES].reduce(
       (text, rewritten) => replaced(text, rewritten, 1),
       wgsl,
     );

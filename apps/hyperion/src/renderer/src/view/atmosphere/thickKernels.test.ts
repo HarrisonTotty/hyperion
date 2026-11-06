@@ -132,14 +132,14 @@ function digestOf(pair: KernelPair): string {
 const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_KERNEL, "3bb14d598c384edb"],
   [AERIAL_PERSPECTIVE_KERNEL, "1ccb804c63ae75c8"],
-  [RAY_MARCH_PER_STEP_KERNEL, "eb4148ef09fd7f0"],
-  [RAY_MARCH_SLOTS_PER_STEP_KERNEL, "d93913e91cfc277c"],
-  [RAY_MARCH_KERNEL, "aaf0f2f711d322d9"],
-  [RAY_MARCH_SLOTS_KERNEL, "3ea558824240903a"],
-  [RAY_MARCH_CENTRE_KERNEL, "e655923a54b2d453"],
-  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "9b38436e3799038c"],
-  [RAY_MARCH_SPECIAL_KERNEL, "ede6943faa409813"],
-  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "bab64bc78b2aae5e"],
+  [RAY_MARCH_PER_STEP_KERNEL, "c96113b0bfc6a38f"],
+  [RAY_MARCH_SLOTS_PER_STEP_KERNEL, "d647b20ebe15c315"],
+  [RAY_MARCH_KERNEL, "72e521f64ac81af6"],
+  [RAY_MARCH_SLOTS_KERNEL, "a6dbacbe74d3a931"],
+  [RAY_MARCH_CENTRE_KERNEL, "1622a402e5f23e68"],
+  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "5bc361abb789b03b"],
+  [RAY_MARCH_SPECIAL_KERNEL, "75017a7ef6409902"],
+  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "908ac56bf89b075f"],
   [RAY_MARCH_FILL_KERNEL, "fdc424b1001af7c6"],
 ];
 
@@ -154,10 +154,10 @@ const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
 const THICK_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_THICK_KERNEL, "b615d3a929d28bef"],
   [AERIAL_PERSPECTIVE_THICK_KERNEL, "861e34c18a663dca"],
-  [RAY_MARCH_THICK_KERNEL, "5910126ac548e8d6"],
-  [RAY_MARCH_SLOTS_THICK_KERNEL, "93487c44d6ca69e0"],
-  [RAY_MARCH_THICK_SPECIAL_KERNEL, "f99501f9845cebe2"],
-  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "778a0f62cce5641c"],
+  [RAY_MARCH_THICK_KERNEL, "1da742ceb7767b1d"],
+  [RAY_MARCH_SLOTS_THICK_KERNEL, "a1e4a78662ec4809"],
+  [RAY_MARCH_THICK_SPECIAL_KERNEL, "85f69bfe5844831f"],
+  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "4c2785c82fe076bf"],
 ];
 
 /** Each thick kernel beside the thin one it is made from. */
@@ -194,9 +194,9 @@ const THICK_LOBES =
   "phased += thickAnalyticWeight(muSun) * lobeOrdersOf(local, angle, light.depth);";
 const SLOT_SOURCE_AT = "let one = sourceAt(body, start, light, muSun, slot, local, phased);";
 /** A ray march's drawn surface keeps its lobes' light beside the correction alone, never on a bake. */
-const SURFACE_LOBES = "let surfaceLobes = lobes && view.forward.w > 0.5;";
+const SURFACE_LOBES = "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0;";
 const THICK_SURFACE_LOBES =
-  "let surfaceLobes = lobes && view.forward.w > 0.5 && thickCorrectionOnly();";
+  "let surfaceLobes = lobes && view.forward.w > 0.5 && depth > 0.0 && thickCorrectionOnly();";
 const THICK_SLOT_SOURCE_AT =
   "let one = thickSourceAt(body, start, light, muSun, slot, local, phased, ray, dir, up);";
 
@@ -316,6 +316,12 @@ const DECK = "* deckGroundAt(body, s, datum.normal, dir, source.direction.xyz, s
 const BARE_GROUND = "if (depth == 0.0 && hitsGround && ground.x <= tEnd) {";
 const DECK_DATUM = "if (hitsGround && ground.x <= tEnd) {";
 const NEEDED = "let needed = view.exact.w > 0.0 || (depth > 0.0 && tSurface > reach);";
+/** A deck's march compiles out its drawn surface's lobes' light (fix-r08-decked-air-route). */
+const SURFACE_STEP =
+  "rayMarchSurfaceStep(surfaceDepth, march, local, absorbedBefore, stepAt.dtM, surfaceLobes);";
+const DECK_SURFACE_STEP =
+  "// No drawn surface's lobes' light over a deck (fix-r08-decked-air-route).";
+const DECK_SURFACE_LOBES = "let surfaceLobes = false;";
 const DECK_NEEDED =
   "let needed = view.exact.w > 0.0 || (depth > 0.0 && (tSurface > reach || deckBeforeSurface(uv, tSurface)));";
 
@@ -331,13 +337,15 @@ describe("the deck read's kernels (R08.T15.a.2)", () => {
     ["the ray march", RAY_MARCH_THICK_KERNEL, RAY_MARCH_DECK_KERNEL],
     ["the ray march by slot", RAY_MARCH_SLOTS_THICK_KERNEL, RAY_MARCH_SLOTS_DECK_KERNEL],
   ] as const)(
-    "makes %s's deck form from its thick one, differing only at the bare ground's light and where it is read, the datum's hit before anything drawn (R08.T16.b.2), and at the texels it draws, those within the volume's reach past the datum too (research-leans-33 §4(c)), with the read appended",
+    "makes %s's deck form from its thick one, differing only at the bare ground's light and where it is read, the datum's hit before anything drawn (R08.T16.b.2), at the texels it draws, those within the volume's reach past the datum too (research-leans-33 §4(c)), and at its drawn surface's lobes' light, compiled out (fix-r08-decked-air-route), with the read appended",
     (_name, thick, deck) => {
       expect(deck.name).toBe(`${thick.name}, over a deck`);
       const appended = `\n${deckReadWgsl}`;
       expect(deck.reference.endsWith(appended)).toBe(true);
       const head = deck.reference.slice(0, -appended.length);
       expect(linesDiffering(thick.reference, head)).toEqual([
+        [SURFACE_STEP, DECK_SURFACE_STEP],
+        [THICK_SURFACE_LOBES, DECK_SURFACE_LOBES],
         [BARE_GROUND, DECK_DATUM],
         [GROUND_LIGHT, DECK_GROUND_LIGHT],
         [ALBEDO, DECK],
