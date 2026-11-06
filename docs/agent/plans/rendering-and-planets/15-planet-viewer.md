@@ -257,3 +257,7 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   above the datum, so that it comes down to it; elsewhere it scales the altitude above the datum.
 - R15.T4 (built): the planet viewer run seeks ground 500 m above the datum at low orbit (arrows, at
   most 12 moves) and captures `planet-viewer-floor` looking down from the floor.
+- R15 census (built, 2026-11-06; the owner's report, 2026-11-05): `hyperion-sim`'s slow
+  `tests/viewer_census.rs` prints `RANDOMIZE`'s first 200 draws (draw seeds 1 to 200): each host's
+  T_eff and class, the planet's air, state, template and lid, and its template's and lid's colour at
+  `D65` and adapted to its host (linear Bradford, `whiteBalance.ts`'s numbers). It asserts no figure.
