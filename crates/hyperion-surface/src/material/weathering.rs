@@ -620,8 +620,8 @@ pub const MATURE_COLOUR_EXPONENT: f64 = 0.83;
 pub const MATURE_COLOUR_RANGE_NM: [f64; 2] = [360.0, 940.0];
 
 /// The generator version from which a weathered entry's colour tends to the mature lunar colour
-/// (the [module documentation](self), "The mature colour"): 31, held with the 31 train
-/// (main's ruling of 2026-11-07: train 30's list froze first).
+/// (this module's documentation, "The mature colour"): 31, held with the 31 train (main's ruling
+/// of 2026-11-07: train 30's list froze first).
 ///
 /// Below it `MatureColourRules::in_force` is `MatureColourRules::Slab`, and
 /// [`weathered_entry_bvr`] is the slab's alone, bit for bit. 31's bump deletes this hold,
@@ -696,7 +696,7 @@ pub struct VBand {
 }
 
 /// The weathered albedo `weathered` at `wavelength_nm` (nm), of fresh albedo `fresh`, drawn toward
-/// the mature lunar colour on the band V `v` (the [module documentation](self), "The mature
+/// the mature lunar colour on the band V `v` (this module's documentation, "The mature
 /// colour"; from generator version 31), dimensionless: the log-linear blend `a`^x [`a_V` r(λ)]^(1 −
 /// x), x = e^(−τ) for the band's npFe⁰ optical depth `tau` ([`npfe_optical_depth`]), r(λ) the mature
 /// colour (λ ÷ `λ_V`)^β ([`MATURE_COLOUR_EXPONENT`]) but never bluer than the fresh colour `fresh`
