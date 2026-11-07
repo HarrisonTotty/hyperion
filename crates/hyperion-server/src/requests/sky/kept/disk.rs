@@ -421,24 +421,37 @@ fn serve(dir: &Path, budget: u64, mut ops: mpsc::Receiver<Op>, counters: &Mutex<
     let mut files: Option<Files> = None;
     while let Some(op) = ops.blocking_recv() {
         let files = files.get_or_insert_with(|| Files::scan(dir, budget));
+        // Each op's counters are published before its reply, so that whoever has the reply reads
+        // counters that count it.
         match op {
             Op::Get { key, reply } => {
+                let found = files.read(&key);
+                publish(&files.counters, counters);
                 // The handler may have gone, and then nobody wants the reply.
-                let _ = reply.send(files.read(&key));
+                let _ = reply.send(found);
             }
-            Op::Keep { key, answer } => files.write(&key, &answer),
+            Op::Keep { key, answer } => {
+                files.write(&key, &answer);
+                publish(&files.counters, counters);
+            }
             Op::Held { ask, reply } => {
+                let found = files.read_held(&ask);
+                publish(&files.counters, counters);
                 // As for `Get`, nobody may want it.
-                let _ = reply.send(files.read_held(&ask));
+                let _ = reply.send(found);
             }
         }
-        // `keep` counts the replies it drops itself, while the thread is busy.
-        let mut shared = lock(counters);
-        *shared = SkyFileCounters {
-            dropped: shared.dropped,
-            ..files.counters
-        };
     }
+}
+
+/// Copies the store's `counters` to the `shared` ones the server reads, but for the replies
+/// dropped, which `keep` counts there itself while the thread is busy.
+fn publish(counters: &SkyFileCounters, shared: &Mutex<SkyFileCounters>) {
+    let mut shared = lock(shared);
+    *shared = SkyFileCounters {
+        dropped: shared.dropped,
+        ..*counters
+    };
 }
 
 /// A file held: its bytes, when it was last used, in the order of uses, and its sky's hold once it
