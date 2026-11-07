@@ -645,11 +645,11 @@ describe("the planet viewer run (plan R15, T6)", () => {
     });
   });
 
-  it("is given the inspection run's 15 minutes, five times as long in software", () => {
+  it("is given 20 minutes with its moon, five times as long in software", () => {
     expect([
       viewsCheckWatchdogMs(LAUNCH, "vulkan"),
       viewsCheckWatchdogMs(LAUNCH, "software"),
-    ]).toEqual([15 * 60_000, 75 * 60_000]);
+    ]).toEqual([20 * 60_000, 100 * 60_000]);
   });
 
   it("fails a run that ends with no capture saved", () => {

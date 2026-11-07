@@ -238,8 +238,8 @@ export const INSPECTION_TIMING_DIR = "target/views-check/timing";
  * and 20 for its low window, flown down to by up to 40 holds of three draws each (on SwiftShader at
  * the high setting, draws of some 50 s, the step outlasted 125 minutes; perf-frame-encoding,
  * 2026-11-04); the planet viewer run's (plan R15, T6), one planet generated and taken from orbit
- * to its surface, the inspection run's 8 and 15, and 4 more for each of its `--randomize` draws,
- * each awaited lit, its air and terrain, and captured four times. Each is
+ * to its surface and a moon then opened from orbit, 8 and 20, and 4 more for each of its
+ * `--randomize` draws, each awaited lit, its air and terrain, and captured four times. Each is
  * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
  * as the renderer's waits are.
  */
@@ -268,8 +268,9 @@ export function viewsCheckWatchdogMs(
     case "planet-viewer":
       // One planet generated and opened, its first photorealistic frames and surveyed ground
       // awaited, then zoomed down to low orbit and the surface, its terrain streamed: as the
-      // inspection run's.
-      ms = (launch.smoke ? 8 * 60_000 : 15 * 60_000) + (launch.randomize ?? 0) * 4 * 60_000;
+      // inspection run's, and 5 minutes more for a moon opened and drawn from orbit last (R15.T5's
+      // follow-up), by which a run in a pod's software mode outlasted the inspection run's 15.
+      ms = (launch.smoke ? 8 * 60_000 : 20 * 60_000) + (launch.randomize ?? 0) * 4 * 60_000;
       break;
   }
   return launchMode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;

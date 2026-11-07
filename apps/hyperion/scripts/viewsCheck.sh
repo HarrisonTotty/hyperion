@@ -357,7 +357,9 @@ fi
 # the client's own watchdogs (8 and 30 minutes); the atmosphere run's 10 and 20, above its (8 and
 # 15), its full run's 40 in the software mode, above its 30 there (its places, a stage each); the
 # inspection run's 10 and 17, above its (8 and 15), and 30 minutes more with its profile, as its
-# watchdog has (its low window's descent 20 of them); the planet viewer run's the inspection run's. Given two, the client refuses the launch at once, so the first run's limit here
+# watchdog has (its low window's descent 20 of them); the planet viewer run's 10 and 22, above its
+# (8 and 20, its moon's 5 among them; R15.T5's follow-up), and 4 more for each `--randomize` draw. Given two, the client refuses the launch
+# at once, so the first run's limit here
 # stands.
 if [[ $terrain -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 2400) + (served == 1 ? 1200 : 0) ))
@@ -366,7 +368,7 @@ elif [[ $atmosphere -eq 1 ]]; then
 elif [[ $inspection -eq 1 ]]; then
     limit=$(( (smoke == 1 ? 600 : 1020) + (timing == 1 ? 1800 : 0) ))
 elif [[ $planet -eq 1 ]]; then
-    limit=$(( (smoke == 1 ? 600 : 1020) + 240 * draws ))
+    limit=$(( (smoke == 1 ? 600 : 1320) + 240 * draws ))
 else
     limit=$(( smoke == 1 ? 300 : 1500 ))
 fi
