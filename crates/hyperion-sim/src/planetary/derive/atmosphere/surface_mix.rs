@@ -64,9 +64,10 @@ use crate::planetary::chem::partition::{
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{OpenWater, PassContext, RecordSpin, WaterGate};
 use crate::planetary::derive::photometry::area_mix::{
-    self, HostShade, IcyResurfacing, LidWeathering, Regolith, VolatileFrost,
+    self, ColourBand, HostShade, IcyResurfacing, LidWeathering, Regolith, VolatileFrost,
 };
 use crate::planetary::derive::photometry::envelope_bond;
+use crate::planetary::derive::photometry::{Bands, DiscColour, SurfaceColourRules};
 use crate::planetary::hooks::cold_traps::{
     self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
     is_collisional, qualifies_by,
@@ -911,6 +912,7 @@ pub(super) fn area_mixed(
     let haze = pass_haze(air, inputs);
     let SurfaceMix {
         disc,
+        bands,
         lid,
         liquid_water,
         deck_water,
@@ -923,6 +925,7 @@ pub(super) fn area_mixed(
                 albedo: envelope_bond::gas_envelope_bond(shade, inputs),
                 cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
             },
+            bands: None,
             lid: None,
             liquid_water: false,
             deck_water: OpenWater::Dry,
@@ -940,6 +943,7 @@ pub(super) fn area_mixed(
                     albedo: area_mix::melt_bond(),
                     cloud_fraction: 0.0,
                 },
+                bands: None,
                 lid,
                 liquid_water: false,
                 deck_water: OpenWater::Dry,
@@ -963,6 +967,7 @@ pub(super) fn area_mixed(
         spun_read::trace(lid.as_ref());
     }
     let albedo = floored(disc, air, inputs, (shade, haze));
+    let band_albedo = bands.and_then(|bands| bands.laid(disc, air, inputs, (shade, haze)));
     let runaway_deck = match air.state {
         SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope => surface.deck,
         SurfaceState::GasEnvelope
@@ -976,6 +981,7 @@ pub(super) fn area_mixed(
     let air = Atmosphere {
         albedo: bond_albedo(albedo, air.state, inputs.material),
         cloud_fraction: disc.cloud_fraction(),
+        band_albedo,
         runaway_deck,
         liquid_water,
         deck_water,
@@ -985,12 +991,16 @@ pub(super) fn area_mixed(
     (air, lid, maturity, cold_traps)
 }
 
-/// What a pass's area mix gives ([`area_mixed`]): its disc before its air's layer, the lid it
+/// What a pass's area mix gives ([`area_mixed`]): its disc before its air's layer, in the B, V and
+/// R bins too from generator version 30, the lid it
 /// took, whether its condensates list liquid water, whether it melts its water under a locked
 /// world's deck ([`Atmosphere::melts_water_under_deck`]), its maturity's outcome, its cold traps'
 /// and the state it carries to the next pass by P14.T53.e's rules 5–7 ([`state_to_carry`]).
 struct SurfaceMix {
     disc: Disc,
+    /// Its disc in the B, V and R bins before its air's layer, from generator version 30
+    /// ([`DiscBands`]): `None` below 30 and for a disc of one albedo.
+    bands: Option<DiscBands>,
     lid: Option<CrustLid>,
     liquid_water: bool,
     deck_water: OpenWater,
@@ -1045,6 +1055,79 @@ impl Disc {
                 cloud_fraction
             }
         }
+    }
+}
+
+/// A pass's disc in the B, V and R bins before its air's Rayleigh layer and haze (the surface
+/// colour, from generator version 30; `area_mix::ColourBand`): its ground's albedo in each bin,
+/// its area mix under the light of that bin alone (`HostShade::in_band`), and its cloud's
+/// ([`area_mix::cloud_band_albedo`]). Its cloud fraction is its disc's, the one its hosts' light
+/// gives.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DiscBands {
+    /// The ground's albedo in each bin, the clear sky's, 0 to 1.
+    ground: Bands,
+    /// The cloud's albedo in each bin, 0 to 1.
+    cloud_albedo: Bands,
+}
+
+/// `of(band)` in each of B, V and R.
+#[must_use]
+fn by_band(of: impl Fn(ColourBand) -> f64) -> Bands {
+    Bands {
+        b: of(ColourBand::B),
+        v: of(ColourBand::V),
+        r: of(ColourBand::R),
+    }
+}
+
+/// `bands`' value in `band`.
+#[must_use]
+const fn in_band(bands: Bands, band: ColourBand) -> f64 {
+    match band {
+        ColourBand::B => bands.b,
+        ColourBand::V => bands.v,
+        ColourBand::R => bands.r,
+    }
+}
+
+impl DiscBands {
+    /// The disc's bands of a pass whose ground and cloud are under the state `state` and `deck`
+    /// (`ground` its ground in a band's light alone, from its condensates, deposits, regolith and
+    /// sediment), under the light `shade`.
+    #[must_use]
+    fn of(
+        (state, deck): (SurfaceState, RunawayDeck),
+        shade: &HostShade,
+        ground: impl Fn(ColourBand, &HostShade) -> f64,
+    ) -> Self {
+        Self {
+            ground: by_band(|band| ground(band, &shade.in_band(band))),
+            cloud_albedo: by_band(|band| area_mix::cloud_band_albedo((state, deck), shade, band)),
+        }
+    }
+
+    /// The disc's colour, [`Atmosphere::band_albedo`]: each band's ground under the cloud
+    /// fraction of `disc` at the cloud's albedo in the band, under the Rayleigh layer and haze of
+    /// the atmosphere `air` of the body `inputs` describes in that band's light alone
+    /// ([`layered`]), as [`floored`] lays them under the adding rule. `None` where the albedos are
+    /// not a colour ([`DiscColour::new`]).
+    #[must_use]
+    fn laid(
+        self,
+        disc: Disc,
+        air: &Atmosphere,
+        inputs: &AtmosphereInputs,
+        (shade, haze): (&HostShade, f64),
+    ) -> Option<DiscColour> {
+        DiscColour::new(by_band(|band| {
+            let disc = Disc::Clouded {
+                ground: in_band(self.ground, band),
+                cloud_fraction: disc.cloud_fraction(),
+                cloud_albedo: in_band(self.cloud_albedo, band),
+            };
+            layered(disc, air, inputs, (&shade.in_band(band), haze))
+        }))
     }
 }
 
@@ -1170,6 +1253,34 @@ fn floored(
     (shade, haze): (&HostShade, f64),
 ) -> f64 {
     let albedo = disc.albedo();
+    let Some(gravity) = beneath_its_air(disc, air, inputs) else {
+        return albedo;
+    };
+    // The floor is the oracle's, and the tests' record of it.
+    #[cfg(test)]
+    let floor = area_mix::rayleigh_floor(&air.partials, gravity, shade);
+    #[cfg(test)]
+    floor_read::record(floor);
+    match area_mix::RayleighAddingRules::in_force() {
+        #[cfg(test)]
+        area_mix::RayleighAddingRules::Max => {
+            let held = if floor > albedo { floor } else { albedo };
+            area_mix::hazed(held, haze, shade)
+        }
+        area_mix::RayleighAddingRules::Added => added(disc, &air.partials, gravity, (shade, haze)),
+    }
+}
+
+/// The surface gravity of the body `inputs` describe where the disc `disc` of its atmosphere `air`
+/// lies beneath its air's own layer ([`floored`]): every state but a gas envelope, whose class
+/// albedo is its whole disc's; `None` there, where the disc's albedo is not a number (which
+/// [`bond_albedo`] labels) and for a body of no mass or radius.
+#[must_use]
+fn beneath_its_air(
+    disc: Disc,
+    air: &Atmosphere,
+    inputs: &AtmosphereInputs,
+) -> Option<MetresPerSecondSquared> {
     let surface = match air.state {
         SurfaceState::GasEnvelope => false,
         SurfaceState::MagmaOcean
@@ -1181,50 +1292,63 @@ fn floored(
         | SurfaceState::Tenuous
         | SurfaceState::SteamEnvelope => true,
     };
-    if !surface || albedo.is_nan() {
-        return albedo;
+    if !surface || disc.albedo().is_nan() {
+        return None;
     }
-    let Some(gravity) = surface_gravity(inputs) else {
-        return albedo;
+    surface_gravity(inputs)
+}
+
+/// [`floored`]'s disc `disc` under the adding rule (P14.T24.h.b's fourth part,
+/// [`area_mix::RayleighAddingRules::Added`]), its air of partial pressures `partials` under the
+/// gravity `gravity`, under the light `shade` and the haze's τ(550) `haze`: its Rayleigh layer over the
+/// clear sky's ground in each of the optics' bins, under its cloud, and its haze over all of it.
+#[must_use]
+fn added(
+    disc: Disc,
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+    (shade, haze): (&HostShade, f64),
+) -> f64 {
+    // An air with no Rayleigh depth lays no layer: its disc, to the bit.
+    let Some(layers) = area_mix::rayleigh_bins(partials, gravity) else {
+        return area_mix::hazed(disc.albedo(), haze, shade);
     };
-    // The floor is the oracle's, and the tests' record of it.
-    #[cfg(test)]
-    let floor = area_mix::rayleigh_floor(&air.partials, gravity, shade);
-    #[cfg(test)]
-    floor_read::record(floor);
-    match area_mix::RayleighAddingRules::in_force() {
-        #[cfg(test)]
-        area_mix::RayleighAddingRules::Max => {
-            let layered = if floor > albedo { floor } else { albedo };
-            area_mix::hazed(layered, haze, shade)
-        }
-        area_mix::RayleighAddingRules::Added => {
-            // An air with no Rayleigh depth lays no layer: its disc, to the bit.
-            let Some(layers) = area_mix::rayleigh_bins(&air.partials, gravity) else {
-                return area_mix::hazed(albedo, haze, shade);
-            };
-            let (ground, cloud) = match disc {
-                Disc::Whole { albedo, .. } => (albedo, None),
-                Disc::Clouded {
-                    ground,
-                    cloud_fraction,
-                    cloud_albedo,
-                } => (ground, Some((cloud_fraction, cloud_albedo))),
-            };
-            let clear = layers.map(|layer| area_mix::rayleigh_added(layer, ground));
-            let clouded = |clear: f64| {
-                cloud.map_or(clear, |(fraction, albedo)| {
-                    area_mix::under_cloud(clear, fraction, albedo)
-                })
-            };
-            if area_mix::hazes(haze) {
-                area_mix::hazed_bins(&clear.map(clouded), haze, shade)
-            } else {
-                // The cloud over the light-weighted clear sky, so that a whole deck keeps its
-                // albedo to the bit.
-                clouded(area_mix::band_weighted(&clear, shade.bands()))
-            }
-        }
+    let (ground, cloud) = match disc {
+        Disc::Whole { albedo, .. } => (albedo, None),
+        Disc::Clouded {
+            ground,
+            cloud_fraction,
+            cloud_albedo,
+        } => (ground, Some((cloud_fraction, cloud_albedo))),
+    };
+    let clear = layers.map(|layer| area_mix::rayleigh_added(layer, ground));
+    let clouded = |clear: f64| {
+        cloud.map_or(clear, |(fraction, albedo)| {
+            area_mix::under_cloud(clear, fraction, albedo)
+        })
+    };
+    if area_mix::hazes(haze) {
+        area_mix::hazed_bins(&clear.map(clouded), haze, shade)
+    } else {
+        // The cloud over the light-weighted clear sky, so that a whole deck keeps its
+        // albedo to the bit.
+        clouded(area_mix::band_weighted(&clear, shade.bands()))
+    }
+}
+
+/// The disc `disc` of the atmosphere `air` of the body `inputs` describes laid under its air's
+/// layer and haze by the adding rule, as [`floored`] lays it, with no floor read: the surface
+/// colour's, in one band's light alone ([`DiscBands::laid`]), from generator version 30.
+#[must_use]
+fn layered(
+    disc: Disc,
+    air: &Atmosphere,
+    inputs: &AtmosphereInputs,
+    (shade, haze): (&HostShade, f64),
+) -> f64 {
+    match beneath_its_air(disc, air, inputs) {
+        Some(gravity) => added(disc, &air.partials, gravity, (shade, haze)),
+        None => disc.albedo(),
     }
 }
 
@@ -1432,6 +1556,7 @@ fn weightless(
             albedo: regolith.bond(air.state, shade.bands()).bond,
             cloud_fraction: 0.0,
         },
+        bands: None,
         lid: None,
         liquid_water: false,
         deck_water: OpenWater::Dry,
@@ -1514,6 +1639,12 @@ fn surface_and_cloud(
         cloud_fraction: area_mix::cloud_fraction((air.state, deck), &solved, shade),
         cloud_albedo: area_mix::cloud_albedo((air.state, deck), shade),
     };
+    let bands = pass_bands(
+        (air.state, deck),
+        (&published, &solved),
+        (&regolith, &deposits),
+        (shade, haze),
+    );
     let liquid_water = published
         .entry(Gas::Water.substance(), CondensatePhase::Liquid)
         .is_some();
@@ -1548,12 +1679,39 @@ fn surface_and_cloud(
     };
     SurfaceMix {
         disc,
+        bands,
         lid,
         liquid_water,
         deck_water,
         maturity,
         cold_traps,
         present,
+    }
+}
+
+/// A pass's disc in the B, V and R bins ([`DiscBands`]; the surface colour, from generator version
+/// 30): [`surface_and_cloud`]'s ground, its published condensates `published` over its partition
+/// `solved`, its regolith `regolith` on the rest and its deposits `deposits`, each in a band's
+/// light alone, under its sediment of the haze's τ(550) `haze`, and its cloud in the state `state`
+/// and `deck`, under the light `shade`. `None` below 30 ([`SurfaceColourRules::Template`]).
+#[must_use]
+fn pass_bands(
+    (state, deck): (SurfaceState, RunawayDeck),
+    (published, solved): (&Condensates, &Partition),
+    (regolith, deposits): (&Regolith, &[(SubstanceId, f64)]),
+    (shade, haze): (&HostShade, f64),
+) -> Option<DiscBands> {
+    match SurfaceColourRules::in_force() {
+        SurfaceColourRules::Template => None,
+        SurfaceColourRules::Surface => Some(DiscBands::of((state, deck), shade, |band, alone| {
+            area_mix::sedimented_surface_bond(
+                published,
+                solved,
+                (regolith.band_albedo(state, shade, band), deposits),
+                alone,
+                haze,
+            )
+        })),
     }
 }
 

@@ -1086,5 +1086,7 @@ fn pick<T>(items: &[T], word: u64) -> Option<&T> {
     items.get(usize::try_from(k).ok()?)
 }
 
+#[cfg(all(test, not(target_family = "wasm")))]
+mod colour_census;
 #[cfg(test)]
 mod tests;

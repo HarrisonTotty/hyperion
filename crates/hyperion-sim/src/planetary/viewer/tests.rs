@@ -9,7 +9,7 @@ use crate::planetary::derive::rotation::SpinDraws;
 use crate::planetary::record::Section;
 
 /// The Milky Way fixture, built once per test binary.
-fn galaxy() -> &'static Galaxy {
+pub(super) fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
         Galaxy::from_params(
@@ -21,7 +21,7 @@ fn galaxy() -> &'static Galaxy {
 }
 
 /// The fixture's density grid, built once per test binary.
-fn grid() -> &'static DensityGrid {
+pub(super) fn grid() -> &'static DensityGrid {
     static GRID: OnceLock<DensityGrid> = OnceLock::new();
     GRID.get_or_init(|| DensityGrid::of(galaxy()))
 }

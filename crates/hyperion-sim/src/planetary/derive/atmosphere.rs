@@ -115,6 +115,7 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{OpenWater, PassContext, WaterGate};
+use crate::planetary::derive::photometry::DiscColour;
 use crate::planetary::derive::photometry::area_mix::{self, reference_cloud_column};
 use crate::planetary::hooks::crust::CrustLid;
 use crate::planetary::hooks::figures::cover::FillSlot;
@@ -2569,6 +2570,8 @@ pub struct Atmosphere {
     optical_depth: f64,
     albedo: BondAlbedo,
     cloud_fraction: f64,
+    /// The disc's albedo in the B, V and R bins ([`Atmosphere::band_albedo`]).
+    band_albedo: Option<DiscColour>,
     carbon_carrier: Option<CarbonCarrier>,
     column: PartialPressures,
     escape: Option<EscapeOutcome>,
@@ -2909,6 +2912,19 @@ impl Atmosphere {
     #[must_use]
     pub const fn cloud_fraction(&self) -> f64 {
         self.cloud_fraction
+    }
+
+    /// The disc's colour, its albedo in the B, V and R bins, from generator version 30.
+    ///
+    /// It is its pass's area mix in each bin's light alone (`area_mix::ColourBand`): its ground
+    /// under its cloud, its air's Rayleigh layer and its haze, as its Bond albedo sums them over
+    /// its hosts' light, which the photometry's B and R read
+    /// ([`PhotometryInputs::band_albedo`](crate::planetary::derive::photometry::PhotometryInputs::band_albedo)).
+    /// `None` below 30, before the area mix, for a disc of one albedo (a gas envelope, a melt, a
+    /// body of no mass or radius) and where its albedos are not a colour ([`DiscColour::new`]).
+    #[must_use]
+    pub const fn band_albedo(&self) -> Option<DiscColour> {
+        self.band_albedo
     }
 
     /// The species the body's carbon is airborne as (P14.T24.f): [`CarbonCarrier::Methane`] on a

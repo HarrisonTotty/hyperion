@@ -34442,3 +34442,15 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     also pass and κ₁'s fit keeps its third figure.
   - _Movers:_ the slow `under_every_30_hold_the_chromophore_census_moves_only_cold_giants_and_their_moons`.
   - _For 30's bump:_ delete what `the_chromophore_mixing_is_held_only_until_the_30_bump` lists.
+- **P14.T47's surface colour (lane `gen-surface-colour`, 2026-11-06).** Held at 30
+  (`photometry::SURFACE_COLOUR_VERSION`; `SurfaceColourRules::{Template, Surface}`, the switch
+  `with_surface_colour`, a line in `HeldRules`). Nothing moves below 30.
+  - _Changed:_ from 30 `p_B` and `p_R` are `p_V` × `a_B` ÷ `a_V` and `a_R` ÷ `a_V`, the disc's area
+    mix in each of the B, V, R bins alone (`HostShade::in_band`), under its cloud, Rayleigh layer
+    and haze; `p_V`, the curve, s and q stay the template's.
+  - _New items:_ `Atmosphere::band_albedo`, `PhotometryInputs::band_albedo` (a public field),
+    `area_mix::{ColourBand, cloud_band_albedo}`, `Regolith::band_albedo`.
+  - _Leans (2026-11-06):_ a part of the disc with no albedos by band takes its analogue's
+    measured colour (the space-weathering cap and an unknown airless lid Mercury's, Venus's deck
+    Venus's); the water cloud is white; a young lava keeps its fresh row's colour at the cap.
+  - _For 30's bump:_ delete what `the_surface_colour_is_held_only_until_the_30_bump` lists.

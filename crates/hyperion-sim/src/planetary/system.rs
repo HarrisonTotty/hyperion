@@ -887,6 +887,7 @@ fn photometry_of(
         class: bulk.class(),
         fractions,
         bond: albedo,
+        band_albedo: atmosphere.band_albedo(),
     })
 }
 

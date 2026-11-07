@@ -134,3 +134,57 @@ fn under_every_24_hold_a_past_only_runaway_s_stand_in_cover_holds_no_water_or_ic
         }
     }
 }
+
+/// The surface colour (from generator version 30): each band's disc lies under its air's layer in
+/// that band's light alone. Earth's clear air over a grey ground of 0.1 is bluer in B than in V and
+/// in V than in R, each the conservative layer in its bin added over the ground, to the bit; a
+/// Titan haze over it reddens it, its B below its R; with no air the disc is its own in every band.
+#[test]
+fn each_band_s_disc_lies_under_its_own_layer() {
+    use super::{Disc, added, by_band};
+    use crate::planetary::derive::atmosphere::PartialPressures;
+    use crate::planetary::derive::photometry::area_mix::{
+        self, ColourBand, HostShade, reference_earth_air,
+    };
+    use crate::planetary::hooks::aerosols::TITAN_HAZE_OPTICAL_DEPTH;
+    use crate::units::MetresPerSecondSquared;
+
+    let sun = HostShade::sun();
+    let air = reference_earth_air();
+    let gravity = MetresPerSecondSquared::new(9.82);
+    let disc = Disc::Clouded {
+        ground: 0.1,
+        cloud_fraction: 0.0,
+        cloud_albedo: 0.0,
+    };
+    let clear = by_band(|band| added(disc, &air, gravity, (&sun.in_band(band), 0.0)));
+    assert!(
+        clear.b > clear.v && clear.v > clear.r && clear.r > 0.1,
+        "{clear:?}"
+    );
+    let layers = area_mix::rayleigh_bins(&air, gravity).expect("Earth's air has a layer");
+    assert_same_bits(
+        clear.v,
+        area_mix::rayleigh_added(layers[ColourBand::V.bin()], 0.1),
+    );
+    let hazy = by_band(|band| {
+        added(
+            disc,
+            &air,
+            gravity,
+            (&sun.in_band(band), TITAN_HAZE_OPTICAL_DEPTH),
+        )
+    });
+    assert!(hazy.b < hazy.r, "{hazy:?}");
+    let none = by_band(|band| {
+        added(
+            disc,
+            &PartialPressures::default(),
+            gravity,
+            (&sun.in_band(band), 0.0),
+        )
+    });
+    for x in [none.b, none.v, none.r] {
+        assert_same_bits(x, 0.1);
+    }
+}

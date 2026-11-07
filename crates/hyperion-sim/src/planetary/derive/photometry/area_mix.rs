@@ -139,10 +139,11 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::atmosphere::{
     Gas, PartialPressures, RunawayDeck, SurfaceMaterial, SurfaceState,
 };
+use crate::planetary::derive::photometry::PhaseTemplate;
 use crate::planetary::hooks::surface::regime::climate_condensable;
 use crate::substance::optics::{
-    CondensedOptics, ReferenceForm, SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS, held_at_first_melt,
-    palette_feo_mass_fraction,
+    BVR_BINS, CondensedOptics, ReferenceForm, SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS,
+    held_at_first_melt, palette_feo_mass_fraction,
 };
 use crate::substance::rayleigh::{RAYLEIGH_REFERENCE_WAVELENGTH_NM, gas_cross_section};
 use crate::substance::{
@@ -156,6 +157,8 @@ use crate::units::{
     WattsPerSquareMetre, Years,
 };
 
+#[cfg(test)]
+mod colour_tests;
 #[cfg(test)]
 mod icy_lag_tests;
 #[cfg(test)]
@@ -422,6 +425,70 @@ fn class_bonds(host: Kelvin) -> ([f64; SUDARSKY_CLASSES], f64) {
     (classes, fiducial * ICE_GIANT_CLASS_I_RATIO)
 }
 
+/// One of the bands a disc's colour is read in, B, V and R (the surface colour, from generator
+/// version 30; `photometry`'s module documentation): each one of the optics' bins, [`BVR_BINS`]'s,
+/// 390–495, 495–595 and 595–700 nm, which hold the bands' effective wavelengths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum ColourBand {
+    /// B, the optics' second bin.
+    B,
+    /// V, the third.
+    V,
+    /// R, the fourth.
+    R,
+}
+
+impl ColourBand {
+    /// Every band, in the order B, V, R.
+    #[cfg(test)]
+    pub(crate) const ALL: [Self; 3] = [Self::B, Self::V, Self::R];
+
+    /// Its bin of the optics' bins ([`BVR_BINS`]).
+    #[must_use]
+    pub(crate) const fn bin(self) -> usize {
+        match self {
+            Self::B => BVR_BINS[0],
+            Self::V => BVR_BINS[1],
+            Self::R => BVR_BINS[2],
+        }
+    }
+
+    /// The liquids' weights in its bin ([`LIQUID_WEIGHTS`]): each of the liquids' bins
+    /// ([`LIQUID_BIN_EDGES_NM`]) by the length, nm, it shares with the band's optics bin, none
+    /// outside it, so that a liquid's albedo in the band is the mean of its bins' over the bin,
+    /// uniform in wavelength, as a solid's bin value is its spherical albedo's mean over the bin
+    /// (`substance::optics`'s module documentation). The bands lie inside the liquids' 380–760 nm.
+    #[must_use]
+    pub(crate) fn liquid_weights(self) -> [f64; LIQUID_WEIGHTS] {
+        let bin = self.bin();
+        let (low, high) = (SPECTRAL_BIN_EDGES_NM[bin], SPECTRAL_BIN_EDGES_NM[bin + 1]);
+        let mut weights = [0.0; LIQUID_WEIGHTS];
+        for (k, weight) in weights[1..=LIQUID_BINS].iter_mut().enumerate() {
+            let (from, to) = (LIQUID_BIN_EDGES_NM[k], LIQUID_BIN_EDGES_NM[k + 1]);
+            let start = if from > low { from } else { low };
+            let end = if to < high { to } else { high };
+            if end > start {
+                *weight = end - start;
+            }
+        }
+        weights
+    }
+
+    /// The measured colour of `template`'s analogue in the band, its row's p there over its `p_V`
+    /// (Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7, as P14.T47.a's rows give it):
+    /// the colour a part of a disc takes whose albedo the area mix gives in no band of its own
+    /// ([`Regolith::band_albedo`], [`cloud_band_albedo`]). 1 in V.
+    #[must_use]
+    pub(crate) fn analogue_colour(self, template: PhaseTemplate) -> f64 {
+        let p = template.row().albedo;
+        match self {
+            Self::B => p.b / p.v,
+            Self::V => 1.0,
+            Self::R => p.r / p.v,
+        }
+    }
+}
+
 /// The light a body's hosts give it, by bin, as the area mix reads it (P14.T51.b): each luminous
 /// host's Planck shares in the optics' bins ([`optics_shares`]) and the liquids' weights
 /// ([`liquid_shares`]), each of its whole spectrum, weighted by its flux at the body, its
@@ -462,6 +529,22 @@ impl HostShade {
     #[must_use]
     pub(crate) const fn bands(&self) -> &[f64; OPTICS_BANDS] {
         &self.bands
+    }
+
+    /// This light in the band `band` alone (the surface colour, from generator version 30): all of
+    /// it in the band's optics bin ([`ColourBand::bin`]) and the liquids' bins in it by their
+    /// overlap ([`ColourBand::liquid_weights`]), its other values its own. Under it the area mix's
+    /// Bond albedo is the disc's albedo in that bin: each solid's spherical albedo in the bin, a
+    /// liquid's the mean over the bin of its bins' and each layer's in the bin.
+    #[must_use]
+    pub(crate) fn in_band(&self, band: ColourBand) -> Self {
+        let mut bands = [0.0; OPTICS_BANDS];
+        bands[band.bin()] = 1.0;
+        Self {
+            bands,
+            bins: band.liquid_weights(),
+            ..*self
+        }
     }
 
     /// Asserts it is `other`, every value to the bit (lever (d)'s check, and the tests').
@@ -1536,6 +1619,62 @@ impl Regolith {
         }
     }
 
+    /// Its albedo in the band `band` on a body in the state `state` under the light `shade` (the
+    /// surface colour, from generator version 30): what [`bond`](Self::bond) takes in the band's
+    /// bin alone ([`HostShade::in_band`]), each case as [`bond`](Self::bond) decides it, but where
+    /// a stand-in gives one albedo for every bin:
+    ///
+    /// - weathered, its weathered spherical albedo in the bin, and under the icy regolith its lag's;
+    /// - of a known lid's row, its row's in the bin, where the stand-in's cap does not act (the
+    ///   row's Bond albedo under the light lies below the Moon's 0.11, or the lid is not capped);
+    /// - capped under the space-weathering stand-in ([`StandIn::SpaceWeathering`]: a lid the law
+    ///   cannot weather, `basalt_reduced`'s among them), its cap times the airless rock analogue's
+    ///   measured colour, Mercury's ([`ColourBand::analogue_colour`]): the stand-in stands for a
+    ///   darkening it does not model, whose colour Mercury's row measures, so that Mercury in its
+    ///   own state is drawn with its row (ruling 9);
+    /// - capped as a lava younger than a regolith ([`StandIn::UnweatheredLava`]), its fresh row's
+    ///   colour at its cap, its row's in the bin times the cap over its row's Bond albedo: an
+    ///   unweathered lava has its fresh rock's colour;
+    /// - an airless rocky body's whose lid is not known, the Moon's 0.11 times Mercury's colour, as
+    ///   the capped stand-in's; any other lid not known, its row by material's in the bin.
+    #[must_use]
+    pub(crate) fn band_albedo(
+        &self,
+        state: SurfaceState,
+        shade: &HostShade,
+        band: ColourBand,
+    ) -> f64 {
+        let alone = shade.in_band(band);
+        if let Some(lagged) = self.icy_lag(state, &alone.bands) {
+            return lagged.bond;
+        }
+        if let RegolithWeathering::Weathered { spherical_bins } = self.weathering {
+            return spherical_bins[band.bin()];
+        }
+        let airless = matches!(state, SurfaceState::Airless | SurfaceState::Tenuous);
+        match self.row {
+            Some(row) if capped_lid(row, state) => {
+                let own = solid_bond(row, &alone.bands).bond;
+                let row_bond = solid_bond(row, &shade.bands).bond;
+                let capped = airless_silicate_stand_in(row_bond);
+                if capped >= row_bond {
+                    return own;
+                }
+                match self.weathering {
+                    RegolithWeathering::UnweatheredLava => own * capped / row_bond,
+                    RegolithWeathering::StandIn | RegolithWeathering::Weathered { .. } => {
+                        capped * band.analogue_colour(PhaseTemplate::Mercury)
+                    }
+                }
+            }
+            Some(row) => solid_bond(row, &alone.bands).bond,
+            None if airless && self.material == SurfaceMaterial::Rock => {
+                moon_bond() * band.analogue_colour(PhaseTemplate::Mercury)
+            }
+            None => solid_bond(Self::stand_in_row(self.material), &alone.bands).bond,
+        }
+    }
+
     /// Its Bond albedo under the light `bands` as P14.T49.m's lag, on a body in the state `state`:
     /// `Some` for an `H2O` row (a known lid's, or the stand-in's row for ice, labelled
     /// [`StandIn::RowByMaterial`]) on an airless or tenuous body that is not resurfaced, under
@@ -2409,6 +2548,41 @@ pub(crate) fn cloud_albedo((state, deck): (SurfaceState, RunawayDeck), shade: &H
             | SurfaceState::Tenuous,
             _,
         ) => 0.0,
+    }
+}
+
+/// The albedo in the band `band` of the cloud of a body in the state `state` whose runaway's deck
+/// is `deck`, under the light of `shade` (the surface colour, from generator version 30): Venus's
+/// deck its 0.76 ([`cloud_albedo`]) times Venus's measured colour
+/// ([`ColourBand::analogue_colour`]), the deck's own, so that Venus at its full cover is drawn with
+/// its row (ruling 9); the water cloud its albedo in every band, white (the lane's lean,
+/// 2026-11-06): drops of effective radius about 10 µm have size parameters of 90–160 over the
+/// visible, where their extinction efficiency is near 2 and their single-scattering albedo 1 to
+/// some 10⁻⁵ (Hansen and Travis 1974, Space Sci. Rev. 16, 527, from memory). Its level is the
+/// water cloud's broadband calibration ([`water_cloud_albedo`]), not a visible albedo, which the
+/// drops' near-infrared absorption leaves higher; none for the rest.
+#[must_use]
+pub(crate) fn cloud_band_albedo(
+    (state, deck): (SurfaceState, RunawayDeck),
+    shade: &HostShade,
+    band: ColourBand,
+) -> f64 {
+    let albedo = cloud_albedo((state, deck), shade);
+    match (state, deck) {
+        (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Kept) => {
+            albedo * band.analogue_colour(PhaseTemplate::Venus)
+        }
+        (SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope, RunawayDeck::Deckless)
+        | (
+            SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::Snowball
+            | SurfaceState::GasEnvelope
+            | SurfaceState::Airless
+            | SurfaceState::MagmaOcean
+            | SurfaceState::Tenuous,
+            _,
+        ) => albedo,
     }
 }
 
