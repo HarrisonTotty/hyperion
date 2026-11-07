@@ -46,9 +46,9 @@
 //! the grid's alive-stay odds `q_c(m) = 1 − ejected ÷ alive` of 0.3–0.6 above 32 M☉, so it listed
 //! some 0.6 of the hosts the grid carved (research-leans-49 §1, the census's 168 against 279).
 //!
-//! From 31 ([`CarveResidualsRules::Matched`]) the class follows the grid's law. A component's share
+//! From 31 (`CarveResidualsRules::Matched`) the class follows the grid's law. A component's share
 //! is the field's share × the alive category's odds, the share the grid places alive; and a host
-//! the test keeps is thinned on [`AliveLaw::odds`] at its mass, `ρ̂_c(m) ÷ (p_E(m) F_c(τ_ref(m)))`
+//! the test keeps is thinned on `AliveLaw::odds` at its mass, `ρ̂_c(m) ÷ (p_E(m) F_c(τ_ref(m)))`
 //! with ρ̂ the alive density normalised over band E (the grid's own sampler), `p_E` the mass
 //! function normalised over it and `τ_ref` the host's lifetime at its source's reference
 //! composition with its own draws, as the grid's alive record takes it. So the kept candidates'
