@@ -1503,6 +1503,11 @@ mod tests {
         );
         assert_eq!(SURFACE_COLOUR_VERSION, crate::GeneratorVersion::new(31));
         assert_eq!(SurfaceColourRules::in_force(), SurfaceColourRules::Template);
+        // The surface crate's mature colour flips with it, at the same version.
+        assert_eq!(
+            SURFACE_COLOUR_VERSION,
+            hyperion_surface::material::MATURE_COLOUR_VERSION
+        );
         assert_eq!(
             with_surface_colour(SurfaceColourRules::Surface, SurfaceColourRules::in_force),
             SurfaceColourRules::Surface

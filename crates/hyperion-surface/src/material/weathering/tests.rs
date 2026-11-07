@@ -341,7 +341,8 @@ fn the_mature_colour_is_held_only_until_the_31_bump() {
         GENERATOR_VERSION < MATURE_COLOUR_VERSION,
         "the 30 → 31 bump draws a weathered entry's colour toward the mature lunar colour: delete \
          `MATURE_COLOUR_VERSION`, `MatureColourRules` with its `Slab` arm and its match in \
-         `weathered_entry_bvr`, the tests' `with_mature_colour`, and this test; have \
+         `weathered_entry_bvr`, the tests' `with_mature_colour`, the sim's cell audit's \
+         `SURFACE_HOLDS` line (`planetary/testing/held.rs`), and this test; have \
          `under_the_mature_colour_the_moon_s_terrains_take_its_colour` read the version's rules \
          alone"
     );
@@ -352,33 +353,48 @@ fn the_mature_colour_is_held_only_until_the_31_bump() {
     );
 }
 
-/// The mature colour keeps the slab's albedo to the bit at τ 0, outside the law's measured range
-/// and for an albedo of 0; a fully weathered grain (τ 60) takes the mature lunar colour on V; and
-/// it never passes the fresh albedo.
+/// The mature colour keeps the slab's albedo to the bit at τ 0, beyond the law's measured range, for
+/// an albedo of 0 and for an input that is not finite; a fully weathered grain (τ 60) takes the
+/// mature lunar colour on V where its fresh row is greyer than the Moon, and its own fresh colour
+/// where it is redder, never bluer; below 360 nm it takes the colour at 360 nm; it never passes
+/// the fresh albedo, and between the two it is the slab's colour in e^(−τ) of the blend.
 #[test]
 fn toward_the_mature_colour_a_fresh_grain_keeps_its_own_and_a_saturated_one_takes_the_moon_s() {
-    let v = (0.05, 550.0);
+    let v = VBand {
+        fresh: 0.4,
+        weathered: 0.05,
+        wavelength_nm: 550.0,
+    };
     for (weathered, wavelength, tau) in [
         (0.04, 440.0, 0.0),
-        (0.04, 300.0, 3.0),
         (0.04, 1_000.0, 3.0),
         (0.0, 440.0, 3.0),
+        (0.04, 440.0, f64::NAN),
     ] {
         assert_same_bits(
             toward_mature_colour(weathered, 0.4, wavelength, tau, v),
             weathered,
         );
     }
+    let moon = |nm: f64| 0.05 * hyperion_base::math::powf(nm / 550.0, MATURE_COLOUR_EXPONENT);
+    // A grey fresh row (its fresh colour 1) takes the Moon's in B, R and the near infrared.
     for wavelength in [440.0, 640.0, 900.0] {
         let mature = toward_mature_colour(0.03, 0.4, wavelength, 60.0, v);
-        let moon = 0.05 * hyperion_base::math::powf(wavelength / 550.0, MATURE_COLOUR_EXPONENT);
-        assert!((mature - moon).abs() < 1e-12, "{wavelength}: {mature}");
+        assert!(
+            (mature - moon(wavelength)).abs() < 1e-12,
+            "{wavelength}: {mature}"
+        );
     }
+    let uv = toward_mature_colour(0.03, 0.4, 300.0, 60.0, v);
+    assert!((uv - moon(360.0)).abs() < 1e-12, "{uv}");
+    // A row redder than the Moon when fresh, B/V 0.7 and R/V 1.3, keeps its own colour.
+    let red_b = toward_mature_colour(0.03, 0.28, 440.0, 60.0, v);
+    assert!((red_b - 0.05 * 0.7).abs() < 1e-12, "{red_b}");
+    let red_r = toward_mature_colour(0.03, 0.52, 640.0, 60.0, v);
+    assert!((red_r - 0.05 * 1.3).abs() < 1e-12, "{red_r}");
     assert_same_bits(toward_mature_colour(0.03, 0.04, 640.0, 60.0, v), 0.04);
-    // Between the two, the slab's colour in e^(−τ) of the light.
     let half = toward_mature_colour(0.03, 0.4, 440.0, core::f64::consts::LN_2, v);
-    let moon = 0.05 * hyperion_base::math::powf(0.8, MATURE_COLOUR_EXPONENT);
-    assert!((half - (0.03 * moon).sqrt()).abs() < 1e-12, "{half}");
+    assert!((half - (0.03 * moon(440.0)).sqrt()).abs() < 1e-12, "{half}");
 }
 
 /// The Moon's terrains under the mature colour, Λ's fit's anchor rows at their anchor soils'

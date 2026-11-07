@@ -290,6 +290,17 @@ mod tests {
                 }
             }
             holds.sort_unstable();
+            // Each surface crate's hold listed apart is one still: its bump deletes its line.
+            for hold in SURFACE_HOLDS {
+                let cell = format!("Cell<Option<{hold}>>");
+                assert!(
+                    the_sources()
+                        .iter()
+                        .any(|(path, text)| path.contains("hyperion-surface")
+                            && text.contains(&cell)),
+                    "{hold} is no longer a surface crate's hold: delete its line in SURFACE_HOLDS"
+                );
+            }
             let mut carried: Vec<String> = HeldRules::TYPES.iter().map(|&t| t.to_owned()).collect();
             carried.sort_unstable();
             assert_eq!(holds, carried);

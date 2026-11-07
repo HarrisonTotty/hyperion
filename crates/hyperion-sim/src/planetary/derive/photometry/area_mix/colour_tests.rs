@@ -249,12 +249,15 @@ fn space_weathering_reddens_the_airless_silicate_lids() {
 }
 
 /// From 30 (the surface colour) a weathered airless silicate lid's colour tends to the mature
-/// lunar colour as its npFe⁰ extinguishes its grains' interiors (`toward_mature_colour`): at m = 1
-/// every lid is red-sloped, R over V above 1.10 and B over V between Mercury's 0.739 (Mallama,
-/// Krobusek and Pavlov 2017, Table 7) and the Moon's bluest mare's 0.860 (Gehrels, Coffeen and
-/// Owings 1964, Table XIII), where the slab alone leaves `basalt_fe` at 0.956 and `basalt` at 0.930;
-/// its V bin, its first bin and its infrared bins are the slab's to the bit, and a fresh lid (m =
-/// 0) keeps its row's bins to the bit, so that fresh basalt stays grey.
+/// lunar colour, never bluer than its fresh row's, as its npFe⁰ attenuates its grains' internal
+/// transmission (`toward_mature_colour`, an empirical closure for the slab's grey floor): at m = 1
+/// every lid is red-sloped, R over V above 1.10 and B over V at most the Moon's bluest mare's 0.860
+/// (Gehrels, Coffeen and Owings 1964, Table XIII) and at least Mercury's 0.739 (Mallama, Krobusek
+/// and Pavlov 2017, Table 7) or its own fresh row's where that is redder, where the slab alone
+/// leaves `basalt_fe` at 0.956 and `basalt` at 0.930; at m = 0.3 every lid is still redder than its
+/// fresh row (B over V below its, R over V above); its first bin over V is at most its B's, no
+/// upturn into the ultraviolet; its V and infrared bins are the slab's to the bit; and a fresh lid
+/// (m = 0) keeps its row's bins to the bit, so that fresh basalt stays grey.
 #[test]
 fn under_the_surface_colour_mature_airless_silicates_take_the_moon_s_red_slope() {
     use crate::planetary::derive::photometry::with_surface_colour;
@@ -272,6 +275,7 @@ fn under_the_surface_colour_mature_airless_silicates_take_the_moon_s_red_slope()
         ColourBand::B.bin(),
         ColourBand::R.bin(),
     );
+    let colour = |a: &[f64; OPTICS_BANDS]| (a[b_bin] / a[v], a[r_bin] / a[v]);
     for key in [
         "basalt",
         "basalt_fe",
@@ -285,23 +289,33 @@ fn under_the_surface_colour_mature_airless_silicates_take_the_moon_s_red_slope()
             .condensed_optics()
             .unwrap()
             .spherical_albedo_bins();
+        let (fresh_b, fresh_r) = colour(&fresh);
         let slab = bins(row, 1.0);
-        let (mature, unweathered) = with_surface_colour(SurfaceColourRules::Surface, || {
-            (bins(row, 1.0), bins(row, 0.0))
-        });
+        let (mature, middling, unweathered) =
+            with_surface_colour(SurfaceColourRules::Surface, || {
+                (bins(row, 1.0), bins(row, 0.3), bins(row, 0.0))
+            });
         for (a, b) in unweathered.iter().zip(fresh) {
             assert_same_bits(*a, b);
         }
-        for bin in [0, v, 6, 7, 8, 9, 10, 11] {
+        for bin in [v, 6, 7, 8, 9, 10, 11] {
             assert_same_bits(mature[bin], slab[bin]);
         }
-        let (b, r) = (mature[b_bin] / mature[v], mature[r_bin] / mature[v]);
+        let (b, r) = colour(&mature);
+        let reddest = if fresh_b < 0.739 { fresh_b } else { 0.739 };
         assert!(
-            r > 1.10 && (0.739..=0.860).contains(&b),
+            r > 1.10 && b <= 0.860 && b >= reddest - 0.005,
             "{key} at m = 1: B/V {b}, R/V {r}"
         );
+        assert!(mature[0] / mature[v] <= b, "{key}: the first bin over V");
+        let (mid_b, mid_r) = colour(&middling);
+        assert!(
+            mid_b < fresh_b && mid_r > fresh_r,
+            "{key} at m = 0.3: B/V {mid_b}, R/V {mid_r} against fresh {fresh_b}, {fresh_r}"
+        );
         eprintln!(
-            "{key} at m = 1: B/V {b:.3}, R/V {r:.3} (the slab's {:.3}, {:.3})",
+            "{key} at m = 1: B/V {b:.3}, R/V {r:.3} (the slab's {:.3}, {:.3}); at m = 0.3 \
+             {mid_b:.3}, {mid_r:.3}; fresh {fresh_b:.3}, {fresh_r:.3}",
             slab[b_bin] / slab[v],
             slab[r_bin] / slab[v]
         );

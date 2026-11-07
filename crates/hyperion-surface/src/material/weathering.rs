@@ -68,25 +68,32 @@
 //! # The mature colour (from generator version 31)
 //!
 //! The slab's floor is grey: as τ grows, Θ → 0 and every band's w → `S_e`, the grain's external
-//! reflection, so that a mature row whose fresh albedo is far above the Moon's (the stand-in fresh
-//! rows, 5–8× the measured fresh/mature contrast) is darkened to the floor and loses its colour:
-//! `basalt_fe` at m = 1 reads B/V 0.956 against the Moon's 0.831, and the bright `feldspathic` at
-//! m = 1 0.715, too red (decision-p14-t51d-weathering's D1 and D2, the form's dark end and the
-//! stand-in fresh rows). The Moon's mature terrains of every iron content and albedo share one
-//! colour instead, maria and highlands within 1% at zero phase (Gehrels, Coffeen and Owings 1964,
-//! AJ 69, 826, Table XIII), the colour Λ's anchors already take: Dollfus and Bowell's whole-Moon
-//! law, R(λ) ÷ R(`λ_V`) = (λ ÷ `λ_V`)^0.83 ([`MATURE_COLOUR_EXPONENT`]).
+//! Fresnel reflection, grey at k = 0. The stand-in fresh rows are far brighter than fresh lunar
+//! soil (the model's fresh/mature contrast is 5–7×, against 1.34–1.68 for fresh craters over the
+//! terrains' medians, Dollfus and Bowell 1971, Table 4), so the fit's Λ darkens a mature iron-rich
+//! row to that floor and it loses its colour: `basalt_fe` at m = 1 reads B/V 0.956 against the
+//! Moon's 0.831, while the bright `feldspathic` reads 0.715, too red (decision-p14-t51d-weathering's
+//! D1 and D2, the form's dark end and the stand-in fresh rows). The Moon's mature maria and
+//! highlands share one colour within a few per cent at zero phase instead (Gehrels, Coffeen and
+//! Owings 1964, AJ 69, 826, Table XIII: maria 0.804–0.860, mean 0.826 of 8 spots; highlands 0.831,
+//! of 2), the colour Λ's anchors already take: Dollfus and Bowell's whole-Moon law, R(λ) ÷
+//! R(`λ_V`) = (λ ÷ `λ_V`)^0.83 ([`MATURE_COLOUR_EXPONENT`]), whose R/V of 1.134 is its
+//! interpolation (Gehrels measured no R).
 //!
-//! So from 31 (`MATURE_COLOUR_VERSION`) a weathered albedo in a band whose wavelength the law
-//! was measured over ([`MATURE_COLOUR_RANGE_NM`]) is the law's own colour in the share e^(−τ) of
-//! its light that the grain's interior still returns, and the mature lunar colour in the rest,
-//! the light its weathered surface returns, which the slab counts grey (the lane's lean,
-//! 2026-11-07; [`toward_mature_colour`]): a^(e^(−τ)) [`a_V` (λ ÷ `λ_V`)^0.83]^(1 − e^(−τ)), with
-//! τ the band's npFe⁰ optical depth and `a_V` the law's weathered albedo in V, which is unchanged,
-//! so that Λ's fit is unchanged in V. A fresh albedo (τ 0) keeps its own colour, so fresh basalt
-//! stays grey; the fit's mare anchor at m = 1 reads B/V 0.832 and R/V 1.128 against the Moon's
-//! 0.831 and 1.134, and its highland 0.800 and 1.125. Never above the fresh albedo. A band outside
-//! the law's measured range keeps the slab's.
+//! So from 31 (`MATURE_COLOUR_VERSION`) an empirical colour closure, not part of Hapke's slab,
+//! stands in for D1 and D2 on the regolith form (the lane's lean, 2026-11-07;
+//! [`toward_mature_colour`]): in each band of the law's measured range
+//! ([`MATURE_COLOUR_RANGE_NM`]) the weathered albedo is the log-linear blend a^x [`a_V` r(λ)]^(1 −
+//! x) of the slab's own and a target colour on the band V's weathered albedo `a_V`, which is
+//! unchanged, so that Λ's fit is unchanged in V. Its weight x = e^(−τ) is the attenuation of the
+//! band's internal transmission Θ by its npFe⁰ optical depth τ, and its target colour r(λ) the
+//! mature lunar colour (λ ÷ `λ_V`)^0.83, but never bluer than the fresh row's own colour, so that
+//! weathering reddens a row redder than the Moon when fresh too. A fresh albedo (τ 0) keeps its own
+//! colour, so fresh basalt stays grey. The fit's mare anchor at m = 1 reads B/V 0.832 and R/V
+//! 1.128, the Moon's by construction (its x is 0.011 in B and 0.080 in R); its highland reads
+//! 0.800 and 1.125, redder than every one of Gehrels's spots, a known miss. Never above the fresh
+//! albedo. A band below the law's range takes the colour at its shortest wavelength; one beyond it
+//! keeps the slab's (the infrared, D2's still).
 
 use hyperion_base::{GENERATOR_VERSION, GeneratorVersion, math};
 
@@ -538,8 +545,9 @@ pub fn weathered_hemispherical_albedos(
 /// [`properties()`](super::properties) takes it for a particulate form. An entry whose `FeO_T` is
 /// `None` (not modelled, or an observed body's albedo that is weathered already) keeps its own
 /// albedos to the bit, so that nothing darkens twice (decision-p14-t51d-weathering §1.5), as does
-/// one of `FeO_T` 0 (an ice, an iron-free solid). From generator version 31 its B and R are drawn
-/// toward the mature lunar colour on its V ([`toward_mature_colour`], `MATURE_COLOUR_VERSION`).
+/// one of `FeO_T` 0 (an ice, an iron-free solid). From generator version 31 an entry under the
+/// regolith's law has its B and R drawn toward the mature lunar colour on its V
+/// ([`toward_mature_colour`], `MATURE_COLOUR_VERSION`).
 ///
 /// # Panics
 ///
@@ -564,10 +572,15 @@ pub fn weathered_entry_bvr(entry: &PaletteEntry, maturity: f64) -> [f64; 3] {
             maturity,
         );
     }
-    match MatureColourRules::in_force() {
-        MatureColourRules::Slab => out,
-        MatureColourRules::Mature => {
-            let v = (out[1], BVR_EFFECTIVE_WAVELENGTHS_NM[1]);
+    match (MatureColourRules::in_force(), law) {
+        (MatureColourRules::Slab, _)
+        | (MatureColourRules::Mature, PhaseLaw::Ice | PhaseLaw::Lambert) => out,
+        (MatureColourRules::Mature, PhaseLaw::Regolith) => {
+            let v = VBand {
+                fresh: entry.normal_albedo_bvr[1],
+                weathered: out[1],
+                wavelength_nm: BVR_EFFECTIVE_WAVELENGTHS_NM[1],
+            };
             for band in [0, 2] {
                 let wavelength_nm = BVR_EFFECTIVE_WAVELENGTHS_NM[band];
                 let tau = npfe_optical_depth(
@@ -602,19 +615,23 @@ pub const MATURE_COLOUR_EXPONENT: f64 = 0.83;
 /// The wavelengths over which the mature colour is measured, nm: 360 to 940, the four colours of
 /// Gehrels et al. 1964 to which Dollfus and Bowell fit eq. 11 ("in 4 colours spanning the
 /// wavelength range 0.36 µ to 0.94 µ", as decision-r10-t1d-anchor-colour reads it). A band beyond
-/// them keeps the slab's weathered albedo ([`toward_mature_colour`]).
+/// them keeps the slab's weathered albedo, one below them takes the colour at 360 nm
+/// ([`toward_mature_colour`]).
 pub const MATURE_COLOUR_RANGE_NM: [f64; 2] = [360.0, 940.0];
 
 /// The generator version from which a weathered entry's colour tends to the mature lunar colour
 /// (the [module documentation](self), "The mature colour"): 31, held with the 31 train
 /// (main's ruling of 2026-11-07: train 30's list froze first).
 ///
-/// Below it [`MatureColourRules::in_force`] is [`MatureColourRules::Slab`], and
+/// Below it `MatureColourRules::in_force` is `MatureColourRules::Slab`, and
 /// [`weathered_entry_bvr`] is the slab's alone, bit for bit. 31's bump deletes this hold,
-/// [`MatureColourRules`] with its `Slab` arm and its match in [`weathered_entry_bvr`], the tests'
-/// switch and its tripwire (`the_mature_colour_is_held_only_until_the_31_bump`). The sim's area
-/// mix takes [`toward_mature_colour`] under its own hold at 31 (`photometry::SURFACE_COLOUR_VERSION`).
-pub(crate) const MATURE_COLOUR_VERSION: GeneratorVersion = GeneratorVersion::new(31);
+/// `MatureColourRules` with its `Slab` arm and its match in [`weathered_entry_bvr`], the tests'
+/// switch and its tripwire (`the_mature_colour_is_held_only_until_the_31_bump`), and the sim's
+/// cell audit's `SURFACE_HOLDS` line (`planetary/testing/held.rs`). The sim's area mix takes
+/// [`toward_mature_colour`] under its own hold at 31 (`photometry::SURFACE_COLOUR_VERSION`), whose
+/// tripwire holds the two equal; public, hidden, for that check alone.
+#[doc(hidden)]
+pub const MATURE_COLOUR_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 
 /// Which colour a weathered palette entry takes (its hold, [`MATURE_COLOUR_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -666,36 +683,79 @@ pub(crate) fn with_mature_colour<R>(rules: MatureColourRules, run: impl FnOnce()
     run()
 }
 
-/// The weathered albedo `weathered` at `wavelength_nm` (nm) drawn toward the mature lunar colour
-/// (the [module documentation](self), "The mature colour"; from generator version 31): the
-/// slab's own colour in the share e^(−τ) of the light the grain's interior still returns, τ the
-/// band's npFe⁰ optical depth `tau` ([`npfe_optical_depth`]), and in the rest the mature colour
-/// on the band V's weathered albedo `v_weathered` at `v_wavelength_nm`: `a`^(e^(−τ)) [`a_V`
-/// (λ ÷ `λ_V`)^β]^(1 − e^(−τ)), β [`MATURE_COLOUR_EXPONENT`], dimensionless, and at most `fresh`,
-/// the band's fresh albedo, as the slab's is.
+/// A band V's albedos, the reference of [`toward_mature_colour`]: its fresh and weathered
+/// albedos, dimensionless, and its wavelength, nm.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VBand {
+    /// Its fresh albedo, 0 to 1.
+    pub fresh: f64,
+    /// Its weathered albedo, the slab's, 0 to 1.
+    pub weathered: f64,
+    /// Its wavelength, nm.
+    pub wavelength_nm: f64,
+}
+
+/// The weathered albedo `weathered` at `wavelength_nm` (nm), of fresh albedo `fresh`, drawn toward
+/// the mature lunar colour on the band V `v` (the [module documentation](self), "The mature
+/// colour"; from generator version 31), dimensionless: the log-linear blend `a`^x [`a_V` r(λ)]^(1 −
+/// x), x = e^(−τ) for the band's npFe⁰ optical depth `tau` ([`npfe_optical_depth`]), r(λ) the mature
+/// colour (λ ÷ `λ_V`)^β ([`MATURE_COLOUR_EXPONENT`]) but never bluer than the fresh colour `fresh`
+/// ÷ `v.fresh` (the lesser of the two below V, the greater above it), and at most `fresh`, as the
+/// slab's is. An empirical closure standing in for the slab's grey floor, not Hapke's physics.
 ///
-/// It is `weathered` itself, to the bit, at τ 0 (a fresh or iron-free grain), for a wavelength
-/// outside [`MATURE_COLOUR_RANGE_NM`] and for an albedo or a V albedo that is not above 0; the V
-/// band's own caller keeps its V. Its inputs are the slab's outputs, which are finite: a value
-/// that is not is returned as it is.
+/// A wavelength below [`MATURE_COLOUR_RANGE_NM`] takes the colour at its shortest, 360 nm (the
+/// sim's first bin stands for all the light below 390 nm), and one above its longest keeps
+/// `weathered`. It is `weathered` itself, to the bit, at τ 0 (a fresh or iron-free grain), beyond
+/// the range, for an albedo or a V albedo that is not above 0, and for an input that is not finite;
+/// the V band's own caller keeps its V.
 #[must_use]
 pub fn toward_mature_colour(
     weathered: f64,
     fresh: f64,
     wavelength_nm: f64,
     tau: f64,
-    (v_weathered, v_wavelength_nm): (f64, f64),
+    v: VBand,
 ) -> f64 {
     let [shortest, longest] = MATURE_COLOUR_RANGE_NM;
-    let measured = wavelength_nm >= shortest && wavelength_nm <= longest;
-    if !(measured && tau > 0.0 && weathered > 0.0 && v_weathered > 0.0 && v_wavelength_nm > 0.0)
-        || !(tau.is_finite() && weathered.is_finite() && v_weathered.is_finite())
+    let finite = [
+        weathered,
+        fresh,
+        wavelength_nm,
+        tau,
+        v.fresh,
+        v.weathered,
+        v.wavelength_nm,
+    ]
+    .iter()
+    .all(|x| x.is_finite());
+    if !(finite
+        && wavelength_nm <= longest
+        && tau > 0.0
+        && weathered > 0.0
+        && v.weathered > 0.0
+        && v.wavelength_nm > 0.0)
     {
         return weathered;
     }
+    let colour_nm = if wavelength_nm < shortest {
+        shortest
+    } else {
+        wavelength_nm
+    };
+    let mature = math::powf(colour_nm / v.wavelength_nm, MATURE_COLOUR_EXPONENT);
+    let ratio = if v.fresh > 0.0 && fresh > 0.0 {
+        let own = fresh / v.fresh;
+        let bluer = if colour_nm < v.wavelength_nm {
+            mature > own
+        } else {
+            mature < own
+        };
+        if bluer { own } else { mature }
+    } else {
+        mature
+    };
     let interior = math::exp(-tau);
-    let mature = v_weathered * math::powf(wavelength_nm / v_wavelength_nm, MATURE_COLOUR_EXPONENT);
-    let drawn = math::powf(weathered, interior) * math::powf(mature, 1.0 - interior);
+    let drawn = math::powf(weathered, interior) * math::powf(v.weathered * ratio, 1.0 - interior);
     if drawn > fresh { fresh } else { drawn }
 }
 

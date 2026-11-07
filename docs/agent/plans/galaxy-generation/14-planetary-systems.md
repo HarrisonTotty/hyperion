@@ -34456,10 +34456,10 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Leans (2026-11-06):_ a part of the disc with no albedos by band takes its analogue's
     measured colour (the space-weathering cap and an unknown airless lid Mercury's, Venus's deck
     Venus's); the water cloud is white; a young lava keeps its fresh row's colour at the cap.
-  - _Changed (part 2, 2026-11-07):_ under the same hold a weathered lid's B to 780–1,000 nm bins
-    tend to the mature lunar colour (`toward_mature_colour`, R10.T1.d's record), so the Bond albedo
-    and `p_V`'s scale move at 31 too (held with it, landing round 4); its V bin, first bin and
-    infrared bins are the slab's.
+  - _Changed (part 2, 2026-11-07):_ under the same hold a weathered lid's bins to 780–1,000 nm
+    tend to the mature lunar colour, never bluer than its fresh row's (`toward_mature_colour`,
+    R10.T1.d's record), so the Bond albedo and `p_V`'s scale move at 31 too (held with it, landing
+    round 4); its V and infrared bins are the slab's.
   - _Retargeted to 31 (landing round 3, 2026-11-07; train 30's list froze):_
     `SURFACE_COLOUR_VERSION` 31, a line in `with_every_31_hold`.
   - _For 31's bump:_ delete what `the_surface_colour_is_held_only_until_the_31_bump` lists.

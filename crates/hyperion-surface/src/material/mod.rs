@@ -101,9 +101,9 @@ pub use properties::{
 };
 pub use weathering::{
     FEO_MOLAR_MASS_G_PER_MOL, ICE_HOST_INDEX, IRON_DENSITY_KG_M3, IRON_MOLAR_MASS_G_PER_MOL,
-    MATURE_COLOUR_EXPONENT, MATURE_COLOUR_RANGE_NM, REGOLITH_HOST_INDEX, npfe_optical_depth,
-    toward_mature_colour, weathered_entry_bvr, weathered_hemispherical_albedos,
-    weathered_normal_albedo, weathered_spherical_albedo,
+    MATURE_COLOUR_EXPONENT, MATURE_COLOUR_RANGE_NM, MATURE_COLOUR_VERSION, REGOLITH_HOST_INDEX,
+    VBand, npfe_optical_depth, toward_mature_colour, weathered_entry_bvr,
+    weathered_hemispherical_albedos, weathered_normal_albedo, weathered_spherical_albedo,
 };
 pub use weights::{ClassWeights, MAX_CLASSES, SLOPE_LAG, WEIGHT_TOTAL, weights_at};
 pub(crate) use weights::{kept_omitted_rms, weights_with_sample};

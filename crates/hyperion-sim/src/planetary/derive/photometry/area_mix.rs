@@ -98,13 +98,13 @@
 //! whose maturity is not modelled its stand-in, each labelled. `ferric`'s weathering deposit joins
 //! the area mix at its row's optics ([`surface_bond`]).
 //!
-//! From generator version 31 (`photometry::SURFACE_COLOUR_VERSION`) the weathered bins whose
-//! midpoints the mature lunar colour was measured over, B to the 780–1,000 nm bin, are drawn toward
-//! it as each bin's npFe⁰ extinguishes the grains' interiors ([`toward_mature_colour`], on the V
-//! bin's weathered albedo, which is unchanged): the slab's grey floor leaves a mature iron-rich lid
-//! grey and a bright one too red, where the Moon's mature terrains share one colour
-//! (`hyperion_surface::material`'s "The mature colour"). The first bin and the infrared's keep the
-//! slab's.
+//! From generator version 31 (`photometry::SURFACE_COLOUR_VERSION`) a weathered lid under the
+//! regolith's law has its bins to the 780–1,000 nm one drawn toward the mature lunar colour, never
+//! bluer than its fresh row's, as each bin's npFe⁰ attenuates its grains' internal transmission
+//! ([`toward_mature_colour`], on the V bin's weathered albedo, which is unchanged): an empirical
+//! closure for the slab's grey floor, which leaves a mature iron-rich lid grey and a bright one
+//! too red, where the Moon's mature terrains share one colour within a few per cent
+//! (`hyperion_surface::material`'s "The mature colour"). The infrared bins keep the slab's.
 //!
 //! # The icy lid's regolith (P14.T49.m; from generator version 27)
 //!
@@ -137,7 +137,7 @@
 
 use hyperion_surface::field::{LIQUID_BINS, LiquidProperties, MechanicsFamily};
 use hyperion_surface::material::{
-    PhaseLaw, npfe_optical_depth, toward_mature_colour, weathered_spherical_albedo,
+    PhaseLaw, VBand, npfe_optical_depth, toward_mature_colour, weathered_spherical_albedo,
 };
 use hyperion_surface::tables::space_weathering as form_tables;
 
@@ -1726,18 +1726,29 @@ impl Regolith {
 
 /// The weathered spherical albedos `bins` of a lid whose fresh ones are `fresh`, weathered under
 /// `law` at the grain density (kg m⁻³), `FeO_T` and maturity of `at`, drawn toward the mature
-/// lunar colour from generator version 31 (the surface colour; `hyperion_surface::material`'s
-/// "The mature colour"): each bin whose midpoint ([`bin_wavelength_nm`]) the colour law was
-/// measured over, B to the 780–1,000 nm bin, by [`toward_mature_colour`] at its own npFe⁰ optical
-/// depth on the V bin's weathered albedo, which is unchanged; the first bin and the infrared's keep
-/// the slab's.
+/// lunar colour from generator version 31 under the regolith's law (the surface colour;
+/// `hyperion_surface::material`'s "The mature colour", an empirical closure for the slab's grey
+/// floor): each bin to the 780–1,000 nm one, the first standing for the light below 390 nm at the
+/// colour law's 360 nm, by [`toward_mature_colour`] at its midpoint ([`bin_wavelength_nm`]) and
+/// its own npFe⁰ optical depth, on the V bin's weathered albedo, which is unchanged; the infrared's
+/// keep the slab's. Eq. 11's colour is a normal albedo's, taken here to the spherical bins: the
+/// form's own tables would make it about 0.86–0.92 in spherical albedo, and Gehrels's maria about
+/// 0.78, some ±3% at 890 nm (the lane's science check, 2026-11-07).
 fn mature_colour(
     bins: &mut [f64; OPTICS_BANDS],
     fresh: &[f64; OPTICS_BANDS],
     (law, density, feo, maturity): (PhaseLaw, f64, f64, f64),
 ) {
+    match law {
+        PhaseLaw::Regolith => {}
+        PhaseLaw::Ice | PhaseLaw::Lambert => return,
+    }
     let v_bin = ColourBand::V.bin();
-    let v = (bins[v_bin], bin_wavelength_nm(v_bin));
+    let v = VBand {
+        fresh: fresh[v_bin],
+        weathered: bins[v_bin],
+        wavelength_nm: bin_wavelength_nm(v_bin),
+    };
     for (bin, albedo) in bins.iter_mut().enumerate() {
         if bin == v_bin {
             continue;
