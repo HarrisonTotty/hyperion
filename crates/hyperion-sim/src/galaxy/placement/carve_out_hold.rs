@@ -735,7 +735,8 @@ fn budget_rules(carve_out: CarveOutRules) -> GalaxyRules {
 /// carve-out, every other outcome the same; and, research item 4 of the galaxy leans, the classes'
 /// entries against the grid's carve over the galaxy: two Poisson counts of one intensity, the core
 /// collapses' and the luminous blue variables', each difference against the two counts' summed
-/// variance. On wasm32-wasip1, the Sun's columns alone and no comparison.
+/// variance, both printed before either is asserted. On wasm32-wasip1, the Sun's columns alone and
+/// no comparison.
 ///
 /// Both arms are at the budget (`FieldShareRules::None`), as
 /// `core_collapses_over_seeds_under_every_26_hold` builds its budget. The field's share φ
@@ -777,25 +778,30 @@ fn census_of_the_carve_out() {
     }
     let core = class_entries(&on, &CoreCollapseProcess::new(&on), ClassId::CORE_COLLAPSE);
     let lbv = class_entries(&on, &LbvProcess::new(&on), ClassId::LUMINOUS_BLUE_VARIABLE);
-    for (name, a, b) in [
+    // Both classes' counts are printed before either is asserted, so that one class's failure
+    // does not hide the other's figures.
+    let p_values: Vec<(&str, f64)> = [
         ("core collapses", grid(Class::CoreCollapse), core),
         (
             "luminous blue variables",
             grid(Class::LuminousBlueVariable),
             lbv,
         ),
-    ] {
+    ]
+    .into_iter()
+    .map(|(name, a, b)| {
         let (a, b) = (
             f64::from(u32::try_from(a).unwrap()),
             f64::from(u32::try_from(b).unwrap()),
         );
         let z = (a - b) / (a + b).max(1.0).sqrt();
-        eprintln!("{name}: the grid carves {a}, the class holds {b}, z = {z:.2}");
-        assert_p_value(
-            &format!("the {name}' carve against the class"),
-            2.0 * normal_cdf(-z.abs()),
-            ALPHA,
-        );
+        let p = 2.0 * normal_cdf(-z.abs());
+        eprintln!("{name}: the grid carves {a}, the class holds {b}, z = {z:.2}, p = {p:.2e}");
+        (name, p)
+    })
+    .collect();
+    for (name, p) in p_values {
+        assert_p_value(&format!("the {name}' carve against the class"), p, ALPHA);
     }
     assert!(grid(Class::CoreCollapse) > 0 && grid(Class::LuminousBlueVariable) > 0);
 }

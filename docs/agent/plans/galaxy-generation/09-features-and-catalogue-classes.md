@@ -6168,5 +6168,5 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   - A reader that adds a kick direction, or moves a remnant off its candidate's line other than by
     its kick times the time since its death, updates `KickDraws::directions` and `kick_may_reach`.
 - **P09.T35's C1 at the budget (lane `fix-carve-out-census`, 2026-11-06, at 29; test only).**
-  `census_of_the_carve_out` builds both arms with `budget_rules` (`FieldShareRules::None`), and
-  `carved_galaxy` walks `REMNANT_REACH_CELLS` = 112 past `young_mean`'s stop, a measured bound only.
+  `census_of_the_carve_out` builds both arms with `budget_rules` (`FieldShareRules::None`) and walks
+  `REMNANT_REACH_CELLS` = 112 past `young_mean`'s stop. Both halves still fail there (lane outbox).
