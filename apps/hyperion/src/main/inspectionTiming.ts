@@ -935,7 +935,8 @@ export interface InspectionTimingResults {
     readonly marchProbe: MarchProbeName | null;
     /**
      * The atmosphere's levers the profile drew with over its setting's (`--march-cover`,
-     * `--limb-rays`; plan R08, R08.T8.d), or `null`, the setting's own.
+     * `--limb-rays`, `--march-sources`, `--surface-lobes`, `--decked-air-surface`; plan R08,
+     * R08.T8.d), or `null`, the setting's own.
      */
     readonly atmosphereLevers: AtmosphereLeversOverride | null;
     /**
@@ -1523,6 +1524,10 @@ function leversText(levers: AtmosphereLeversOverride | null): string {
     ...(levers.marchSourceTransmittance === undefined
       ? []
       : [`march sources ${levers.marchSourceTransmittance}`]),
+    ...(levers.surfaceLobes === undefined ? [] : [`surface lobes ${levers.surfaceLobes}`]),
+    ...(levers.deckedAirSurface === undefined
+      ? []
+      : [`decked air surface ${levers.deckedAirSurface}`]),
   ];
   return `; atmosphere levers ${named.join(", ")} over the setting's`;
 }
@@ -1623,7 +1628,7 @@ export async function writeInspectionTimingResults(
   const march = results.run.marchProbe;
   const levers = results.run.atmosphereLevers;
   const lit = results.run.litProbe;
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${levers?.marchSourceTransmittance === undefined ? "" : `-sources-${levers.marchSourceTransmittance}`}${lit === null ? "" : `-lit-${lit}`}`;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${levers?.marchSourceTransmittance === undefined ? "" : `-sources-${levers.marchSourceTransmittance}`}${levers?.surfaceLobes === undefined ? "" : `-lobes-${levers.surfaceLobes}`}${levers?.deckedAirSurface === undefined ? "" : `-ground-${levers.deckedAirSurface}`}${lit === null ? "" : `-lit-${lit}`}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

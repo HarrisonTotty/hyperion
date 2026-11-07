@@ -123,10 +123,10 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, ten pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
+    // Four own runs, twelve pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
     // then two counted settings and the occlusion's, figure-shading's and both shading pairs' two
     // counted sides each.
-    expect(matrix).toHaveLength(4 + 10 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
+    expect(matrix).toHaveLength(4 + 12 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -167,6 +167,24 @@ describe("the Mac batch's matrix", () => {
       ["--frame-rate", "120", "--frame-pacing", "display"],
       ["--frame-rate", "120", "--frame-pacing", "rate"],
     ]);
+  });
+
+  it("pairs a drawn surface's lobes and a decked air's ground, each the setting's way (A) against the way back (B) at DPR 1, uncounted (R08)", () => {
+    const matrix = macProfileMatrix({
+      ...DRY_RUN,
+      levers: ["decked-air-surface", "surface-lobes"],
+    });
+    expect(matrix.map((run) => [run.id, run.args])).toEqual([
+      ["surface-lobes-low-dpr1-a1", []],
+      ["surface-lobes-low-dpr1-b1", ["--surface-lobes", "extinguished"]],
+      ["decked-air-surface-low-dpr1-a1", []],
+      ["decked-air-surface-low-dpr1-b1", ["--decked-air-surface", "uniform"]],
+    ]);
+    expect(
+      macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["surface-lobes", "decked-air-surface"] })
+        .filter(isCounted)
+        .map((run) => run.id),
+    ).toEqual(["counted-high-dpr1", "counted-low-dpr1"]);
   });
 
   it("makes the dry run's two runs, the levers in their own order whatever the order given", () => {
@@ -397,7 +415,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 70 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 78 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(

@@ -14,7 +14,15 @@
 // --machine names the machine in the summary and the sweep's table ("Apple M5, 16 GiB"). --body
 // names the served body every launch inspects, 41ffecb200000002.0400 by default; a batch of another
 // body, such as a routed one's (a medium within the thick or the haze route's range) for the thick
-// read's limb-rays and march-sources pairs, takes an --out of its own. --out
+// read's limb-rays and march-sources pairs, takes an --out of its own. The second batch, after the
+// first, is the decked air's, the served world 42002cae00000004.0300 (plan R08,
+// fix-r08-decked-air-route), whose air alone the decked-air-surface pair's sides draw apart:
+//
+//   node --no-warnings scripts/macProfile.mjs --machine <text> --body 42002cae00000004.0300
+//       --out target/mac-profile-decked --settings none --no-sweep
+//       --levers surface-lobes,decked-air-surface,limb-rays,march-sources
+//
+// --out
 // (default target/mac-profile/) holds the batch: each kept run under runs/<id>/ (its timing file and
 // summary, its captures, the views check's output and run.json, its samples), a run that wrote no
 // timing file under failed/, the warm-ups under warm-up/, the server's log and data, the sweep under
@@ -45,11 +53,12 @@
 // Each run's sample, before and after: the 1-minute load, the server's `ps` %CPU and CPU time (the
 // summary gives its mean over the run) and `pmset -g therm` on macOS. The sweep's runs are sampled
 // too, without the server, which is stopped first: each descent starts its own. --levers takes the
-// names of `MAC_PROFILE_LEVERS` (limb-rays, march-sources, lit-per-fragment, composite-per-pixel,
-// occlusion, strides, far-cascades, shading, shading-occlusion, pacing-120); --settings none and
-// --levers none drop those runs. pacing-120 (R07.T19) runs both sides on a 120 Hz offscreen frame
-// clock (`--frame-rate 120`), frames counted (`--frame-pacing display`) against each view at its own
-// rate (`rate`), each window's callbacks, draws and measured vsync in the windows' table.
+// names of `MAC_PROFILE_LEVERS` (limb-rays, march-sources, surface-lobes, decked-air-surface,
+// lit-per-fragment, composite-per-pixel, occlusion, strides, far-cascades, shading,
+// shading-occlusion, pacing-120); --settings none and --levers none drop those runs. pacing-120
+// (R07.T19) runs both sides on a 120 Hz offscreen frame clock (`--frame-rate 120`), frames counted
+// (`--frame-pacing display`) against each view at its own rate (`rate`), each window's callbacks,
+// draws and measured vsync in the windows' table.
 // --software (Linux only) runs every launch on SwiftShader, as a pod's dry run does; --port is the
 // batch's server's (7880 by default, apart from a developer's server and the descent spike's).
 //

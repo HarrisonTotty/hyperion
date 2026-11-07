@@ -1083,6 +1083,37 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
   });
 
+  it("names and states a run drawn with its surface lobes or decked ground over its setting's (R08)", async () => {
+    const written = new Map<string, string>();
+    const files = {
+      mkdir: () => Promise.resolve(),
+      exists: (path: string) => Promise.resolve(written.has(path)),
+      writeFile: (path: string, text: string) => {
+        written.set(path, text);
+        return Promise.resolve();
+      },
+    };
+    const lobes = results(null, null, { surfaceLobes: "extinguished" });
+    const ground = results(null, null, { deckedAirSurface: "uniform" });
+    expect([
+      (await writeInspectionTimingResults("/timing", lobes, files)).json,
+      (await writeInspectionTimingResults("/timing", ground, files)).json,
+      inspectionTimingMarkdown(lobes)
+        .split("\n")
+        .find((line) => line.startsWith("- **Launch:**"))
+        ?.endsWith("; atmosphere levers surface lobes extinguished over the setting's"),
+      inspectionTimingMarkdown(ground)
+        .split("\n")
+        .find((line) => line.startsWith("- **Launch:**"))
+        ?.endsWith("; atmosphere levers decked air surface uniform over the setting's"),
+    ]).toEqual([
+      "/timing/2026-11-01-pod-low-inspection-timing-lobes-extinguished.json",
+      "/timing/2026-11-01-pod-low-inspection-timing-ground-uniform.json",
+      true,
+      true,
+    ]);
+  });
+
   it("names and states a run drawn under the march's probe (R08.T8.d)", async () => {
     const written = new Map<string, string>();
     const files = {

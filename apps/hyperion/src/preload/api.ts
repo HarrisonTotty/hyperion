@@ -1186,8 +1186,8 @@ export interface ViewsCheckLaunch {
    */
   readonly marchProbe?: MarchProbeName;
   /**
-   * The frame profile's atmosphere levers over its setting's (`--march-cover`, `--limb-rays`; plan
-   * R08, R08.T8.d): present only on an `--inspection --timing` launch that gives either, whose
+   * The frame profile's atmosphere levers over its setting's (`--march-cover`, `--limb-rays`,
+   * `--march-sources`, `--surface-lobes`, `--decked-air-surface`; plan R08, R08.T8.d): present only on an `--inspection --timing` launch that gives either, whose
    * `VIEW` then draws its atmospheres with them over `SETTINGS[s].atmosphereLevers`, for the A/B of
    * each lever on and off on one build; absent on every other launch.
    */
@@ -1248,8 +1248,10 @@ export type MarchProbeName = "centre" | "depth-zero" | "one-source" | "no-lobes"
  * The atmosphere's levers a frame profile draws with over its setting's (plan R08, R08.T8.d): the
  * march's cover (`area`, or `tiles`, the exact tile cull), its far limb's node rays (`per-texel`,
  * or `packed`), and since R08.T8.e's table its step's sources (`table`, from the sources' table, or
- * `per-step`, the sliced lookup), each as `hillaire.ts`'s `AtmosphereSettings` names them, the
- * step's sources the thick read's shared read's too (perf-thick-march); any may be absent, the
+ * `per-step`, the sliced lookup), and since fix-r08-decked-air-route a drawn surface's forward lobes
+ * (`transmitted`, or `extinguished`, the way back) and a decked air's ground (`departure`, or
+ * `uniform`, the bake's average ground), each as `hillaire.ts`'s `AtmosphereSettings` names them,
+ * the step's sources the thick read's shared read's too (perf-thick-march); any may be absent, the
  * setting's then. The pictures are a player's, the cover's and the limb's to
  * the bit on a fallback adapter.
  */
@@ -1257,6 +1259,8 @@ export interface AtmosphereLeversOverride {
   readonly marchCover?: "area" | "tiles";
   readonly limbRays?: "per-texel" | "packed";
   readonly marchSourceTransmittance?: "table" | "per-step";
+  readonly surfaceLobes?: "transmitted" | "extinguished";
+  readonly deckedAirSurface?: "departure" | "uniform";
 }
 
 /**

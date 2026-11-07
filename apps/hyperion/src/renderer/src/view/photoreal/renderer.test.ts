@@ -1234,6 +1234,32 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
     tables.dispose();
   });
 
+  it.each([
+    ["the setting's", undefined, 1],
+    ["extinguished under a frame profile's lever", { surfaceLobes: "extinguished" }, 0],
+    ["kept beside the decked ground's lever", { deckedAirSurface: "uniform" }, 1],
+  ] as const)(
+    "marches a drawn surface's forward lobes %s (R08)",
+    async (_, levers: AtmosphereLeversOverride | undefined, w) => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const frame: PhotorealFrame = {
+        ...frameWith([]),
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      };
+      // The setting's first, so that the lever's frame must make its atmosphere again.
+      renderer.render(view, frame);
+      renderer.render(view, levers === undefined ? frame : { ...frame, atmosphereLevers: levers });
+      // The march's view is the composite's Draw's first members, its forward.w among them.
+      const composites = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+      expect(composites.at(-1)?.draws[0]?.uniforms["forward"]?.[3]).toBe(w);
+      renderer.dispose();
+      tables.dispose();
+    },
+  );
+
   /** A renderer prepared for the test's view under a frame profile's `levers`. */
   async function preparedWith(levers: AtmosphereLeversOverride | undefined): Promise<{
     readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;

@@ -923,10 +923,36 @@ describe("the several-views check's options", () => {
     ]);
   });
 
+  it("takes --surface-lobes and --decked-air-surface, the frame profile's lobe and decked-ground levers over its setting's (R08)", () => {
+    const profile = [
+      "--views-check",
+      "--inspection",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--timing",
+    ];
+    expect([
+      parse([...profile, "--surface-lobes", "extinguished"]).viewsCheck?.atmosphereLevers,
+      parse([...profile, "--surface-lobes", "transmitted"]).viewsCheck?.atmosphereLevers,
+      parse([...profile, "--decked-air-surface", "uniform"]).viewsCheck?.atmosphereLevers,
+      parse([...profile, "--decked-air-surface", "departure", "--limb-rays", "packed"]).viewsCheck
+        ?.atmosphereLevers,
+    ]).toEqual([
+      { surfaceLobes: "extinguished" },
+      { surfaceLobes: "transmitted" },
+      { deckedAirSurface: "uniform" },
+      { limbRays: "packed", deckedAirSurface: "departure" },
+    ]);
+  });
+
   it.each([
     ["--march-cover", "tiles"],
     ["--limb-rays", "packed"],
     ["--march-sources", "table"],
+    ["--surface-lobes", "extinguished"],
+    ["--decked-air-surface", "uniform"],
   ] as const)(
     "refuses %s without the frame profile, or naming no value (R08.T8.d)",
     (flag, value) => {

@@ -79,6 +79,24 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: false,
   },
   {
+    name: "surface-lobes",
+    decides:
+      "R08, a drawn surface's forward lobes: transmitted, the settings' (A), against extinguished (B)",
+    a: [],
+    b: ["--surface-lobes", "extinguished"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
+    name: "decked-air-surface",
+    decides:
+      "R08, a decked air's ground: its departure, the settings' (A), against the bake's uniform ground (B); its sides differ on a decked air's body alone",
+    a: [],
+    b: ["--decked-air-surface", "uniform"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
     name: "lit-per-fragment",
     decides: "R08.T9.b, the lit fragment's sources: from the table (A) against per fragment (B)",
     a: [],

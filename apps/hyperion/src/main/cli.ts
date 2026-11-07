@@ -116,8 +116,10 @@
  * `--composite-probe`.
  * `--march-cover area|tiles` and `--limb-rays per-texel|packed` (plan R08, R08.T8.d), and
  * `--march-sources table|per-step` (R08.T8.e's table; since perf-thick-march the thick read's shared
- * read too), draw that profile's atmospheres with that lever over its setting's, for the A/B of each
- * lever on and off on one build; each is refused without `--timing`.
+ * read too), and `--surface-lobes transmitted|extinguished` and `--decked-air-surface
+ * departure|uniform` (fix-r08-decked-air-route: a drawn surface's forward lobes, and a decked air's
+ * ground departing from the bake's), draw that profile's atmospheres with that lever over its
+ * setting's, for the A/B of each lever on and off on one build; each is refused without `--timing`.
  * With `--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment` too (plan R08,
  * R08.T9.b's measurement) that profile makes the lit materials and kernels under the probe, every
  * source's transmittance through the air 1, a planetshine source's at its centre node alone, the
@@ -569,6 +571,18 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option(
+        "--surface-lobes <LOBES>",
+        "the frame profile's drawn surfaces' forward lobes over its setting's (R08): transmitted, or extinguished",
+      ).choices(["transmitted", "extinguished"]),
+    )
+    .addOption(
+      new Option(
+        "--decked-air-surface <GROUND>",
+        "the frame profile's decked air's ground over its setting's (R08): departing from the bake's, or the bake's uniform ground",
+      ).choices(["departure", "uniform"]),
+    )
+    .addOption(
+      new Option(
         "--march-probe <PROBE>",
         "the frame profile's march probe (R08.T8.d, R08.T8.e): every texel's centre ray alone, each step's sources through no air, the first source alone, or no forward lobes' higher orders",
       ).choices(MARCH_PROBE_NAMES),
@@ -753,6 +767,8 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     ["marchCover", "--march-cover"],
     ["limbRays", "--limb-rays"],
     ["marchSources", "--march-sources"],
+    ["surfaceLobes", "--surface-lobes"],
+    ["deckedAirSurface", "--decked-air-surface"],
   ] as const) {
     if (options[option] !== undefined && options["timing"] !== true) {
       command.error(`error: ${flag} is an option of --timing, which was not given`);
@@ -1014,9 +1030,9 @@ function marchProbeOf(
 }
 
 /**
- * The atmosphere's levers `--march-cover`, `--limb-rays` and `--march-sources` name where any is
- * given, else nothing (plan R08, R08.T8.d and R08.T8.e's table); commander has checked their
- * choices.
+ * The atmosphere's levers `--march-cover`, `--limb-rays`, `--march-sources`, `--surface-lobes` and
+ * `--decked-air-surface` name where any is given, else nothing (plan R08, R08.T8.d, R08.T8.e's
+ * table and fix-r08-decked-air-route); commander has checked their choices.
  */
 function atmosphereLeversOf(
   options: Readonly<Record<string, unknown>>,
@@ -1024,10 +1040,14 @@ function atmosphereLeversOf(
   const cover = options["marchCover"];
   const rays = options["limbRays"];
   const sources = options["marchSources"];
+  const lobes = options["surfaceLobes"];
+  const ground = options["deckedAirSurface"];
   const levers: AtmosphereLeversOverride = {
     ...(cover === "area" || cover === "tiles" ? { marchCover: cover } : {}),
     ...(rays === "per-texel" || rays === "packed" ? { limbRays: rays } : {}),
     ...(sources === "table" || sources === "per-step" ? { marchSourceTransmittance: sources } : {}),
+    ...(lobes === "transmitted" || lobes === "extinguished" ? { surfaceLobes: lobes } : {}),
+    ...(ground === "departure" || ground === "uniform" ? { deckedAirSurface: ground } : {}),
   };
   return Object.keys(levers).length === 0 ? {} : { atmosphereLevers: levers };
 }

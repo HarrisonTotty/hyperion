@@ -328,7 +328,8 @@ export interface PhotorealFrame {
   readonly atmosphereSetting?: QualitySetting | undefined;
   /**
    * A frame profile's atmosphere levers over its setting's `SETTINGS[s].atmosphereLevers` (plan R08,
-   * R08.T8.d; `--march-cover`, `--limb-rays`), which its atmospheres draw with, the A/B of each
+   * R08.T8.d; `--march-cover`, `--limb-rays`, `--march-sources`, `--surface-lobes`,
+   * `--decked-air-surface`), which its atmospheres draw with, the A/B of each
    * lever on one build; the setting's alone where absent.
    */
   readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
@@ -1575,7 +1576,9 @@ export class PhotorealRenderer {
       held.setting === setting &&
       held.levers?.marchCover === levers?.marchCover &&
       held.levers?.limbRays === levers?.limbRays &&
-      held.levers?.marchSourceTransmittance === levers?.marchSourceTransmittance
+      held.levers?.marchSourceTransmittance === levers?.marchSourceTransmittance &&
+      held.levers?.surfaceLobes === levers?.surfaceLobes &&
+      held.levers?.deckedAirSurface === levers?.deckedAirSurface
     ) {
       held.atmosphere.setTables(air.tables);
       return held.atmosphere;
