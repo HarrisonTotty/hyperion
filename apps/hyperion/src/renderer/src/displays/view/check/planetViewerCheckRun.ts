@@ -36,9 +36,9 @@
  * 7. Then a moon of the galaxy (R15.T5's follow-up): the first of the real planets `viewer_randomize`
  *    draws, from draw seed 1, at most {@link MOON_SEARCH_DRAWS}, whose system holds a moon present
  *    at the epoch gives it ({@link firstMoon}). With `SUN` `ORBITAL` again its ID is entered in
- *    `BODY`, and once the panel holds `GENERATE` back with `NO INPUTS` and the moon is drawn
- *    photorealistic, no longer `PHOTOREALISTIC: PREPARING`, it is captured from orbit as
- *    `planet-viewer-moon`.
+ *    `BODY`, and once the panel holds `GENERATE` back with `NO INPUTS`, VIEW's frame names the
+ *    moon and it is drawn photorealistic, no longer `PHOTOREALISTIC: PREPARING`, it is captured
+ *    from orbit as `planet-viewer-moon`.
  *
  * Each capture is taken twice: of the whole tab, and with `MAXIMIZE VIEW` on (`-maximized`), its
  * label block and panels hidden, so that the planet fills the view.
@@ -953,6 +953,12 @@ async function viewPlanet(
     );
   await drawn.until(`the moon ${moon} was not shown with NO INPUTS`, generateHeld);
   await setPartOpen("SHOWN", false);
+  // The view's frame names the moon once its scene is the one drawn; until then the label block
+  // still reads the planet's, whose picture is no longer preparing.
+  const moonIndex = `/${String(parseBodyId(moon).bodyIndex)}`;
+  await drawn.until(`VIEW's frame did not name the moon ${moon}`, () =>
+    (plate().line("FRAME") ?? "").endsWith(moonIndex),
+  );
   await drawn.until(
     "the moon was not drawn photorealistic",
     () => controls.styleOf(PRIMARY_NAME) === "photorealistic",
