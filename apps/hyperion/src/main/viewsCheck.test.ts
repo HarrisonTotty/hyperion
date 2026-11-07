@@ -779,6 +779,15 @@ describe("the inspection run's frame profile (the owner's report)", () => {
     expect(deps.exit).toHaveBeenCalledWith(0);
   });
 
+  it("logs each window the record left out, and writes the file of the rest (lane perf-page-long-tasks)", async () => {
+    const lines: string[] = [];
+    const { run, timed } = timingSession({ log: (line) => lines.push(line) });
+    await run.writeTimingResults(TIMING_RECORD, ["low: its React commits"]);
+    expect([lines.filter((line) => line.includes("leaves out")), timed[0]?.windows.length]).toEqual(
+      [["views check: the timing file leaves out the window low: its React commits"], 1],
+    );
+  });
+
   it("records a window whose trace does not reduce as missing, with why", async () => {
     const { run, timed } = timingSession({
       reduceProfile: () => Promise.reject(new Error("the trace was cut short")),

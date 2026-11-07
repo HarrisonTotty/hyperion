@@ -105,6 +105,7 @@ import {
   readAtmosphereCheckRecord,
   readHandoverCheckRecord,
   inspectionTimingRecordProblem,
+  leftOutTimingWindows,
   readInspectionTimingRecord,
   readTerrainCheckRecord,
   readTerrainPhaseUpdate,
@@ -764,11 +765,18 @@ export class ViewsCheckSession {
    * Builds the inspection run's timing file from its renderer's record and the windows' traces,
    * and writes it.
    *
+   * @param leftOut - The windows the record left out, as `<name>: <why>`, each logged.
    * @throws Error if the launch profiles nothing.
    */
-  async writeTimingResults(record: InspectionTimingRecord): Promise<SpikeResultsPaths> {
+  async writeTimingResults(
+    record: InspectionTimingRecord,
+    leftOut: ReadonlyArray<string> = [],
+  ): Promise<SpikeResultsPaths> {
     if (this.#deps.launch.timing !== true) {
       throw new Error("the launch profiles no frame");
+    }
+    for (const each of leftOut) {
+      this.#deps.log(`views check: the timing file leaves out the window ${each}`);
     }
     const run = await this.#run;
     const pageProfile = (await this.#deps.pageProfile?.stop()) ?? null;
@@ -1272,7 +1280,7 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
         `${VIEWS_CHECK_CHANNELS.writeTimingResults} refused: not the inspection run's timing record (${problem ?? "unknown"})`,
       );
     }
-    return deps.session.writeTimingResults(record);
+    return deps.session.writeTimingResults(record, leftOutTimingWindows(value));
   });
   guarded(VIEWS_CHECK_CHANNELS.capture, async ([value]) => {
     if (deps.run === "several-views" || !isCaptureLabel(value)) {

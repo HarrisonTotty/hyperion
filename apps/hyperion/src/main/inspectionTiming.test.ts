@@ -5,6 +5,7 @@ import type {
   InspectionLongTasks,
   InspectionTimingMarchCensus,
   InspectionTimingRecord,
+  InspectionTimingWindow,
 } from "../preload/api";
 import {
   buildInspectionTimingResults,
@@ -24,7 +25,20 @@ import {
 } from "./inspectionTiming";
 import { measured } from "./measured";
 import { longTaskFunctions, type PageProfile } from "./pageProfile";
-import { inspectionTimingRecordProblem, readInspectionTimingRecord } from "./viewsCheckRecord";
+import {
+  inspectionTimingRecordProblem,
+  leftOutTimingWindows,
+  readInspectionTimingRecord,
+  timingWindowProblem,
+} from "./viewsCheckRecord";
+
+/**
+ * The window a one-window record keeps, or `null` where the record leaves it out (or is none): a
+ * window the main process cannot take is left out, the rest kept (lane perf-page-long-tasks).
+ */
+function takenWindow(record: unknown): InspectionTimingWindow | null {
+  return readInspectionTimingRecord(record)?.windows[0] ?? null;
+}
 
 /** The renderer's main thread and a worker of its process, and the GPU process's main thread. */
 function named(scan: ProfileScan): ProfileScan {
@@ -491,11 +505,9 @@ describe("the frame profile's timing file (the owner's report)", () => {
         { ...CENSUS, laneRays: 1_000 },
         { ...CENSUS, rays: 0.5 },
         { ...CENSUS, kernel: "" },
-      ].map((census) => readInspectionTimingRecord(withCensus(census))),
+      ].map((census) => takenWindow(withCensus(census))),
     ).toEqual([null, null, null, null, null]);
-    expect(
-      readInspectionTimingRecord({ ...RECORD, windows: [{ ...window, marchCensus: undefined }] }),
-    ).toBeNull();
+    expect(takenWindow({ ...RECORD, windows: [{ ...window, marchCensus: undefined }] })).toBeNull();
   });
 
   it("records the run's pacing and each window's callbacks and measured vsync (R07.T19)", () => {
@@ -628,12 +640,10 @@ describe("the frame profile's timing file (the owner's report)", () => {
     }
     expect([
       readInspectionTimingRecord(withReact(null))?.windows[0]?.react,
-      readInspectionTimingRecord(withReact({ ...react, renders: 7 })),
-      readInspectionTimingRecord(
-        withReact({ ...react, components: [stage, { ...stage, renders: 1 }] }),
-      ),
-      readInspectionTimingRecord(withReact({ ...react, components: [{ ...stage, unchanged: 2 }] })),
-      readInspectionTimingRecord(withReact(undefined)),
+      takenWindow(withReact({ ...react, renders: 7 })),
+      takenWindow(withReact({ ...react, components: [stage, { ...stage, renders: 1 }] })),
+      takenWindow(withReact({ ...react, components: [{ ...stage, unchanged: 2 }] })),
+      takenWindow(withReact(undefined)),
     ]).toEqual([null, null, null, null, null]);
   });
 
@@ -771,7 +781,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
       { label: "bodies", call: "render pass.draw", count: 2, bytes: 0 },
     ];
     const repeated = window === undefined ? [] : [{ ...window, gpuCalls: twice }];
-    expect(readInspectionTimingRecord({ ...RECORD, windows: repeated })).toBeNull();
+    expect(takenWindow({ ...RECORD, windows: repeated })).toBeNull();
   });
 
   it("takes a window's cluster counters, or none, and refuses them malformed (plan R14, R14.T3.d)", () => {
@@ -785,10 +795,8 @@ describe("the frame profile's timing file (the owner's report)", () => {
     });
     expect([
       readInspectionTimingRecord(withClusters(null))?.windows[0]?.clusters,
-      readInspectionTimingRecord(
-        withClusters({ passes: [{ label: "lit", clusters: -1, triangles: 0 }] }),
-      ),
-      readInspectionTimingRecord(
+      takenWindow(withClusters({ passes: [{ label: "lit", clusters: -1, triangles: 0 }] })),
+      takenWindow(
         withClusters({
           passes: [
             { label: "lit", clusters: 1, triangles: 2 },
@@ -796,7 +804,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
           ],
         }),
       ),
-      readInspectionTimingRecord(withClusters(undefined)),
+      takenWindow(withClusters(undefined)),
       results().windows[0]?.clusters,
     ]).toEqual([null, null, null, null, window.clusters]);
     expect(inspectionTimingMarkdown(results())).toContain(
@@ -854,16 +862,40 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect([
       inspectionTimingRecordProblem(RECORD),
       inspectionTimingRecordProblem({ ...RECORD, timer: "sometimes" }),
-      inspectionTimingRecordProblem({ ...RECORD, windows: [{ ...window, endMs: "late" }] }),
       inspectionTimingRecordProblem({ ...RECORD, longTasks: { ...tasks, tasks: [task] } }),
       inspectionTimingRecordProblem({ ...RECORD, windows: [window, window] }),
     ]).toEqual([
       null,
       "its pass timer is sometimes",
-      "window 0 (close) is not one",
       'long task 0 is not one: {"startMs":100,"durationMs":51,"renderMs":-0.4}',
       "a window stands twice, its long tasks' span or order is not one, or its engine's time, compiles or first frames are not",
     ]);
+  });
+
+  it("keeps the windows it takes and names each it leaves out by its first field it does not take (lane perf-page-long-tasks)", () => {
+    const [window] = RECORD.windows;
+    if (window === undefined) {
+      throw new Error("the record holds a window");
+    }
+    const low = {
+      ...window,
+      name: "low",
+      react: {
+        commits: 1,
+        renders: 0,
+        components: [
+          { name: "Stage", renders: 2, mounts: 0, unchanged: 0, stateChanged: 0, propsChanged: [] },
+        ],
+      },
+    };
+    const late = { ...window, name: "orbit", endMs: -1 };
+    const given = { ...RECORD, windows: [window, low, late] };
+    expect([
+      readInspectionTimingRecord(given)?.windows.map((each) => each.name),
+      leftOutTimingWindows(given),
+      leftOutTimingWindows(RECORD),
+      timingWindowProblem(window),
+    ]).toEqual([["close"], ["low: its React commits", "orbit: its span"], [], null]);
   });
 
   it("takes the run's long tasks, or none, and refuses them malformed or out of order (lane perf-page-long-tasks)", () => {

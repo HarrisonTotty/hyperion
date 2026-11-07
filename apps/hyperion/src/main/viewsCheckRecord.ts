@@ -1742,6 +1742,74 @@ function timingWindow(value: unknown): ReadTimingWindow | null {
   return { kind: "window", window };
 }
 
+/**
+ * Why `value` is not a profiled window ({@link timingWindow}): its first field the record does not
+ * take; `null` where it is one. The checks are {@link timingWindow}'s, in its order, named.
+ */
+export function timingWindowProblem(value: unknown): string | null {
+  if (timingWindow(value) !== null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return "it is not an object";
+  }
+  const { startMs, endMs, untimedFrames, position, marchSamples } = value;
+  const gpuMs = times(value["gpuMs"]);
+  const passes = listOf(value["passes"], timingPass);
+  const checks: ReadonlyArray<readonly [string, boolean]> = [
+    ["its name", readTimingWindowName(value["name"]) !== null],
+    ["its span", isFiniteNumber(startMs) && isFiniteNumber(endMs) && endMs >= startMs],
+    ["its canvas", canvas(value["canvas"]) !== null],
+    ["its scales", numbers(value["scales"]) !== null],
+    ["its intervals", times(value["intervalsMs"]) !== null],
+    ["its main thread's times", times(value["mainThreadMs"]) !== null],
+    ["its submissions' times", times(value["submitMs"]) !== null],
+    ["its GPU times", gpuMs !== null],
+    ["its passes", passes !== null],
+    [
+      "its passes' times, one a frame timed in full",
+      passes === null || gpuMs === null || passes.every((pass) => pass.ms.length === gpuMs.length),
+    ],
+    [
+      "its passes' labels, each once",
+      passes === null || new Set(passes.map((pass) => pass.label)).size === passes.length,
+    ],
+    ["its untimed frames", isCount(untimedFrames)],
+    ["its memory traffic", timingMemory(value["memory"]) !== null],
+    ["its WebGPU calls", gpuCalls(value["gpuCalls"]) !== undefined],
+    ["its attachments", gpuAttachments(value["gpuAttachments"]) !== undefined],
+    ["its atmosphere reads", listOf(value["atmosphereReads"], atmosphereRead) !== null],
+    ["its React commits", reactCommits(value["react"]) !== undefined],
+    ["its cluster counters", timingClusters(value["clusters"]) !== undefined],
+    ["its march's samples", isCount(marchSamples) && marchSamples > 0],
+    ["its position", isTextOrNull(position)],
+    ["its statements", strings(value["statements"]) !== null],
+    ["its march census", timingCensus(value["marchCensus"]) !== undefined],
+  ];
+  return checks.find(([, taken]) => !taken)?.[0] ?? "a field the checks do not name";
+}
+
+/**
+ * The windows of `value`, a timing record, that the record leaves out ({@link
+ * readInspectionTimingRecord}), each as `<name>: <its problem>` ({@link timingWindowProblem}).
+ */
+export function leftOutTimingWindows(value: unknown): ReadonlyArray<string> {
+  const windows: unknown = isRecord(value) ? value["windows"] : undefined;
+  if (!Array.isArray(windows)) {
+    return [];
+  }
+  return windows.flatMap((each: unknown, index: number) => {
+    const problem = timingWindowProblem(each);
+    if (problem === null) {
+      return [];
+    }
+    const name: unknown = isRecord(each) ? each["name"] : undefined;
+    return [
+      `${typeof name === "string" ? name.slice(0, 16) : `window ${String(index)}`}: ${problem}`,
+    ];
+  });
+}
+
 /** `value` as one long task, or `null`: its times finite, its rendering within it. */
 function longTask(value: unknown): InspectionLongTask | null {
   if (!isRecord(value)) {
@@ -1858,11 +1926,6 @@ export function inspectionTimingRecordProblem(value: unknown): string | null {
   if (!Array.isArray(windows)) {
     return "it holds no windows";
   }
-  const window = windows.findIndex((each: unknown) => timingWindow(each) === null);
-  if (window >= 0) {
-    const name: unknown = isRecord(windows[window]) ? windows[window]["name"] : undefined;
-    return `window ${String(window)} (${typeof name === "string" ? name.slice(0, 16) : "unnamed"}) is not one`;
-  }
   if (readInspectionTimingRecord(value) !== null) {
     return null;
   }
@@ -1880,7 +1943,8 @@ export function inspectionTimingRecordProblem(value: unknown): string | null {
 /**
  * `value` as the inspection run's frame profile's record (the owner's report, 2026-11-01), or
  * `null` if it is not one: each window at most once, the run's long tasks or `null`, its
- * compiles, and its first frames, each kind at most once. A window whose passes' times are not as
+ * compiles, and its first frames, each kind at most once. A window that is not one is left out
+ * ({@link leftOutTimingWindows} names it), the rest kept; a window whose passes' times are not as
  * many as its frames' GPU times is dropped alone, its name and both counts logged, the others kept
  * (lane fix-inspection-timing-record).
  */
@@ -1889,7 +1953,15 @@ export function readInspectionTimingRecord(value: unknown): InspectionTimingReco
     return null;
   }
   const { timer, devicePixelRatio, engineAtMs } = value;
-  const read = listOf(value["windows"], timingWindow);
+  // A window the record cannot take is left out, and named (`leftOutTimingWindows`), so that one
+  // window's fault does not lose a run's every other figure.
+  const given: unknown = value["windows"];
+  const read = Array.isArray(given)
+    ? given.flatMap((each: unknown) => {
+        const window = timingWindow(each);
+        return window === null ? [] : [window];
+      })
+    : null;
   const tasks = longTasks(value["longTasks"]);
   const compiles = listOf(value["compiles"], timingCompile);
   const firstFrames = listOf(value["firstFrames"], timingFirstFrame);
