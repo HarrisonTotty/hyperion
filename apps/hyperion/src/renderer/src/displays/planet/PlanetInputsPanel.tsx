@@ -39,7 +39,12 @@ import {
 } from "./inputsLayout";
 import { SeedField } from "./SeedField";
 import { EntryRefusalContext, type EntryRefusals, useEntryDraft } from "./useEntryDraft";
-import type { CommandState, PlanetViewer, ViewerCommand } from "./usePlanetViewer";
+import {
+  type CommandState,
+  type PlanetViewer,
+  shownInputs,
+  type ViewerCommand,
+} from "./usePlanetViewer";
 
 /** One group of the panel's inputs: the part it folds as, its title and its inputs, in order. */
 interface InputGroup {
@@ -142,17 +147,21 @@ function GroupSummary({ group, inputs, drawn }: GroupSummaryProps) {
  * the first.
  */
 function ShownSummary({ shown }: { readonly shown: PlanetViewer["shown"] }) {
-  let summary: ReactNode;
-  if (shown === null) {
-    summary = "NONE";
-  } else if (shown.source.kind === "generated") {
-    summary = "GENERATED";
-  } else {
-    summary = (
-      <>
-        BODY <span className="planet-inputs__id">{shown.body.toUpperCase()}</span>
-      </>
-    );
+  let summary: ReactNode = "NONE";
+  if (shown !== null) {
+    switch (shown.source.kind) {
+      case "generated":
+        summary = "GENERATED";
+        break;
+      case "body":
+      case "moon":
+        summary = (
+          <>
+            BODY <span className="planet-inputs__id">{shown.body.toUpperCase()}</span>
+          </>
+        );
+        break;
+    }
   }
   return <span className="planet-inputs__summary">{summary}</span>;
 }
@@ -183,7 +192,7 @@ export const GENERATE_KEY = "g";
  * Why `GENERATE` and `SHARE` are held back while a moon is shown: it has none of the viewer's
  * inputs, and the panel's are another planet's (plan R15, T5's follow-up).
  */
-export const NO_INPUTS_REASON = "NO INPUTS: A MOON";
+export const NO_INPUTS_REASON = "NO INPUTS: a moon has none, enter one to GENERATE or SHARE";
 
 /** Props of {@link PlanetInputsPanel}. */
 export interface PlanetInputsPanelProps {
@@ -206,6 +215,39 @@ export interface PlanetInputsPanelProps {
 /** Whether two sets of inputs are the same planet's. */
 function samePlanet(a: PlanetInputs, b: PlanetInputs): boolean {
   return formatInputsString(a) === formatInputsString(b);
+}
+
+/** The galaxy's body on show, as `BODY` and its notes read it. */
+interface GalaxyBodyShown {
+  readonly body: NonNullable<PlanetViewer["shown"]>["body"];
+  /** Whether its system has more stars than its inputs' one host. */
+  readonly multipleStars: boolean;
+  /** Whether the panel still holds its inputs: never for a moon, which has none. */
+  readonly held: boolean;
+}
+
+/** `shown` as the galaxy's body on show, the panel holding `inputs`, or `null` for a generated one. */
+function galaxyBodyShown(
+  shown: NonNullable<PlanetViewer["shown"]>,
+  inputs: PlanetInputs,
+): GalaxyBodyShown | null {
+  const { source } = shown;
+  let galaxyBody: GalaxyBodyShown | null = null;
+  switch (source.kind) {
+    case "generated":
+      break;
+    case "body":
+      galaxyBody = {
+        body: shown.body,
+        multipleStars: source.multipleStars,
+        held: samePlanet(source.inputs, inputs),
+      };
+      break;
+    case "moon":
+      galaxyBody = { body: shown.body, multipleStars: false, held: false };
+      break;
+  }
+  return galaxyBody;
 }
 
 /**
@@ -231,8 +273,8 @@ function samePlanet(a: PlanetInputs, b: PlanetInputs): boolean {
  *   `OPEN BODY` show a planet of the galaxy by its ID and put its inputs, read back, on the panel.
  *   While the panel holds the inputs of a planet whose system has more stars than one, a note says
  *   that they hold its host alone.
- * - A moon on show (`SHOWN` `BODY` and its ID) has none of the inputs: the groups keep their last
- *   values, muted, under {@link NO_INPUTS_REASON}, which holds `GENERATE` and the bar's `SHARE` back
+ * - A moon on show (`SHOWN` `BODY` and its ID) has none of the inputs: the groups and `SEED` keep
+ *   their last values, muted, under {@link NO_INPUTS_REASON}, which holds `GENERATE` and the bar's `SHARE` back
  *   while it stands; an input entered gives the panel its inputs again, and `RANDOMIZE` and
  *   `OPEN BODY` stay offered.
  * - In the `full` layout `STAR`, `ORBIT` and `PLANET` stand open, and the volatile ranks and
@@ -273,10 +315,9 @@ export function PlanetInputsPanel({
   const { inputs, command, shown, noInputs } = viewer;
   const generateHeld = heldBack !== null || noInputs;
   const refused = command?.state.kind === "rejected" ? refusedInput(command.field) : null;
+  const readInputs = shown === null ? null : shownInputs(shown.source);
   const drawnShown =
-    shown !== null && shown.inputs !== null && samePlanet(shown.inputs, inputs)
-      ? shown.drawn
-      : null;
+    shown !== null && readInputs !== null && samePlanet(readInputs, inputs) ? shown.drawn : null;
   const refusalOf = (name: NumericInputName): string | null =>
     refused === name && command !== null && command.state.kind === "rejected"
       ? command.state.reason
@@ -336,14 +377,7 @@ export function PlanetInputsPanel({
   const reasonShown = refused === "seed" || (refusedPart !== null && isOpen(refusedPart));
   const generateStatus = outcomeUnder(statusOf("generate"), reasonShown ? refused : null);
   // The galaxy's planet on show, and whether the panel still holds its inputs.
-  const bodyShown =
-    shown !== null && shown.source.kind !== "generated"
-      ? {
-          body: shown.body,
-          multipleStars: shown.source.kind === "body" && shown.source.multipleStars,
-          held: shown.inputs !== null && samePlanet(shown.inputs, inputs),
-        }
-      : null;
+  const bodyShown = shown === null ? null : galaxyBodyShown(shown, inputs);
   const openStatus = statusOf("open");
   // A new command state opens the part its state stands in, once, adjusting state as it renders
   // (React's pattern for state that follows a prop), so that the operator may fold it again.
@@ -429,7 +463,10 @@ export function PlanetInputsPanel({
     </button>
   );
   return (
-    <section className="panel planet-inputs" aria-labelledby={titleId}>
+    <section
+      className={`panel planet-inputs${noInputs ? " planet-inputs--none" : ""}`}
+      aria-labelledby={titleId}
+    >
       <EntryRefusalContext value={refusals}>
         <div className="planet-inputs__parts" onFocus={onFocus} onBlur={onBlur}>
           <div className="planet-inputs__head" data-fold="shown">
@@ -454,7 +491,7 @@ export function PlanetInputsPanel({
               onOpen={viewer.openBody}
             />
           </div>
-          <div className={`planet-inputs__groups${noInputs ? " planet-inputs__groups--none" : ""}`}>
+          <div className="planet-inputs__groups">
             {noInputs ? (
               <p className="planet-inputs__note" id={noInputsId}>
                 <StatusText text={NO_INPUTS_REASON} />

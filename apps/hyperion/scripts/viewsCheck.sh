@@ -121,6 +121,9 @@
 # open in turn and at its tallest, and after the surface's with a server's refusal of SMA (R15.T6's
 # fold), as between-planet-viewer-inputs-<shown|orbit|planet|volatiles|tallest|refused>.png (orbit
 # and planet where the compact layout folds them), and it fails where the column's foot is cut.
+# Last it opens a moon of the galaxy by its ID in BODY, with none of the inputs (R15.T5's follow-up),
+# the first moon in the systems of the real planets RANDOMIZE's draws 1 to 32 give, and captures it
+# from orbit as between-planet-viewer-moon.png.
 # Before the ground's wait it waits, within the draw's, for the server's warm-up, its sky's first
 # reply, and goes on past it: on a cold server the galaxy's tables and the census's first step hold
 # every worker, and a first launch could outwait the ground's wait (R15.T6's finding).

@@ -277,6 +277,6 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   `bad_request` on `body` as no inputs once `system_bodies` says the body is a moon.
 - R15.T5 (built): `ShownSource` gains `{ kind: "moon" }`, `ShownPlanet.inputs` is `null` for it,
   and `PlanetViewer.noInputs` holds `GENERATE` (and `G`) and the bar's `SHARE`/`LOAD` back.
-- R15.T5 (lean, 2026-11-07): with a moon shown, the groups keep their last values, muted and still
-  editable, under `NO INPUTS: A MOON`; an input entered (or a planet shown) ends the hold, and
+- R15.T5 (lean, 2026-11-07): with a moon shown, the groups and `SEED` keep their last values, muted
+  and still editable, under `NO INPUTS: a moon has none, enter one to GENERATE or SHARE`; an input entered (or a planet shown) ends the hold, and
   `RANDOMIZE` and `OPEN BODY` stay offered. `SUN` `HELD` turns the stars about the moon alone.

@@ -258,6 +258,12 @@ async function answerOpen(socket: FakeWebSocket, multipleStars = false): Promise
   await settle();
 }
 
+/**
+ * `NO INPUTS`' line as a description, its state and sentence in their own parts, which jsdom's
+ * accessible name joins with no space between.
+ */
+const NO_INPUTS_DESCRIPTION = /^NO INPUTS: ?a moon has none, enter one to GENERATE or SHARE$/u;
+
 /** Refuses the pending `viewer_inputs` as the server refuses a body that is no planet. */
 async function refuseAsNoPlanet(socket: FakeWebSocket): Promise<void> {
   const [asked] = socket.requestsOfKind("viewer_inputs");
@@ -696,7 +702,7 @@ describe("nextDrawSeed", () => {
       expect([
         screen.queryByText(/NO PLANET/u),
         screen.queryByText(/OPEN BODY REJECTED/u),
-        wholeText("NO INPUTS: A MOON").length,
+        wholeText("NO INPUTS: a moon has none, enter one to GENERATE or SHARE").length,
       ]).toEqual([null, null, 1]);
     });
 
@@ -714,7 +720,7 @@ describe("nextDrawSeed", () => {
         generate.getAttribute("aria-disabled"),
         socket.requestsOfKind("viewer_planet").length,
       ]).toEqual(["true", 0]);
-      expect(generate).toHaveAccessibleDescription("NO INPUTS: A MOON");
+      expect(generate).toHaveAccessibleDescription(NO_INPUTS_DESCRIPTION);
     });
 
     it("holds SHARE and its LOAD back, saying why", async () => {
@@ -725,7 +731,7 @@ describe("nextDrawSeed", () => {
         "true",
         "true",
       ]);
-      expect(load).toHaveAccessibleDescription("NO INPUTS: A MOON");
+      expect(load).toHaveAccessibleDescription(NO_INPUTS_DESCRIPTION);
     });
 
     it("still offers RANDOMIZE", async () => {
@@ -763,6 +769,65 @@ describe("nextDrawSeed", () => {
         screen.queryByText(/NO INPUTS/u),
         socket.requestsOfKind("viewer_planet").length,
       ]).toEqual([null, 1]);
+    });
+
+    it("refuses LOAD while SHARE is held back, the panel's inputs kept", async () => {
+      const { user } = await handOverMoon();
+      await user.click(screen.getByRole("button", { name: "LOAD" }));
+      expect(screen.getByRole("textbox", { name: "SMA" })).toHaveProperty("value", "1");
+    });
+
+    it("offers SHARE again once an input is entered", async () => {
+      const { user } = await handOverMoon();
+      const sma = screen.getByRole("textbox", { name: "SMA" });
+      await user.clear(sma);
+      await user.type(sma, "2{Enter}");
+      expect([
+        screen.getByRole("textbox", { name: "SHARE" }).getAttribute("readonly"),
+        screen.getByRole("button", { name: "LOAD" }).getAttribute("aria-disabled"),
+      ]).toEqual([null, null]);
+    });
+
+    it("gives the panel the drawn inputs of a RANDOMIZE whose planet is refused", async () => {
+      const { socket, user } = await handOverMoon();
+      await user.click(screen.getByRole("button", { name: "N RANDOMIZE" }));
+      await act(async () => {
+        socket.serverAnswers("viewer_randomize", () => ({
+          kind: "viewer_randomize",
+          universe: aUniverse().id,
+          draw_seed: "0000000000000001",
+          inputs: toInputsDto(DEFAULT_INPUTS),
+          source: FIXTURE_EARTH,
+        }));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const [asked] = socket.requestsOfKind("viewer_planet");
+      await act(async () => {
+        if (asked !== undefined) {
+          socket.serverRejects(asked.id, { code: "internal", message: "failed", field: null });
+        }
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect([
+        screen.queryByText(/NO INPUTS/u),
+        screen.getByRole("button", { name: "G GENERATE" }).getAttribute("aria-disabled"),
+      ]).toEqual([null, null]);
+    });
+
+    it("keeps an input entered while it opens, offering GENERATE once it is shown", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, FIXTURE_MOON);
+      await refuseAsNoPlanet(socket);
+      const sma = screen.getByRole("textbox", { name: "SMA" });
+      await user.clear(sma);
+      await user.type(sma, "2{Enter}");
+      await answerSystem(socket, populatedBodies());
+      expect([
+        screen.queryByText(/OPEN BODY PENDING/u),
+        screen.queryByText(/NO INPUTS/u),
+        screen.getByRole("button", { name: "G GENERATE" }).getAttribute("aria-disabled"),
+      ]).toEqual([null, null, null]);
     });
 
     it("opens in VIEW's ORBIT camera about the moon", async () => {

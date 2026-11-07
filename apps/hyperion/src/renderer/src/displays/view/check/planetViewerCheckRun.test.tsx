@@ -1,6 +1,8 @@
 import { RequestClient } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
+import { FIXTURE_MOON } from "../../../test/inspectionFixture";
+import { populatedBodies, sliceBodies } from "../../../test/planetaryFixture";
 import type { FrameSubmission } from "../../../view/engine/types";
 import {
   consoleOverflowPx,
@@ -10,6 +12,7 @@ import {
   runPlanetViewerCheck,
   PrimaryDraws,
   elevationM,
+  firstMoon,
   goalAltitudeM,
   inputsCutPx,
   recordPlanetViewerCheck,
@@ -46,6 +49,12 @@ function box(top: number, bottom: number): Pick<Element, "getBoundingClientRect"
       DOMRect.fromRect({ x: 0, y: top, width: 416, height: bottom - top }),
   };
 }
+
+describe("the planet viewer run's moon (R15.T5's follow-up)", () => {
+  it("takes the first moon present in a system's bodies, and none from a system with none", () => {
+    expect([firstMoon(populatedBodies()), firstMoon(sliceBodies())]).toEqual([FIXTURE_MOON, null]);
+  });
+});
 
 describe("the planet viewer run's wait for the server's warm-up", () => {
   it("reads the sky unanswered while its STARS line reads PENDING", () => {

@@ -33,7 +33,7 @@ export interface PlanetViewerBarProps {
   readonly command: ViewerCommand | null;
   /** Whether the viewer holds no inputs (a moon on show), which holds `SHARE` back. */
   readonly noInputs: boolean;
-  /** The ID of the panel's words saying so (`NO INPUTS: A MOON`), which `SHARE` cites. */
+  /** The ID of the panel's words saying so (`NO INPUTS: …`), which `SHARE` cites. */
   readonly noInputsId: string;
 }
 
@@ -106,7 +106,13 @@ export function PlanetViewerBar({
           <RequestStatus state={status} id={statusId} subject="RANDOMIZE" />
         )}
       </div>
-      <ShareField inputs={inputs} onLoad={onLoad} heldId={noInputs ? noInputsId : null} />
+      <ShareField
+        // A new state on each hold, so that what was typed before it does not come back after it.
+        key={noInputs ? "held" : "offered"}
+        inputs={inputs}
+        onLoad={onLoad}
+        heldId={noInputs ? noInputsId : null}
+      />
       {heldBack === null ? null : (
         <p className="planet-viewer__held" id={heldBackId}>
           <StatusText text={`NOT AVAILABLE: ${heldBack}`} />

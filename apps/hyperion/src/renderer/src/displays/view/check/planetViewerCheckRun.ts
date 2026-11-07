@@ -33,6 +33,11 @@
  * 6. Last, `SMA` is moved inside the star and `GENERATE` pressed, which the server refuses, so that
  *    `SMA`'s reason stands under its field and `GENERATE`'s outcome names it, and with `SUN` `HELD`
  *    and `LATITUDE`'s entry refused the column is captured as `planet-viewer-inputs-refused`.
+ * 7. Then a moon of the galaxy (R15.T5's follow-up): the first of the real planets `viewer_randomize`
+ *    draws, from draw seed 1, at most {@link MOON_SEARCH_DRAWS}, whose system holds a moon present
+ *    at the epoch gives it ({@link firstMoon}). With `SUN` `ORBITAL` again its ID is entered in
+ *    `BODY`, and once the panel holds `GENERATE` back with `NO INPUTS` the moon is captured
+ *    from orbit as `planet-viewer-moon`.
  *
  * Each capture is taken twice: of the whole tab, and with `MAXIMIZE VIEW` on (`-maximized`), its
  * label block and panels hidden, so that the planet fills the view.
@@ -50,13 +55,21 @@
  * `LIGHTING: NOT RECEIVED`, where a capture's frames drew no lit body larger than a point, where the
  * planet's ground is not modelled, or where it is stopped (`STOPPED`).
  */
-import type { RequestClient, UniverseInfo } from "@hyperion/protocol";
+import {
+  type BodyIdHex,
+  parseBodyId,
+  type RequestClient,
+  type ResponseFor,
+  type UniverseIdHex,
+  type UniverseInfo,
+} from "@hyperion/protocol";
 
 import type { ViewsCheckApi } from "../../../../../preload/api";
 import { ATMOSPHERE_STATEMENTS } from "../../../view/atmosphere/labels";
 import { ORBIT_FLOOR_M, ORBIT_ZOOM_FACTOR } from "../../../view/camera/orbit";
 import { SKY_PENDING } from "../../../view/sky/label";
-import { GENERATE_KEY } from "../../planet/PlanetInputsPanel";
+import { toBodiesRequest } from "../../../lib/system/bodiesWire";
+import { GENERATE_KEY, NO_INPUTS_REASON } from "../../planet/PlanetInputsPanel";
 import { RANDOMIZE_KEY } from "../../planet/PlanetViewerBar";
 import { type WhiteBalance, whiteBalanceName } from "../../../view/post/whiteBalance";
 import { MISSING_READING as MISSING, WHITE_BALANCE_LABEL } from "../viewRun";
@@ -139,7 +152,22 @@ export const PLANET_VIEWER_CAPTURES = [
   "planet-viewer-low-orbit",
   "planet-viewer-surface",
   "planet-viewer-floor",
+  "planet-viewer-moon",
 ] as const;
+
+/** The most real planets the run draws seeking a system that holds a moon. */
+export const MOON_SEARCH_DRAWS = 32;
+
+/**
+ * The first moon present at the epoch in `answer`'s system, by its ID, or `null` where it holds
+ * none.
+ */
+export function firstMoon(answer: ResponseFor<"system_bodies">): BodyIdHex | null {
+  const moon = answer.bodies.find(
+    (body) => body.kind.type === "moon" && body.state.type === "present",
+  );
+  return moon?.id ?? null;
+}
 
 /**
  * The `INPUTS` column's captures (R15.T6's fold), of the whole tab, in the order the run takes
@@ -910,7 +938,81 @@ async function viewPlanet(
     () => inputsField("LATITUDE")?.getAttribute("aria-invalid") === "true",
   );
   await captureInputs("planet-viewer-inputs-refused", "with a server's refusal under SMA");
+
+  // 7. A moon of the galaxy, opened by its ID with none of the inputs, captured from orbit.
+  const moon = await moonOf(deps.requests, universe.id, stopped);
+  await setSunHeld(false);
+  await setPartOpen("SHOWN", true);
+  entered("BODY", moon);
+  const generateHeld = (): boolean =>
+    generate()?.getAttribute("aria-disabled") === "true" &&
+    [...document.querySelectorAll(".planet-inputs__note")].some(
+      (note) => note.textContent === NO_INPUTS_REASON,
+    );
+  await drawn.until(`the moon ${moon} was not shown with NO INPUTS`, generateHeld);
+  await setPartOpen("SHOWN", false);
+  await drawn.until(
+    "the moon was not drawn photorealistic",
+    () => controls.styleOf(PRIMARY_NAME) === "photorealistic",
+  );
+  await drawn.until(
+    "the moon's lighting and atmosphere stayed pending",
+    () =>
+      inspectionLighting(plate().statements) !== "pending" &&
+      !plate().statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
+  );
+  await capture("planet-viewer-moon", `the moon ${moon} from orbit`, "required");
   return taken;
+}
+
+/**
+ * The first moon of the real planets' systems `viewer_randomize` draws in `universe` from draw seed
+ * 1 (the module's remarks, step 7).
+ *
+ * @throws Error where a request is refused, or no moon is found in {@link MOON_SEARCH_DRAWS} draws.
+ */
+async function moonOf(
+  requests: Pick<RequestClient, "request">,
+  universe: UniverseIdHex,
+  stopped: () => void,
+): Promise<BodyIdHex> {
+  const searched = new Set<string>();
+  for (let draw = 1; draw <= MOON_SEARCH_DRAWS; draw += 1) {
+    stopped();
+    const drawSeed = draw.toString(16).padStart(16, "0");
+    // One after another: each draw's system is read before the next is drawn.
+    // oxlint-disable-next-line no-await-in-loop
+    const drawn = await requests.request({
+      kind: "viewer_randomize",
+      universe,
+      draw_seed: drawSeed,
+    }).outcome;
+    if (!drawn.ok) {
+      throw new Error(`views check: viewer_randomize was refused: ${drawn.error.message}`);
+    }
+    const { system } = parseBodyId(drawn.response.source);
+    if (searched.has(system)) {
+      continue;
+    }
+    searched.add(system);
+    // The draw's system read before the next draw, which a moon found makes needless.
+    // oxlint-disable-next-line no-await-in-loop
+    const bodies = await requests.request(
+      toBodiesRequest(universe, system, { seconds: 0, nanos: 0 }),
+    ).outcome;
+    if (!bodies.ok) {
+      throw new Error(
+        `views check: system_bodies of ${system} was refused: ${bodies.error.message}`,
+      );
+    }
+    const moon = firstMoon(bodies.response);
+    if (moon !== null) {
+      return moon;
+    }
+  }
+  throw new Error(
+    `views check: no moon in the systems of ${String(MOON_SEARCH_DRAWS)} real planets drawn`,
+  );
 }
 
 /** What {@link recordPlanetViewerCheck} asks of the main process. */
