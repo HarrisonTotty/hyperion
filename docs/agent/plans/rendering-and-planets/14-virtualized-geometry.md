@@ -2832,3 +2832,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   sides counted as occlusion's and shading's: 56 runs in all. The batch's server takes
   `--sky-qos utility` (research-next-work-40), so that the warm-ups' skies finish on macOS's
   performance cores; its kept skies persist under its `--data-dir`.
+- (fix-inspection-timing-record) `InspectionProfiler.measure` reads `window`, `passTimes`,
+  `memoryTraffic` and `atmosphereReads` in one synchronous step before the census's wait, so a
+  window's passes and `gpuMs` are always over the same frames.
+- `readInspectionTimingRecord` drops a window whose passes' times are not as many as its `gpuMs`
+  alone, with a `console.warn` naming it and both counts; the record's other windows are written.
