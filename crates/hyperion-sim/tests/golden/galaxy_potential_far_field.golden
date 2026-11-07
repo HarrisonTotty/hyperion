@@ -1,4 +1,4 @@
-# generator_version = 29
+# generator_version = 30
 force(300000, 1000).radial = 0x3fbb0f3458ca8afb  # 0.10570075195077415
 force(300000, 1000).vertical = 0x3f371e049a13292c  # 0.00035274135923359334
 potential(300000, 1000) = 0xc0eee8c74545e6e1  # -63302.22720618337

@@ -1,4 +1,4 @@
-# generator_version = 29
+# generator_version = 30
 mass node 0 [Fe/H] -2.301 age bin 0 = 0x3fea9dcf0e5c4677  # 0.831763771102671
   core false collapsed false
 mass node 0 [Fe/H] -2.301 age bin 13 = 0x3fea9dcf0e5c4677  # 0.831763771102671
@@ -2187,8 +2187,8 @@ query 221: 64.075277 + 0.094703 M☉, periastron 8.248586e4 R☉, age 2.268876e5
 query 221: M_V = 0x40248a3d70a3d70a  # 10.27
 query 222: 4.374000 + 4.274235 M☉, periastron 1.927538e4 R☉, age 3.132349e7 yr, [Fe/H] -0.2276: Some(Detached)
 query 223: 1.407309 + 0.672974 M☉, periastron 5.813949e4 R☉, age 1.635327e9 yr, [Fe/H] 0.1553: Some(Detached)
-query 224: 6.845738 + 0.457280 M☉, periastron 1.270317e1 R☉, age 4.982650e9 yr, [Fe/H] -2.2898: Some(Bright(Magnitudes(-7.85)))
-query 224: M_V = 0xc01f666666666666  # -7.85
+query 224: 6.845738 + 0.457280 M☉, periastron 1.270317e1 R☉, age 4.982650e9 yr, [Fe/H] -2.2898: Some(Bright(Magnitudes(-7.84)))
+query 224: M_V = 0xc01f5c28f5c28f5c  # -7.84
 query 225: 0.404725 + 0.184308 M☉, periastron 2.414066e3 R☉, age 1.244577e5 yr, [Fe/H] -1.3231: Some(Detached)
 query 226: 0.698164 + 0.171973 M☉, periastron 4.733004e3 R☉, age 2.780411e8 yr, [Fe/H] -1.8640: Some(Detached)
 query 227: 0.315963 + 0.117925 M☉, periastron 5.579291e4 R☉, age 2.090816e7 yr, [Fe/H] -1.0980: Some(Detached)
@@ -2224,8 +2224,8 @@ query 249: M_V = 0xbff851eb851eb852  # -1.52
 query 250: 5.549344 + 0.927086 M☉, periastron 1.772167e2 R☉, age 3.071662e5 yr, [Fe/H] -0.2960: Some(Detached)
 query 251: 27.775283 + 2.202185 M☉, periastron 2.053551e0 R☉, age 1.165707e7 yr, [Fe/H] -1.9220: Some(Bright(Magnitudes(-10.67)))
 query 251: M_V = 0xc025570a3d70a3d7  # -10.67
-query 252: 5.011844 + 0.092866 M☉, periastron 1.491774e3 R☉, age 3.051165e9 yr, [Fe/H] -1.4279: Some(Bright(Magnitudes(-7.88)))
-query 252: M_V = 0xc01f851eb851eb85  # -7.88
+query 252: 5.011844 + 0.092866 M☉, periastron 1.491774e3 R☉, age 3.051165e9 yr, [Fe/H] -1.4279: Some(Bright(Magnitudes(-6.7)))
+query 252: M_V = 0xc01acccccccccccd  # -6.7
 query 253: 3.414015 + 2.120792 M☉, periastron 6.199871e0 R☉, age 2.700768e5 yr, [Fe/H] -1.5082: Some(Unchanged)
 query 254: 102.423598 + 26.818198 M☉, periastron 7.765156e1 R☉, age 1.295532e7 yr, [Fe/H] -0.3697: Some(Bright(Magnitudes(-10.73)))
 query 254: M_V = 0xc02575c28f5c28f6  # -10.73

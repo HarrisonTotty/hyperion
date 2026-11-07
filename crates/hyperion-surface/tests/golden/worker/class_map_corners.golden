@@ -1,4 +1,4 @@
-# generator_version = 29
+# generator_version = 30
 world earth_coast: level 8, corners 3 texels 1 refined complete true
 fine 1 cells 1111111111111111 corners 0000ff/- 01fe00/- 05fa00/- 03fc00/- 04fb00/- 0000ff/- 01fe00/- 04fb00/- 03fc00/- 05fa00/- 0000ff/- 01fe00/- 03fc00/- 03fc00/- 07f800/- 0000ff/- 01fe00/- 03fc00/- 03fc00/- 09f600/- - - - - -
 world two_crusts: level 7, corners 3 texels 3 refined complete true

@@ -1,4 +1,4 @@
-# generator_version = 29
+# generator_version = 30
 # milky_way, seed 0
 milky_way.point[0].layer_A = 0x40275328dbc3a688  # 11.66242110026657
 milky_way.point[0].layer_B = 0x40007c51488a23d0  # 2.060701910701461

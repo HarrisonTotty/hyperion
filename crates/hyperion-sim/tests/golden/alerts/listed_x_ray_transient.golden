@@ -1,6 +1,6 @@
-# generator_version = 29
+# generator_version = 30
 XrayTransient Some(ClassId(5)) Onset in XRay
 event e6c5e00070000015.0000:0302000000000200
 host = 0xe6c5e00070000015
 arrival -3231777811 s 95219800 ns
-flux = 0x3f80264e3bf2e70f  # 0.007885562138074257
+flux = 0x3f8031aa3a94f607  # 0.007907228386666366

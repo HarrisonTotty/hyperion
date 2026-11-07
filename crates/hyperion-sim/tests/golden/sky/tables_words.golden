@@ -1,8 +1,8 @@
-# generator_version = 29
+# generator_version = 30
 the fixture's luminosity tables and features' gas index by their words, each value's IEEE 754 bits, each list's length and no capacity: FNV-1a 64 over each word's eight little-endian bytes
 tables.format = 1
 tables.words = 8583636
-tables.digest = 0x8a266d83028f5c73
+tables.digest = 0x46d4636d3342b909
 index.format = 1
 index.words = 6144619
 index.digest = 0x18a21a377f37141f

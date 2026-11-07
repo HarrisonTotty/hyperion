@@ -1,4 +1,4 @@
-# generator_version = 29
+# generator_version = 30
 Jupiter protosolar enrichment = 0x4005332f4d01b257  # 2.649992562879827
 Jupiter protosolar ice_line_factor = 0x3ff9249249249249  # 1.5714285714285714
 Jupiter protosolar helium_depletion = 0x3fe8e33174ea46c6  # 0.7777335437296748

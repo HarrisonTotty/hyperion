@@ -1,4 +1,4 @@
-# generator_version = 29
+# generator_version = 30
 # P14.T52.d's visible atmospheres (hyperion_sim::planetary::hooks::envelope_atmosphere):
 # the Solar System table's four giants (protosolar host, this module's T_int, adopted grey
 # profile, starlit), a KELT-9b-like dayside (f 1/2) and an 8 M_E sub-Neptune. Per body: its

@@ -1,4 +1,4 @@
-# generator_version = 29
+# generator_version = 30
 near the Sun (0, 26,000, 68) ly at the epoch, cut V 7, every cap forced to 130 ly
   cells = 27274
   shells = 9
@@ -25,7 +25,7 @@ the tallies, each layer's
   D generated = 1207
   D accepted = 134
   D listed = 134
-  D without photometry = 34
+  D without photometry = 31
   D centre members = 0
   E cells = 22
   E generated = 305
@@ -528,6 +528,7 @@ the listed stars, in the census's order: ID/star layer = V's bits, V to 10⁻⁶
   0x42006caa00c00005/0 C = 0x401638155b6618e7 V 5.554769 first
   0x4200acadff800008/1 C = 0x401638652e07d3e8 V 5.555073 later
   0x42006cae00000005/0 C = 0x40163c43c8b4cbca V 5.558852 first
+  0x6200596800000002/3 D = 0x40163e306baad687 V 5.560732 first
   0x42006cbe01000007/0 C = 0x40163ea726af7d72 V 5.561185 later
   0x41ffecbe00000007/0 C = 0x4016403592831e35 V 5.562704 first
   0x41ffecb1ff800000/0 C = 0x401642a1a3645b5e V 5.565070 first
@@ -1156,7 +1157,6 @@ the listed stars, in the census's order: ID/star layer = V's bits, V to 10⁻⁶
   0x42002caa00000005/1 C = 0x401b430f9459b6cf V 6.815489 first
   0x42002cba00400007/0 C = 0x401b43ea2e91d03f V 6.816323 first
   0x41ff2cbe0000000c/0 C = 0x401b447d4b7ce867 V 6.816884 later
-  0x61ffd94802000000/2 D = 0x401b447dd919a9b3 V 6.816886 first
   0x41ffacbdffc0000b/0 C = 0x401b45bcd5547d29 V 6.818103 later
   0x42006cae01800004/0 C = 0x401b46be486d5bfa V 6.819085 later
   0x42006cb200000005/1 C = 0x401b472e73ea35f7 V 6.819513 first

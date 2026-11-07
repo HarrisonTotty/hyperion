@@ -1,4 +1,4 @@
-# generator_version = 29
+# generator_version = 30
 world moon_like
 body
 radius = 0x413a82b800000000  # 1737400.0
