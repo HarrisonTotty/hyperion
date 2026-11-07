@@ -1836,6 +1836,48 @@ function timingFirstFrame(value: unknown): InspectionTimingFirstFrame | null {
 }
 
 /**
+ * Why `value` is not the inspection run's timing record ({@link readInspectionTimingRecord}), for
+ * the refusal to say: its first part that is not as the record takes it, a window or a long task
+ * by its index; `null` where it is one.
+ *
+ * @remarks
+ * A refused record writes no file, so a run of hours that its last call refuses names what to fix
+ * (lane perf-page-long-tasks: two runs of 2.5 h were lost to an unnamed refusal).
+ */
+export function inspectionTimingRecordProblem(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return "it is not an object";
+  }
+  const { timer, devicePixelRatio, windows } = value;
+  if (timer !== "full" && timer !== "quantized" && timer !== "absent") {
+    return `its pass timer is ${String(timer)}`;
+  }
+  if (!isFiniteNumber(devicePixelRatio) || !(devicePixelRatio > 0)) {
+    return `its device-pixel ratio is ${String(devicePixelRatio)}`;
+  }
+  if (!Array.isArray(windows)) {
+    return "it holds no windows";
+  }
+  const window = windows.findIndex((each: unknown) => timingWindow(each) === null);
+  if (window >= 0) {
+    const name: unknown = isRecord(windows[window]) ? windows[window]["name"] : undefined;
+    return `window ${String(window)} (${typeof name === "string" ? name.slice(0, 16) : "unnamed"}) is not one`;
+  }
+  if (readInspectionTimingRecord(value) !== null) {
+    return null;
+  }
+  const tasks = value["longTasks"];
+  const list: unknown = isRecord(tasks) ? tasks["tasks"] : undefined;
+  const task = Array.isArray(list)
+    ? list.findIndex((each: unknown) => longTask(each) === null)
+    : -1;
+  if (task >= 0) {
+    return `long task ${String(task)} is not one: ${JSON.stringify(Array.isArray(list) ? list[task] : null).slice(0, 160)}`;
+  }
+  return "a window stands twice, its long tasks' span or order is not one, or its engine's time, compiles or first frames are not";
+}
+
+/**
  * `value` as the inspection run's frame profile's record (the owner's report, 2026-11-01), or
  * `null` if it is not one: each window at most once, the run's long tasks or `null`, its
  * compiles, and its first frames, each kind at most once. A window whose passes' times are not as

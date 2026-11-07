@@ -24,7 +24,7 @@ import {
 } from "./inspectionTiming";
 import { measured } from "./measured";
 import { longTaskFunctions, type PageProfile } from "./pageProfile";
-import { readInspectionTimingRecord } from "./viewsCheckRecord";
+import { inspectionTimingRecordProblem, readInspectionTimingRecord } from "./viewsCheckRecord";
 
 /** The renderer's main thread and a worker of its process, and the GPU process's main thread. */
 function named(scan: ProfileScan): ProfileScan {
@@ -841,6 +841,28 @@ describe("the frame profile's timing file (the owner's report)", () => {
       false,
       false,
       false,
+    ]);
+  });
+
+  it("names what a refused record holds that is not as the record takes it (lane perf-page-long-tasks)", () => {
+    const [window] = RECORD.windows;
+    if (window === undefined) {
+      throw new Error("the record holds a window");
+    }
+    const task = { startMs: 100, durationMs: 51, renderMs: -0.4 };
+    const tasks = { observed: { longtask: true, longAnimationFrame: true }, fromMs: 0, toMs: 9 };
+    expect([
+      inspectionTimingRecordProblem(RECORD),
+      inspectionTimingRecordProblem({ ...RECORD, timer: "sometimes" }),
+      inspectionTimingRecordProblem({ ...RECORD, windows: [{ ...window, endMs: "late" }] }),
+      inspectionTimingRecordProblem({ ...RECORD, longTasks: { ...tasks, tasks: [task] } }),
+      inspectionTimingRecordProblem({ ...RECORD, windows: [window, window] }),
+    ]).toEqual([
+      null,
+      "its pass timer is sometimes",
+      "window 0 (close) is not one",
+      'long task 0 is not one: {"startMs":100,"durationMs":51,"renderMs":-0.4}',
+      "a window stands twice, its long tasks' span or order is not one, or its engine's time, compiles or first frames are not",
     ]);
   });
 

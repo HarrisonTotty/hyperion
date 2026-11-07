@@ -104,6 +104,7 @@ import {
   isCaptureLabel,
   readAtmosphereCheckRecord,
   readHandoverCheckRecord,
+  inspectionTimingRecordProblem,
   readInspectionTimingRecord,
   readTerrainCheckRecord,
   readTerrainPhaseUpdate,
@@ -1264,8 +1265,11 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
   guarded(VIEWS_CHECK_CHANNELS.writeTimingResults, async ([value]) => {
     const record = profiles ? readInspectionTimingRecord(value) : null;
     if (record === null) {
+      const problem = profiles
+        ? inspectionTimingRecordProblem(value)
+        : "the launch profiles nothing";
       throw new ViewsCheckCallRefused(
-        `${VIEWS_CHECK_CHANNELS.writeTimingResults} refused: not the inspection run's timing record`,
+        `${VIEWS_CHECK_CHANNELS.writeTimingResults} refused: not the inspection run's timing record (${problem ?? "unknown"})`,
       );
     }
     return deps.session.writeTimingResults(record);

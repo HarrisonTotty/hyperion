@@ -53,6 +53,12 @@ describe("the page's long tasks (lane perf-page-long-tasks)", () => {
     expect(task.renderMs).toBe(durationMs);
   });
 
+  it("never gives a task less than no rendering, where its frame's whole-millisecond end falls before its rendering's start", () => {
+    // A frame of 100 to 150 ms, its 50.4 ms rounded down, rendering from 150.4 ms.
+    const task = longTaskOf(100, 51, [{ startMs: 100, endMs: 150, renderStartMs: 150.4 }]);
+    expect(task.renderMs).toBe(0);
+  });
+
   it("records each long task with its frame's rendering, from its start, in order, and stops", () => {
     let nowMs = 1_000;
     const { source, emit, observing } = fakeSource(["longtask", "long-animation-frame"]);

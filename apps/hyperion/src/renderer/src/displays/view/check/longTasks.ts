@@ -100,12 +100,13 @@ export function longTaskOf(
       each.renderStartMs < endMs &&
       each.startMs < endMs,
   );
-  // Held to the task's length, which `endMs − renderStartMs` passes by an ulp where the rendering
-  // starts with the task: the main process refuses a task rendered longer than it lasted.
+  // Held within the task's length, which `endMs − renderStartMs` passes by an ulp where the
+  // rendering starts with the task, and above 0, which a frame's end, its duration coarsened to whole
+  // milliseconds, can fall under: the main process refuses a task's rendering outside them.
   const renderMs =
     frame === undefined || frame.renderStartMs === null
       ? 0
-      : Math.min(durationMs, Math.min(frame.endMs, endMs) - frame.renderStartMs);
+      : Math.min(durationMs, Math.max(0, Math.min(frame.endMs, endMs) - frame.renderStartMs));
   return { startMs, durationMs, renderMs };
 }
 
