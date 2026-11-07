@@ -134,7 +134,15 @@ describe("the preload's views-check functions", () => {
       ),
     );
     const api = viewsCheckApi(LAUNCH, { invoke });
-    const record = { timer: "absent", devicePixelRatio: 1, windows: [], longTasks: null } as const;
+    const record = {
+      timer: "absent",
+      devicePixelRatio: 1,
+      windows: [],
+      longTasks: null,
+      engineAtMs: null,
+      compiles: [],
+      firstFrames: [],
+    } as const;
     await api.startProfile("orbit");
     await api.endProfile("orbit", { startMs: 1, endMs: 2 });
     expect(await api.writeTimingResults(record)).toEqual({ json: "a", markdown: "b" });
@@ -153,6 +161,9 @@ describe("the preload's views-check functions", () => {
         devicePixelRatio: 1,
         windows: [],
         longTasks: null,
+        engineAtMs: null,
+        compiles: [],
+        firstFrames: [],
       }),
     ).rejects.toThrow("the main process wrote no timing file");
   });

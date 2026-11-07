@@ -865,6 +865,12 @@ export interface RenderEngine {
   /** Every creation, destruction and upload, with its byte size and category. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
   /**
+   * Every asynchronous pipeline compile the device's budget ran (`webgpu/compileBudget.ts`), as it
+   * settles: an inspection profile's create-to-ready times (plan R08, fix-r08-decked-air-route).
+   * `ResilientEngine` reports the current engine's, a restored device's among them.
+   */
+  onCompile(listener: (event: CompileEvent) => void): () => void;
+  /**
    * Every fault, as it happens. The engine `loadRenderEngine` returns has already told the status
    * store of a lost device; a listener does not dispatch it again.
    */
@@ -889,6 +895,26 @@ export interface RenderEngine {
  * from 1, or `unlimited`, each asked at once, as before the budget.
  */
 export type CompileBudgetSize = number | "unlimited";
+
+/**
+ * Where a compile waits in the device's budget: `draw`, a pipeline a draw is waiting for now, ahead
+ * of every other; `ahead`, one made ahead of its first draw, in the order asked.
+ */
+export type CompileLane = "draw" | "ahead";
+
+/**
+ * One asynchronous pipeline compile the device's budget ran, as it settled
+ * ({@link RenderEngine.onCompile}; plan R08, fix-r08-decked-air-route).
+ */
+export interface CompileEvent {
+  /** The pipeline's owner: its kernel's, material's, post pass's or splat's name. */
+  readonly name: string;
+  readonly lane: CompileLane;
+  /** Its wait for a place in the budget, from its asking to its create call, ms. */
+  readonly waitedMs: number;
+  /** From its create call to its pipeline's being ready, or its failure, wall-clock ms. */
+  readonly ms: number;
+}
 
 /** The WebGPU module's one export, `createWebGpuEngine`, which only `loadEngine.ts` imports. */
 export type CreateWebGpuEngine = (

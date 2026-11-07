@@ -8,6 +8,7 @@ import type {
   RenderEngine,
   TextureHandle,
 } from "../../../view/engine/types";
+import { fakeViewEngineSource } from "../../../test/fakeViewEngine";
 import { timedEngineSource } from "../../../test/viewDisplayHarness";
 import {
   AERIAL_PERSPECTIVE_THICK_KERNEL,
@@ -305,6 +306,88 @@ describe("the views probe", () => {
       destroyed: { count: 1, bytes: 64 },
       uploads: [{ name: "view star sprites", count: 2, bytes: 96 }],
     });
+  });
+
+  it("times each pipeline compile as it settles, and when the engine was made (R08)", async () => {
+    const { probe, page, timed } = await probed();
+    page.nowMs = 250;
+    timed.engines[0]?.reportCompile({
+      name: RAY_MARCH_THICK_TABLE_KERNEL.name,
+      lane: "ahead",
+      waitedMs: 40,
+      ms: 200,
+    });
+    page.nowMs = 300;
+    timed.engines[0]?.reportCompile({ name: "terrain lit", lane: "draw", waitedMs: 0, ms: 20 });
+    expect([probe.engineAtMs(), probe.compiles()]).toEqual([
+      0,
+      [
+        {
+          name: RAY_MARCH_THICK_TABLE_KERNEL.name,
+          lane: "ahead",
+          readyAtMs: 250,
+          waitedMs: 40,
+          ms: 200,
+        },
+        { name: "terrain lit", lane: "draw", readyAtMs: 300, waitedMs: 0, ms: 20 },
+      ],
+    ]);
+  });
+
+  it("gives the primary's first draw and its first with a body's air apart from the frames after them (R08)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const oblate: TextureHandle = { kind: "texture", name: "oblate body" };
+    const withAir = (): void => {
+      primary.render(frame("view:photoreal"));
+      engine.dispatch(
+        { kind: "compute", name: SKY_VIEW_THICK_KERNEL.name, path: "reference" },
+        airBindings(oblate),
+        [1, 1, 1],
+        "atmosphere view",
+      );
+    };
+    expect(probe.firstFrames("view")).toEqual([]);
+    inFrame(page, 100, () => primary.render(frame("view:photoreal")), 5);
+    timed.deliver(() => 4);
+    inFrame(page, 150, withAir, 900);
+    inFrame(page, 1_100, withAir, 30);
+    expect(probe.firstFrames("view")).toEqual([
+      {
+        kind: "drawn",
+        atMs: 100,
+        intervalMs: null,
+        mainThreadMs: 5,
+        submitMs: 0,
+        gpuMs: 4,
+      },
+      {
+        kind: "air",
+        atMs: 150,
+        intervalMs: 50,
+        mainThreadMs: 900,
+        submitMs: 0,
+        gpuMs: null,
+      },
+    ]);
+  });
+
+  it("gives a first frame no GPU time where the engine has no pass timer (R08)", async () => {
+    const plain = fakeViewEngineSource();
+    const page = new FakePage();
+    const probe = new ViewsProbe(plain.source, () => page.nowMs);
+    const outcome = await probe.source.requestAdapter();
+    if (outcome.kind !== "adapter") {
+      throw new Error("the fake gave no adapter");
+    }
+    const engine = await probe.source.load(
+      outcome,
+      new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+    );
+    probe.installFrameClock(page);
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    inFrame(page, 100, () => primary.render(frame("view:photoreal")));
+    expect(probe.firstFrames("view").map((each) => each.gpuMs)).toEqual([null]);
   });
 
   it("counts a resolve that never reports as a drop, and leaves its frame untimed", async () => {

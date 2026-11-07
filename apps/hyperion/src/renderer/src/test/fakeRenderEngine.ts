@@ -14,6 +14,7 @@ import { deviceCapabilities } from "../view/engine/platform";
 import type { GraphicsFault } from "../view/engine/status";
 import type {
   BufferHandle,
+  CompileEvent,
   ComputeHandle,
   CreateWebGpuEngine,
   DepthLayerPass,
@@ -114,6 +115,7 @@ export class FakeRenderEngine implements RenderEngine {
   disposed = false;
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
+  readonly #compileListeners = new Set<(event: CompileEvent) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   readonly #restoredListeners = new Set<() => void>();
   readonly #viewless: boolean;
@@ -172,6 +174,18 @@ export class FakeRenderEngine implements RenderEngine {
     return () => {
       this.#passTimeListeners.delete(listener);
     };
+  }
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    this.#compileListeners.add(listener);
+    return () => {
+      this.#compileListeners.delete(listener);
+    };
+  }
+  /** Reports a settled compile, as the WebGPU engine's budget does. */
+  reportCompile(event: CompileEvent): void {
+    for (const listener of this.#compileListeners) {
+      listener(event);
+    }
   }
   /** Reports an allocation, a release or a write, as the WebGPU engine does as it makes them. */
   reportAllocation(event: AllocationEvent): void {

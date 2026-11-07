@@ -2532,6 +2532,42 @@ export interface InspectionTimingMarchCensus {
   readonly laneRays: number;
 }
 
+/**
+ * One asynchronous pipeline compile over the inspection run, from the device's compile budget
+ * (`compileBudget.ts`; plan R08, fix-r08-decked-air-route): a one-time cost told apart from the
+ * frames'.
+ */
+export interface InspectionTimingCompile {
+  /** The pipeline's owner: its kernel's, material's, post pass's or splat's name. */
+  readonly name: string;
+  /** `draw`, a pipeline a draw was waiting for; `ahead`, one made ahead of its first draw. */
+  readonly lane: "draw" | "ahead";
+  /** When its pipeline was ready, or it failed, on the page's clock (`performance.now()`), ms. */
+  readonly readyAtMs: number;
+  /** Its wait for a place in the budget, ms. */
+  readonly waitedMs: number;
+  /** From its create call to its pipeline's being ready, wall-clock ms. */
+  readonly ms: number;
+}
+
+/**
+ * One of the primary's first frames, apart from the windows' steady frames (plan R08,
+ * fix-r08-decked-air-route): its first draw, or its first that drew a body's air.
+ */
+export interface InspectionTimingFirstFrame {
+  readonly kind: "drawn" | "air";
+  /** The animation frame's timestamp, on the page's clock, ms. */
+  readonly atMs: number;
+  /** From the primary's draw before it, ms, or `null` for its first draw. */
+  readonly intervalMs: number | null;
+  /** The animation frame's callbacks on the main thread, ms. */
+  readonly mainThreadMs: number;
+  /** The primary's renders' encoding and submission in it, ms. */
+  readonly submitMs: number;
+  /** Its GPU time, every view's and target's passes, ms, or `null` where its times never came. */
+  readonly gpuMs: number | null;
+}
+
 /** What the inspection run's renderer reports of its frame profile, for its timing file. */
 export interface InspectionTimingRecord {
   /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
@@ -2544,6 +2580,12 @@ export interface InspectionTimingRecord {
    * recorded.
    */
   readonly longTasks: InspectionLongTasks | null;
+  /** When `VIEW`'s engine was made, on the page's clock, ms, or `null` where none was. */
+  readonly engineAtMs: number | null;
+  /** Every pipeline compile the device's budget ran over the run, in the order they settled. */
+  readonly compiles: ReadonlyArray<InspectionTimingCompile>;
+  /** The primary's first draw, then its first that drew a body's air, where each was drawn. */
+  readonly firstFrames: ReadonlyArray<InspectionTimingFirstFrame>;
 }
 
 /**

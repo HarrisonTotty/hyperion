@@ -716,6 +716,9 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       },
     ],
     longTasks: null,
+    engineAtMs: null,
+    compiles: [],
+    firstFrames: [],
   };
 
   /** A profiled inspection launch's session, its timing files kept. */
@@ -1388,6 +1391,9 @@ describe("the views check's handlers", () => {
       devicePixelRatio: 1,
       windows: [],
       longTasks: null,
+      engineAtMs: null,
+      compiles: [],
+      firstFrames: [],
     });
     expect(calls).toEqual(["start profile orbit", "end profile orbit", "write timing"]);
   });
@@ -1417,6 +1423,9 @@ describe("the views check's handlers", () => {
         devicePixelRatio: 1,
         windows: [],
         longTasks: null,
+        engineAtMs: null,
+        compiles: [],
+        firstFrames: [],
       }),
     ).rejects.toThrow(/timing record/);
     expect(calls).toEqual([]);

@@ -169,7 +169,7 @@ describe("the Mac batch's matrix", () => {
     ]);
   });
 
-  it("pairs a drawn surface's lobes and a decked air's ground, each the setting's way (A) against the way back (B) at DPR 1, uncounted (R08)", () => {
+  it("pairs a drawn surface's lobes and a decked air's ground, each the setting's way (A) against the way back (B) at DPR 1 (R08)", () => {
     const matrix = macProfileMatrix({
       ...DRY_RUN,
       levers: ["decked-air-surface", "surface-lobes"],
@@ -180,6 +180,9 @@ describe("the Mac batch's matrix", () => {
       ["decked-air-surface-low-dpr1-a1", []],
       ["decked-air-surface-low-dpr1-b1", ["--decked-air-surface", "uniform"]],
     ]);
+  });
+
+  it("counts no side of the lobes' or the decked ground's pair, which split no pass (R08)", () => {
     expect(
       macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["surface-lobes", "decked-air-surface"] })
         .filter(isCounted)
@@ -359,6 +362,32 @@ describe("the samples' arithmetic", () => {
   });
 });
 
+/**
+ * `each` with three compiles, the thick march's `longestMs` long, and its first frame with air
+ * `intervalMs` after the draw before it.
+ */
+function compiled(each: KeptRun, longestMs: number, intervalMs: number): KeptRun {
+  return {
+    ...each,
+    timing: {
+      ...each.timing,
+      compiles: {
+        count: 3,
+        totalMs: 200 + longestMs,
+        each: [
+          { name: "terrain lit", ms: 100 },
+          { name: "atmosphere ray march, thick", ms: longestMs },
+          { name: "composite", ms: 100 },
+        ],
+      },
+      firstFrames: [
+        { kind: "drawn", intervalMs: null, sinceEngineMs: 2_000 },
+        { kind: "air", intervalMs, sinceEngineMs: 9_000 },
+      ],
+    },
+  };
+}
+
 describe("a lever's pair", () => {
   const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
   const kept = [
@@ -397,6 +426,35 @@ describe("a lever's pair", () => {
     // A window only one side measured has no delta.
     expect(close?.b.runs).toBe(0);
     expect(close?.deltaMs).toBeNull();
+  });
+
+  it("gives each run's compiles and first frame with air, and each side's medians, apart from its steady frames (R08)", () => {
+    const [a1, b1, a2, b2] = kept;
+    if (a1 === undefined || b1 === undefined || a2 === undefined || b2 === undefined) {
+      throw new Error("the pair keeps four runs");
+    }
+    const lines = macProfileSummaryLines({
+      machine: "pod, 48 vCPU",
+      tree: "e9966e0",
+      body: "42002cae00000004.0300",
+      options: { ...MAC_PROFILE_DEFAULTS, levers: ["march-sources"] },
+      kept: [
+        compiled(a1, 4_000, 3_000),
+        compiled(b1, 6_000, 5_000),
+        compiled(a2, 5_000, 4_000),
+        { ...b2, timing: { ...b2.timing } },
+      ],
+      sweep: { table: null, runs: [] },
+    });
+    expect(lines).toContain(
+      "| march-sources-high-dpr1-a1 | 3 | 4200 | atmosphere ray march, thick 4000 | 2.0 | 9.0 | 3000.0 | orbit 40.0, close 90.0 |",
+    );
+    // A file before version 10 recorded none.
+    expect(lines).toContain(
+      "| march-sources-high-dpr1-b2 | not recorded | — | — | — | — | — | orbit 54.0 |",
+    );
+    expect(lines).toContain("| A | 2 | 3 | 4700 | 4500 | 9.0 | 3500.0 |");
+    expect(lines).toContain("| B | 2 | 3 | 6200 | 6000 | 9.0 | 5000.0 |");
   });
 
   it("has no windows where none of its runs is kept", () => {

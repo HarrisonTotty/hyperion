@@ -70,6 +70,9 @@ export interface InspectionProfileDeps {
     | "timer"
     | "marchCensus"
     | "atmosphereReads"
+    | "engineAtMs"
+    | "compiles"
+    | "firstFrames"
   >;
   /** Marks a window in the trace as a `performance.measure` span. */
   readonly markWindow: (window: ViewsCheckWindow) => void;
@@ -267,13 +270,20 @@ export class InspectionProfiler {
     }
   }
 
-  /** The profile's record of the windows measured. */
+  /**
+   * The profile's record of the windows measured, with the run's pipeline compiles and the
+   * primary's first frames apart from them (plan R08, fix-r08-decked-air-route).
+   */
   record(): InspectionTimingRecord {
+    const { views } = this.#deps;
     return {
-      timer: this.#deps.views.timer(),
+      timer: views.timer(),
       devicePixelRatio: this.#deps.devicePixelRatio,
       windows: this.#windows,
       longTasks: this.#deps.longTasks?.take() ?? null,
+      engineAtMs: views.engineAtMs(),
+      compiles: views.compiles(),
+      firstFrames: views.firstFrames(PRIMARY_VIEW_NAME),
     };
   }
 

@@ -1498,6 +1498,23 @@ describe("the kernel cache (R01.T15)", () => {
     expect(new Set(handles.map((handle) => engine.kernelOf(handle))).size).toBe(1);
   });
 
+  it("tells its compile listeners of a kernel made in the background, by its name, ahead of its first draw (R08)", async () => {
+    const { engine } = await engineOn();
+    const heard: string[] = [];
+    engine.onCompile((event) => heard.push(`${event.name} ${event.lane}`));
+    await engine.createComputeAsync(SCALER);
+    expect(heard).toEqual([`${SCALER.name} ahead`]);
+  });
+
+  it("tells no compile listener once disposed (R08)", async () => {
+    const { engine } = await engineOn();
+    const heard: string[] = [];
+    engine.onCompile((event) => heard.push(event.name));
+    engine.dispose();
+    await engine.compiles.run("after the engine", async () => "pipeline");
+    expect(heard).toEqual([]);
+  });
+
   it("makes a pipeline of its own for a kernel that differs in its name, a source or its readback", async () => {
     const { engine, gpu } = await engineOn();
     engine.createCompute(SCALER);

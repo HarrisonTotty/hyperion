@@ -48,6 +48,7 @@ import { type GpuCapabilities, MAX_TEXTURE_ARRAY_LAYERS } from "../view/engine/p
 import type { GraphicsFault } from "../view/engine/status";
 import type {
   BufferHandle,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
   DepthLayerPass,
@@ -816,6 +817,10 @@ export class CountingRenderEngine implements RenderEngine {
     return () => {
       this.#allocationListeners.delete(listener);
     };
+  }
+
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.inner.onCompile(listener);
   }
 
   onFault(listener: (fault: GraphicsFault) => void): () => void {

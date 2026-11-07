@@ -20,6 +20,8 @@
 import type {
   InspectionAtmosphereRead,
   InspectionAtmosphereReadName,
+  InspectionTimingCompile,
+  InspectionTimingFirstFrame,
   InspectionTimingMemory,
   InspectionTimingPass,
   ViewsCheckCanvas,
@@ -213,6 +215,9 @@ export class ViewsProbe implements EngineProbe {
   readonly #resolves = new Map<string, ResolveEntry>();
   readonly #times = new Map<string, PassTimes>();
   readonly #allocations: TimedAllocation[] = [];
+  readonly #compiles: InspectionTimingCompile[] = [];
+  /** When the first engine was given to `VIEW`, ms, or `null` before it. */
+  #engineAtMs: number | null = null;
   /** Every write, allocation and release with its bytes, for the frame profile's windows. */
   readonly #traffic: TimedTraffic[] = [];
   readonly #faults: string[] = [];
@@ -396,6 +401,58 @@ export class ViewsProbe implements EngineProbe {
       }));
   }
 
+  /** When the first engine was given to `VIEW`, on the probe's clock, ms, or `null` before it. */
+  engineAtMs(): number | null {
+    return this.#engineAtMs;
+  }
+
+  /**
+   * Every pipeline compile the engines' budgets ran so far, in the order they settled, each timed
+   * as it settled (plan R08, fix-r08-decked-air-route; `RenderEngine.onCompile`).
+   */
+  compiles(): ReadonlyArray<InspectionTimingCompile> {
+    return [...this.#compiles];
+  }
+
+  /**
+   * `view`'s first draw, then its first that drew a body's air (plan R08, fix-r08-decked-air-route),
+   * where each was drawn: one-time costs, its compiles and its tables', told apart from the
+   * frames after them.
+   */
+  firstFrames(view: string): ReadonlyArray<InspectionTimingFirstFrame> {
+    const draws = this.#drawsByView.get(view) ?? [];
+    const drewAir = (atMs: number): boolean =>
+      this.#frames
+        .get(atMs)
+        ?.dispatches.some((each) => each.air !== null && atmosphereReadOf(each.kernel) !== null) ===
+      true;
+    const kinds: ReadonlyArray<{
+      readonly kind: InspectionTimingFirstFrame["kind"];
+      readonly at: number;
+    }> = [
+      { kind: "drawn", at: draws.length > 0 ? 0 : -1 },
+      { kind: "air", at: draws.findIndex(drewAir) },
+    ];
+    return kinds.flatMap(({ kind, at }) => {
+      const atMs = draws[at];
+      const frame = atMs === undefined ? undefined : this.#frames.get(atMs);
+      if (atMs === undefined || frame === undefined) {
+        return [];
+      }
+      const before = at > 0 ? draws[at - 1] : undefined;
+      return [
+        {
+          kind,
+          atMs,
+          intervalMs: before === undefined ? null : atMs - before,
+          mainThreadMs: frame.mainMs,
+          submitMs: frame.views.get(view)?.submitMs ?? 0,
+          gpuMs: this.#frameGpuMs(frame),
+        },
+      ];
+    });
+  }
+
   /**
    * The far limb's census of the next march its latest engine dispatches over an area (plan R08,
    * R08.T8.d; {@link ProbedEngine.marchCensus}), or `null` before it has made one; withdrawn as
@@ -552,17 +609,6 @@ export class ViewsProbe implements EngineProbe {
     const frames = [...this.#frames.values()]
       .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
       .toSorted((a, b) => a.atMs - b.atMs);
-    const gpuOf = (keys: ReadonlyArray<string>): number | null => {
-      let ns = 0;
-      for (const key of keys) {
-        const times = this.#times.get(key);
-        if (times === undefined) {
-          return null;
-        }
-        ns += times.passes.reduce((sum, pass) => sum + pass.ns, 0);
-      }
-      return ns / 1e6;
-    };
     const frameGpuMs: number[] = [];
     let untimedFrames = 0;
     const made = new Set<string>();
@@ -574,7 +620,7 @@ export class ViewsProbe implements EngineProbe {
       for (const key of keys) {
         made.add(key);
       }
-      const gpuMs = gpuOf(keys);
+      const gpuMs = this.#gpuMsOf(keys);
       if (gpuMs === null) {
         untimedFrames += 1;
       } else {
@@ -599,7 +645,7 @@ export class ViewsProbe implements EngineProbe {
         canvas: this.canvasOf(view.name),
         draws: drawn.length,
         gpuMs: drawn.flatMap((part) => {
-          const gpuMs = part.resolves.length === 0 ? null : gpuOf(part.resolves);
+          const gpuMs = part.resolves.length === 0 ? null : this.#gpuMsOf(part.resolves);
           return gpuMs === null ? [] : [gpuMs];
         }),
         submitMs: drawn.map((part) => part.submitMs),
@@ -725,6 +771,7 @@ export class ViewsProbe implements EngineProbe {
 
   #attach(engine: RenderEngine): RenderEngine {
     this.#generation += 1;
+    this.#engineAtMs ??= this.#nowMs();
     // Each listener lives as long as its engine, whose disposal drops it.
     engine.onPassTimes((times) => {
       this.#timer = times.timer;
@@ -736,6 +783,15 @@ export class ViewsProbe implements EngineProbe {
       if (event.kind !== "uploaded") {
         this.#allocations.push({ atMs, kind: event.kind, name: event.name });
       }
+    });
+    engine.onCompile((event) => {
+      this.#compiles.push({
+        name: event.name,
+        lane: event.lane,
+        readyAtMs: this.#nowMs(),
+        waitedMs: event.waitedMs,
+        ms: event.ms,
+      });
     });
     engine.onFault((fault) => {
       this.#faults.push(faultLine(fault));
@@ -755,6 +811,28 @@ export class ViewsProbe implements EngineProbe {
     );
     this.#engine = probed;
     return probed;
+  }
+
+  /**
+   * The GPU time of `frame`'s resolves, every view's, ms, or `null` where it took none (no pass
+   * timer) or one has not reported.
+   */
+  #frameGpuMs(frame: FrameEntry): number | null {
+    const keys = [...frame.views.values()].flatMap((part) => part.resolves);
+    return keys.length === 0 ? null : this.#gpuMsOf(keys);
+  }
+
+  /** The GPU time of the resolves `keys`, ms, or `null` while any has not reported. */
+  #gpuMsOf(keys: ReadonlyArray<string>): number | null {
+    let ns = 0;
+    for (const key of keys) {
+      const times = this.#times.get(key);
+      if (times === undefined) {
+        return null;
+      }
+      ns += times.passes.reduce((sum, pass) => sum + pass.ns, 0);
+    }
+    return ns / 1e6;
   }
 
   #key(resolve: number): string {

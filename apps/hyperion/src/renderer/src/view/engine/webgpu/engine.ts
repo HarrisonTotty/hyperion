@@ -32,6 +32,7 @@ import type {
 import type {
   BufferHandle,
   CompileBudgetSize,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
   CreateWebGpuEngine,
@@ -216,7 +217,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     });
     this.#kernels = new KernelCache({
       compile: (pair, spec) => createKernel(device, pair, spec),
-      compileAsync: (pair, spec) => this.compiles.run(() => createKernelAsync(device, pair, spec)),
+      compileAsync: (pair, spec) =>
+        this.compiles.run(pair.name, () => createKernelAsync(device, pair, spec)),
       // A kernel's uniform buffers are bound by its dispatches alone, never by a draw's cached bind
       // group, so the draw path's cache is left as it is, and the dispatches' forgotten.
       destroyBuffer: (buffer) => {
@@ -806,7 +808,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     assertSplatSupported(this.capabilities);
     const { vertex, fragment } = this.#splatModules(spec);
     try {
-      const pipeline = await this.compiles.run(() =>
+      const pipeline = await this.compiles.run(spec.name, () =>
         this.device.createRenderPipelineAsync(pointSplatPipelineDescriptor(spec, vertex, fragment)),
       );
       return this.#splatHandle(spec, pipeline);
@@ -1005,6 +1007,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     };
   }
 
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.compiles.onCompile(listener);
+  }
+
   /** Never fires here: the engine `loadRenderEngine` returns re-creates this one after a loss. */
   onRestored(_listener: () => void): () => void {
     return () => undefined;
@@ -1056,6 +1062,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     this.device.destroy();
     this.#allocationListeners.clear();
     this.#faultListeners.clear();
+    this.compiles.clearListeners();
   }
 
   #makeMaterial(

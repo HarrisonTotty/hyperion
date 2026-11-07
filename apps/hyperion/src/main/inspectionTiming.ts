@@ -37,6 +37,8 @@ import type {
   InspectionLongTask,
   InspectionLongTasks,
   InspectionReactCommits,
+  InspectionTimingCompile,
+  InspectionTimingFirstFrame,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
   InspectionTimingMemory,
@@ -78,9 +80,11 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
  * since each thread's longest task (lane perf-render-thread-ground), 7 since each window's render
  * passes' attachments and each body's atmosphere read (R14.T2.e; a file before it has neither), 8
  * since the run's long tasks (lane perf-page-long-tasks), 9 since the run's pacing and offscreen
- * frame clock and each window's callbacks, frame intervals and measured vsync period (R07.T19).
+ * frame clock and each window's callbacks, frame intervals and measured vsync period (R07.T19), 10
+ * since the run's pipeline compiles, each window's compiles alongside it and the primary's first
+ * frames (plan R08, fix-r08-decked-air-route).
  */
-export const INSPECTION_TIMING_VERSION = 9;
+export const INSPECTION_TIMING_VERSION = 10;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -893,6 +897,12 @@ export interface InspectionTimingWindowResults {
   readonly marchCensus: InspectionTimingMarchCensus | null;
   /** The primary's terrain's cluster counters as the window ended (plan R14), or `null`. */
   readonly clusters: InspectionTimingClusters | null;
+  /**
+   * The pipeline compiles that ran while it was measured (plan R08, fix-r08-decked-air-route): how
+   * many, and their create-to-ready time within it, summed, ms; of those settled by the record, so
+   * that one still running as the run ended is not among them.
+   */
+  readonly compiles: { readonly count: number; readonly withinMs: number };
   /** The window's trace, reduced, or why it is missing. */
   readonly trace: Measured<ProfileTraceFigures>;
   /** The renderer's own times, as it measured them. */
@@ -900,6 +910,38 @@ export interface InspectionTimingWindowResults {
     InspectionTimingWindow,
     "intervalsMs" | "frameIntervalsMs" | "mainThreadMs" | "submitMs" | "gpuMs"
   >;
+}
+
+/** A lane's compiles, or every lane's: how many, their create-to-ready times summed and longest, ms. */
+export interface CompileLaneFigures {
+  readonly count: number;
+  readonly totalMs: number;
+  readonly longestMs: number | null;
+}
+
+/** One compile of the run, with when it settled after the engine was made. */
+export interface InspectionTimingCompileResults extends InspectionTimingCompile {
+  /** From the engine's making to its settling, ms, or `null` where no engine was recorded. */
+  readonly readySinceEngineMs: number | null;
+}
+
+/**
+ * The run's pipeline compiles (plan R08, fix-r08-decked-air-route; the device's compile budget):
+ * one-time costs, apart from the windows' steady frames. Their times summed are more than the
+ * wall time they took where they ran side by side.
+ */
+export interface InspectionTimingCompileFigures extends CompileLaneFigures {
+  readonly byLane: { readonly draw: CompileLaneFigures; readonly ahead: CompileLaneFigures };
+  /** Each, in the order they settled. */
+  readonly each: ReadonlyArray<InspectionTimingCompileResults>;
+}
+
+/** One of the primary's first frames, with when it came after the engine was made. */
+export interface InspectionTimingFirstFrameResults extends InspectionTimingFirstFrame {
+  /** From the engine's making to it, ms, or `null` where no engine was recorded. */
+  readonly sinceEngineMs: number | null;
+  /** The compiles that settled before it. */
+  readonly compilesBefore: number;
 }
 
 /** A timing file of the inspection run. */
@@ -948,6 +990,10 @@ export interface InspectionTimingResults {
   readonly windows: ReadonlyArray<InspectionTimingWindowResults>;
   /** The page's long tasks over the run, or `null` where none were recorded. */
   readonly longTasks: LongTaskFigures | null;
+  /** The run's pipeline compiles (plan R08, fix-r08-decked-air-route). */
+  readonly compiles: InspectionTimingCompileFigures;
+  /** The primary's first draw, then its first with a body's air, apart from the steady frames. */
+  readonly firstFrames: ReadonlyArray<InspectionTimingFirstFrameResults>;
 }
 
 /** Everything a timing file is built from. */
@@ -982,10 +1028,64 @@ export interface InspectionTimingInput {
 export const TERRAIN_PASS_LABELS =
   /^(?:bodies(?: late)?|depth pyramid|terrain (?:id raster(?: late)?|resolve)|terrain cluster (?:cull|compact)|terrain shadows|symbology)(?: #\d+)?$/u;
 
+/** `compiles`' count, create-to-ready times summed and longest. */
+function laneFigures(compiles: ReadonlyArray<InspectionTimingCompile>): CompileLaneFigures {
+  return {
+    count: compiles.length,
+    totalMs: compiles.reduce((sum, each) => sum + each.ms, 0),
+    longestMs: compiles.length === 0 ? null : Math.max(...compiles.map((each) => each.ms)),
+  };
+}
+
+/** The run's compiles' figures (plan R08, fix-r08-decked-air-route). */
+export function compileFigures(
+  compiles: ReadonlyArray<InspectionTimingCompile>,
+  engineAtMs: number | null,
+): InspectionTimingCompileFigures {
+  return {
+    ...laneFigures(compiles),
+    byLane: {
+      draw: laneFigures(compiles.filter((each) => each.lane === "draw")),
+      ahead: laneFigures(compiles.filter((each) => each.lane === "ahead")),
+    },
+    each: compiles.map((each): InspectionTimingCompileResults => ({
+      name: each.name,
+      lane: each.lane,
+      readyAtMs: each.readyAtMs,
+      waitedMs: each.waitedMs,
+      ms: each.ms,
+      readySinceEngineMs: engineAtMs === null ? null : each.readyAtMs - engineAtMs,
+    })),
+  };
+}
+
+/**
+ * The compiles that ran while a window from `startMs` to `endMs` was measured, and their
+ * create-to-ready time within it, ms.
+ */
+function compilesWithin(
+  compiles: ReadonlyArray<InspectionTimingCompile>,
+  startMs: number,
+  endMs: number,
+): InspectionTimingWindowResults["compiles"] {
+  let count = 0;
+  let withinMs = 0;
+  for (const each of compiles) {
+    const fromMs = Math.max(startMs, each.readyAtMs - each.ms);
+    const toMs = Math.min(endMs, each.readyAtMs);
+    if (toMs > fromMs || (each.readyAtMs >= startMs && each.readyAtMs < endMs)) {
+      count += 1;
+      withinMs += Math.max(0, toMs - fromMs);
+    }
+  }
+  return { count, withinMs };
+}
+
 /** One window's figures from the renderer's record and its trace. */
 function windowResults(
   window: InspectionTimingWindow,
   trace: Measured<ProfileTraceFigures> | undefined,
+  compiles: ReadonlyArray<InspectionTimingCompile>,
 ): InspectionTimingWindowResults {
   const durationMs = window.endMs - window.startMs;
   const draws = window.submitMs.length;
@@ -1050,6 +1150,7 @@ function windowResults(
     react: window.react,
     marchCensus: window.marchCensus,
     clusters: window.clusters,
+    compiles: compilesWithin(compiles, window.startMs, window.endMs),
     trace: trace ?? missing("no trace was recorded over the window"),
     samples: {
       intervalsMs: window.intervalsMs,
@@ -1208,7 +1309,20 @@ export function buildInspectionTimingResults(
       atmosphereLevers: input.atmosphereLevers,
       litProbe: input.litProbe,
     },
-    windows: record.windows.map((window) => windowResults(window, input.traces.get(window.name))),
+    windows: record.windows.map((window) =>
+      windowResults(window, input.traces.get(window.name), record.compiles),
+    ),
+    compiles: compileFigures(record.compiles, record.engineAtMs),
+    firstFrames: record.firstFrames.map((frame): InspectionTimingFirstFrameResults => ({
+      kind: frame.kind,
+      atMs: frame.atMs,
+      intervalMs: frame.intervalMs,
+      mainThreadMs: frame.mainThreadMs,
+      submitMs: frame.submitMs,
+      gpuMs: frame.gpuMs,
+      sinceEngineMs: record.engineAtMs === null ? null : frame.atMs - record.engineAtMs,
+      compilesBefore: record.compiles.filter((each) => each.readyAtMs < frame.atMs).length,
+    })),
     longTasks:
       record.longTasks === null
         ? null
@@ -1445,6 +1559,7 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
     `- **Position:** ${cell(window.position ?? "—")}`,
     `- **Statements:** ${cell(window.statements.length === 0 ? "—" : window.statements.join(" · "))}`,
     `- **Atmosphere read** (each body with air, from the kernels its frames dispatched): ${cell(atmosphereReadsText(window.atmosphereReads))}`,
+    `- **Compiles alongside** (pipelines compiling while it was measured, of those settled by the run's end): ${String(window.compiles.count)}, ${msText(window.compiles.withinMs, 0)} ms of their create-to-ready time within it`,
     "",
     "| Frame | Count | Median (ms) | p95 (ms) | Mean (ms) | Max (ms) |",
     "| --- | --- | --- | --- | --- | --- |",
@@ -1513,6 +1628,60 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
   ];
 }
 
+/** The compiles the summary lists, the longest first. */
+const LISTED_COMPILES = 10;
+
+/** A lane's compiles in words. */
+function laneText(figures: CompileLaneFigures): string {
+  return `${String(figures.count)}, ${msText(figures.totalMs, 0)} ms`;
+}
+
+/** A first frame's line of the summary. */
+function firstFrameLine(frame: InspectionTimingFirstFrameResults): string {
+  const since =
+    frame.sinceEngineMs === null
+      ? "—"
+      : `${(frame.sinceEngineMs / 1000).toFixed(1)} s after the engine was made`;
+  return (
+    `- **${frame.kind === "drawn" ? "First draw" : "First frame with air"}:** ${since}` +
+    (frame.intervalMs === null
+      ? ""
+      : `, ${msText(frame.intervalMs)} ms after the primary's draw before it`) +
+    `, ${String(frame.compilesBefore)} compiles settled before it; main thread ${msText(frame.mainThreadMs)} ms, ` +
+    `submission ${msText(frame.submitMs)} ms, GPU ${frame.gpuMs === null ? "—" : `${msText(frame.gpuMs)} ms`}`
+  );
+}
+
+/**
+ * The run's compiles and first frames (plan R08, fix-r08-decked-air-route), apart from the
+ * windows' steady frames.
+ */
+function compilesMarkdown(results: InspectionTimingResults): string[] {
+  const { compiles } = results;
+  const longest = compiles.each.toSorted((a, b) => b.ms - a.ms).slice(0, LISTED_COMPILES);
+  return [
+    "## Compiles and first frames",
+    "",
+    `- **Compiles** (the device's budget, each from its create call to its pipeline's being ready; summed, more than the wall time where they ran side by side): ${laneText(compiles)}, the longest ${compiles.longestMs === null ? "—" : `${msText(compiles.longestMs, 0)} ms`}; a draw waited on ${laneText(compiles.byLane.draw)}, made ahead ${laneText(compiles.byLane.ahead)}`,
+    ...(results.firstFrames.length === 0
+      ? ["- **First frames:** — (the primary never drew)"]
+      : results.firstFrames.map(firstFrameLine)),
+    "- **Steady frames:** each window's, below, with the compiles alongside it.",
+    ...(longest.length === 0
+      ? []
+      : [
+          "",
+          "| Pipeline (the longest) | Lane | Waited (ms) | Create to ready (ms) | Settled after the engine was made (s) |",
+          "| --- | --- | --- | --- | --- |",
+          ...longest.map(
+            (each) =>
+              `| ${cell(each.name)} | ${each.lane} | ${msText(each.waitedMs, 0)} | ${msText(each.ms, 0)} | ${each.readySinceEngineMs === null ? "—" : (each.readySinceEngineMs / 1000).toFixed(1)} |`,
+          ),
+        ]),
+    "",
+  ];
+}
+
 /** The launch line's part for the levers a run drew with over its setting's, or nothing. */
 function leversText(levers: AtmosphereLeversOverride | null): string {
   if (levers === null) {
@@ -1549,6 +1718,7 @@ export function inspectionTimingMarkdown(results: InspectionTimingResults): stri
     `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}${leversText(run.atmosphereLevers)}${run.litProbe === null ? "" : `; lit probe ${run.litProbe}, not the picture a player sees`}`,
     "- **A profile, not a measurement:** nothing is judged; a hidden run's frames are never presented, and the machine may be shared.",
     "",
+    ...compilesMarkdown(results),
     ...results.windows.flatMap(windowMarkdown),
     ...longTasksMarkdown(results.longTasks),
   ].join("\n");
@@ -1611,8 +1781,9 @@ const NODE_FILES: ResultsFiles = {
 /**
  * Writes the timing file and its summary into `dir` as
  * `<date>-<machine>-<setting>-inspection-timing.json` and `.md` (with `-composite-<probe>` and
- * `-march-<probe>` after it for a probed run, `-cover-<cover>` and `-limb-<rays>` for one drawn
- * with a lever over its setting's, and `-lit-<probe>` for one drawn under the lit probe), adding
+ * `-march-<probe>` after it for a probed run, `-cover-<cover>`, `-limb-<rays>`, `-sources-<way>`,
+ * `-lobes-<lobes>` and `-ground-<ground>` for one drawn with a lever over its setting's, and
+ * `-lit-<probe>` for one drawn under the lit probe), adding
  * `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the
  * repository's limit for added files.
  *

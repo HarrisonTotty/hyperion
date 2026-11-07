@@ -370,6 +370,20 @@ describe("a device loss", () => {
     expect(events).toHaveBeenCalledWith({ kind: "destroyed", ...FAKE_ENGINE_MEMORY });
   });
 
+  it("forwards the current engine's compiles, the restored engine's after a loss and the lost one's no more (R08)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const heard: string[] = [];
+    engine.onCompile((event) => heard.push(event.name));
+    nth(module, 0).reportCompile({ name: "before", lane: "ahead", waitedMs: 0, ms: 5 });
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    nth(module, 0).reportCompile({ name: "lost", lane: "ahead", waitedMs: 0, ms: 5 });
+    nth(module, 1).reportCompile({ name: "restored", lane: "draw", waitedMs: 0, ms: 5 });
+    expect(heard).toEqual(["before", "restored"]);
+  });
+
   it("forwards a release to the engine that made the handle (R06.T13.h)", async () => {
     const { engine, module } = await load([adapter()]);
     const buffer = engine.createBuffer({ name: "b", bytes: 4, usage: 0x40, category: "other" });

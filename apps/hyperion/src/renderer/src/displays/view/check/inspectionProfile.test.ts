@@ -127,6 +127,20 @@ function profiler(
         return census();
       },
       ...probe,
+      engineAtMs: () => 10,
+      compiles: () => [
+        { name: "atmosphere ray march", lane: "ahead", readyAtMs: 400, waitedMs: 5, ms: 300 },
+      ],
+      firstFrames: (view) => [
+        {
+          kind: "drawn",
+          atMs: view === "view" ? 500 : -1,
+          intervalMs: null,
+          mainThreadMs: 40,
+          submitMs: 8,
+          gpuMs: 12,
+        },
+      ],
     },
     markWindow: (span) => {
       marked.push(span);
@@ -395,6 +409,23 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       1,
     ]);
     expect(profiler(100).profile.record().longTasks).toBeNull();
+  });
+
+  it("records the run's compiles and the primary's first frames beside its windows (R08)", async () => {
+    const { profile } = profiler(100);
+    await profile.measure("orbit", PLATE);
+    const { engineAtMs, compiles, firstFrames, windows } = profile.record();
+    expect({
+      engineAtMs,
+      compiles: compiles.map((each) => [each.name, each.ms]),
+      first: firstFrames.map((each) => [each.kind, each.atMs]),
+      windows: windows.length,
+    }).toEqual({
+      engineAtMs: 10,
+      compiles: [["atmosphere ray march", 300]],
+      first: [["drawn", 500]],
+      windows: 1,
+    });
   });
 
   it("stretches its waits five times in software, never its count of draws", () => {

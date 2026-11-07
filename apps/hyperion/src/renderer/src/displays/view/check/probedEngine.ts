@@ -42,6 +42,7 @@ import type { KernelPair } from "../../../view/engine/kernels";
 import type { GraphicsFault } from "../../../view/engine/status";
 import type {
   BufferHandle,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
   DepthLayerPass,
@@ -615,6 +616,10 @@ export class ProbedEngine implements RenderEngine {
 
   onAllocation(listener: (event: AllocationEvent) => void): () => void {
     return this.#inner.onAllocation(listener);
+  }
+
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.#inner.onCompile(listener);
   }
 
   onFault(listener: (fault: GraphicsFault) => void): () => void {

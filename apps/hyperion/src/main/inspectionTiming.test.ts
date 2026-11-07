@@ -307,6 +307,23 @@ const RECORD: InspectionTimingRecord = {
     },
   ],
   longTasks: null,
+  // The engine made 5 s before the window; the thick march made ahead of the first frame with air,
+  // and a material a draw waited on running into the window by 0.5 s.
+  engineAtMs: -5_000,
+  compiles: [
+    {
+      name: "atmosphere ray march, thick",
+      lane: "ahead",
+      readyAtMs: -1_000,
+      waitedMs: 200,
+      ms: 3_000,
+    },
+    { name: "terrain lit", lane: "draw", readyAtMs: 500, waitedMs: 0, ms: 800 },
+  ],
+  firstFrames: [
+    { kind: "drawn", atMs: -4_000, intervalMs: null, mainThreadMs: 120, submitMs: 30, gpuMs: 45 },
+    { kind: "air", atMs: -900, intervalMs: 1_900, mainThreadMs: 60, submitMs: 20, gpuMs: null },
+  ],
 };
 
 /**
@@ -994,6 +1011,74 @@ describe("the frame profile's timing file (the owner's report)", () => {
     expect(markdown).toContain("- **Statements:** ATMOSPHERE: APPROXIMATE · TERRAIN: STREAMING");
   });
 
+  it("takes the run's compiles and first frames only as the main process checks them (R08)", () => {
+    const [compile] = RECORD.compiles;
+    const [first] = RECORD.firstFrames;
+    if (compile === undefined || first === undefined) {
+      throw new Error("the record holds a compile and a first frame");
+    }
+    expect(
+      [
+        { ...RECORD, compiles: [{ ...compile, ms: -1 }] },
+        { ...RECORD, compiles: [{ ...compile, lane: "later" }] },
+        { ...RECORD, compiles: [{ ...compile, name: "" }] },
+        { ...RECORD, compiles: undefined },
+        { ...RECORD, firstFrames: [first, first] },
+        { ...RECORD, firstFrames: [{ ...first, gpuMs: Number.NaN }] },
+        { ...RECORD, engineAtMs: undefined },
+      ].map(readInspectionTimingRecord),
+    ).toEqual([null, null, null, null, null, null, null]);
+    expect(
+      readInspectionTimingRecord({ ...RECORD, engineAtMs: null, compiles: [], firstFrames: [] }),
+    ).toEqual({ ...RECORD, engineAtMs: null, compiles: [], firstFrames: [] });
+  });
+
+  it("sums the run's compiles by lane and times its first frames from the engine's making, apart from the steady frames (R08)", () => {
+    const built = results();
+    expect({
+      compiles: [
+        built.compiles.count,
+        built.compiles.totalMs,
+        built.compiles.longestMs,
+        built.compiles.byLane,
+      ],
+      ready: built.compiles.each.map((each) => each.readySinceEngineMs),
+      first: built.firstFrames.map((each) => [each.kind, each.sinceEngineMs, each.compilesBefore]),
+      // The material ran from −300 ms to 500 ms: 500 ms of it within the window from 0.
+      window: built.windows[0]?.compiles,
+    }).toEqual({
+      compiles: [
+        2,
+        3_800,
+        3_000,
+        {
+          draw: { count: 1, totalMs: 800, longestMs: 800 },
+          ahead: { count: 1, totalMs: 3_000, longestMs: 3_000 },
+        },
+      ],
+      ready: [4_000, 5_500],
+      first: [
+        ["drawn", 1_000, 0],
+        ["air", 4_100, 1],
+      ],
+      window: { count: 1, withinMs: 500 },
+    });
+  });
+
+  it("writes the run's compiles, the longest listed, its first frames and each window's compiles alongside in its summary (R08)", () => {
+    const markdown = inspectionTimingMarkdown(results());
+    expect(markdown).toContain(
+      "): 2, 3800 ms, the longest 3000 ms; a draw waited on 1, 800 ms, made ahead 1, 3000 ms",
+    );
+    expect(markdown).toContain(
+      "- **First frame with air:** 4.1 s after the engine was made, 1900.0 ms after the primary's draw before it, 1 compiles settled before it; main thread 60.0 ms, submission 20.0 ms, GPU —",
+    );
+    expect(markdown).toContain("| atmosphere ray march, thick | ahead | 200 | 3000 | 4.0 |");
+    expect(markdown).toContain(
+      "- **Compiles alongside** (pipelines compiling while it was measured, of those settled by the run's end): 1, 500 ms of their create-to-ready time within it",
+    );
+  });
+
   it("writes each window's march census: its texels by node rays and the tiles that wait (R08.T8.d)", () => {
     expect(inspectionTimingMarkdown(results())).toContain(
       "The march's far limb, the frame after the window (`atmosphere ray march`): texels by node rays 0: 900, 2: 60, 10: 40; 30 at w_L 1, with no centre ray; 600 centre rays in the air; 4 of 20 tiles hold a node ray; 1150 rays in the air, 2300 as each tile waits on its slowest texel (2.00 times).",
@@ -1018,7 +1103,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 9,
+      version: 10,
       run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
     });
   });

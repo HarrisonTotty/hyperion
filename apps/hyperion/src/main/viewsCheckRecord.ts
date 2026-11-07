@@ -37,6 +37,8 @@ import type {
   InspectionReactCommits,
   InspectionReactComponent,
   InspectionTimingBytes,
+  InspectionTimingCompile,
+  InspectionTimingFirstFrame,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
   InspectionTimingMemory,
@@ -1793,18 +1795,62 @@ function longTasks(value: unknown): InspectionLongTasks | null | undefined {
 }
 
 /**
+ * One pipeline compile of the run (plan R08, fix-r08-decked-air-route): a name, a lane, a time
+ * ready on the page's clock and its wait and create-to-ready times, none negative.
+ */
+function timingCompile(value: unknown): InspectionTimingCompile | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { name, lane, readyAtMs, waitedMs, ms } = value;
+  return typeof name !== "string" ||
+    name.length === 0 ||
+    (lane !== "draw" && lane !== "ahead") ||
+    !isFiniteNumber(readyAtMs) ||
+    !isFiniteNumber(waitedMs) ||
+    waitedMs < 0 ||
+    !isFiniteNumber(ms) ||
+    ms < 0
+    ? null
+    : { name, lane, readyAtMs, waitedMs, ms };
+}
+
+/**
+ * One of the primary's first frames (plan R08, fix-r08-decked-air-route): its kind, its time, an
+ * interval from the draw before it or `null`, and its times, none negative, its GPU's or `null`.
+ */
+function timingFirstFrame(value: unknown): InspectionTimingFirstFrame | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { kind, atMs, intervalMs, mainThreadMs, submitMs, gpuMs } = value;
+  const isTime = (each: unknown): each is number => isFiniteNumber(each) && each >= 0;
+  return (kind !== "drawn" && kind !== "air") ||
+    !isFiniteNumber(atMs) ||
+    !(intervalMs === null || isTime(intervalMs)) ||
+    !isTime(mainThreadMs) ||
+    !isTime(submitMs) ||
+    !(gpuMs === null || isTime(gpuMs))
+    ? null
+    : { kind, atMs, intervalMs, mainThreadMs, submitMs, gpuMs };
+}
+
+/**
  * `value` as the inspection run's frame profile's record (the owner's report, 2026-11-01), or
- * `null` if it is not one: each window at most once, and the run's long tasks or `null`. A window
- * whose passes' times are not as many as its frames' GPU times is dropped alone, its name and both
- * counts logged, the others kept (lane fix-inspection-timing-record).
+ * `null` if it is not one: each window at most once, the run's long tasks or `null`, its
+ * compiles, and its first frames, each kind at most once. A window whose passes' times are not as
+ * many as its frames' GPU times is dropped alone, its name and both counts logged, the others kept
+ * (lane fix-inspection-timing-record).
  */
 export function readInspectionTimingRecord(value: unknown): InspectionTimingRecord | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { timer, devicePixelRatio } = value;
+  const { timer, devicePixelRatio, engineAtMs } = value;
   const read = listOf(value["windows"], timingWindow);
   const tasks = longTasks(value["longTasks"]);
+  const compiles = listOf(value["compiles"], timingCompile);
+  const firstFrames = listOf(value["firstFrames"], timingFirstFrame);
   if (
     (timer !== "full" && timer !== "quantized" && timer !== "absent") ||
     !isFiniteNumber(devicePixelRatio) ||
@@ -1812,7 +1858,11 @@ export function readInspectionTimingRecord(value: unknown): InspectionTimingReco
     read === null ||
     new Set(read.map((each) => (each.kind === "mistimed" ? each.name : each.window.name))).size !==
       read.length ||
-    tasks === undefined
+    tasks === undefined ||
+    !(engineAtMs === null || isFiniteNumber(engineAtMs)) ||
+    compiles === null ||
+    firstFrames === null ||
+    new Set(firstFrames.map((each) => each.kind)).size !== firstFrames.length
   ) {
     return null;
   }
@@ -1826,5 +1876,5 @@ export function readInspectionTimingRecord(value: unknown): InspectionTimingReco
       windows.push(each.window);
     }
   }
-  return { timer, devicePixelRatio, windows, longTasks: tasks };
+  return { timer, devicePixelRatio, windows, longTasks: tasks, engineAtMs, compiles, firstFrames };
 }

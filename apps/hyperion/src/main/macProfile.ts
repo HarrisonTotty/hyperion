@@ -26,6 +26,9 @@ import {
   atmosphereReadsText,
   attachmentText,
   INSPECTION_TIMING_SCHEMA,
+  type InspectionTimingCompileFigures,
+  type InspectionTimingCompileResults,
+  type InspectionTimingFirstFrameResults,
   type InspectionTimingResults,
   type InspectionTimingWindowResults,
   type PassFigures,
@@ -526,6 +529,17 @@ function readsText(window: ProfiledWindow): string {
 export interface ProfiledTiming {
   readonly run: Pick<InspectionTimingResults["run"], "timer">;
   readonly windows: ReadonlyArray<ProfiledWindow>;
+  /**
+   * The run's pipeline compiles (plan R08, fix-r08-decked-air-route); absent before the file's
+   * version 10, as not recorded.
+   */
+  readonly compiles?: Pick<InspectionTimingCompileFigures, "count" | "totalMs"> & {
+    readonly each: ReadonlyArray<Pick<InspectionTimingCompileResults, "name" | "ms">>;
+  };
+  /** The primary's first frames; absent before the file's version 10, as not recorded. */
+  readonly firstFrames?: ReadonlyArray<
+    Pick<InspectionTimingFirstFrameResults, "kind" | "intervalMs" | "sinceEngineMs">
+  >;
 }
 
 /** A kept run: its place in the matrix, its record and its timing file. */
@@ -768,6 +782,102 @@ function windowsTable(
   ];
 }
 
+/** A run's longest compile, its name and time, or `—`. */
+function longestCompileText(timing: ProfiledTiming): string {
+  const longest = timing.compiles?.each.toSorted((a, b) => b.ms - a.ms)[0];
+  return longest === undefined ? "—" : `${longest.name} ${msText(longest.ms, 0)}`;
+}
+
+/** A run's first frame of `kind`, or `undefined` where it has none or recorded none. */
+function firstFrameOf(
+  timing: ProfiledTiming,
+  kind: InspectionTimingFirstFrameResults["kind"],
+): NonNullable<ProfiledTiming["firstFrames"]>[number] | undefined {
+  return timing.firstFrames?.find((each) => each.kind === kind);
+}
+
+/** A time from the engine's making, s, or `—`. */
+function sinceText(ms: number | null | undefined): string {
+  return ms === null || ms === undefined ? "—" : (ms / 1000).toFixed(1);
+}
+
+/**
+ * The compiles' table (plan R08, fix-r08-decked-air-route): each kept run's pipeline compiles and
+ * first frames, its one-time costs, beside its windows' steady interval medians.
+ */
+function compilesTable(
+  matrix: ReadonlyArray<MacProfileRun>,
+  kept: ReadonlyMap<string, KeptRun>,
+): string[] {
+  return [
+    "| Run | Compiles | Create to ready, summed (ms) | The longest (ms) | First draw after the engine (s) | First frame with air after the engine (s) | Its interval (ms) | Steady interval medians (ms) |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...matrix.flatMap((run) => {
+      const timing = kept.get(run.id)?.timing;
+      if (timing === undefined) {
+        return [];
+      }
+      const { compiles } = timing;
+      const air = firstFrameOf(timing, "air");
+      const steady = timing.windows.map(
+        (window) => `${window.name} ${msText(window.frame.intervalMs.medianMs)}`,
+      );
+      return [
+        `| ${run.id} | ${compiles === undefined ? "not recorded" : String(compiles.count)} | ` +
+          `${compiles === undefined ? "—" : msText(compiles.totalMs, 0)} | ${cell(longestCompileText(timing))} | ` +
+          `${sinceText(firstFrameOf(timing, "drawn")?.sinceEngineMs)} | ${sinceText(air?.sinceEngineMs)} | ` +
+          `${msText(air?.intervalMs ?? null)} | ${steady.length === 0 ? "—" : steady.join(", ")} |`,
+      ];
+    }),
+  ];
+}
+
+/**
+ * A pair's sides' one-time costs at one ratio (plan R08, fix-r08-decked-air-route): each side's
+ * medians over its runs of their compiles and their first frames with air, apart from the steady
+ * frames above.
+ */
+function pairCompileRows(
+  lever: MacProfileLever,
+  ratio: MacProfileRatio,
+  kept: ReadonlyArray<KeptRun>,
+): string[] {
+  const rows = (["a", "b"] as const).map((side) => {
+    const runs = kept.filter(
+      (each) =>
+        each.run.place.kind === "pair" &&
+        each.run.place.lever === lever.name &&
+        each.run.place.side === side &&
+        each.run.ratio === ratio,
+    );
+    const of = (figure: (timing: ProfiledTiming) => number | null | undefined): number | null =>
+      median(runs.flatMap((each) => figure(each.timing) ?? []));
+    return (
+      `| ${side.toUpperCase()} | ${String(runs.length)} | ${msText(
+        of((t) => t.compiles?.count),
+        0,
+      )} | ` +
+      `${msText(
+        of((t) => t.compiles?.totalMs),
+        0,
+      )} | ` +
+      `${msText(
+        of((t) =>
+          t.compiles === undefined ? null : Math.max(0, ...t.compiles.each.map((each) => each.ms)),
+        ),
+        0,
+      )} | ` +
+      `${sinceText(of((t) => firstFrameOf(t, "air")?.sinceEngineMs))} | ${msText(of((t) => firstFrameOf(t, "air")?.intervalMs))} |`
+    );
+  });
+  return [
+    "| Side | Runs | Compiles | Create to ready, summed (ms) | The longest (ms) | First frame with air after the engine (s) | Its interval (ms) |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
+    ...rows,
+    "",
+  ];
+}
+
 /** A pair's section at one ratio: its windows' figures, then its dearest passes by window. */
 function pairSection(
   lever: MacProfileLever,
@@ -820,6 +930,7 @@ function pairSection(
         `| ${each.window} | ${cell(each.a.reads.length === 0 ? "—" : each.a.reads.join(" / "))} | ${cell(each.b.reads.length === 0 ? "—" : each.b.reads.join(" / "))} |`,
     ),
     "",
+    ...pairCompileRows(lever, ratio, kept),
   ];
 }
 
@@ -1018,6 +1129,15 @@ export function macProfileSummaryLines(input: MacProfileSummaryInput): string[] 
     "## Each run's windows",
     "",
     ...windowsTable(matrix, byId),
+    "",
+    "## Each run's compiles and first frames",
+    "",
+    "One-time costs, apart from the windows' steady frames: each pipeline the device's compile " +
+      "budget made, from its create call to its being ready (summed, more than the wall time where " +
+      "they ran side by side), and the primary's first draw and first frame with air after the " +
+      "engine was made, the latter's interval from the draw before it.",
+    "",
+    ...compilesTable(matrix, byId),
     "",
     "## The lever pairs",
     "",

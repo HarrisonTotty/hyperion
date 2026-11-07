@@ -37,6 +37,7 @@ import { EngineUnavailable } from "../engine/resilientEngine";
 import type { GraphicsFault } from "../engine/status";
 import type {
   BufferHandle,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
   DepthLayersSpec,
@@ -508,6 +509,10 @@ export class SourceTableEngine implements RenderEngine {
 
   onAllocation(listener: (event: AllocationEvent) => void): () => void {
     return this.#inner.onAllocation(listener);
+  }
+
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.#inner.onCompile(listener);
   }
 
   onFault(listener: (fault: GraphicsFault) => void): () => void {

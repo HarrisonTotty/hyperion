@@ -22,6 +22,7 @@ import { type AdapterOutcome, type GpuCapabilities, requestAdapterOutcome } from
 import type { GraphicsFault, GraphicsStatusStore } from "./status";
 import type {
   BufferHandle,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
   DepthLayersSpec,
@@ -151,6 +152,7 @@ export class ResilientEngine implements RenderEngine {
   readonly #restoredListeners = new Set<() => void>();
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
+  readonly #compileListeners = new Set<(event: CompileEvent) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   #inner: RenderEngine | null = null;
   /**
@@ -461,6 +463,10 @@ export class ResilientEngine implements RenderEngine {
     return this.#listen(this.#allocationListeners, listener);
   }
 
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.#listen(this.#compileListeners, listener);
+  }
+
   onFault(listener: (fault: GraphicsFault) => void): () => void {
     return this.#listen(this.#faultListeners, listener);
   }
@@ -479,6 +485,7 @@ export class ResilientEngine implements RenderEngine {
     this.#restoredListeners.clear();
     this.#faultListeners.clear();
     this.#allocationListeners.clear();
+    this.#compileListeners.clear();
     this.#passTimeListeners.clear();
   }
 
@@ -530,6 +537,11 @@ export class ResilientEngine implements RenderEngine {
       }),
       inner.onAllocation((event) => {
         for (const listener of this.#allocationListeners) {
+          listener(event);
+        }
+      }),
+      inner.onCompile((event) => {
+        for (const listener of this.#compileListeners) {
           listener(event);
         }
       }),

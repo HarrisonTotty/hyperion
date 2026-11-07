@@ -205,7 +205,7 @@ function pipelineFor(
   pipelines.set(key, "pending");
   // A draw waits for it now: ahead of every compile made ahead of its first draw.
   void compiles
-    .run(() => device.createRenderPipelineAsync(made), "draw")
+    .run(owner, () => device.createRenderPipelineAsync(made), "draw")
     .then((pipeline): void => {
       pipelines.set(key, pipeline);
       return undefined;
@@ -323,7 +323,7 @@ export class Drawing {
     try {
       record.pipelines.set(
         key,
-        await this.#host.compiles.run(() =>
+        await this.#host.compiles.run(record.spec.name, () =>
           this.#host.device.createRenderPipelineAsync(
             materialPipelineDescriptor(
               record.spec,
@@ -366,7 +366,7 @@ export class Drawing {
     }
     let pipeline: GPURenderPipeline | null;
     try {
-      pipeline = await this.#host.compiles.run(async () =>
+      pipeline = await this.#host.compiles.run(record.spec.name, async () =>
         // A draw that came first made its own while this one waited its turn: none is made twice.
         record.pipelines.has(key)
           ? null
