@@ -484,8 +484,8 @@ async fn resolve_system_names_the_system_or_the_time_it_cannot_use() {
 /// below 27 it refused it with `unknown_system` naming `system` (P12.T2 as built).
 #[tokio::test]
 async fn the_central_black_hole_resolves_at_the_centre() {
-    // Seen at 22 to 26 refused, at 27 to 29 resolved.
-    assert_eq!(GENERATOR_VERSION.get(), 29, "the version this was seen at");
+    // Seen at 22 to 26 refused, at 27 to 30 resolved.
+    assert_eq!(GENERATOR_VERSION.get(), 30, "the version this was seen at");
     let server = TestServer::start().await;
     let mut client = server.connected().await;
     let universe = client.create_universe("Parallax", SEED).await;
