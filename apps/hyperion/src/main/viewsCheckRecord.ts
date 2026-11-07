@@ -1633,12 +1633,17 @@ function timingClusters(value: unknown): InspectionTimingClusters | null | undef
  * record, said, the record's other windows kept (lane fix-inspection-timing-record).
  */
 interface MistimedWindow {
-  readonly mistimed: InspectionTimingWindowName;
-  /** The frames' GPU times the window has. */
-  readonly gpuMs: number;
-  /** The first pass whose times are not as many, its label and their count. */
-  readonly pass: { readonly label: string; readonly ms: number };
+  readonly kind: "mistimed";
+  readonly name: InspectionTimingWindowName;
+  /** The frames timed in full, as many as the window's frames' GPU times. */
+  readonly gpuTimedFrames: number;
+  /** The first pass whose times are not as many, its label and the frames it has times for. */
+  readonly pass: { readonly label: string; readonly timedFrames: number };
 }
+
+/** A profiled window as read: whole, or mistimed and to be dropped. */
+type ReadTimingWindow =
+  { readonly kind: "window"; readonly window: InspectionTimingWindow } | MistimedWindow;
 
 /**
  * One profiled window (the owner's report): its name, an end not before its start, and its times,
@@ -1646,7 +1651,7 @@ interface MistimedWindow {
  * once, its WebGPU calls and attachments or `null`, its atmosphere reads, its React commits or
  * `null`, and its cluster counters or `null`.
  */
-function timingWindow(value: unknown): InspectionTimingWindow | MistimedWindow | null {
+function timingWindow(value: unknown): ReadTimingWindow | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -1698,12 +1703,13 @@ function timingWindow(value: unknown): InspectionTimingWindow | MistimedWindow |
   const mistimed = passes.find((pass) => pass.ms.length !== gpuMs.length);
   if (mistimed !== undefined) {
     return {
-      mistimed: name,
-      gpuMs: gpuMs.length,
-      pass: { label: mistimed.label, ms: mistimed.ms.length },
+      kind: "mistimed",
+      name,
+      gpuTimedFrames: gpuMs.length,
+      pass: { label: mistimed.label, timedFrames: mistimed.ms.length },
     };
   }
-  return {
+  const window: InspectionTimingWindow = {
     name,
     startMs,
     endMs,
@@ -1726,6 +1732,7 @@ function timingWindow(value: unknown): InspectionTimingWindow | MistimedWindow |
     statements,
     marchCensus,
   };
+  return { kind: "window", window };
 }
 
 /**
@@ -1745,19 +1752,19 @@ export function readInspectionTimingRecord(value: unknown): InspectionTimingReco
     !isFiniteNumber(devicePixelRatio) ||
     !(devicePixelRatio > 0) ||
     read === null ||
-    new Set(read.map((each) => ("mistimed" in each ? each.mistimed : each.name))).size !==
+    new Set(read.map((each) => (each.kind === "mistimed" ? each.name : each.window.name))).size !==
       read.length
   ) {
     return null;
   }
   const windows: InspectionTimingWindow[] = [];
   for (const each of read) {
-    if ("mistimed" in each) {
+    if (each.kind === "mistimed") {
       console.warn(
-        `views check: the timing window ${each.mistimed} dropped: its pass ${each.pass.label} has ${String(each.pass.ms)} times against ${String(each.gpuMs)} frame GPU times`,
+        `views check: the timing window ${each.name} dropped: its pass ${each.pass.label} has ${String(each.pass.timedFrames)} times against ${String(each.gpuTimedFrames)} frame GPU times`,
       );
     } else {
-      windows.push(each);
+      windows.push(each.window);
     }
   }
   return { timer, devicePixelRatio, windows };
