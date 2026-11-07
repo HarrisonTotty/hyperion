@@ -562,11 +562,10 @@ impl Error for ResolveOpticalDepthError {
 
 /// A mode's vertical profile (P14.T24.c): its base and its top, between which its mixing ratio
 /// goes as (p ÷ `p_base`)^f, f its exponent, 0 for a well-mixed layer (P14.T24.g's modes) and
-/// negative, above −1, for a haze whose mixing ratio rises aloft (from generator version 30 the
-/// methane haze's, `HAZE_PROFILE_VERSION`, rendering plan R08's R08.T17). The
-/// loop's modes take their deck's base and top, and its `f_sed`, or from generator version 26 the
-/// smaller of that and its saturation's log-slope at the base (P14.T52.g, from 26;
-/// P14.T52.g).
+/// negative, above −1, for a haze whose mixing ratio rises aloft (the methane haze's, rendering
+/// plan R08's R08.T17). The loop's modes take their deck's base and top, and its `f_sed`, or from
+/// generator version 26 the smaller of that and its saturation's log-slope at the base (P14.T52.g,
+/// from 26; P14.T52.g).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ModeProfile {
     base: Pascals,
