@@ -135,7 +135,7 @@ fn under_every_24_hold_a_past_only_runaway_s_stand_in_cover_holds_no_water_or_ic
     }
 }
 
-/// The surface colour (from generator version 30): each band's disc lies under its air's layer in
+/// The surface colour (from generator version 31): each band's disc lies under its air's layer in
 /// that band's light alone. Earth's clear air over a grey ground of 0.1 is bluer in B than in V and
 /// in V than in R, each the conservative layer in its bin added over the ground, to the bit; a
 /// Titan haze over it reddens it, its B below its R; with no air the disc is its own in every band.

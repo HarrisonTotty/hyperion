@@ -35,7 +35,7 @@
 //!   (by [`soot_weight`]), the ice giants' haze on a CH₄ deck and the chromophore on an NH₃ deck
 //!   with no CH₄ deck above it, and that cloud's NH₃-ice haze ([`ammonia_haze`], part 6), as the
 //!   record draws them from 27, each by the rules in force (the chromophore's column by its haze's
-//!   gas from 30, held: `photochem::CHROMOPHORE_MIXING_VERSION`).
+//!   gas from 31, held: `photochem::CHROMOPHORE_MIXING_VERSION`).
 //! - **The absorbers**: each layer's CH₄, H₂O, Na and K, held above its deck's base (or 100 bar's,
 //!   for a trapped one) to its saturation there.
 

@@ -47,9 +47,9 @@
 //! that every Solar System analogue in its own state is drawn with its row's p (ruling 9). The
 //! stated ratio `p_V` `q_V` ÷ `A_Bond` is a check only.
 //!
-//! # The colour from the body's own surface (from generator version 30)
+//! # The colour from the body's own surface (from generator version 31)
 //!
-//! Below 30 a body's B and R are its template's row scaled by the one Bond factor, so that every
+//! Below 31 a body's B and R are its template's row scaled by the one Bond factor, so that every
 //! airless rock is Mercury's colour and every snowball the Moon's grey. From 30
 //! (`SURFACE_COLOUR_VERSION`) `p_V` is as above, and `p_B` and `p_R` are `p_V` times the disc's
 //! own albedo in the B and R bins over its albedo in the V bin, `a_B` ÷ `a_V` and `a_R` ÷ `a_V`
@@ -67,7 +67,7 @@
 //! no albedos by band of its own takes its analogue's measured colour, `p_c` ÷ `p_V` of its row:
 //! an airless silicate regolith under the space-weathering stand-in, or whose lid is not known,
 //! Mercury's, and Venus's deck Venus's; a disc with none at all (a gas envelope, a melt) is its
-//! template's row, as below 30. So every Solar System analogue in its own state is still drawn with
+//! template's row, as below 31. So every Solar System analogue in its own state is still drawn with
 //! its row (ruling 9): Mercury's regolith is the stand-in's and Venus's disc its deck.
 
 use core::f64::consts::PI;
@@ -86,23 +86,23 @@ pub(crate) mod area_mix;
 pub(crate) mod envelope_bond;
 
 /// The generator version from which a body's disc takes its B and R from its own surface (the
-/// [module documentation](self), "The colour from the body's own surface"): 30, held with the 30
-/// train.
+/// [module documentation](self), "The colour from the body's own surface"): 31, held with the 31
+/// train (main's ruling of 2026-11-07: train 30's list froze first).
 ///
 /// Below it [`SurfaceColourRules::in_force`] is [`SurfaceColourRules::Template`]: the passes give
-/// no albedo by band and every geometric albedo is as it was, bit for bit. 30's bump deletes this
+/// no albedo by band and every geometric albedo is as it was, bit for bit. 31's bump deletes this
 /// hold, [`SurfaceColourRules`] with its `Template` arm and its matches (in
 /// [`BodyPhotometry::derive`] and the passes' `surface_mix::pass_bands`), the tests' switch, its
-/// line in the tests' `HeldRules` and its tripwire
-/// (`the_surface_colour_is_held_only_until_the_30_bump`).
-pub(crate) const SURFACE_COLOUR_VERSION: GeneratorVersion = GeneratorVersion::new(30);
+/// line in the tests' `HeldRules` and in `with_every_31_hold`, and its tripwire
+/// (`the_surface_colour_is_held_only_until_the_31_bump`).
+pub(crate) const SURFACE_COLOUR_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 
 /// Where a body's disc takes its B and R from (its hold, [`SURFACE_COLOUR_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum SurfaceColourRules {
     /// Version 29's and before: its template's row, scaled by the one Bond factor.
     Template,
-    /// Version 30's: `p_V` times the disc's own albedo in the band over its albedo in V.
+    /// Version 31's: `p_V` times the disc's own albedo in the band over its albedo in V.
     Surface,
 }
 
@@ -132,8 +132,8 @@ thread_local! {
 }
 
 /// `run`'s result with the surface colour's rules `rules` on this thread, for the tests to reach
-/// 30's colours ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. 30's bump deletes it
+/// 31's colours ahead of the bump; the version's rules are set back after, a panic in `run`
+/// included. A record derives lazily, so a test reads it inside the switch. 31's bump deletes it
 /// with the hold.
 #[cfg(test)]
 pub(crate) fn with_surface_colour<R>(rules: SurfaceColourRules, run: impl FnOnce() -> R) -> R {
@@ -854,11 +854,11 @@ pub struct PhotometryInputs {
     pub fractions: MassFractions,
     /// The Bond albedo of the state on the material (P14.T13.c).
     pub bond: BondAlbedo,
-    /// The disc's own colour, from generator version 30 (`SURFACE_COLOUR_VERSION`).
+    /// The disc's own colour, from generator version 31 (`SURFACE_COLOUR_VERSION`).
     ///
     /// It is its albedo in the B, V and R bins
     /// ([`Atmosphere::band_albedo`](crate::planetary::derive::Atmosphere::band_albedo)), whose
-    /// ratios to V give `p_B` and `p_R`. `None` below 30 and for a disc with no albedos by band (a
+    /// ratios to V give `p_B` and `p_R`. `None` below 31 and for a disc with no albedos by band (a
     /// gas envelope, a melt), which keep their template's row.
     pub band_albedo: Option<DiscColour>,
 }
@@ -1479,20 +1479,22 @@ mod tests {
         assert!(photometry.provisional());
     }
 
-    /// The surface colour is held until the 29 → 30 bump: the rules in force are the template's,
-    /// and the tests' switch reaches 30's.
+    /// The surface colour is held until the 30 → 31 bump: the rules in force are the template's,
+    /// and the tests' switch reaches 31's.
     #[test]
-    fn the_surface_colour_is_held_only_until_the_30_bump() {
+    fn the_surface_colour_is_held_only_until_the_31_bump() {
         assert!(
             GENERATOR_VERSION < SURFACE_COLOUR_VERSION,
-            "the 29 → 30 bump takes a disc's B and R from its own surface: delete \
+            "the 30 → 31 bump takes a disc's B and R from its own surface: delete \
              `SURFACE_COLOUR_VERSION`, `SurfaceColourRules` with its `Template` arm and its matches \
              in `BodyPhotometry::derive` and `surface_mix::pass_bands`, the tests' \
-             `with_surface_colour`, its line in `HeldRules`, and this test; have \
+             `with_surface_colour`, its lines in `HeldRules` and `with_every_31_hold`, and this \
+             test; have \
              `under_the_surface_colour_the_solar_system_draws_itself`, \
              `the_surface_s_colour_gives_b_and_r_relative_to_v` and the viewer's colour census read \
              the version's rules alone"
         );
+        assert_eq!(SURFACE_COLOUR_VERSION, crate::GeneratorVersion::new(31));
         assert_eq!(SurfaceColourRules::in_force(), SurfaceColourRules::Template);
         assert_eq!(
             with_surface_colour(SurfaceColourRules::Surface, SurfaceColourRules::in_force),
@@ -1504,7 +1506,7 @@ mod tests {
         );
     }
 
-    /// From 30 `p_V` is the template's scale and `p_B` and `p_R` are `p_V` times the disc's own
+    /// From 31 `p_V` is the template's scale and `p_B` and `p_R` are `p_V` times the disc's own
     /// albedo in the band over V, each capped so that p q ≤ 1; with no colour, or under 29's rules,
     /// every band is the row's scaled, to the bit. Albedos that are not a colour (`a_V` 0, a NaN, a
     /// negative, an infinite ratio) make none.
@@ -1576,7 +1578,7 @@ mod tests {
         });
     }
 
-    /// From 30 the Solar System still draws itself (ruling 9): Mercury, whose regolith is the
+    /// From 31 the Solar System still draws itself (ruling 9): Mercury, whose regolith is the
     /// space-weathering stand-in's, and Venus, whose disc is its deck, at their references, draw
     /// Table 7's B, V and R to 10⁻¹², and every giant, whose disc has no albedos by band, its row's
     /// colour to the bit. Earth, off its reference, keeps the template's `p_V` and takes its own

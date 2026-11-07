@@ -157,16 +157,22 @@ mod tests {
         assert_eq!(HeldRules::on_this_thread(), version);
     }
 
-    /// Every planetary hold of version 30 is in force under the tests' `with_every_30_hold`, each
-    /// at its 30 arm, and the version's rules outside it: a cold giant's chromophore mixed in its
-    /// haze's gas (P14.T28.g's merged steps and R08.T17's haze profile are v30's own rules). A 30
-    /// hold's bump deletes its line here with its line in `with_every_30_hold`.
+    /// Every planetary hold of version 31 is in force under the tests' `with_every_31_hold`, each
+    /// at its 31 arm, and the version's rules outside it: a cold giant's chromophore mixed in its
+    /// haze's gas and a disc's B and R from its own surface. A 31 hold's bump deletes its line here
+    /// with its line in `with_every_31_hold`.
     #[test]
-    fn every_30_hold_is_in_force_under_with_every_30_hold() {
-        use crate::planetary::testing::with_every_30_hold;
-        let rules = ChromophoreRules::in_force;
-        assert_eq!(with_every_30_hold(rules), ChromophoreRules::HazeMixing);
-        assert_eq!(rules(), ChromophoreRules::DiscColumn);
+    fn every_31_hold_is_in_force_under_with_every_31_hold() {
+        use crate::planetary::testing::with_every_31_hold;
+        let rules = || (ChromophoreRules::in_force(), SurfaceColourRules::in_force());
+        assert_eq!(
+            with_every_31_hold(rules),
+            (ChromophoreRules::HazeMixing, SurfaceColourRules::Surface)
+        );
+        assert_eq!(
+            rules(),
+            (ChromophoreRules::DiscColumn, SurfaceColourRules::Template)
+        );
     }
 
     /// The tests that run threads, catch a panic or read the sources, none of which a wasm32-wasip1

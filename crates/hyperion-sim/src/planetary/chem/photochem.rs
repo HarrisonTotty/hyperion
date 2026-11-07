@@ -885,16 +885,16 @@ pub const CHROMOPHORE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05), 0
 
 /// The generator version from which a cold giant's chromophore is mixed in the gas of its ammonia
 /// cloud's haze, and that haze's τ(550) refitted with it (`ChromophoreRules::HazeMixing`;
-/// fix-p14-giant-chromophore, P14.T24.h.b part 6's follow-up): 30, main's ruling of 2026-11-05
-/// (train 29's list froze first).
+/// fix-p14-giant-chromophore, P14.T24.h.b part 6's follow-up): 31, main's rulings of 2026-11-05
+/// and 2026-11-07 (train 29's list froze first, then train 30's).
 ///
 /// Below it `ChromophoreRules::in_force` is `ChromophoreRules::DiscColumn`, and every figure
-/// is the version's bit for bit. 30's bump deletes this hold, `ChromophoreRules` with its
+/// is the version's bit for bit. 31's bump deletes this hold, `ChromophoreRules` with its
 /// `DiscColumn` arm, [`CHROMOPHORE_DISC_COLUMN`], `with_chromophore_mixing` with its line in
-/// `planetary/testing/held.rs`'s `held_rules!` and in `with_every_30_hold`, and the tripwire
-/// `the_chromophore_mixing_is_held_only_until_the_30_bump`; [`AMMONIA_HAZE_OPTICAL_DEPTH`] takes
+/// `planetary/testing/held.rs`'s `held_rules!` and in `with_every_31_hold`, and the tripwire
+/// `the_chromophore_mixing_is_held_only_until_the_31_bump`; [`AMMONIA_HAZE_OPTICAL_DEPTH`] takes
 /// [`AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`]'s value and the twin goes.
-pub const CHROMOPHORE_MIXING_VERSION: GeneratorVersion = GeneratorVersion::new(30);
+pub const CHROMOPHORE_MIXING_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 
 /// How a cold giant's chromophore column is set (its hold, [`CHROMOPHORE_MIXING_VERSION`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -902,13 +902,13 @@ pub(crate) enum ChromophoreRules {
     /// Version 29's and before: every cold giant's chromophore at Jupiter's disc-typical
     /// [`CHROMOPHORE_DISC_COLUMN`], its ammonia haze at τ(550) [`AMMONIA_HAZE_OPTICAL_DEPTH`].
     DiscColumn,
-    /// Version 30's: the chromophore [`CHROMOPHORE_MIXING_RATIO`] of the gas its ammonia haze
+    /// Version 31's: the chromophore [`CHROMOPHORE_MIXING_RATIO`] of the gas its ammonia haze
     /// spans, that haze at τ(550) [`AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`].
     #[cfg_attr(
         not(test),
         expect(
             dead_code,
-            reason = "held at 30: only a test's switch sets the arm until the bump makes it the \
+            reason = "held at 31: only a test's switch sets the arm until the bump makes it the \
                       version's"
         )
     )]
@@ -935,7 +935,7 @@ thread_local! {
         const { core::cell::Cell::new(None) };
 }
 
-/// `run`'s result with the chromophore's rules `rules` on this thread, the held arm 30's; the
+/// `run`'s result with the chromophore's rules `rules` on this thread, the held arm 31's; the
 /// version's are set back after, a panic in `run` included.
 #[cfg(test)]
 pub(crate) fn with_chromophore_mixing<R>(rules: ChromophoreRules, run: impl FnOnce() -> R) -> R {

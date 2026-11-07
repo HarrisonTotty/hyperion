@@ -992,14 +992,14 @@ pub(super) fn area_mixed(
 }
 
 /// What a pass's area mix gives ([`area_mixed`]): its disc before its air's layer, in the B, V and
-/// R bins too from generator version 30, the lid it
+/// R bins too from generator version 31, the lid it
 /// took, whether its condensates list liquid water, whether it melts its water under a locked
 /// world's deck ([`Atmosphere::melts_water_under_deck`]), its maturity's outcome, its cold traps'
 /// and the state it carries to the next pass by P14.T53.e's rules 5–7 ([`state_to_carry`]).
 struct SurfaceMix {
     disc: Disc,
     /// Its disc in the B, V and R bins before its air's layer, from generator version 30
-    /// ([`DiscBands`]): `None` below 30 and for a disc of one albedo.
+    /// ([`DiscBands`]): `None` below 31 and for a disc of one albedo.
     bands: Option<DiscBands>,
     lid: Option<CrustLid>,
     liquid_water: bool,
@@ -1059,7 +1059,7 @@ impl Disc {
 }
 
 /// A pass's disc in the B, V and R bins before its air's Rayleigh layer and haze (the surface
-/// colour, from generator version 30; `area_mix::ColourBand`): its ground's albedo in each bin,
+/// colour, from generator version 31; `area_mix::ColourBand`): its ground's albedo in each bin,
 /// its area mix under the light of that bin alone (`HostShade::in_band`), and its cloud's
 /// ([`area_mix::cloud_band_albedo`]). Its cloud fraction is its disc's, the one its hosts' light
 /// gives.
@@ -1338,7 +1338,7 @@ fn added(
 
 /// The disc `disc` of the atmosphere `air` of the body `inputs` describes laid under its air's
 /// layer and haze by the adding rule, as [`floored`] lays it, with no floor read: the surface
-/// colour's, in one band's light alone ([`DiscBands::laid`]), from generator version 30.
+/// colour's, in one band's light alone ([`DiscBands::laid`]), from generator version 31.
 #[must_use]
 fn layered(
     disc: Disc,
@@ -1690,10 +1690,10 @@ fn surface_and_cloud(
 }
 
 /// A pass's disc in the B, V and R bins ([`DiscBands`]; the surface colour, from generator version
-/// 30): [`surface_and_cloud`]'s ground, its published condensates `published` over its partition
+/// 31): [`surface_and_cloud`]'s ground, its published condensates `published` over its partition
 /// `solved`, its regolith `regolith` on the rest and its deposits `deposits`, each in a band's
 /// light alone, under its sediment of the haze's τ(550) `haze`, and its cloud in the state `state`
-/// and `deck`, under the light `shade`. `None` below 30 ([`SurfaceColourRules::Template`]).
+/// and `deck`, under the light `shade`. `None` below 31 ([`SurfaceColourRules::Template`]).
 #[must_use]
 fn pass_bands(
     (state, deck): (SurfaceState, RunawayDeck),

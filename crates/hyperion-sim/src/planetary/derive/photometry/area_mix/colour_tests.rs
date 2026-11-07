@@ -1,4 +1,4 @@
-//! The surface colour's area mix by band (from generator version 30; `photometry`'s module
+//! The surface colour's area mix by band (from generator version 31; `photometry`'s module
 //! documentation, "The colour from the body's own surface"): a band's light alone, the regolith's
 //! and the cloud's albedos in a band, and whether space weathering's reddening reaches the airless
 //! silicate lids.

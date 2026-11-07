@@ -1789,23 +1789,23 @@ fn chromophore_figures(record: &BodyRecord) -> Option<(f64, f64, f64)> {
 }
 
 /// The chromophore's mixing's census (fix-p14-giant-chromophore) over `thin_air_sets` (the
-/// sample's 400, the golden systems and LOOK72's) at the epoch: every 30 hold against every 30 hold
+/// sample's 400, the golden systems and LOOK72's) at the epoch: every 31 hold against every 31 hold
 /// with the chromophore's rules set back to `DiscColumn`, the census's galaxy at its own
 /// rules in both. Only envelopes move, each a cold giant on its record (an NH₃ deck and no CH₄ deck
 /// above it) or in its own Bond albedo's closed form, with any moons of moved envelopes, and every
 /// cold giant moves (asserted). Printed: each cold giant's chromophore column and τ(550) and its
-/// own Bond albedo, 28's against 30's, how many take the bound, the other envelopes' largest
+/// own Bond albedo, 28's against 31's, how many take the bound, the other envelopes' largest
 /// moves, and the moons moved (2026-11-05: 87 cold giants, 66 at the bound, 22 others, no moon).
 #[test]
-#[ignore = "slow: the thin-air census's 442 systems twice under every 30 hold"]
-fn under_every_30_hold_the_chromophore_census_moves_only_cold_giants_and_their_moons() {
+#[ignore = "slow: the thin-air census's 442 systems twice under every 31 hold"]
+fn under_every_31_hold_the_chromophore_census_moves_only_cold_giants_and_their_moons() {
     use crate::planetary::chem::photochem::{
         CHROMOPHORE_COLUMN, ChromophoreRules, with_chromophore_mixing,
     };
-    use crate::planetary::testing::with_every_30_hold;
+    use crate::planetary::testing::with_every_31_hold;
     use std::fmt::Write as _;
     let sets = thin_air_sets();
-    let (version, held) = with_every_30_hold(|| {
+    let (version, held) = with_every_31_hold(|| {
         (
             with_chromophore_mixing(ChromophoreRules::DiscColumn, || census_records(&sets)),
             census_records(&sets),
@@ -2148,26 +2148,26 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
     }
 }
 
-/// Under every 30 hold (`photochem::CHROMOPHORE_MIXING_VERSION`) the table's Jupiter and Saturn
+/// Under every 31 hold (`photochem::CHROMOPHORE_MIXING_VERSION`) the table's Jupiter and Saturn
 /// take a chromophore of `CHROMOPHORE_MIXING_RATIO` of the gas their ammonia haze spans,
 /// (`p_NH₃` − 0.1 bar) ÷ g, at most `CHROMOPHORE_COLUMN`, at its peak and width as before, and
 /// their haze τ(550) `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`, with the version's modes in the version's
 /// order (their figures move with the giants' own albedos); Uranus's and Neptune's envelopes do
 /// not move. Each giant's two modes are printed whole.
 #[test]
-fn under_every_30_hold_a_cold_giant_s_chromophore_is_its_haze_s_gas() {
+fn under_every_31_hold_a_cold_giant_s_chromophore_is_its_haze_s_gas() {
     use crate::planetary::chem::photochem::{
         AMMONIA_HAZE_OPTICAL_DEPTH_MIXED, AMMONIA_HAZE_TOP, CHROMOPHORE_COLUMN,
         CHROMOPHORE_MIXING_RATIO,
     };
     use crate::planetary::hooks::EnvelopeAtmosphere;
-    use crate::planetary::testing::with_every_30_hold;
+    use crate::planetary::testing::with_every_31_hold;
     let ammonia = by_key("NH3").expect("a row");
     let chromophore = by_key("chromophore").expect("a row");
     let is_haze = |m: &AerosolMode| m.material() == ammonia && m.profile().exponent() <= 0.0;
     for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
         let (_, version) = table_envelope(name);
-        let (of, held) = with_every_30_hold(|| table_envelope(name));
+        let (of, held) = with_every_31_hold(|| table_envelope(name));
         let (was, now) = (version.atmosphere(), held.atmosphere());
         if matches!(name, "Uranus" | "Neptune") {
             assert_eq!(format!("{version:?}"), format!("{held:?}"), "{name} moves");
@@ -2205,7 +2205,7 @@ fn under_every_30_hold_a_cold_giant_s_chromophore_is_its_haze_s_gas() {
         };
         assert_eq!(materials(was), materials(now), "{name}");
         eprintln!(
-            "{name} under every 30 hold: its haze's gas {gas:.1} kg/m², the chromophore \
+            "{name} under every 31 hold: its haze's gas {gas:.1} kg/m², the chromophore \
              {column:.4e} kg/m² of τ {:.6} (at 28 {:.6})\n  {mode:?}\n  {haze:?}",
             mode.optical_depth().expect("a τ").value(),
             old.optical_depth().expect("a τ").value()

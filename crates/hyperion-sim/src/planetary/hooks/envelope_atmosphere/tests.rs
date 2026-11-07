@@ -335,13 +335,13 @@ fn under_every_27_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo() {
     };
 }
 
-/// Under every 30 hold (the cold giants' chromophore mixed in their haze's gas,
+/// Under every 31 hold (the cold giants' chromophore mixed in their haze's gas,
 /// `photochem::CHROMOPHORE_MIXING_VERSION`) the Galileo calibration still holds at Jupiter's own
 /// albedo, the refitted haze's: κ₁'s fit is [`THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG`] to three
 /// figures, and the table's Jupiter follows the probe.
 #[test]
-fn under_every_30_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo() {
-    crate::planetary::testing::with_every_30_hold(|| {
+fn under_every_31_hold_the_galileo_calibration_holds_at_jupiter_s_own_albedo() {
+    crate::planetary::testing::with_every_31_hold(|| {
         assert_kappa_is_its_fit(THERMAL_OPACITY_AT_ONE_BAR_M2_PER_KG);
         assert_jupiter_follows_the_probe(GreyProfile::ADOPTED);
     });

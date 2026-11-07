@@ -426,7 +426,7 @@ fn class_bonds(host: Kelvin) -> ([f64; SUDARSKY_CLASSES], f64) {
 }
 
 /// One of the bands a disc's colour is read in, B, V and R (the surface colour, from generator
-/// version 30; `photometry`'s module documentation): each one of the optics' bins, [`BVR_BINS`]'s,
+/// version 31; `photometry`'s module documentation): each one of the optics' bins, [`BVR_BINS`]'s,
 /// 390–495, 495–595 and 595–700 nm, which hold the bands' effective wavelengths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ColourBand {
@@ -531,7 +531,7 @@ impl HostShade {
         &self.bands
     }
 
-    /// This light in the band `band` alone (the surface colour, from generator version 30): all of
+    /// This light in the band `band` alone (the surface colour, from generator version 31): all of
     /// it in the band's optics bin ([`ColourBand::bin`]) and the liquids' bins in it by their
     /// overlap ([`ColourBand::liquid_weights`]), its other values its own. Under it the area mix's
     /// Bond albedo is the disc's albedo in that bin: each solid's spherical albedo in the bin, a
@@ -1620,7 +1620,7 @@ impl Regolith {
     }
 
     /// Its albedo in the band `band` on a body in the state `state` under the light `shade` (the
-    /// surface colour, from generator version 30): what [`bond`](Self::bond) takes in the band's
+    /// surface colour, from generator version 31): what [`bond`](Self::bond) takes in the band's
     /// bin alone ([`HostShade::in_band`]), each case as [`bond`](Self::bond) decides it, but where
     /// a stand-in gives one albedo for every bin:
     ///
@@ -2552,7 +2552,7 @@ pub(crate) fn cloud_albedo((state, deck): (SurfaceState, RunawayDeck), shade: &H
 }
 
 /// The albedo in the band `band` of the cloud of a body in the state `state` whose runaway's deck
-/// is `deck`, under the light of `shade` (the surface colour, from generator version 30): Venus's
+/// is `deck`, under the light of `shade` (the surface colour, from generator version 31): Venus's
 /// deck its 0.76 ([`cloud_albedo`]) times Venus's measured colour
 /// ([`ColourBand::analogue_colour`]), the deck's own, so that Venus at its full cover is drawn with
 /// its row (ruling 9); the water cloud its albedo in every band, white (the lane's lean,

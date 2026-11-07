@@ -34431,8 +34431,7 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   `fix-p14-giant-chromophore`, 2026-11-05).** Held at 30 (`photochem::CHROMOPHORE_MIXING_VERSION`;
   `ChromophoreRules::{DiscColumn, HazeMixing}`, `with_chromophore_mixing`, a line in `HeldRules`
   and in the new planetary `testing::with_every_30_hold`; 30, train 29 having frozen); nothing
-  moves at 28 or 29. `with_every_30_hold` sets every planetary 30 hold (P14.T28.g's merged steps
-  and R08.T17's haze profile are v30's own rules; `every_30_hold_is_in_force_under_...`).
+  moves at 28 or 29.
   - _Changed:_ `photochem::chromophore(ammonia_layer, gravity)` returns `Result<Option<Haze>, _>`
     (`None` where the haze is none, from 30). Column `CHROMOPHORE_MIXING_RATIO` (7 × 10⁻⁸) ×
     (`p_NH₃` − 0.1 bar) ÷ g; haze τ `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED` (7).
@@ -34440,8 +34439,12 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     Unbounded, some of the census's deep-deck, low-gravity giants took a chromophore τ above 10; Saturn
     takes the bound. q and τ were picked inside Jupiter's 10% colour band so that the hand cases
     also pass and κ₁'s fit keeps its third figure.
-  - _Movers:_ the slow `under_every_30_hold_the_chromophore_census_moves_only_cold_giants_and_their_moons`.
-  - _For 30's bump:_ delete what `the_chromophore_mixing_is_held_only_until_the_30_bump` lists.
+  - _Movers:_ the slow `under_every_31_hold_the_chromophore_census_moves_only_cold_giants_and_their_moons`.
+  - _Retargeted to 31 (landing round 3, 2026-11-07; train 30's list froze):_
+    `CHROMOPHORE_MIXING_VERSION` 31; its tests run under the new planetary
+    `testing::with_every_31_hold` (the chromophore's and the surface colour's; v30 left no
+    planetary 30 hold, so `with_every_30_hold` is deleted, landing round 4).
+  - _For 31's bump:_ delete what `the_chromophore_mixing_is_held_only_until_the_31_bump` lists.
 - **P14.T47's surface colour (lane `gen-surface-colour`, 2026-11-06).** Held at 30
   (`photometry::SURFACE_COLOUR_VERSION`; `SurfaceColourRules::{Template, Surface}`, the switch
   `with_surface_colour`, a line in `HeldRules`). Nothing moves below 30.
@@ -34453,4 +34456,6 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Leans (2026-11-06):_ a part of the disc with no albedos by band takes its analogue's
     measured colour (the space-weathering cap and an unknown airless lid Mercury's, Venus's deck
     Venus's); the water cloud is white; a young lava keeps its fresh row's colour at the cap.
-  - _For 30's bump:_ delete what `the_surface_colour_is_held_only_until_the_30_bump` lists.
+  - _Retargeted to 31 (landing round 3, 2026-11-07; train 30's list froze):_
+    `SURFACE_COLOUR_VERSION` 31, a line in `with_every_31_hold`.
+  - _For 31's bump:_ delete what `the_surface_colour_is_held_only_until_the_31_bump` lists.

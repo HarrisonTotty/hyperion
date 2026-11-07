@@ -8,7 +8,7 @@ use crate::planetary::derive::atmosphere::AtmosphereInputs;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::hooks::EnvelopeAtmosphere;
 use crate::planetary::hooks::aerosols::AerosolDeck;
-use crate::planetary::testing::with_every_30_hold;
+use crate::planetary::testing::with_every_31_hold;
 use crate::substance::aloft::law_aloft;
 use crate::substance::by_key;
 use crate::units::{Kelvin, Pascals};
@@ -341,11 +341,11 @@ fn the_closed_form_follows_the_record_s_own_envelope() {
     closed_form_follows_the_record("at 28");
 }
 
-/// [`the_closed_form_follows_the_record_s_own_envelope`] under every 30 hold, the cold giants'
+/// [`the_closed_form_follows_the_record_s_own_envelope`] under every 31 hold, the cold giants'
 /// chromophore mixed in their haze's gas (`photochem::CHROMOPHORE_MIXING_VERSION`).
 #[test]
-fn under_every_30_hold_the_closed_form_follows_the_record_s_own_envelope() {
-    with_every_30_hold(|| closed_form_follows_the_record("under every 30 hold"));
+fn under_every_31_hold_the_closed_form_follows_the_record_s_own_envelope() {
+    with_every_31_hold(|| closed_form_follows_the_record("under every 31 hold"));
 }
 
 /// The closed form within 0.04 of the record's own envelope read alike, on the table's four giants
@@ -381,13 +381,13 @@ fn closed_form_follows_the_record(label: &str) {
 
 /// Mallama, Krobusek and Pavlov's (2017, Icarus 282, 19) Table 7 geometric albedos of Jupiter and
 /// Saturn in B, V and R (`photometry.rs`'s templates): `p_B` ÷ `p_V` and `p_R` ÷ `p_V`, the
-/// colours the cold giants' own bins are held to under every 30 hold.
+/// colours the cold giants' own bins are held to under every 31 hold.
 const TABLE_7_COLOURS: [(&str, f64, f64); 2] = [
     ("Jupiter", 0.443 / 0.538, 0.495 / 0.538),
     ("Saturn", 0.339 / 0.499, 0.568 / 0.499),
 ];
 
-/// Under every 30 hold (the cold giants' chromophore mixed in their haze's gas,
+/// Under every 31 hold (the cold giants' chromophore mixed in their haze's gas,
 /// `photochem::CHROMOPHORE_MIXING_RATIO`, its haze at `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`) the
 /// table's Jupiter, the fit, takes its own Bond albedo within its measured 0.503 ± 0.012 (Li et
 /// al. 2018) and its 390–495 nm bin over its 495–595 nm bin within 10% of Table 7's `p_B` ÷
@@ -396,7 +396,7 @@ const TABLE_7_COLOURS: [(&str, f64, f64); 2] = [
 /// (a miss, the lane's finding). Each figure is pinned; Uranus and Neptune, a CH₄ deck above any
 /// NH₃, do not move.
 #[test]
-fn under_every_30_hold_the_cold_giants_colours_are_their_measured_ones() {
+fn under_every_31_hold_the_cold_giants_colours_are_their_measured_ones() {
     use crate::planetary::derive::solar::{found, solar_system};
     // The pinned figures: name, Bond albedo, bin 1 ÷ bin 2 and bin 3 ÷ bin 2.
     const PINNED: [(&str, f64, f64, f64); 2] = [
@@ -404,10 +404,10 @@ fn under_every_30_hold_the_cold_giants_colours_are_their_measured_ones() {
         ("Saturn", 0.3077, 0.7006, 1.0648),
     ];
     let version = solar_system();
-    let held = with_every_30_hold(solar_system);
+    let held = with_every_31_hold(solar_system);
     for (name, bond, blue, red) in PINNED {
         let body = found(&held, name);
-        let bins = with_every_30_hold(|| {
+        let bins = with_every_31_hold(|| {
             bin_albedos(&column::snapshot_column(&giant_inputs(body)).expect("a column"))
         });
         let (b, r) = (bins[1] / bins[2], bins[3] / bins[2]);
@@ -417,7 +417,7 @@ fn under_every_30_hold_the_cold_giants_colours_are_their_measured_ones() {
             .find(|(n, ..)| *n == name)
             .expect("a measured colour");
         eprintln!(
-            "{name} under every 30 hold: own Bond albedo {own:.4} (at 28 {:.4}), bins B/V \
+            "{name} under every 31 hold: own Bond albedo {own:.4} (at 28 {:.4}), bins B/V \
              {b:.4} against {want_b:.4} and R/V {r:.4} against {want_r:.4}, T_eq {:.2} K",
             found(&version, name).albedo().value(),
             body.equilibrium_temperature().value()

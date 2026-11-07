@@ -326,19 +326,19 @@ fn the_ammonia_haze_lies_above_the_ammonia_cloud() {
     assert_eq!(ammonia_haze(Pascals::new(5.0e3)), Ok(None));
 }
 
-/// The chromophore's mixing is held until the 29 → 30 bump: the rules in force are version 28's
-/// and 29's, and 30's mix the chromophore in its haze's gas.
+/// The chromophore's mixing is held until the 30 → 31 bump: the rules in force are the version's,
+/// and 31's mix the chromophore in its haze's gas.
 #[test]
-fn the_chromophore_mixing_is_held_only_until_the_30_bump() {
+fn the_chromophore_mixing_is_held_only_until_the_31_bump() {
     use crate::GENERATOR_VERSION;
     assert!(
         GENERATOR_VERSION < CHROMOPHORE_MIXING_VERSION,
-        "the 29 → 30 bump puts the chromophore's mixing on the record (fix-p14-giant-chromophore): \
+        "the 30 → 31 bump puts the chromophore's mixing on the record (fix-p14-giant-chromophore): \
          delete `ChromophoreRules` with its `DiscColumn` arm, `CHROMOPHORE_DISC_COLUMN`, \
-         `with_chromophore_mixing` and its lines in `held_rules!` and `with_every_30_hold`, and \
+         `with_chromophore_mixing` and its lines in `held_rules!` and `with_every_31_hold`, and \
          this test; `AMMONIA_HAZE_OPTICAL_DEPTH` takes `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`'s value"
     );
-    assert_eq!(CHROMOPHORE_MIXING_VERSION, crate::GeneratorVersion::new(30));
+    assert_eq!(CHROMOPHORE_MIXING_VERSION, crate::GeneratorVersion::new(31));
     assert_eq!(ChromophoreRules::in_force(), ChromophoreRules::DiscColumn);
     assert_eq!(
         with_chromophore_mixing(ChromophoreRules::HazeMixing, ChromophoreRules::in_force),
@@ -347,13 +347,13 @@ fn the_chromophore_mixing_is_held_only_until_the_30_bump() {
     assert_eq!(ChromophoreRules::in_force(), ChromophoreRules::DiscColumn);
 }
 
-/// Under the 30 hold the chromophore is [`CHROMOPHORE_MIXING_RATIO`] of the gas its ammonia haze
+/// Under the 31 hold the chromophore is [`CHROMOPHORE_MIXING_RATIO`] of the gas its ammonia haze
 /// spans, (`p_NH₃` − 0.1 bar) ÷ g: its column in proportion to that gas up to the Great Red Spot's
 /// [`CHROMOPHORE_COLUMN`], none where the haze is none, its peak and width as before, and gravity
 /// checked; the haze's τ(550) the refitted
 /// [`AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`], tapered as before.
 #[test]
-fn under_the_30_hold_the_chromophore_is_mixed_in_its_haze_s_gas() {
+fn under_the_31_hold_the_chromophore_is_mixed_in_its_haze_s_gas() {
     with_chromophore_mixing(ChromophoreRules::HazeMixing, || {
         for (bar, g) in [(0.7285, 24.79), (1.218, 11.17), (0.28, 24.79), (3.0, 9.0)] {
             let layer = Pascals::new(bar * PASCALS_PER_BAR);

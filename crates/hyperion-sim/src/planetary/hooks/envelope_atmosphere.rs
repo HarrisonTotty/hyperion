@@ -231,7 +231,7 @@
 //!   the deck's onset, as P14.T52.b's record leaves it (no taper: none is sourced). From 27 the
 //!   chromophore takes the disc's typical column, and the same cloud carries **its haze**
 //!   ([`ammonia_haze`], P14.T24.h.b part 6): small NH₃-ice particles to the tropopause, the NH₃
-//!   deck's second mode, which leads the hazes' modes and is not counted in their τ. From 30
+//!   deck's second mode, which leads the hazes' modes and is not counted in their τ. From 31
 //!   (`photochem::CHROMOPHORE_MIXING_VERSION`, held) the chromophore's column is a mixing ratio of
 //!   that haze's gas and the haze's τ is refitted with it. A CH₄ deck's
 //!   modes become **its methane layer's** (`methane_layer_mode`, part 7): Irwin et al.'s
