@@ -3262,7 +3262,12 @@ describe("a thick body's bake over the optics pool (R08.T14.c)", () => {
     seam.answer(seam.latestFor(A).id, answerFor(A));
     await microtasks();
     const worker = workerAt(workers, 0);
-    worker.reply({ kind: "assembled", id: lastPosted(worker).id, assembled: thickAssembly() });
+    worker.reply({
+      kind: "assembled",
+      id: lastPosted(worker).id,
+      assembled: thickAssembly(),
+      lobes: [],
+    });
     await microtasks();
     // The light's curve share, sent once the assembly freed the worker and dropped by the build,
     // which needs no curves: its late answer frees the worker for the bake.

@@ -38,6 +38,9 @@ import {
 import { type AssembledMedium, lineSpeciesOf } from "./assemble";
 import type { BodyAtmosphereInput, BodyLight } from "./atmosphereInput";
 import { R05_EARTH_REFERENCE } from "./earth";
+import { type ForwardLobe, forwardLobeOfTable, madeLobesOf } from "./forwardLobe";
+import { FORWARD_PEAK_GRID_ENTRIES, FORWARD_PEAK_U } from "./forwardPeak";
+import { phaseTable } from "./medium";
 import { OPTICS_ASSEMBLY, OpticsJobs } from "./opticsJobs";
 import { type OpticsReply, type OpticsRequest, transferablesOf } from "./opticsMessages";
 import {
@@ -177,6 +180,17 @@ describe("an optics worker's answers", () => {
     );
     expect([lined.length > 0, reply.assembled.drawn.curves]).toEqual([true, []]);
   });
+
+  it("answers an assembly with its tabulated terms' lobes as the page's readers take them, a giant's clouds' (lane perf-page-long-tasks)", async () => {
+    const jobs = new OpticsJobs(toyLoader());
+    const input = recordInput(detailOf(jupiterDetail()));
+    const { reply } = await jobs.answer({ kind: "assemble", id: 1, input });
+    if (reply.kind !== "assembled" || reply.assembled.medium === undefined) {
+      throw new Error(`the giant was answered ${reply.kind} with no medium`);
+    }
+    expect(reply.lobes.length).toBe(3);
+    expect(reply.lobes).toEqual(madeLobesOf(reply.assembled.medium));
+  }, 300_000);
 
   it.each([
     ["an assembly", { kind: "assemble", id: 1, input: earthInput() }],
@@ -429,6 +443,7 @@ describe("the optics-worker pool", () => {
     const { medium } = r05EarthWithOzoneAbsorber();
     worker.reply({
       kind: "assembled",
+      lobes: [],
       id: lastPosted(worker).id,
       assembled: {
         medium: { ...medium, terms: medium.terms.filter((term) => term.absorber === undefined) },
@@ -457,6 +472,7 @@ describe("the optics-worker pool", () => {
     const regime = { kind: "cloudDeck", deckAltitudeM: 4_000 } as const;
     worker.reply({
       kind: "assembled",
+      lobes: [],
       id: lastPosted(worker).id,
       assembled: {
         medium: { ...medium, terms: medium.terms.filter((term) => term.absorber === undefined) },
@@ -484,6 +500,27 @@ describe("the optics-worker pool", () => {
     expect(outcome).toEqual({ kind: "failed", message: expect.stringMatching(/light/u) });
   });
 
+  it("keeps the lobes an assembly carries, so that the page's readers make none (lane perf-page-long-tasks)", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const build = pool.build(KEPT_UNSET);
+    const worker = workerAt(workers, 0);
+    // An even table on the kernels' grid of values no other test's lobe holds.
+    const table = phaseTable(FORWARD_PEAK_U, [
+      new Float64Array(FORWARD_PEAK_GRID_ENTRIES).fill(0.0791),
+      new Float64Array(FORWARD_PEAK_GRID_ENTRIES).fill(0.0791),
+      new Float64Array(FORWARD_PEAK_GRID_ENTRIES).fill(0.0791),
+    ]);
+    const lobe: ForwardLobe = { share: [0.3, 0.3, 0.3], table: [] };
+    worker.reply({
+      kind: "assembled",
+      id: lastPosted(worker).id,
+      assembled: NOT_MODELLED,
+      lobes: [{ table, lobe }],
+    });
+    expect((await build.outcome).kind).toBe("built");
+    expect(forwardLobeOfTable(structuredClone(table))).toBe(lobe);
+  });
+
   it("replaces a worker that fails and asks its job again", async () => {
     const { pool, workers } = scriptedPool(2);
     const build = pool.build(KEPT_UNSET);
@@ -495,7 +532,7 @@ describe("the optics-worker pool", () => {
       asked.kind,
       "input" in asked ? asked.input : undefined,
     ]).toEqual([true, "assemble", KEPT_UNSET]);
-    replacement.reply({ kind: "assembled", id: asked.id, assembled: NOT_MODELLED });
+    replacement.reply({ kind: "assembled", id: asked.id, assembled: NOT_MODELLED, lobes: [] });
     expect((await build.outcome).kind).toBe("built");
   });
 
@@ -535,6 +572,7 @@ describe("the optics-worker pool", () => {
     const first = workerAt(workers, 0);
     first.reply({
       kind: "assembled",
+      lobes: [],
       id: lastPosted(first).id,
       assembled: absorbing(ozone, medium),
     });
@@ -584,13 +622,13 @@ describe("the optics-worker pool", () => {
     it("holds its worker until the late reply, then sends it the next queued job", () => {
       const { worker, late } = cancelledDuringAssembly();
       const before = worker.received.length;
-      worker.reply({ kind: "assembled", id: late.id, assembled: NOT_MODELLED });
+      worker.reply({ kind: "assembled", id: late.id, assembled: NOT_MODELLED, lobes: [] });
       expect([before, worker.received.length, lastPosted(worker).id]).toEqual([1, 2, late.id + 1]);
     });
 
     it("gives the late reply to no build, the next waiting for its own", async () => {
       const { worker, next, late } = cancelledDuringAssembly();
-      worker.reply({ kind: "assembled", id: late.id, assembled: NOT_MODELLED });
+      worker.reply({ kind: "assembled", id: late.id, assembled: NOT_MODELLED, lobes: [] });
       const settled = await Promise.race([next, microtasks().then(() => "still waiting" as const)]);
       expect(settled).toBe("still waiting");
     });

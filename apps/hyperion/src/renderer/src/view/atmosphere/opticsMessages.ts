@@ -15,6 +15,7 @@ import type { AbsorberCurve, AbsorberCurveSums, AbsorberSpec, CurveShare } from 
 import type { AssembledMedium } from "./assemble";
 import type { BodyAtmosphereInput } from "./atmosphereInput";
 import type { DiscBandValues, DiscReflectanceTable } from "./discTable";
+import type { MadeLobe } from "./forwardLobe";
 import type { AtmosphereMedium, RenderChannel } from "./medium";
 import type { BakeSpectrum } from "./spectralColour";
 import type { MsBinShare, MsSourceTable, ThickBakeBody } from "./thick/bake";
@@ -308,7 +309,16 @@ export function keptBakeLightsOf(
  * - `failed`: the job threw, a bug (`decision-r08-t10a-leans.md` item 6), with its message.
  */
 export type OpticsReply =
-  | { readonly kind: "assembled"; readonly id: number; readonly assembled: AssembledMedium }
+  | {
+      readonly kind: "assembled";
+      readonly id: number;
+      readonly assembled: AssembledMedium;
+      /**
+       * The medium's forward lobes as its readers on the page take them (`forwardLobe.ts`'s
+       * `madeLobesOf`; lane perf-page-long-tasks), none without a medium.
+       */
+      readonly lobes: ReadonlyArray<MadeLobe>;
+    }
   | {
       readonly kind: "curve-sums";
       readonly id: number;

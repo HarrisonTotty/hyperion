@@ -70,6 +70,7 @@ import {
   lineSpeciesOf,
 } from "./assemble";
 import { atmosphereKey } from "./atmosphereInput";
+import { madeLobesOf } from "./forwardLobe";
 import {
   type OpticsAnswer,
   type OpticsReply,
@@ -203,9 +204,13 @@ export class OpticsJobs {
   #reply(request: OpticsRequest, options: AssembleOptions): OpticsReply {
     let reply: OpticsReply;
     switch (request.kind) {
-      case "assemble":
-        reply = { kind: "assembled", id: request.id, assembled: this.#assembled(request, options) };
+      case "assemble": {
+        const assembled = this.#assembled(request, options);
+        // The lobes made here, beside the medium, so that the page's first draw makes none.
+        const lobes = assembled.medium === undefined ? [] : madeLobesOf(assembled.medium);
+        reply = { kind: "assembled", id: request.id, assembled, lobes };
         break;
+      }
       case "curve-sums": {
         const { specs, suns } = this.#absorbersUnder(request, options);
         const sums = specs.map((spec) => absorberCurveSums(spec, suns, request.share));

@@ -49,7 +49,8 @@
 import { gaussLegendre } from "../lighting/quadrature";
 import type { Rgb } from "../photometry/toneCurve";
 import { FORWARD_PEAK_GRID_ENTRIES, FORWARD_PEAK_U } from "./forwardPeak";
-import type { PhaseTable } from "./medium";
+import { resampledPhase, withoutForwardDelta } from "./kernelPhase";
+import type { AtmosphereMedium, PhaseTable } from "./medium";
 import { cos, exp, expm1, pow, sin } from "../../lib/pinnedMath";
 
 /** The forward lobe's reach: 30°, `science-r08-mmf.md` §3's forward part. */
@@ -337,15 +338,82 @@ export function forwardLobeOfTable(table: PhaseTable): ForwardLobe {
     lobe = LOBES_BY_VALUES.get(key);
     if (lobe === undefined) {
       lobe = forwardLobeOf(table);
-      LOBES_BY_VALUES.set(key, lobe);
-      const oldest = LOBES_BY_VALUES.keys().next();
-      if (LOBES_BY_VALUES.size > LOBES_BY_VALUES_KEPT && oldest.done !== true) {
-        LOBES_BY_VALUES.delete(oldest.value);
-      }
+      keepByValues(key, lobe);
     }
     LOBES.set(table, lobe);
   }
   return lobe;
+}
+
+/**
+ * A phase table's lobe made where its medium was assembled, an optics worker, for the page to keep
+ * (lane perf-page-long-tasks): the table, as its readers take it, and its lobe.
+ */
+export interface MadeLobe {
+  readonly table: PhaseTable;
+  readonly lobe: ForwardLobe;
+}
+
+/**
+ * The lobes `medium`'s readers on the page take first ({@link forwardLobeOfTable}), each of its
+ * tabulated terms' table with the forward delta taken out and on the kernels' grid, as
+ * `tables.ts`'s `setMedium` packs it and its CPU twin reads it, made by the optics worker that
+ * assembled the medium, so that the page's first draw of it makes none (2.5 s in the draw loop's
+ * tick on the pod at high, the console stopped meanwhile). Each lobe is a copy, whose arrays a
+ * reply may transfer, the maker's own kept.
+ *
+ * @throws RangeError as {@link forwardLobeOf}, and for a term's delta off the grid as
+ *   `withoutForwardDelta`.
+ */
+export function madeLobesOf(medium: AtmosphereMedium): ReadonlyArray<MadeLobe> {
+  const made: MadeLobe[] = [];
+  const seen = new Set<string>();
+  for (const term of medium.terms) {
+    const direct = withoutForwardDelta(term);
+    if (direct.phase.kind !== "tabulated") {
+      continue;
+    }
+    const table = resampledPhase(direct.phase.table);
+    const key = valuesKey(table);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const lobe = forwardLobeOfTable(table);
+    made.push({
+      table,
+      lobe: {
+        share: [lobe.share[0], lobe.share[1], lobe.share[2]],
+        table: lobe.table.map(([r, g, b]) => [r.slice(), g.slice(), b.slice()] as const),
+      },
+    });
+  }
+  return made;
+}
+
+/**
+ * Keeps lobes an optics worker made ({@link madeLobesOf}) as {@link forwardLobeOfTable} keeps its
+ * own, by table and by values, so that a reader on the page takes them and makes none: the same
+ * function of the same table's bits, run on another thread.
+ *
+ * @throws RangeError for a table off the kernels' grid, as {@link forwardLobeOf}.
+ */
+export function keepForwardLobes(made: ReadonlyArray<MadeLobe>): void {
+  for (const { table, lobe } of made) {
+    checkOnGrid(table);
+    keepByValues(valuesKey(table), lobe);
+    LOBES.set(table, lobe);
+  }
+}
+
+/** Keeps a lobe by its table's values, the oldest dropped past {@link LOBES_BY_VALUES_KEPT}. */
+function keepByValues(key: string, lobe: ForwardLobe): void {
+  LOBES_BY_VALUES.delete(key);
+  LOBES_BY_VALUES.set(key, lobe);
+  const oldest = LOBES_BY_VALUES.keys().next();
+  if (LOBES_BY_VALUES.size > LOBES_BY_VALUES_KEPT && oldest.done !== true) {
+    LOBES_BY_VALUES.delete(oldest.value);
+  }
 }
 
 /**

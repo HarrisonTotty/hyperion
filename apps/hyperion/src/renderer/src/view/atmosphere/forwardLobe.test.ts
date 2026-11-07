@@ -13,8 +13,11 @@ import {
   forwardLobeAt,
   forwardLobeOf,
   forwardLobeOfTable,
+  keepForwardLobes,
+  madeLobesOf,
   slabOrders,
 } from "./forwardLobe";
+import { resampledPhase } from "./kernelPhase";
 import { type AtmosphereMedium, CHANNEL_WAVELENGTHS_NM, type PhaseTable } from "./medium";
 import { maxDistanceM } from "./opticalDepth";
 import type { ModeOptics } from "./sizeDistribution";
@@ -195,6 +198,63 @@ describe("the lobes kept (R08.T7)", () => {
     expect(clone).not.toBe(table);
     expect(forwardLobeOfTable(clone)).toBe(forwardLobeOfTable(table));
   }, 60_000);
+});
+
+describe("the lobes an optics worker makes (lane perf-page-long-tasks)", () => {
+  /** A medium of the Mars mode, its forward delta in, and an untabulated term. */
+  function marsMedium(): AtmosphereMedium {
+    return {
+      name: "Mars dust",
+      topHeightM: 80_000,
+      groundAlbedo: [0.25, 0.2, 0.15],
+      terms: [
+        {
+          name: "Mars dust",
+          density: { kind: "exponential", scaleHeightM: 11_000 },
+          scattering: [1, 1, 1],
+          absorption: [0, 0, 0],
+          phase: { kind: "tabulated", table: aerosolPhaseTable(marsOptics()) },
+        },
+        {
+          name: "Rayleigh",
+          density: { kind: "exponential", scaleHeightM: 11_000 },
+          scattering: [1, 1, 1],
+          absorption: [0, 0, 0],
+          phase: { kind: "rayleigh", depolarisation: [0, 0, 0] },
+        },
+      ],
+    };
+  }
+
+  it("makes each tabulated term's lobe of its table on the grid with its delta out, the page's own bits, in arrays of its own", () => {
+    const medium = marsMedium();
+    const [term] = medium.terms;
+    if (term === undefined) {
+      throw new Error("the medium holds the dust");
+    }
+    const direct = withoutForwardDelta(term);
+    if (direct.phase.kind !== "tabulated") {
+      throw new Error("the dust stays tabulated");
+    }
+    const table = resampledPhase(direct.phase.table);
+    const made = madeLobesOf(medium);
+    expect(made.map((each) => each.table)).toEqual([table]);
+    expect(made[0]?.lobe).toEqual(forwardLobeOf(table));
+    expect(made[0]?.lobe.table[0]?.[0]).not.toBe(forwardLobeOfTable(table).table[0]?.[0]);
+  }, 60_000);
+
+  it("gives a kept lobe to the page's readers of an equal table, who make none", () => {
+    // A table of values no other test's lobe holds, and a lobe no making would give.
+    const source = marsTable();
+    const [r, g, b] = source.values.map((channel) => channel.map((v) => v * 1.5));
+    if (r === undefined || g === undefined || b === undefined) {
+      throw new Error("a phase table has three channels");
+    }
+    const table: PhaseTable = { ...source, values: [r, g, b] };
+    const kept: ForwardLobe = { share: [0.5, 0.5, 0.5], table: [] };
+    keepForwardLobes([{ table, lobe: kept }]);
+    expect(forwardLobeOfTable(structuredClone(table))).toBe(kept);
+  });
 });
 
 describe("J₀ (Numerical Recipes' bessj0)", () => {

@@ -83,6 +83,7 @@ import {
   transferablesOf,
 } from "./opticsMessages";
 import { type DiscBandValues, discTableOfBands, type DiscReflectanceTable } from "./discTable";
+import { keepForwardLobes, type MadeLobe } from "./forwardLobe";
 import type { MsBinShare, MsSourceTable, ThickBakeBody } from "./thick/bake";
 import type { DiscBakeAir } from "./thick/discBake";
 import type { DeckBinShare, DeckSplit, DeckTables } from "./thick/deck";
@@ -533,6 +534,8 @@ export class OpticsWorkerPool implements AtmosphereBuilder {
         return withoutCurves(taken);
       }
       const { assembled } = taken;
+      // The worker's lobes kept before the medium is drawn, whose first draw then makes none.
+      keepForwardLobes(taken.lobes);
       if (assembled.medium === undefined) {
         return withoutCurves({ kind: "built", assembled });
       }
@@ -1031,10 +1034,12 @@ function settle(job: Job, outcome: JobOutcome): void {
 }
 
 /** An assembly job's outcome: the assembly, or why the build has none. */
-function assemblyOf(
-  outcome: JobOutcome,
-):
-  | { readonly kind: "assembled"; readonly assembled: AssembledMedium }
+function assemblyOf(outcome: JobOutcome):
+  | {
+      readonly kind: "assembled";
+      readonly assembled: AssembledMedium;
+      readonly lobes: ReadonlyArray<MadeLobe>;
+    }
   | Exclude<OpticsBuildOutcome, { readonly kind: "built" }> {
   if (outcome.kind !== "answered") {
     return failureOf(outcome);
@@ -1042,7 +1047,7 @@ function assemblyOf(
   if (outcome.reply.kind !== "assembled") {
     return { kind: "failed", message: `an assembly was answered ${outcome.reply.kind}` };
   }
-  return { kind: "assembled", assembled: outcome.reply.assembled };
+  return { kind: "assembled", assembled: outcome.reply.assembled, lobes: outcome.reply.lobes };
 }
 
 /** A thick bake's job's outcome as the bake's (see the module's remarks). */
