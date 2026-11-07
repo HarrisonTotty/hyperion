@@ -33,7 +33,7 @@
 //!
 //! # The galaxy
 //!
-//! Each task fits at its manifest's `generator_version`, 29 for the refit on the generator's own
+//! Each task fits at its manifest's `generator_version`, 30 for the refit on the generator's own
 //! pairs (the census's first attempts as the generator draws them, train 27's finding), into its
 //! block's `_29` items, which `tables::binary`'s samplers and share rows read. Its census galaxy is the version's, every hold
 //! that version turns on in force, with the binary classes' scratch share rows in its class shares
@@ -127,7 +127,7 @@ const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 
 /// The generator version the fingerprints' galaxy is built at: the refit's, the manifests'
 /// (a test holds the four manifests to it).
-const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(29);
+const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(30);
 
 /// The fingerprints' galaxy: the Milky Way fixture of [`FINGERPRINT_SEED`] at
 /// [`FINGERPRINT_VERSION`], with the binary classes' scratch share rows, as a census galaxy is
@@ -1193,9 +1193,9 @@ mod tests {
             let error = AwdParams::of(&manifest(|t| t.replacen(from, to, 1))).unwrap_err();
             assert!(error.to_string().contains(key), "{from} → {to}: {error}");
         };
-        assert_eq!(params.census.version, GeneratorVersion::new(29));
+        assert_eq!(params.census.version, GeneratorVersion::new(30));
         refused(
-            "generator_version = 29",
+            "generator_version = 30",
             "generator_version = 23",
             "generator_version",
         );

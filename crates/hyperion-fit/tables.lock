@@ -6,7 +6,7 @@ name = "binary_awd"
 path = "binary.rs"
 task = "binary_awd"
 revision = 0
-inputs_sha256 = "e71e8ac98ac7f0c000eaa965a97a406fe701ad0d655697e02aa4b58160f3c9aa"
+inputs_sha256 = "05097b201a6558b687e2193318b21c8feb83639650a9d963d38e82b56575b15d"
 body_sha256 = "87896b5ada0fad15ecba67b32979e534237870866fc41c40cf83bc6c41930e91"
 fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 1.0960630250705998, 21.0, 1.0, 0.6529028848978797, 0.0322439496270119, 0.000000000012255222349553427]
 since_generator_version = 29
@@ -43,11 +43,11 @@ path = "binary_pair_light_d.rs"
 task = "binary_pair_light_d"
 revision = 0
 inputs_sha256 = "732c1e063876c4908687a3b97b483519bda1a292e898d485204a46ed3d438992"
-body_sha256 = "0afab47de7cc41e4f70deebc43ac26c91ee8e7136e84eda14b204106fd147810"
+body_sha256 = "382efc486129f6b77185e4657350b27aea91bfad08c2dca4bd2f7c6d070538e9"
 fingerprint = [6528.0, 103.34591467473332, -8.889702197686299, 4.0, 7.0, 108.34573232599705, 23.745482726891534, 6.0, 7.0, 13.009535389815337, -5.81808681162251, 3.0, 7.0, 10.943518639978231, -4.721618112106256, 2.0, 7.0, 13.336014548563288, -9.917483402178886, 3.0, 7.0, 24.37043930096877, -2.9032990513209755, 1.0, 7.0, -32.86406411251578, -13.483573819070717, 5.0, 7.0, -32.408700568662056, -6.670042829478909, 2.0, 7.0, -26.444557937419972, -17.04030556747712, 5.0, 7.0, -26.279439376875928, -10.169032906731019, 2.0, 7.0, -57.183387098351965, -26.804061473733896, 9.0, 7.0, -53.90017083228775, -7.194068003397633, 2.0, 7.0]
-since_generator_version = 29
+since_generator_version = 30
 provisional = false
-acceptance = "6528 cells, 6528 sampled, 470016 samples (64 + 8 held out a cell), 384103 holding a changed star; held out: 6721 of 346407 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.024 mag before the 0.3 mag margin; 6528 cells with a changed star, the brightest -8.86 mag; packed 14318 rows, 131220 segments, 452412 characters"
+acceptance = "6528 cells, 6528 sampled, 470016 samples (64 + 8 held out a cell), 384103 holding a changed star; held out: 6815 of 346604 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.024 mag before the 0.3 mag margin; 6528 cells with a changed star, the brightest -8.86 mag; packed 14408 rows, 134157 segments, 461223 characters"
 
 [[table]]
 name = "binary_pair_light_e"
@@ -55,11 +55,11 @@ path = "binary_pair_light_e.rs"
 task = "binary_pair_light_e"
 revision = 0
 inputs_sha256 = "3562f5290d461477f352050a44bfef53a4a2cbf3e582024f4651996046ebb79d"
-body_sha256 = "b032adbd05428e22903f397376579d5fbdbe52bdcdb79934f084c48dc4b83cc2"
+body_sha256 = "0d5baa587370c25ca939390ea2fc111983dfac9030edb0ab668c97c474686e6c"
 fingerprint = [7296.0, -68.29662491189316, -61.4966112474516, 16.0, 7.0, -55.62109318001828, -2.220056569989846, 14.0, 7.0, -88.41113556948793, -63.352662805502774, 12.0, 7.0, -64.08463410154253, -15.363152902101497, 3.0, 7.0, -94.59617429118984, -67.66164314950699, 12.0, 7.0, -91.86327966587562, -33.61044896867474, 8.0, 7.0, -86.0083629285052, -69.61060223387204, 12.0, 7.0, -72.60098732858754, -20.414818069328916, 3.0, 7.0, -89.00932828002672, -68.11663877968358, 9.0, 7.0, -88.62697183615137, -9.356515269520708, 1.0, 7.0, -71.05905699326136, -68.11663877968358, 9.0, 7.0, -70.67670054938601, 0.0, 0.0, 7.0]
-since_generator_version = 29
+since_generator_version = 30
 provisional = false
-acceptance = "7296 cells, 7296 sampled, 525312 samples (64 + 8 held out a cell), 341742 holding a changed star; held out: 9273 of 324234 changed bins beyond their own cell's samples, 35 bins not bounded by the table of the first 64, the least room -0.611 mag before the 0.3 mag margin; 7124 cells with a changed star, the brightest -11.49 mag; packed 10552 rows, 111219 segments, 399321 characters"
+acceptance = "7296 cells, 7296 sampled, 525312 samples (64 + 8 held out a cell), 341742 holding a changed star; held out: 9274 of 324234 changed bins beyond their own cell's samples, 35 bins not bounded by the table of the first 64, the least room -0.611 mag before the 0.3 mag margin; 7124 cells with a changed star, the brightest -11.49 mag; packed 10551 rows, 111181 segments, 399207 characters"
 
 [[table]]
 name = "binary_reach"
@@ -90,12 +90,12 @@ name = "binary_xrb"
 path = "binary.rs"
 task = "binary_xrb"
 revision = 0
-inputs_sha256 = "10bd856ea7f7acebe8112f6d5d4f45bbb904ec87ba352c6678af3ed66490b7f5"
-body_sha256 = "0063cdbf33bea37427a4ae0aa173ec2f28c66a5ca435c09caf6154e212d04138"
+inputs_sha256 = "e801734a877e2f0e848c05d848d16ea678d511436554e17b960ae9855d530766"
+body_sha256 = "0655640123f24a9dc6a636ef28cdb14107618f6cd85085565eed0734e75686f7"
 fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 25.0, 1.0, 1.55261502182327, 1.3396048261069489, -1.5866839897114011]
-since_generator_version = 29
+since_generator_version = 30
 provisional = false
-acceptance = "slab members by kind 390/9808/4/91/7/0/1014/4/0; young members by kind 543/400/107/168/874/4/120/0/4; census kinds 0.0364/0.8948/0.0007/0.0066/0.0008/0.0000/0.0604/0.0002/0.0000; weights 0.0319/0.7837/0.0006/0.1300/0.0529/0.0002 and 0.0007/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 66); high-mass hosts 7; donor mass's own nodes 14; layers C 0.000 D 0.195 E 0.805; rates a system 1.56e-4/2.48e-4/1.68e-4/1.33e-4/1.99e-4/1.30e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
+acceptance = "slab members by kind 388/9725/4/91/7/0/239/4/0; young members by kind 543/400/107/168/874/4/96/0/4; census kinds 0.0375/0.9385/0.0007/0.0070/0.0009/0.0000/0.0150/0.0003/0.0000; weights 0.0329/0.8223/0.0006/0.1300/0.0132/0.0002 and 0.0007/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 70); high-mass hosts 8; donor mass's own nodes 14; layers C 0.000 D 0.147 E 0.853; rates a system 1.54e-4/2.29e-4/1.67e-4/1.30e-4/1.98e-4/1.21e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
 
 [[table]]
 name = "bowl_permanent_shadow"
@@ -445,11 +445,11 @@ path = "sky_binary_light_c.rs"
 task = "sky_binary_light_c"
 revision = 0
 inputs_sha256 = "20f3430ceff92ef66bf400a1a4d929041ffdfbab4be4426b113742e5ddbe3861"
-body_sha256 = "5b40837460cee31f36e8c1902a0389c4de8c955507ad24b1d638835ec2e1fc2a"
+body_sha256 = "a465b925847e6002bf5d2ddf062c06c2181fd51b18659ef033f2bc58f3d98c9a"
 fingerprint = [-286.63293847630274, -308.9133587357554, -444.4013199684933, -285.2266357724602, -554.487008181429, -12.0, -3165.560777962404, 287.53546437494145, 26.0, -808.8666710306339, -880.5215834467264, -1362.7459380261498, -794.1506096286814, -1444.3352319131905, -33.0, -7675.719445363895, 812.6947195013641, 57.0, 92.48628279541008, 92.80832209058516, 68.88083260746262, 92.37336832535571, 292.5817491045646, -9.0, 1122.082839676733, 96.40985434003005, 15.0]
-since_generator_version = 29
+since_generator_version = 30
 provisional = false
-acceptance = "130 cells × 200000 systems (26000000), 433643 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -5.0662e-1 to 1.2257e-1 L☉,V a system, its standard error at most 1.5730e-1"
+acceptance = "130 cells × 200000 systems (26000000), 433641 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -5.0662e-1 to 1.2257e-1 L☉,V a system, its standard error at most 1.5730e-1"
 
 [[table]]
 name = "sky_binary_light_d"
@@ -457,11 +457,11 @@ path = "sky_binary_light_d.rs"
 task = "sky_binary_light_d"
 revision = 0
 inputs_sha256 = "8992e1da34b0fa40cd339dfd38cf30dce5572fdc36265bf7f40445342dbd6033"
-body_sha256 = "fd0899eb6b4350f3e0f69da6d9c5e683e0914a5751fafe6fe047164152106442"
-fingerprint = [-449.51164901937756, -454.26508359260254, -355.82319404343315, -441.1863178727718, -1449.4059948872912, -16.0, -5163.428744176823, 594.4321061592332, 17.0, -6598.839859598376, -7107.409366613624, -10591.832365699984, -6469.572717254109, -12224.326824452777, -21.0, -50664.03865111614, 8200.07588576167, 30.0, -7093.980780308867, -7733.610363717335, -12023.89302957789, -6985.542247342455, -12475.675332764518, -4.0, -48831.23196351373, 7265.776551286786, 8.0]
-since_generator_version = 29
+body_sha256 = "e8bffc71063fd4044ac7221669e1d180b0615e06142d4edbd88a9ed1c9bbdf67"
+fingerprint = [-449.51164901937756, -454.26508359260254, -355.82319404343315, -441.1863178727718, -1449.4059948872912, -16.0, -5163.428744176823, 594.4321061592332, 17.0, -6615.663044374652, -7124.282457543361, -10604.059659975546, -6486.296447375812, -12278.810559023404, -22.0, -50872.727467789635, 8216.899070537946, 30.0, -7093.980780308867, -7733.610363717335, -12023.89302957789, -6985.542247342455, -12475.675332764518, -4.0, -48831.23196351373, 7265.776551286786, 8.0]
+since_generator_version = 30
 provisional = false
-acceptance = "130 cells × 20000 systems (2600000), 255037 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -4.4819e1 to 1.2056e0 L☉,V a system, its standard error at most 7.1710e0"
+acceptance = "130 cells × 20000 systems (2600000), 253330 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -4.4819e1 to 1.2667e0 L☉,V a system, its standard error at most 7.1710e0"
 
 [[table]]
 name = "sky_binary_light_e"
@@ -469,11 +469,11 @@ path = "sky_binary_light_e.rs"
 task = "sky_binary_light_e"
 revision = 0
 inputs_sha256 = "8fa5566f3390f7a9f0a589a0783f1d0b9f9ef66f886e40299e840ea3ea857626"
-body_sha256 = "e1b077c900e941d2c66e7c10c1c96fb2e66ab497136723dd2dbfa5fbf5f2b459"
+body_sha256 = "4468f46b9b512234b340498a642c8ebfcc2087f6767129a9d2107512df4d2791"
 fingerprint = [-98541.59396350944, -100805.73020028113, -92894.58436982098, -98247.9729708907, -284512.10848999704, -36.0, -564864.5744310723, 99377.9508178254, 21.0, -85306.28796318581, -88938.25571569987, -100628.42262623546, -84917.28744873093, -213668.95717740277, -48.0, -493145.6135683193, 108243.0363555688, 34.0, 5265.1229441756195, 5275.986669533824, 3674.046395068381, 5187.159916725045, 17737.500630524468, 0.0, 23694.071432929537, 5267.655474570714, 11.0]
-since_generator_version = 29
+since_generator_version = 30
 provisional = false
-acceptance = "130 cells × 20000 systems (raised: cell 25 100000) (2680000), 538515 changed by pair evolution; the 1-mag bins from absolute V -12 to 20 held; a cell's mean total light difference -2.5266e3 to 6.4145e2 L☉,V a system, its standard error at most 2.3960e2"
+acceptance = "130 cells × 20000 systems (raised: cell 25 100000) (2680000), 538498 changed by pair evolution; the 1-mag bins from absolute V -12 to 20 held; a cell's mean total light difference -2.5266e3 to 6.4145e2 L☉,V a system, its standard error at most 2.3960e2"
 
 [[table]]
 name = "sky_envelope"
@@ -713,7 +713,7 @@ body_sha256 = "b1c9ec5e1cde8f41acc5e366d483b653322d7840363838c94c7555998c9c8d3a"
 fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 1.0960630250705998, 0.00007045175165970433, 0.0000687768912141925, 0.0000671418474864471, 0.00006554567390744563, 0.00006398744641109867, 0.00006246626289928335, 0.00006098124271959729, 0.00005953152615552191, 0.00005811627392871585, 0.00005673466671313003, 0.00005538590466068287, 0.00005406920693820183, 0.00005278381127539033, 0.00005152897352351225, 0.00005030396722460306, 0.00004910808319089251, 0.00004794062909424209, 0.000046800929065338604, 0.00004568832330241403, 0.00004460216768927103, 0.00004354183342238668, 0.000042506706646881515, 0.00004149618810114428, 0.00004050969276990198, 120.0, 69.0, 2.0, 228623318.61134434, 1.0, 1.44, 1.0, 375197383.3958119, 1.0, 1.2730355319210962, 0.0]
 since_generator_version = 28
 provisional = false
-acceptance = "24 of 24 bins capped at η 1, every short bin among them (passes), the pool ÷ target by bin 0.005/0.110/0.431/0.390/0.510/0.648/0.761/0.587/0.135/0.012/0.025/0.110/0.225/0.423/0.079/0.094/0.098/0.106/0.104/0.108/0.105/0.094/0.093/0.099; the pool 3.1053e-4 per M☉ formed, 0.239 of the yield (mergers 0.056, accretions 0.183); exploded 3.1053e-4, min(pool, target) in every bin within 0.00 σ (passes); η of the even and odd parts within 0.00 σ (passes; both under 4.098 σ, α = 10⁻³ over the bins); 16173 detonatable candidates (mergers 3802, accretions 12371) of 41655; records C/D/E 7924768/1625728/449568, pairs 1709089/951509/301363; recorded, not asserted: the double white dwarfs' contacts over the last Gyr 4.092e-14 per M☉ formed a year, 0.567 × the delay-time distribution's 7.221e-14 at the same ages (Maoz, Hallakoun and Badenes 2018: 4.5–7)"
+acceptance = "24 of 24 bins capped at η 1, every short bin among them (passes), the pool ÷ target by bin 0.005/0.110/0.431/0.390/0.510/0.648/0.761/0.587/0.135/0.012/0.025/0.110/0.225/0.423/0.079/0.094/0.098/0.106/0.104/0.108/0.105/0.094/0.093/0.099; the pool 3.1053e-4 per M☉ formed, 0.239 of the yield (mergers 0.056, accretions 0.183); exploded 3.1053e-4, min(pool, target) in every bin within 0.00 σ (passes); η of the even and odd parts within 0.00 σ (passes; both under 4.098 σ, α = 10⁻³ over the bins); 16173 detonatable candidates (mergers 3802, accretions 12371) of 41655; records C/D/E 7924768/1625728/449568, pairs 1709088/951507/301363; recorded, not asserted: the double white dwarfs' contacts over the last Gyr 4.092e-14 per M☉ formed a year, 0.567 × the delay-time distribution's 7.221e-14 at the same ages (Maoz, Hallakoun and Badenes 2018: 4.5–7)"
 
 [[table]]
 name = "wd_cooling"
