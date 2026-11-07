@@ -9973,10 +9973,18 @@ struct MoonBulkMoves {
 
 /// The water the moon `part` of the system `system` held before P14.T56.f's arms, by its origin
 /// as its record's bulk reads it (`PlanetarySystem::stated_moon_bulk`, `moon_own_bulk`), its
-/// parent as `now` says and its derivation `derived`: a regular moon's placement's ice
-/// ([`DerivedMoon::ice_fraction`]), a giant-impact moon's its icy parent's water or none, and a
-/// capture's the ice its density holds wherever it formed.
-fn unthinned_water(part: &MoonPart, now: &ParentNow, derived: &DerivedMoon) -> f64 {
+/// parent as `now` says, its derivation `derived` and its record's mass `mass`: a regular moon's
+/// placement's ice ([`DerivedMoon::ice_fraction`]), a giant-impact moon's its icy parent's water
+/// or none, and a capture's the ice its density holds wherever it formed. From generator version
+/// 29 a record's bulk is the moon's at the mass its rock's evaporation has left it (P14.T55.b.a),
+/// a capture's radius shrunk by the cube root of that share to keep its density, which keeps it
+/// but for its last bits: a capture's water is read at that mass and radius, as its record's is.
+fn unthinned_water(
+    part: &MoonPart,
+    now: &ParentNow,
+    derived: &DerivedMoon,
+    mass: EarthMasses,
+) -> f64 {
     match part.satellite.moon() {
         SatelliteMoon::Regular(_) => derived.ice_fraction(),
         SatelliteMoon::GiantImpact(_) => match (part.parent.class(), &now.derived) {
@@ -9984,7 +9992,7 @@ fn unthinned_water(part: &MoonPart, now: &ParentNow, derived: &DerivedMoon) -> f
             _ => 0.0,
         },
         SatelliteMoon::Captured(captured) => {
-            ice_fraction_of(sphere_density(part.satellite.mass(), captured.radius()))
+            ice_fraction_of(sphere_density(mass, captured.with_mass(mass).radius()))
         }
     }
 }
@@ -10018,6 +10026,12 @@ impl MoonBulkMoves {
             let Some(new) = find(after.bodies()) else {
                 continue;
             };
+            let record_mass = after
+                .bodies()
+                .iter()
+                .find(|r| r.index() == body.index)
+                .and_then(|r| r.mass().ok().copied())
+                .unwrap_or_else(|| body.mass());
             let (OrbitHost::Body(parent), Part::Moon(part)) = (body.host, &body.part) else {
                 if new.class() == PlanetClass::Icy && new.equilibrium_temperature() > HOT_ICE_LIMIT
                 {
@@ -10045,7 +10059,7 @@ impl MoonBulkMoves {
             });
             let r_km = Metres::from(new.radius()).value() / 1e3;
             let (w0, w1) = (
-                unthinned_water(part, &now, &derived),
+                unthinned_water(part, &now, &derived, record_mass),
                 new.fractions().water(),
             );
             if w1 > 0.0 && r_km < 10.0 && (200.0..=HOT_ICE_LIMIT.value()).contains(&t0) {
