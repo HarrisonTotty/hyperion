@@ -631,9 +631,10 @@ fn the_census_walk_covers_a_natal_kick_s_reach() {
 /// The census's columns per chunk: the unit its checkpoint records and a resumed run skips.
 const CENSUS_CHUNK_COLUMNS: usize = 512;
 
-/// The environment variable naming the census's checkpoint file: one line per finished chunk of
-/// [`CENSUS_CHUNK_COLUMNS`] columns, appended as each finishes, which a run reads first and whose
-/// chunks it skips (LANE-RULES v7, "Long runs"). Unset, nothing is written or read.
+/// The environment variable naming the census's checkpoint file: a header naming the run, then one
+/// line per finished chunk of [`CENSUS_CHUNK_COLUMNS`] columns, appended as each finishes, which a
+/// run whose header is the same reads first and whose chunks it skips (LANE-RULES v7, "Long
+/// runs"); a run of another header refuses the file. Unset, nothing is written or read.
 const CENSUS_CHECKPOINT: &str = "HYPERION_CENSUS_CHECKPOINT";
 
 /// What one chunk of the census's columns carved: each claimed record's ID with its class, in the
@@ -781,11 +782,35 @@ fn carved_galaxy(off: &Galaxy, on: &Galaxy) -> (Vec<(u64, Class)>, BTreeMap<i32,
     let columns = layer_e_columns(on);
     let chunks: Vec<&[[i32; 2]]> = columns.chunks(CENSUS_CHUNK_COLUMNS).collect();
     let path = std::env::var_os(CENSUS_CHECKPOINT).map(std::path::PathBuf::from);
+    // The run's header: the version, both galaxies' seeds and rules, the chunks' size and the
+    // columns' count and digest, so that a checkpoint is read back only by its own run.
+    let digest = f64_digest(
+        &columns
+            .iter()
+            .flat_map(|&[x, y]| [f64::from(x), f64::from(y)])
+            .collect::<Vec<_>>(),
+    );
+    let header = format!(
+        "census v{} seed {:#x} off {:?} on {:?} chunk {CENSUS_CHUNK_COLUMNS} columns {} {digest:#018x}",
+        GENERATOR_VERSION.get(),
+        on.seed().get(),
+        off.rules(),
+        on.rules(),
+        columns.len()
+    );
     let mut done: BTreeMap<usize, CensusChunk> = BTreeMap::new();
     if let Some(path) = &path
         && let Ok(text) = std::fs::read_to_string(path)
+        && !text.is_empty()
     {
-        for (index, chunk) in text.lines().filter_map(CensusChunk::parse) {
+        let mut lines = text.lines();
+        assert_eq!(
+            lines.next(),
+            Some(header.as_str()),
+            "the checkpoint {} is another run's",
+            path.display()
+        );
+        for (index, chunk) in lines.filter_map(CensusChunk::parse) {
             done.insert(index, chunk);
         }
     }
@@ -800,13 +825,15 @@ fn carved_galaxy(off: &Galaxy, on: &Galaxy) -> (Vec<(u64, Class)>, BTreeMap<i32,
         todo.len()
     );
     let file = path.as_ref().map(|path| {
-        Mutex::new(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .expect("the census's checkpoint opens"),
-        )
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("the census's checkpoint opens");
+        if done.is_empty() && file.metadata().is_ok_and(|m| m.len() == 0) {
+            writeln!(file, "{header}").expect("the checkpoint writes");
+        }
+        Mutex::new(file)
     });
     let next = AtomicUsize::new(0);
     let walked = Mutex::new(BTreeMap::new());

@@ -367,7 +367,22 @@ mod tests {
     /// predicates read none, every one, and about half by position, in every layer.
     #[test]
     fn visit_cell_hands_over_generate_cell_s_systems_whichever_it_reads() {
-        let galaxy = held();
+        visit_cell_hands_over_in(held());
+    }
+
+    /// The same under every 31 hold's carve-out residuals, whose recently dead records the lens
+    /// walk counts without the exact fate they take (P09.T35's census C1).
+    #[test]
+    fn visit_cell_hands_over_generate_cell_s_systems_under_the_31_residuals() {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            residuals: crate::galaxy::displaced::site::CarveResidualsRules::Matched,
+            ..held().rules()
+        };
+        visit_cell_hands_over_in(&held().clone().with_rules(rules));
+    }
+
+    /// [`visit_cell_hands_over_generate_cell_s_systems_whichever_it_reads`] in `galaxy`.
+    fn visit_cell_hands_over_in(galaxy: &Galaxy) {
         let baade = GalacticPosition::from_light_years([0.0, 0.0, -1_770.0]).unwrap();
         let mut cell = Vec::new();
         let (mut read, mut counted) = (0_usize, 0_usize);

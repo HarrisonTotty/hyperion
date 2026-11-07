@@ -6174,7 +6174,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   `GalaxyRules::residuals` (`CarveResidualsRules`, `CARVE_RESIDUALS_VERSION` = 31, in
   `displaced/site.rs`; `GalaxyRules::every_31_hold()`). Its LBV half (P09.T43): from 31 a component's
   share is the field's × `StayMarks`' alive odds, each node weight × `AliveLaw`'s bound, and a host
-  is thinned on `AliveLaw::odds` (lifetime at `Z_ref`, own draws) on `class.lbv.mass` word 2.
+  is thinned on `AliveLaw::odds` (lifetime at `Z_ref`, own draws) on a new tag, `class.lbv.alive`.
   Lean (2026-11-07): thin at the host, after the test, so only hosts pay the lifetime.
   Its dead-record half (P09.T35's C1): from 31 `placement::marks::dead_age` takes the exact fate of a
   table-read record whose drawn time since death is under `recent_death_reach()` (`W_cap` + L + 2H)

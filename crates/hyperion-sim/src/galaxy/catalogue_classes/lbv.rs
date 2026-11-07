@@ -137,7 +137,7 @@ use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{CatalogueSystemId, Layer, SystemId};
-use crate::rng::{Mark, ObjectKey, PiecewiseLinear, Stream, Threshold, tags};
+use crate::rng::{ObjectKey, PiecewiseLinear, Stream, Threshold, tags};
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
 use crate::stellar::sse::lifetime_under;
@@ -538,9 +538,9 @@ pub struct LbvCandidate {
     age_at_epoch: Years,
     composition: Composition,
     velocity: GalacticVelocity,
-    /// From 31, the component's place in the process, the node and the mark the alive law
-    /// thins on (`class.lbv.mass` word 2).
-    alive: Option<(usize, usize, Mark)>,
+    /// From 31, the component's place in the process and the node, which the alive law's
+    /// thinning reads.
+    alive: Option<(usize, usize)>,
 }
 
 /// A luminous-blue-variable host: a system of the young field whose primary's window near the
@@ -662,20 +662,21 @@ impl LbvProcess {
                         (stay * odds, weights, total)
                     }
                 };
-                (share > 0.0 && rate > 0.0 && total.is_finite() && total > 0.0).then(|| {
-                    let rate = rate * (1.0 + BOUND_MARGIN);
-                    if matched {
-                        alive.push(law);
-                    }
-                    LbvComponent {
-                        id,
-                        share,
-                        rate_per_year: rate,
-                        candidates_per_system: rate * total,
-                        node_weights,
-                        weight: total,
-                    }
-                })
+                (share > 0.0 && rate > 0.0 && (!matched || (total.is_finite() && total > 0.0)))
+                    .then(|| {
+                        let rate = rate * (1.0 + BOUND_MARGIN);
+                        if matched {
+                            alive.push(law);
+                        }
+                        LbvComponent {
+                            id,
+                            share,
+                            rate_per_year: rate,
+                            candidates_per_system: rate * total,
+                            node_weights,
+                            weight: total,
+                        }
+                    })
             })
             .collect();
         Self {
@@ -694,12 +695,12 @@ impl LbvProcess {
     }
 
     /// Whether a host the test keeps is kept by the alive law's thinning, from 31: its mark
-    /// below the law's odds at its mass and its lifetime at the reference composition with its own
+    /// (`class.lbv.alive`) below the law's odds at its mass and its lifetime at the reference composition with its own
     /// draws, as the grid's alive record takes its own, against its node's bound (module
     /// documentation, "The living hosts, from 31"). Always under the held arm. Only a host pays
     /// the lifetime, since the thinning is independent of the test.
     fn lives_on_the_grid(&self, galaxy: &Galaxy, candidate: &LbvCandidate) -> bool {
-        let Some((slot, k, mark)) = candidate.alive else {
+        let Some((slot, k)) = candidate.alive else {
             return true;
         };
         let Some(law) = self.alive_law(slot) else {
@@ -718,7 +719,9 @@ impl LbvProcess {
         if odds > bound {
             ALIVE_OVER_BOUND.with(|c| c.set(c.get() + 1));
         }
-        mark.is_below(Threshold::from_ratio(odds.min(bound), bound))
+        let key = ObjectKey::from(SystemId::from(candidate.id));
+        Stream::open(galaxy.seed(), tags::CLASS_LBV_ALIVE, key)
+            .decide(Threshold::from_ratio(odds.min(bound), bound))
     }
 
     /// The young field's components, in component order: those with layer-E systems of the
@@ -807,8 +810,8 @@ impl ClassProcess for LbvProcess {
             hi.value(),
             stream.uniform(),
         ));
-        // From 31, the mark the test thins on the alive law at the mass.
-        let alive = self.alive_law(slot).map(|_| (slot, k, stream.mark()));
+        // From 31, what the test's thinning on the alive law reads.
+        let alive = self.alive_law(slot).map(|_| (slot, k));
         // 3. The age at the epoch over the node's span, thinned on the component's age density
         //    there against its largest.
         let mut stream = Stream::open(seed, tags::CLASS_LBV_AGE, key);

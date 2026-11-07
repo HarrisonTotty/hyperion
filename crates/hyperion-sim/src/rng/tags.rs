@@ -1317,6 +1317,15 @@ domain_tags! {
     /// 0–3 four uniforms that place a point by the galaxy's density, word 4 the planet picked of
     /// the system nearest it, word 5 the new `SEED`; every later word is reserved.
     VIEWER_DRAW: Galaxy = "viewer.draw";
+
+    // Plan 09, P09.T43 at 31 (the carve-out's residuals): a luminous-blue-variable host's alive
+    // mark, beside P09.T43's `class.lbv.*` tags above. Appended here, after R15's `viewer.draw`,
+    // because the macro's order fixes `ALL`.
+
+    /// A luminous-blue-variable host's alive mark (P09.T43, from generator version 31), keyed as
+    /// its other `class.lbv.*` draws are: word 0 the mark that thins it on the grid's alive law at
+    /// its mass against its node's bound (`lbv::AliveLaw`); the other words are reserved.
+    CLASS_LBV_ALIVE: System = "class.lbv.alive";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1774,6 +1783,7 @@ mod tests {
             CLASS_LBV_AGE,
             CLASS_LBV_METALLICITY,
             CLASS_LBV_VELOCITY,
+            CLASS_LBV_ALIVE,
         ] {
             assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
             assert!(tag.name().starts_with("class.lbv."));
