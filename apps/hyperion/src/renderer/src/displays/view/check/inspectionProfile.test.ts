@@ -55,7 +55,7 @@ const CENSUS: MarchCensus = {
  * A profiler over fakes, the clock moving by each wait, the primary drawing every `drawMs`, its
  * calls counted by `counter` where given, and each census asked of the probe answered by `census`
  * (none by default: no engine made) and its signals kept, React's commits counted by `react`
- * where given.
+ * where given, and the probe's figures replaced by `probe`'s where it has them.
  */
 function profiler(
   drawMs: number,
@@ -63,6 +63,7 @@ function profiler(
   counter: InspectionProfileDeps["calls"] = null,
   census: () => Promise<MarchCensus> | null = () => null,
   react: InspectionProfileDeps["react"] = null,
+  probe: Partial<InspectionProfileDeps["views"]> = {},
 ): {
   readonly profile: InspectionProfiler;
   readonly calls: string[];
@@ -123,6 +124,7 @@ function profiler(
         signals.push(signal);
         return census();
       },
+      ...probe,
     },
     markWindow: (span) => {
       marked.push(span);
@@ -319,6 +321,41 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       warn.mock.calls.length,
       none.profile.windows[0]?.marchCensus,
     ]).toEqual([null, [true], null, 1, null]);
+  });
+
+  it("takes its frames' GPU times and pass times over the same frames, a resolve that reports in the census's wait in neither (lane fix-inspection-timing-record)", async () => {
+    // The probe's frames: two timed as the window settles, a third whose resolve reports later.
+    let timed = 2;
+    const { profile } = profiler(
+      100,
+      Number.NEGATIVE_INFINITY,
+      null,
+      // The census is taken a frame later, and that frame reports the window's last resolve.
+      () =>
+        new Promise((resolve) => {
+          timed += 1;
+          resolve(CENSUS);
+        }),
+      null,
+      {
+        window: (startMs, endMs) => ({
+          ...figures(startMs, endMs),
+          frameGpuMs: Array.from({ length: timed }, () => 40),
+          untimedFrames: 3 - timed,
+        }),
+        passTimes: () => [
+          {
+            label: "atmosphere view",
+            ms: Array.from({ length: timed }, () => 30),
+            kernels: [],
+            workgroups: [],
+          },
+        ],
+      },
+    );
+    await profile.measure("close", PLATE);
+    const window = profile.windows[0];
+    expect([window?.gpuMs.length, window?.passes.map((pass) => pass.ms.length)]).toEqual([2, [2]]);
   });
 
   it("writes every window measured, in order, with the pass timer's kind", async () => {

@@ -184,9 +184,15 @@ export class InspectionProfiler {
       }
       throw error;
     }
+    // Every per-frame figure in one synchronous step, over the same frames: a resolve that reports
+    // in a later wait (the census's) would otherwise count in the passes and not the frames' GPU
+    // times, and the main process refuse the record (lane fix-inspection-timing-record).
     const figures = views.window(startMs, endMs, [
       { name: PRIMARY_VIEW_NAME, style: "photorealistic" },
     ]);
+    const passes = views.passTimes(startMs, endMs);
+    const memory = views.memoryTraffic(startMs, endMs);
+    const atmosphereReads = views.atmosphereReads(startMs, endMs);
     const primary = figures.views[0];
     const census = await this.#censusAfter(name);
     this.#windows.push({
@@ -199,12 +205,12 @@ export class InspectionProfiler {
       mainThreadMs: figures.mainThreadMs,
       submitMs: primary?.submitMs ?? [],
       gpuMs: figures.frameGpuMs,
-      passes: views.passTimes(startMs, endMs),
+      passes,
       untimedFrames: figures.untimedFrames,
-      memory: views.memoryTraffic(startMs, endMs),
+      memory,
       gpuCalls,
       gpuAttachments,
-      atmosphereReads: views.atmosphereReads(startMs, endMs),
+      atmosphereReads,
       react,
       clusters: this.#deps.clusters(),
       // The floor's air at the low setting's sizes while it stands stepped (the owner's report).
