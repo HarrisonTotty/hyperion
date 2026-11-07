@@ -8,9 +8,9 @@
 //!   (plan 15's P15.T9.b, from P11.T11.a's records) takes none of the paths: its dwarf merges with
 //!   a helium star, and the product, keeping the dwarf's core, collapses by electron capture at the
 //!   merger (P11.T4's `merged_capture`).
-//! - Slow: the dwarf-limit census's 6 × 10⁴ pairs of layers C, D and E near the Sun under every 30
-//!   hold: each path's endings and first candidates, the pairs' candidates by channel, and the
-//!   pairs that show a neutron star at their age.
+//! - Slow: the dwarf-limit census's 6 × 10⁴ pairs of layers C, D and E near the Sun under the
+//!   version's rules: each path's endings and first candidates, the pairs' candidates by channel,
+//!   and the pairs that show a neutron star at their age.
 
 use crate::planetary::testing::in_shares;
 
@@ -68,8 +68,8 @@ fn the_golden_s_carbon_oxygen_dwarf_ends_a_neutron_star() {
 
     let seed = Seed::new(0x4d2);
     let id = crate::id::SystemId::from_raw(0x6200_5957_fe00_0024).expect("a grid ID");
-    let rules = GalaxyRules::every_30_hold();
-    let case = "every 30 hold";
+    let rules = GalaxyRules::of_version(crate::GENERATOR_VERSION);
+    let case = "the version's rules";
     let galaxy = Galaxy::from_params_with_rules(
         seed,
         GalaxyParams::from_seed(seed, MassFunctionKind::default()),
@@ -234,14 +234,14 @@ const CENSUS_FIGURES: Figures = Figures {
     neutron_stars: [1, 2_072, 11_190],
 };
 
-/// A census of 6 × 10⁴ generated pairs ([`census`]) under every 30 hold: every ending is a
+/// A census of 6 × 10⁴ generated pairs ([`census`]) under the version's rules: every ending is a
 /// disruption, and every candidate a path pools first can detonate.
 #[test]
 #[ignore = "slow: 6 × 10⁴ generated pairs run through the binary engine to 13.8 Gyr"]
-fn every_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_under_every_30_hold() {
+fn every_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
     let galaxy = Galaxy::from_params(Seed::new(CENSUS_SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture's gas is mostly neutral");
-    let figures = census(&galaxy, StellarRules::every_30_hold());
+    let figures = census(&galaxy, StellarRules::of_version(crate::GENERATOR_VERSION));
     println!("{figures:?}");
     for (layer, paths) in figures.paths.iter().enumerate() {
         for (path, [_, first, detonatable, _]) in ChandrasekharPath::ALL.iter().zip(paths) {

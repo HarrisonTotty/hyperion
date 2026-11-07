@@ -66,15 +66,6 @@ impl GalaxyRules {
             stellar: StellarRules::of_version(version),
         }
     }
-
-    /// Every galaxy and stellar hold at 30 in force, for a test that asserts a 30 figure: the
-    /// version's rules from 30, the stellar holds ([`StellarRules::every_30_hold`], P11.T4's
-    /// merged capture) among them. The 30 bump deletes it with them.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_30_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(30))
-    }
 }
 
 #[cfg(test)]

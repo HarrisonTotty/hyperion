@@ -85,7 +85,7 @@ fn an_oxygen_neon_dwarf_s_coalescence_past_the_capture_mass_collapses() {
         );
         evolve(&input, Years::new(1.6e9))
     };
-    let captured = run(StellarRules::every_30_hold());
+    let captured = run(StellarRules::of_version(crate::GENERATOR_VERSION));
     let at = merger_age(&captured);
     assert!(
         (1.48e9..1.50e9).contains(&at.value()),
@@ -101,7 +101,7 @@ fn an_oxygen_neon_dwarf_s_coalescence_past_the_capture_mass_collapses() {
         let state = captured.state_at(Years::new(age));
         assert!(
             state.stars().iter().all(|s| !s.phase().is_living()),
-            "every 30 hold, {age:.4e} yr: {state:?}"
+            "{age:.4e} yr: {state:?}"
         );
         assert_eq!(state.stars()[0].phase(), Phase::NeutronStar, "{state:?}");
     }
@@ -120,7 +120,7 @@ fn the_merged_capture_is_deterministic() {
         650.0,
         0.7,
         [StarDraws::median(), StarDraws::median()],
-        StellarRules::every_30_hold(),
+        StellarRules::of_version(crate::GENERATOR_VERSION),
     );
     let runs = [(), ()].map(|()| {
         let before = merged_captures();
@@ -135,7 +135,7 @@ fn the_merged_capture_is_deterministic() {
 /// 1.5–2.3 M☉, 10 periastra of 562–1,778 R☉ log-even, 9 eccentricities of 0–0.9 and 5 [Fe/H] of
 /// 0–0.176, each through `pair_light::pair_rows` and against the version's E table: the pairs with
 /// a changed star brighter than the table at some bin, and the least room. As measured (2026-11-06,
-/// at generator version 28, against version 28's table; pod, 16 vCPU): under every 30 hold none,
+/// at generator version 28 under every 30 hold, against version 28's table; pod, 16 vCPU): none,
 /// the least room +1.19 mag, so E's table needs no slice of its own (research-leans-45's fallback),
 /// where under every 29 hold 164 pairs passed it, the least room −1.45 mag (the research measured
 /// 173 and −1.45 against the table refitted at 29, all of them the merged channel).
@@ -171,7 +171,7 @@ fn the_merged_channel_s_pairs_against_e_s_table() {
     }
     let key = CellKey::new(Layer::E, [3, 5, 7]).expect("a cell");
     let seed = Seed::new(0x5eed_0017_b0b0_f17e);
-    let rules = StellarRules::every_30_hold();
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
     let shares = in_shares(64, 16, |share| {
         let mut past = 0_usize;
         let mut least = f64::INFINITY;

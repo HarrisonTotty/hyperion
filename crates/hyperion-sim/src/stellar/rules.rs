@@ -63,16 +63,6 @@ impl StellarRules {
         }
     }
 
-    /// Every stellar hold at 30 in force, for a test that asserts a 30 figure without a galaxy:
-    /// P11.T4's `merged_capture`. The stellar part of
-    /// `GalaxyRules::every_30_hold()`, so a later hold at 30 joins both with nothing to edit; the 30
-    /// bump deletes it with it.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_30_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(30))
-    }
-
     /// The test-only second table in place of the committed one
     /// ([`KickRankRules::Probe`]), which no version takes: the tests' door to every reader's
     /// choke point.

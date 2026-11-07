@@ -8485,15 +8485,19 @@ fn a_fed_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
     };
     let co = Phase::CarbonOxygenWhiteDwarf;
     let dwarf = 1.4401;
-    let disrupted = fed_by_transfer(co, dwarf, StellarRules::every_30_hold());
-    assert_disrupted_with_a_candidate(&disrupted, 0, dwarf, "transfer, every 30 hold");
+    let disrupted = fed_by_transfer(
+        co,
+        dwarf,
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    assert_disrupted_with_a_candidate(&disrupted, 0, dwarf, "transfer");
     let companion = disrupted.members[1].state_at(&disrupted.ctx, 1, disrupted.age);
     assert_eq!(companion.phase(), Phase::MainSequence, "{companion:?}");
 
     let one = fed_by_transfer(
         Phase::OxygenNeonWhiteDwarf,
         1.375,
-        StellarRules::every_30_hold(),
+        StellarRules::of_version(crate::GENERATOR_VERSION),
     );
     let [collapse] = one.supernovae.as_slice() else {
         panic!(
@@ -8507,9 +8511,9 @@ fn a_fed_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
         "an oxygen–neon dwarf pools no candidate"
     );
 
-    let mut wind = wind_fed_dwarf_engine(1.439, StellarRules::every_30_hold());
+    let mut wind = wind_fed_dwarf_engine(1.439, StellarRules::of_version(crate::GENERATOR_VERSION));
     wind.detached_phase();
-    assert_disrupted_with_a_candidate(&wind, 0, CHANDRASEKHAR_MASS.value(), "wind, every 30 hold");
+    assert_disrupted_with_a_candidate(&wind, 0, CHANDRASEKHAR_MASS.value(), "wind");
     assert!(
         wind.supernovae[0]
             .age()
@@ -8550,8 +8554,8 @@ fn a_merged_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
         engine.finish_merger_with(product);
         engine
     };
-    let disrupted = merged(StellarRules::every_30_hold());
-    assert_disrupted_with_a_candidate(&disrupted, 0, core, "the merged dwarf, every 30 hold");
+    let disrupted = merged(StellarRules::of_version(crate::GENERATOR_VERSION));
+    assert_disrupted_with_a_candidate(&disrupted, 0, core, "the merged dwarf");
     assert_eq!(
         disrupted.pooled.map(|p| p.masses()[1]),
         Some(SolarMasses::ZERO)
@@ -8564,8 +8568,8 @@ fn a_merged_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
         });
         engine
     };
-    let disrupted = unplaced(StellarRules::every_30_hold());
-    assert_disrupted_with_a_candidate(&disrupted, 0, 1.5, "the unplaced product, every 30 hold");
+    let disrupted = unplaced(StellarRules::of_version(crate::GENERATOR_VERSION));
+    assert_disrupted_with_a_candidate(&disrupted, 0, 1.5, "the unplaced product");
 }
 
 /// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a giant whose core is a carbon–oxygen
@@ -8590,27 +8594,27 @@ fn a_kept_carbon_oxygen_core_at_the_chandrasekhar_mass_pools_a_candidate() {
         engine.die(0);
         (engine, core)
     };
-    let (disrupted, core) = at_death(StellarRules::every_30_hold());
-    assert_disrupted_with_a_candidate(&disrupted, 0, core, "at its death, every 30 hold");
+    let (disrupted, core) = at_death(StellarRules::of_version(crate::GENERATOR_VERSION));
+    assert_disrupted_with_a_candidate(&disrupted, 0, core, "at its death");
 }
 
 /// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass are deterministic. The
-/// fed dwarf's, the wind-fed dwarf's and the unplaced product's engines twice under every 30 hold
+/// fed dwarf's, the wind-fed dwarf's and the unplaced product's engines twice
 /// give the same members, deaths and candidates, and so do pinned pair 0080 and a swollen dwarf's
 /// pair (1.1 + 0.9 M☉ at 100 d, Z = 0.004) evolved twice.
 #[test]
 fn the_co_chandrasekhar_ending_is_deterministic() {
     use super::common_envelope::Product;
 
-    let every_30 = StellarRules::every_30_hold();
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
     let wind = || {
-        let mut engine = wind_fed_dwarf_engine(1.439, every_30);
+        let mut engine = wind_fed_dwarf_engine(1.439, rules);
         engine.detached_phase();
         (engine.age, engine.members, engine.supernovae, engine.pooled)
     };
     assert_eq!(wind(), wind());
     let disruption = || {
-        let mut engine = fed_dwarf_engine(0.6, 0.02, every_30);
+        let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
         engine.finish_merger_with(Product::Disruption {
             mass: SolarMasses::new(1.5),
         });
@@ -8619,7 +8623,7 @@ fn the_co_chandrasekhar_ending_is_deterministic() {
     assert_eq!(disruption(), disruption());
     let until = Years::new(1.2e10);
     for input in [pinned_pair_number(80), pair(1.1, 0.9, 100.0, 0.0, 0.004)] {
-        let input = input.with_rules(every_30);
+        let input = input.with_rules(rules);
         assert_eq!(evolve(&input, until), evolve(&input, until));
     }
 }
@@ -8652,9 +8656,9 @@ fn a_pinned_primary_s_merged_dwarf_disrupts() {
         engine.mix();
         engine
     };
-    let disrupted = merged(StellarRules::every_30_hold());
+    let disrupted = merged(StellarRules::of_version(crate::GENERATOR_VERSION));
     let [death] = disrupted.supernovae.as_slice() else {
-        panic!("every 30 hold: one death, not {:?}", disrupted.supernovae);
+        panic!("one death, not {:?}", disrupted.supernovae);
     };
     assert_eq!(death.remnant().kind(), RemnantKind::None);
     let left = disrupted.members[0].state_at(&disrupted.ctx, 0, disrupted.age);
@@ -8678,12 +8682,12 @@ fn a_kept_core_s_own_carbon_ignition_pools_a_candidate() {
         engine.own_carbon_ignition(0, death, core, before);
         engine.pooled
     };
-    let every_30 = StellarRules::every_30_hold();
-    let pooled = ignited(every_30, DeathKind::ThermonuclearDisruption).expect("a candidate");
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let pooled = ignited(rules, DeathKind::ThermonuclearDisruption).expect("a candidate");
     assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
     assert_eq!(pooled.masses(), [core, SolarMasses::new(2.5)]);
     assert!(super::ia::is_detonatable(&pooled), "{pooled:?}");
-    assert_eq!(ignited(every_30, DeathKind::EnvelopeLoss), None);
+    assert_eq!(ignited(rules, DeathKind::EnvelopeLoss), None);
 }
 
 /// P11.T4's merged capture: a coalescence around a 1.53 M☉ core of an oxygen–neon dwarf's
@@ -8707,11 +8711,11 @@ fn a_pinned_primary_s_oxygen_neon_coalescence_is_left_to_its_pin() {
         fed_dwarf_engine(0.6, 0.02, rules).product_member(product, CoreSource::OxygenNeonDwarf)
     };
     assert!(matches!(
-        unpinned(StellarRules::every_30_hold()),
+        unpinned(StellarRules::of_version(crate::GENERATOR_VERSION)),
         Product::ElectronCapture { .. }
     ));
     let (input, _) = untouched_pinned_pair();
-    let input = input.with_rules(StellarRules::every_30_hold());
+    let input = input.with_rules(StellarRules::of_version(crate::GENERATOR_VERSION));
     let engine = engine_with_its_pin(&input, 1.0e6, 10.0);
     assert!(engine.pin_pending(0));
     assert!(matches!(
