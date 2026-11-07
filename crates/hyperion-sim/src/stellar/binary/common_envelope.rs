@@ -47,7 +47,6 @@ use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years
 use super::co_chandrasekhar::ChandrasekharPath;
 use super::dwarf_limit::{self, CoreSource, ProductTyping, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
-use super::merged_capture::MergedCaptureRules;
 use super::params::BinaryParams;
 use super::rlof::kelvin_helmholtz;
 use super::star::{G, Kind, Member, Path, cooling_origin, moment_of_inertia, positive};
@@ -548,8 +547,7 @@ impl Engine {
     }
 
     /// The product of a coalescence of `mass_msun` M☉ around a core of `core_msun` M☉ from `source`
-    /// where it collapses at once by electron capture: from version 30 (P11.T4's `merged_capture`)
-    /// one whose core is an oxygen–neon dwarf's ([`Engine::coalesced_source`], which is where either
+    /// where it collapses at once by electron capture (P11.T4's `merged_capture`): one whose core is an oxygen–neon dwarf's ([`Engine::coalesced_source`], which is where either
     /// parent's core is, a giant's own track typing it so included) and holds its limit
     /// (`supernova::core_limit`), unless the primary's pin is pending; `None` otherwise.
     #[must_use]
@@ -559,10 +557,7 @@ impl Engine {
         mass_msun: f64,
         core_msun: f64,
     ) -> Option<Product> {
-        if self.ctx.rules().merged_capture != MergedCaptureRules::Captured
-            || source != CoreSource::OxygenNeonDwarf
-            || self.pin_pending(0)
-        {
+        if source != CoreSource::OxygenNeonDwarf || self.pin_pending(0) {
             return None;
         }
         let limit = core_limit(source, self.ctx.track_options().remnant())?;

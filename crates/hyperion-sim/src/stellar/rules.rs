@@ -30,21 +30,16 @@
 //! - [`kick_rank`](StellarRules::kick_rank), the ordinary kick's rank table. No version holds a
 //!   second table yet, so every version takes the committed one. The tests reach a test-only
 //!   second table through it, to show that every reader goes through the choke point.
-//! - [`merged_capture`](StellarRules::merged_capture), at `MERGED_CAPTURE_VERSION` (plan 11,
-//!   P11.T4's fix): whether an oxygen–neon dwarf's coalescence that holds the capture mass
-//!   collapses at once by electron capture, from 30, read by `Engine::product_member` through the
-//!   engine's input's rules (`stellar/rules/merged_capture_hold.rs`).
 //!
 //! The 27 folds put P11's 27 holds on the record, the 29 folds P11.T4's white-dwarf union and
-//! P11.T12's wind reach, and the 30 folds P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass;
-//! `merged_capture` is at 30.
+//! P11.T12's wind reach, and the 30 folds P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass
+//! and merged capture.
 //!
 //! [`GalaxyRules`]: crate::galaxy::rules::GalaxyRules
 //! [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
 //! [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
 
 use crate::GeneratorVersion;
-use crate::stellar::binary::merged_capture::MergedCaptureRules;
 use crate::stellar::remnant::KickRankRules;
 
 /// The stellar stage's holds, carried as an argument from the `Galaxy`'s rules
@@ -55,22 +50,16 @@ pub(crate) struct StellarRules {
     ///
     /// [`KickRankTable::of`]: crate::stellar::remnant::KickRankTable::of
     pub(crate) kick_rank: KickRankRules,
-    /// Whether an oxygen–neon dwarf's coalescence that holds the capture mass collapses at once,
-    /// the hold of
-    /// [`MERGED_CAPTURE_VERSION`](crate::stellar::binary::merged_capture::MERGED_CAPTURE_VERSION).
-    pub(crate) merged_capture: MergedCaptureRules,
 }
 
 impl StellarRules {
     /// Each field's arm at `version`: the new arm from its `*_VERSION`, the held arm below it.
     ///
-    /// Every version takes the committed kick-rank table; an oxygen–neon dwarf's coalescence at the
-    /// capture mass is held below 30.
+    /// Every version takes the committed kick-rank table, and no field is held now.
     #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
+    pub(crate) const fn of_version(_version: GeneratorVersion) -> Self {
         Self {
             kick_rank: KickRankRules::Committed,
-            merged_capture: MergedCaptureRules::of_version(version),
         }
     }
 
@@ -85,14 +74,13 @@ impl StellarRules {
     }
 
     /// The test-only second table in place of the committed one
-    /// ([`KickRankRules::Probe`]), which no version takes, under the version's other rules: the
-    /// tests' door to every reader's choke point.
+    /// ([`KickRankRules::Probe`]), which no version takes: the tests' door to every reader's
+    /// choke point.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn probe() -> Self {
         Self {
             kick_rank: KickRankRules::Probe,
-            ..Self::of_version(crate::GENERATOR_VERSION)
         }
     }
 }

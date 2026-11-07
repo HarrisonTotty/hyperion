@@ -6,9 +6,8 @@
 //!
 //! - The server golden's carbon–oxygen dwarf of 1.12 M☉ (alone) that its pair ends as a neutron star
 //!   (plan 15's P15.T9.b, from P11.T11.a's records) takes none of the paths: its dwarf merges with
-//!   a helium star, and the product, keeping the dwarf's core, collapses an iron core at its
-//!   track's death under the version's rules, and by electron capture at the merger under every 30
-//!   hold (P11.T4's `merged_capture`).
+//!   a helium star, and the product, keeping the dwarf's core, collapses by electron capture at the
+//!   merger (P11.T4's `merged_capture`).
 //! - Slow: the dwarf-limit census's 6 × 10⁴ pairs of layers C, D and E near the Sun under every 30
 //!   hold: each path's endings and first candidates, the pairs' candidates by channel, and the
 //!   pairs that show a neutron star at their age.
@@ -16,7 +15,6 @@
 use crate::planetary::testing::in_shares;
 
 use super::*;
-use crate::GENERATOR_VERSION;
 use crate::galaxy::Galaxy;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
@@ -55,87 +53,67 @@ const THREADS: usize = 16;
 /// the 1.64 M☉ helium star its companion's common envelope leaves, with no Type Ia candidate pooled.
 /// The product's core is oxygen–neon, the helium star's own track typing its core so (HPT section
 /// 6.1; `Engine::coalesced_source`), and no carbon–oxygen dwarf or core reaches the Chandrasekhar
-/// mass:
-///
-/// - under the version's rules the product, a helium giant of 2.34 M☉ placed around the dwarf,
-///   collapses an iron core at its track's death into a neutron star of over 1.4 M☉ (its
-///   `Mc,BAGB`, its mass, passes 2.25 M☉, and a kept core ends as its track does there:
-///   research-leans-38, P11.T4's kept-core endings);
-/// - under every 30 hold its core already holds the capture mass at the merger, where it collapses
-///   by electron capture into Mandel and Müller's 1.26 M☉ neutron star (P11.T4's `merged_capture`).
+/// mass: its core already holds the capture mass at the merger, where it collapses by electron
+/// capture into Mandel and Müller's 1.26 M☉ neutron star (P11.T4's `merged_capture`), where under
+/// every 29 hold the product, a helium giant of 2.34 M☉ placed around the dwarf, collapsed an iron
+/// core at its track's death into a neutron star of over 1.4 M☉.
 #[test]
 fn the_golden_s_carbon_oxygen_dwarf_ends_a_neutron_star() {
     use crate::galaxy::imf::MassFunctionKind;
     use crate::galaxy::placement::{CellKey, generate_cell};
     use crate::stellar::binary::SegmentKind;
-    use crate::stellar::binary::merged_capture::MergedCaptureRules;
     use crate::stellar::remnant::RemnantKind;
     use crate::stellar::remnant::collapse::electron_capture_remnant;
     use crate::stellar::system::SystemStars;
 
     let seed = Seed::new(0x4d2);
     let id = crate::id::SystemId::from_raw(0x6200_5957_fe00_0024).expect("a grid ID");
-    for rules in [
-        GalaxyRules::of_version(GENERATOR_VERSION),
-        GalaxyRules::every_30_hold(),
-    ] {
-        let case = format!("{:?}", rules.stellar.merged_capture);
-        let galaxy = Galaxy::from_params_with_rules(
-            seed,
-            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
-            rules,
-        )
-        .expect("a drawn galaxy keeps half its gas neutral");
-        let mut cell = Vec::new();
-        generate_cell(&galaxy, CellKey::of(id).expect("a grid cell"), &mut cell);
-        let record = *cell
-            .iter()
-            .find(|r| r.id() == id)
-            .expect("the cell holds the record");
-        let stars = SystemStars::generate(&galaxy, &record);
-        let [pair] = stars.pairs() else {
-            panic!("{case}: one pair, not {}", stars.pairs().len());
-        };
-        let timeline = pair.timeline();
-        let [collapse] = timeline.supernovae() else {
-            panic!("{case}: one death, not {:?}", timeline.supernovae());
-        };
-        assert_eq!(
-            collapse.remnant().kind(),
-            RemnantKind::NeutronStar,
-            "{case}"
-        );
-        assert!(timeline.pooled_ia().is_none(), "{case}");
-        // The merger of the dwarf and the helium star comes at or before the collapse.
-        let merged = timeline
-            .segments()
-            .iter()
-            .find(|s| s.kind() == SegmentKind::Merged)
-            .expect("the pair merges");
-        let before = timeline.state_at(Years::new(merged.start().value() * (1.0 - 1e-6)));
-        let phases = before.stars().map(|s| s.phase());
-        assert!(
-            phases.contains(&Phase::CarbonOxygenWhiteDwarf),
-            "{case}: {phases:?}"
-        );
-        match rules.stellar.merged_capture {
-            MergedCaptureRules::Held => {
-                assert!(merged.start() < collapse.age(), "{case}");
-                assert!(
-                    collapse.remnant().mass().value() > 1.4,
-                    "{case}: {collapse:?}"
-                );
-            }
-            MergedCaptureRules::Captured => {
-                assert_eq!(
-                    collapse.age().value().total_cmp(&merged.start().value()),
-                    core::cmp::Ordering::Equal,
-                    "{case}: {collapse:?} at the merger"
-                );
-                assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
-            }
-        }
-    }
+    let rules = GalaxyRules::every_30_hold();
+    let case = "every 30 hold";
+    let galaxy = Galaxy::from_params_with_rules(
+        seed,
+        GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+        rules,
+    )
+    .expect("a drawn galaxy keeps half its gas neutral");
+    let mut cell = Vec::new();
+    generate_cell(&galaxy, CellKey::of(id).expect("a grid cell"), &mut cell);
+    let record = *cell
+        .iter()
+        .find(|r| r.id() == id)
+        .expect("the cell holds the record");
+    let stars = SystemStars::generate(&galaxy, &record);
+    let [pair] = stars.pairs() else {
+        panic!("{case}: one pair, not {}", stars.pairs().len());
+    };
+    let timeline = pair.timeline();
+    let [collapse] = timeline.supernovae() else {
+        panic!("{case}: one death, not {:?}", timeline.supernovae());
+    };
+    assert_eq!(
+        collapse.remnant().kind(),
+        RemnantKind::NeutronStar,
+        "{case}"
+    );
+    assert!(timeline.pooled_ia().is_none(), "{case}");
+    // The merger of the dwarf and the helium star comes at or before the collapse.
+    let merged = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() == SegmentKind::Merged)
+        .expect("the pair merges");
+    let before = timeline.state_at(Years::new(merged.start().value() * (1.0 - 1e-6)));
+    let phases = before.stars().map(|s| s.phase());
+    assert!(
+        phases.contains(&Phase::CarbonOxygenWhiteDwarf),
+        "{case}: {phases:?}"
+    );
+    assert_eq!(
+        collapse.age().value().total_cmp(&merged.start().value()),
+        core::cmp::Ordering::Equal,
+        "{case}: {collapse:?} at the merger"
+    );
+    assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
 }
 
 /// What the census finds.

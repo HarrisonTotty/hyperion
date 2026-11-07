@@ -8686,10 +8686,10 @@ fn a_kept_core_s_own_carbon_ignition_pools_a_candidate() {
     assert_eq!(ignited(every_30, DeathKind::EnvelopeLoss), None);
 }
 
-/// P11.T4's merged capture: under every 30 hold a coalescence around a 1.53 M☉ core of an
-/// oxygen–neon dwarf's (`CoreSource::OxygenNeonDwarf`), research-leans-45's early-AGB product of
-/// 1.78 M☉, is an electron capture where no pin is pending (`fed_dwarf_engine`), and a star left
-/// to its pin where the primary's is (the 17 + 12 M☉ pinned pair); under every 29 hold a star.
+/// P11.T4's merged capture: a coalescence around a 1.53 M☉ core of an oxygen–neon dwarf's
+/// (`CoreSource::OxygenNeonDwarf`), research-leans-45's early-AGB product of 1.78 M☉, is an
+/// electron capture where no pin is pending (`fed_dwarf_engine`), and a star left to its pin where
+/// the primary's is (the 17 + 12 M☉ pinned pair).
 #[test]
 fn a_pinned_primary_s_oxygen_neon_coalescence_is_left_to_its_pin() {
     use super::common_envelope::{CoalescedProduct, Product};
@@ -8709,10 +8709,6 @@ fn a_pinned_primary_s_oxygen_neon_coalescence_is_left_to_its_pin() {
     assert!(matches!(
         unpinned(StellarRules::every_30_hold()),
         Product::ElectronCapture { .. }
-    ));
-    assert!(matches!(
-        unpinned(StellarRules::of_version(crate::GENERATOR_VERSION)),
-        Product::Member(..)
     ));
     let (input, _) = untouched_pinned_pair();
     let input = input.with_rules(StellarRules::every_30_hold());
