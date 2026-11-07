@@ -7,6 +7,7 @@ import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
+import { warmCanvas2d } from "./lib/canvasWarmUp";
 import { watchStrokeProperties } from "./lib/strokes";
 import { provideWholeTerrainField } from "./view/scenes/terrainScene";
 import "@fontsource/b612/400.css";
@@ -23,6 +24,10 @@ if (container === null) {
 // The SVG strokes' widths at the display's ratio, before the first render and on each change of
 // it, so that none is drawn under 2 device px (R07.T16.f). It lasts as long as the page does.
 watchStrokeProperties(document.documentElement);
+
+// The 2D canvases' GPU context made now, while the GPU process is idle, rather than at the first
+// map's paint, behind the engine's compiles (lane perf-page-long-tasks).
+warmCanvas2d(document);
 
 // A `--descent-spike` launch draws the spike in place of the consoles (plan R05, T13.c). Its module
 // loads only then, so that the consoles' bundle does not take its terrain and its atmosphere, whose
