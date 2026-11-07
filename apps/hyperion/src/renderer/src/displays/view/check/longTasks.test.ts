@@ -43,6 +43,16 @@ describe("the page's long tasks (lane perf-page-long-tasks)", () => {
     ]).toEqual([0, 50, 30, { startMs: 500, durationMs: 60, renderMs: 0 }, 0]);
   });
 
+  it("never gives a task more rendering than its length, where the rendering starts with it", () => {
+    // (1,209,278.2 + 16,956.3) − 1,209,278.2 rounds to 16,956.300000000047.
+    const startMs = 1_209_278.2;
+    const durationMs = 16_956.3;
+    const task = longTaskOf(startMs, durationMs, [
+      { startMs, endMs: startMs + durationMs + 5, renderStartMs: startMs },
+    ]);
+    expect(task.renderMs).toBe(durationMs);
+  });
+
   it("records each long task with its frame's rendering, from its start, in order, and stops", () => {
     let nowMs = 1_000;
     const { source, emit, observing } = fakeSource(["longtask", "long-animation-frame"]);
