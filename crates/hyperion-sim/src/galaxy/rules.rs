@@ -16,6 +16,8 @@
 //!
 //! - [`merger_tables`](GalaxyRules::merger_tables), the merger classes' step from 31 (P15.T10.b,
 //!   [`MergerTableRules`]): their census of the generator's own pairs;
+//! - [`residuals`](GalaxyRules::residuals), at `CARVE_RESIDUALS_VERSION` (31): the carve-out's
+//!   two residuals closed (P09.T35's census C1, P09.T43).
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -27,7 +29,7 @@ use crate::GeneratorVersion;
 use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::catalogue_classes::binary::MergerTableRules;
 use crate::galaxy::displaced::DisplacedRules;
-use crate::galaxy::displaced::site::CarveOutRules;
+use crate::galaxy::displaced::site::{CarveOutRules, CarveResidualsRules};
 use crate::galaxy::features::members::recent::FeatureClassesRules;
 use crate::stellar::rules::StellarRules;
 use crate::tables::binary::{CLASS_SHARES, CLASS_SHARES_31, ClassShareTable};
@@ -58,6 +60,11 @@ pub(crate) struct GalaxyRules {
     /// that `Galaxy::with_rules` refuses to change it, and whether their census draws the
     /// generator's own pairs.
     pub(crate) merger_tables: MergerTableRules,
+    /// Whether the carve-out's two residuals are closed, the hold of
+    /// [`CARVE_RESIDUALS_VERSION`](crate::galaxy::displaced::site::CARVE_RESIDUALS_VERSION):
+    /// the luminous blue variables' class following the grid's living field stars, and a recently
+    /// dead grid record's age following its exact death (P09.T35's census C1, P09.T43).
+    pub(crate) residuals: CarveResidualsRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -73,13 +80,14 @@ impl GalaxyRules {
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
             merger_tables: MergerTableRules::of_version(version),
+            residuals: CarveResidualsRules::of_version(version),
             stellar: StellarRules::of_version(version),
         }
     }
 
     /// Every galaxy and stellar hold at 31 in force, for a test that asserts a 31 figure: the
-    /// merger classes' step (P15.T10.b, [`MergerTableRules::Fitted`]). The 31 bump deletes it with
-    /// them.
+    /// merger classes' step (P15.T10.b, [`MergerTableRules::Fitted`]) and the carve-out's residuals
+    /// (P09.T35, P09.T43, [`CarveResidualsRules::Matched`]). The 31 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_31_hold() -> Self {

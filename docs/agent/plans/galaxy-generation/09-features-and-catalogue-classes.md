@@ -6170,3 +6170,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
 - **P09.T35's C1 at the budget (lane `fix-carve-out-census`, 2026-11-06, at 29; test only).**
   `census_of_the_carve_out` builds both arms with `budget_rules` (`FieldShareRules::None`) and walks
   `REMNANT_REACH_CELLS` = 112 past `young_mean`'s stop. Both halves still fail there (lane outbox).
+- **The carve-out's residuals, held at 31 (lane `fix-carve-out-residuals`, 2026-11-07).** One hold,
+  `GalaxyRules::residuals` (`CarveResidualsRules`, `CARVE_RESIDUALS_VERSION` = 31, in
+  `displaced/site.rs`; `GalaxyRules::every_31_hold()`). Its LBV half (P09.T43): from 31 a component's
+  share is the field's × `StayMarks`' alive odds, each node weight × `AliveLaw`'s bound, and a host
+  is thinned on `AliveLaw::odds` (lifetime at `Z_ref`, own draws) on `class.lbv.mass` word 2.
+  Lean (2026-11-07): thin at the host, after the test, so only hosts pay the lifetime.

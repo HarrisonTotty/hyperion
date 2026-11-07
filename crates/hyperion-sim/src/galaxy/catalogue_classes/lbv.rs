@@ -34,6 +34,31 @@
 //! class follows the field as the grid places it: each component's layer-E share is the field's,
 //! and the young disc's ages the young field's.
 //!
+//! # The living hosts, from 31
+//!
+//! In a galaxy that holds plan 08's displaced classes the grid places a living layer-E field star
+//! from its component's `StayMarks`' alive category (`placement::marks::stay`): its mass from
+//! the category's mass density `ρ_c(m)`, `pdf × (alive − ejected)` on the 33 nodes and linear between
+//! them, and its age at the reference composition from `f_c(a)` below its lifetime there,
+//! `τ_ref(m)` with its own draws, renormalised by `F_c(τ_ref)`, the share born within it. Up to 30
+//! the class took the field's stay share of band E for its share, the alive and the retained
+//! remnants averaged over the band, most of it dead: 0.18 of the young thin disc's budget against
+//! the grid's alive-stay odds `q_c(m) = 1 − ejected ÷ alive` of 0.3–0.6 above 32 M☉, so it listed
+//! some 0.6 of the hosts the grid carved (research-leans-49 §1, the census's 168 against 279).
+//!
+//! From 31 ([`CarveResidualsRules::Matched`]) the class follows the grid's law. A component's share
+//! is the field's share × the alive category's odds, the share the grid places alive; and a host
+//! the test keeps is thinned on [`AliveLaw::odds`] at its mass, `ρ̂_c(m) ÷ (p_E(m) F_c(τ_ref(m)))`
+//! with ρ̂ the alive density normalised over band E (the grid's own sampler), `p_E` the mass
+//! function normalised over it and `τ_ref` the host's lifetime at its source's reference
+//! composition with its own draws, as the grid's alive record takes it. So the kept candidates'
+//! intensity is the grid's, `share × n_c(x) × ρ̂_c(m) f_c(a) ÷ F_c(τ_ref(m))`, mass by mass (lean,
+//! 2026-11-07: the thinning at the host, after its test, so that only a host pays the lifetime;
+//! each node's weight is raised by the thinning's bound over its masses, from the lifetime
+//! bracket's least, and a mark above the bound is thinned at it and counted in test builds). The
+//! age is the class's own, drawn at the host's composition, where the grid scales its reference
+//! age to its lifetime there: the same within the young field's nearly flat age density.
+//!
 //! # The envelope and a candidate
 //!
 //! The conditional density of initial mass is the galaxy's mass function over each node's masses,
@@ -104,15 +129,18 @@ use super::supernova::{DeathMarks, Surroundings, claims};
 use super::system::{CatalogueMotion, CatalogueSystem};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::bounds::{BOUND_MARGIN, CellBox};
+use crate::galaxy::displaced::marks::{LifetimeBracket, StayCategory};
+use crate::galaxy::displaced::site::CarveResidualsRules;
 use crate::galaxy::displaced::{ExplosionSite, PlacementClass, death_in_interval_under};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{CatalogueSystemId, Layer, SystemId};
-use crate::rng::{ObjectKey, Stream, Threshold, tags};
+use crate::rng::{Mark, ObjectKey, PiecewiseLinear, Stream, Threshold, tags};
 use crate::stellar::Composition;
 use crate::stellar::multiplicity::MultiplicityContext;
+use crate::stellar::sse::lifetime_under;
 use crate::stellar::system::{SystemStars, draw_metallicity, primary_draws, primary_eta};
 use crate::tables::lbv::LBV_SAMPLER;
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, SourceHorizon, UniverseTime};
@@ -251,6 +279,11 @@ pub struct LbvComponent {
     share: f64,
     rate_per_year: f64,
     candidates_per_system: f64,
+    /// The weights its candidates pick the sampler's nodes by: the nodes' own, and from 31 each
+    /// times its bound on the alive law's thinning ([`AliveLaw`]).
+    node_weights: [f64; NODES],
+    /// The node weights summed in order.
+    weight: f64,
 }
 
 impl LbvComponent {
@@ -260,7 +293,9 @@ impl LbvComponent {
         self.id
     }
 
-    /// Its layer-E share: the fraction of its systems whose primaries are of band E.
+    /// Its layer-E share: the fraction of its systems whose primaries are of band E that the
+    /// class follows, the field's stay share of them, and from 31 the share the grid places alive
+    /// (module documentation, "The living hosts, from 31").
     #[must_use]
     pub const fn share(&self) -> f64 {
         self.share
@@ -279,6 +314,128 @@ impl LbvComponent {
     pub const fn candidates_per_system(&self) -> f64 {
         self.candidates_per_system
     }
+
+    /// The weights its candidates pick the sampler's nodes by, in years: each node's weight, and
+    /// from 31 times the node's bound on the alive law's thinning.
+    #[must_use]
+    pub const fn node_weights(&self) -> &[f64; NODES] {
+        &self.node_weights
+    }
+}
+
+/// The grid's law of one young component's living layer-E field stars, as the class follows it
+/// from 31 (module documentation, "The living hosts, from 31"): `StayMarks`' alive mass density,
+/// the band's mass function, the source's reference composition, and per sampler node a bound on
+/// the thinning.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AliveLaw {
+    /// The alive category's mass density, the grid's sampler, normalised over band E.
+    density: PiecewiseLinear,
+    /// The mass function's integral over band E.
+    band: f64,
+    /// The source's reference composition, at which the grid's alive record takes its lifetime.
+    z_ref: Composition,
+    /// Per sampler node, the bound on [`AliveLaw::odds`] over the node's masses.
+    bounds: [f64; NODES],
+}
+
+impl AliveLaw {
+    /// The law of component `id`'s living field stars in `galaxy`, or `None` where the galaxy holds
+    /// no displaced classes or the component's alive category is empty.
+    fn of(
+        galaxy: &Galaxy,
+        id: ComponentId,
+        nodes: &[LbvMassNode; NODES],
+        band: f64,
+    ) -> Option<Self> {
+        let table = galaxy.fields().displaced()?.class_table();
+        let marks = table.stay_marks(id);
+        let density = marks.mass_density(StayCategory::Alive).ok()?;
+        let z_ref = table.reference_composition(table.component_source(id));
+        let ages = galaxy.fields().component(id).ages();
+        let mass_function = galaxy.mass_function();
+        let bracket = LifetimeBracket::shared();
+        let knots = marks.masses();
+        let bounds = core::array::from_fn(|k| {
+            let (lo, hi) = (nodes[k].masses.0.value(), nodes[k].masses.1.value());
+            // Over each of the marks' intervals the node covers: the density is linear, so at its
+            // greatest at an end; the mass function falls, so at its least at the upper end; and
+            // the lifetime is at least the bracket's least there, the heavier knot's.
+            let mut bound: f64 = 0.0;
+            for pair in knots.windows(2) {
+                let (a, b) = (pair[0].max(lo), pair[1].min(hi));
+                if a >= b {
+                    continue;
+                }
+                let rho = density.pdf(a).max(density.pdf(b));
+                let pdf = mass_function.pdf(a).min(mass_function.pdf(b)) / band;
+                let least = bracket
+                    .bracket(SolarMasses::new(b))
+                    .map_or(0.0, |(least, _)| least.value());
+                let born = born_within(ages, least);
+                if rho > 0.0 {
+                    bound = if pdf > 0.0 && born > 0.0 {
+                        bound.max(rho / (pdf * born))
+                    } else {
+                        f64::INFINITY
+                    };
+                }
+            }
+            bound * (1.0 + 1e-9)
+        });
+        Some(Self {
+            density,
+            band,
+            z_ref,
+            bounds,
+        })
+    }
+
+    /// The alive law's thinning of a star of component `id` and initial mass `m` whose lifetime at
+    /// the reference composition is `life_ref`: the grid's alive density at `m` (normalised over
+    /// band E) over the class's mass density there (the band's mass function, normalised), and
+    /// over the share of the component's stars born within `life_ref`, by which the grid's age
+    /// draw renormalises. Times the component's alive share of band E, it is the grid's alive-stay
+    /// odds `q_c(m)` at the mass.
+    #[must_use]
+    pub(crate) fn odds(
+        &self,
+        galaxy: &Galaxy,
+        id: ComponentId,
+        m: SolarMasses,
+        life_ref: Years,
+    ) -> f64 {
+        let rho = self.density.pdf(m.value());
+        if rho <= 0.0 {
+            return 0.0;
+        }
+        let pdf = galaxy.mass_function().pdf(m.value()) / self.band;
+        let born = born_within(galaxy.fields().component(id).ages(), life_ref.value());
+        rho / (pdf * born)
+    }
+
+    /// The bound on [`odds`](Self::odds) over sampler node `k`'s masses.
+    #[must_use]
+    pub(crate) const fn bound(&self, k: usize) -> f64 {
+        self.bounds[k]
+    }
+
+    /// The reference composition.
+    #[must_use]
+    pub(crate) const fn z_ref(&self) -> &Composition {
+        &self.z_ref
+    }
+}
+
+/// The share of `ages`' stars born within `life` years of the epoch, as the grid's alive age draw
+/// renormalises by: the distribution from its least age to `life` (or its oldest).
+#[must_use]
+pub(crate) fn born_within(ages: &crate::galaxy::ages::AgeDistribution, life: f64) -> f64 {
+    let below = Years::new(life.min(ages.max().value()));
+    if below.value() <= ages.min().value() {
+        return 0.0;
+    }
+    ages.cdf(below) - ages.cdf(ages.min())
 }
 
 /// One of the sampler's mass nodes, as the class draws from it in a galaxy.
@@ -365,6 +522,9 @@ pub struct LbvProcess {
     nodes: [LbvMassNode; NODES],
     /// The nodes' weights summed in order.
     weight: Years,
+    /// From 31, per component in order, the grid's law of its living field stars, which the test
+    /// thins on ([`AliveLaw`]); empty under the held arm.
+    alive: Vec<Option<AliveLaw>>,
 }
 
 /// A luminous-blue-variable candidate the thinning kept, with every mark its test reads.
@@ -378,6 +538,9 @@ pub struct LbvCandidate {
     age_at_epoch: Years,
     composition: Composition,
     velocity: GalacticVelocity,
+    /// From 31, the component's place in the process, the node and the mark the alive law
+    /// thins on (`class.lbv.mass` word 2).
+    alive: Option<(usize, usize, Mark)>,
 }
 
 /// A luminous-blue-variable host: a system of the young field whose primary's window near the
@@ -468,21 +631,49 @@ impl LbvProcess {
         let latest = nodes
             .iter()
             .fold(f64::NEG_INFINITY, |a, node| a.max(node.ages.1.value()));
+        let matched = galaxy.rules().residuals == CarveResidualsRules::Matched;
+        let shared: [f64; NODES] = core::array::from_fn(|k| nodes[k].weight.value());
+        let mut alive = Vec::new();
         let components = fields
             .component_ids()
             .filter_map(|id| {
                 // The field's share and ages: the budget's until P09.T2.c's version 27.
-                let share = galaxy.field_component_share(MassBand::E, id);
+                let stay = galaxy.field_component_share(MassBand::E, id);
                 let rate = galaxy
                     .field_ages(id)
                     .max_pdf_between(Years::new(earliest), Years::new(latest));
-                (share > 0.0 && rate > 0.0).then(|| {
+                // From 31, the share the grid places alive, and the node weights times their
+                // bounds on the alive law's thinning.
+                let law = if matched {
+                    AliveLaw::of(galaxy, id, &nodes, band)
+                } else {
+                    None
+                };
+                let (share, node_weights, total) = match &law {
+                    None => (stay, shared, weight.value()),
+                    Some(law) => {
+                        let odds = galaxy
+                            .fields()
+                            .displaced()
+                            .map_or(1.0, |d| d.class_table().stay_marks(id).odds()[0]);
+                        let weights: [f64; NODES] =
+                            core::array::from_fn(|k| shared[k] * law.bound(k));
+                        let total = weights.iter().fold(0.0, |sum, w| sum + w);
+                        (stay * odds, weights, total)
+                    }
+                };
+                (share > 0.0 && rate > 0.0 && total.is_finite() && total > 0.0).then(|| {
                     let rate = rate * (1.0 + BOUND_MARGIN);
+                    if matched {
+                        alive.push(law);
+                    }
                     LbvComponent {
                         id,
                         share,
                         rate_per_year: rate,
-                        candidates_per_system: rate * weight.value(),
+                        candidates_per_system: rate * total,
+                        node_weights,
+                        weight: total,
                     }
                 })
             })
@@ -491,7 +682,43 @@ impl LbvProcess {
             components,
             nodes,
             weight,
+            alive,
         }
+    }
+
+    /// The grid's law of the living field stars of the component at `slot` of
+    /// [`components`](Self::components), from 31 (`None` under the held arm).
+    #[must_use]
+    pub(crate) fn alive_law(&self, slot: usize) -> Option<&AliveLaw> {
+        self.alive.get(slot).and_then(Option::as_ref)
+    }
+
+    /// Whether a host the test keeps is kept by the alive law's thinning, from 31: its mark
+    /// below the law's odds at its mass and its lifetime at the reference composition with its own
+    /// draws, as the grid's alive record takes its own, against its node's bound (module
+    /// documentation, "The living hosts, from 31"). Always under the held arm. Only a host pays
+    /// the lifetime, since the thinning is independent of the test.
+    fn lives_on_the_grid(&self, galaxy: &Galaxy, candidate: &LbvCandidate) -> bool {
+        let Some((slot, k, mark)) = candidate.alive else {
+            return true;
+        };
+        let Some(law) = self.alive_law(slot) else {
+            return true;
+        };
+        let record = candidate.record();
+        let life_ref = lifetime_under(
+            candidate.mass,
+            law.z_ref(),
+            &primary_draws(galaxy, &record),
+            galaxy.rules().stellar,
+        );
+        let odds = law.odds(galaxy, candidate.component, candidate.mass, life_ref);
+        let bound = law.bound(k);
+        #[cfg(test)]
+        if odds > bound {
+            ALIVE_OVER_BOUND.with(|c| c.set(c.get() + 1));
+        }
+        mark.is_below(Threshold::from_ratio(odds.min(bound), bound))
     }
 
     /// The young field's components, in component order: those with layer-E systems of the
@@ -564,21 +791,24 @@ impl ClassProcess for LbvProcess {
         let point = PointLy::from(&site);
         let mut weights = [0.0; MAX_COMPONENTS];
         let n = self.weights(galaxy, &point, &mut weights);
-        let young = self.components[stream.mark().pick_weighted(&weights[..n], bound.value())?];
+        let slot = stream.mark().pick_weighted(&weights[..n], bound.value())?;
+        let young = self.components[slot];
         let component = young.id;
         let laws = galaxy.fields().component(component);
         // 2. The node, by its weight, and the primary's initial mass among its masses.
         let mut stream = Stream::open(seed, tags::CLASS_LBV_MASS, key);
-        let node_weights: [f64; NODES] = core::array::from_fn(|k| self.nodes[k].weight.value());
-        let node = self.nodes[stream
+        let k = stream
             .mark()
-            .pick_weighted(&node_weights, self.weight.value())?];
+            .pick_weighted(&young.node_weights, young.weight)?;
+        let node = self.nodes[k];
         let (lo, hi) = node.masses;
         let mass = SolarMasses::new(galaxy.mass_function().quantile_in(
             lo.value(),
             hi.value(),
             stream.uniform(),
         ));
+        // From 31, the mark the test thins on the alive law at the mass.
+        let alive = self.alive_law(slot).map(|_| (slot, k, stream.mark()));
         // 3. The age at the epoch over the node's span, thinned on the component's age density
         //    there against its largest.
         let mut stream = Stream::open(seed, tags::CLASS_LBV_AGE, key);
@@ -608,12 +838,13 @@ impl ClassProcess for LbvProcess {
             age_at_epoch,
             composition,
             velocity,
+            alive,
         })
     }
 
     fn test(&self, galaxy: &Galaxy, candidate: LbvCandidate) -> Option<LbvEntry> {
         match Verdict::of(galaxy, &candidate) {
-            Verdict::Host(entry) => Some(*entry),
+            Verdict::Host(entry) => self.lives_on_the_grid(galaxy, &candidate).then_some(*entry),
             Verdict::Prefiltered | Verdict::NoWindow | Verdict::CoreCollapse => None,
         }
     }
@@ -795,6 +1026,7 @@ pub(crate) fn test_on_grid_marks(galaxy: &Galaxy, record: &SystemRecord) -> Opti
         age_at_epoch: record.age_at_epoch(),
         composition: draw_metallicity(galaxy, record),
         velocity: crate::galaxy::query::epoch_velocity(galaxy, record),
+        alive: None,
     };
     match Verdict::of_record(galaxy, &candidate, record) {
         Verdict::Host(entry) => Some(*entry),
@@ -802,5 +1034,21 @@ pub(crate) fn test_on_grid_marks(galaxy: &Galaxy, record: &SystemRecord) -> Opti
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// This thread's hosts whose alive odds passed their node's bound ([`alive_over_bound`]).
+    static ALIVE_OVER_BOUND: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+}
+
+/// The hosts this thread's luminous-blue-variable tests have found with alive odds above their
+/// node's bound since it started, a test build's counter: each was thinned at the bound.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn alive_over_bound() -> usize {
+    ALIVE_OVER_BOUND.with(core::cell::Cell::get)
+}
+
+#[cfg(test)]
+mod residuals_hold;
 #[cfg(test)]
 mod tests;
