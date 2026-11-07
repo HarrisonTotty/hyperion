@@ -24,12 +24,14 @@ use super::*;
 use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::coords::GalacticPosition;
+use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::catalogue_classes::core_collapse::{CoreCollapseProcess, recent_death_claims};
 use crate::galaxy::catalogue_classes::lbv::{LbvProcess, horizon_window, lbv_claims, may_host};
 use crate::galaxy::catalogue_classes::type_ia::ancient_share;
 use crate::galaxy::catalogue_classes::{
     CatalogueCellKey, CatalogueClassCell, ClassId, ClassProcess,
 };
+use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
 use crate::galaxy::displaced::hold::field_only_rules;
 use crate::galaxy::displaced::site::{
     CarveOutRules, ExplosionSite, explosion_site, recent_death_claim,
@@ -38,13 +40,15 @@ use crate::galaxy::imf::MassBand;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::query::{SubstellarRequest, epoch_velocity, expected_counts};
 use crate::galaxy::rules::GalaxyRules;
+use crate::galaxy::snr::SHELL_WINDOW_CAP;
 use crate::galaxy::{Galaxy, Population};
 use crate::id::Layer;
 use crate::math;
 use crate::planetary::testing::in_shares;
 use crate::stellar::multiplicity::MultiplicityContext;
+use crate::stellar::remnant::KickLawParams;
 use crate::stellar::system::{ClockDeath, SystemStars};
-use crate::time::UniverseTime;
+use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, UniverseTime};
 use crate::units::{LightYears, SolarMasses, Years};
 
 /// The seed of the hold's Milky Way fixture, and of the pre-pin's.
@@ -583,35 +587,99 @@ fn layer_e_columns(galaxy: &Galaxy) -> Vec<[i32; 2]> {
     columns
 }
 
-/// The carve-out over a galaxy's young field: every layer-E cell's claimed records, a column at a
-/// time from the plane outwards until the young field's mean is negligible, in sixteen shares, in
-/// ID order.
-fn carved_galaxy(off: &Galaxy, on: &Galaxy) -> Vec<(SystemRecord, Class)> {
+/// The remnants' reach in layer-E cells, 112 (14,336 ly): the farthest a natal kick carries a
+/// remnant from its explosion site by the epoch, [`remnant_reach_ly`], rounded up.
+///
+/// It bounds the ballistic bins' remnants, whose vertical speed is their height over the time
+/// since the kick, held to the kick's speed (`kinematics::displaced`). Past those bins a remnant's
+/// place is its class's form and its velocity the class's Gaussian, which nothing here bounds: a
+/// walk of every 31st of the census's columns to the cube's edge under the budget (2026-11-06)
+/// carved 38 of its 523 core collapses past the young field's stop and none 112 cells or more past
+/// it, the farthest 102, a remnant of the nuclear disc's fastest old class.
+const REMNANT_REACH_CELLS: i32 = 112;
+
+/// The farthest a natal kick carries a remnant from its explosion site by the epoch, ly: the kick
+/// law's truncation, 1,000 km/s ([`KickLawParams::max_speed_km_s`]; Disberg and Mandel 2025, eq. 5,
+/// ruling 96.2), over the longest time from a death in the core collapses' interval to the epoch,
+/// `W_cap` + L + H = 4,263,144 Julian years (the interval's start, `displaced::site`), about
+/// 14,220 ly. The kick's rank clamp, 0.999, holds its speed under 990 km/s, so the cells' 14,336 ly
+/// leave about 18 km/s for the progenitor's own motion; and in the fixture (`v_ref` 224 km/s) the
+/// kick loop's floor of the fastest bin, 2.8 `v_ref`, is 627 km/s, under it.
+fn remnant_reach_ly() -> f64 {
+    let years = SHELL_WINDOW_CAP.value()
+        + LIGHT_CROSSING_L.as_julian_years_f64()
+        + CLOCK_WINDOW_H.as_julian_years_f64();
+    KickLawParams::default().max_speed_km_s * years * LIGHT_YEARS_PER_YEAR_PER_KM_S
+}
+
+/// The census's walk past the young field's stop is the natal kick's reach rounded up to whole
+/// layer-E cells, about 14,220 ly in 112: it covers the reach and one cell fewer would not, so a
+/// change of the kick law's truncation or of the interval fails here, not in the census, which
+/// is slow.
+#[test]
+fn the_census_walk_covers_a_natal_kick_s_reach() {
+    let reach = remnant_reach_ly();
+    let cell = f64::from(Layer::E.cell_size_ly());
+    assert!((reach - 14_220.3).abs() < 0.1, "{reach} ly");
+    assert!(f64::from(REMNANT_REACH_CELLS) * cell >= reach, "{reach} ly");
+    assert!(
+        f64::from(REMNANT_REACH_CELLS - 1) * cell < reach,
+        "{reach} ly"
+    );
+}
+
+/// The carve-out over a galaxy's young field, in sixteen shares: every layer-E cell's claimed
+/// records, in ID order, a column at a time from the plane outwards until the young field's mean is
+/// negligible and on for the remnants' reach; and the core collapses carved past that stop, by the
+/// cells past it. The grid places a kicked remnant at its epoch position, away from the site where
+/// the class lists its death, so the carve reaches past the young field's stop
+/// ([`REMNANT_REACH_CELLS`] gives the measured tail).
+fn carved_galaxy(off: &Galaxy, on: &Galaxy) -> (Vec<(SystemRecord, Class)>, BTreeMap<i32, usize>) {
     let columns = layer_e_columns(on);
     let shares = 16;
-    let mut all: Vec<(SystemRecord, Class)> = in_shares(shares, shares, |share| {
+    let parts = in_shares(shares, shares, |share| {
         let mut out = Vec::new();
+        let mut past: BTreeMap<i32, usize> = BTreeMap::new();
         for &[x, y] in columns.iter().skip(share).step_by(shares) {
             for side in [1, -1] {
+                let mut stop = None;
                 for k in 0.. {
                     let z = if side > 0 { k } else { -1 - k };
                     let Ok(key) = CellKey::new(Layer::E, [x, y, z]) else {
                         break;
                     };
-                    if young_mean(on, key) < NEGLIGIBLE_YOUNG {
+                    if stop.is_none() && young_mean(on, key) < NEGLIGIBLE_YOUNG {
+                        stop = Some(k);
+                    }
+                    if stop.is_some_and(|s| k >= s + REMNANT_REACH_CELLS) {
                         break;
                     }
-                    out.extend(carved(off, on, &[key]));
+                    let cell = carved(off, on, &[key]);
+                    if let Some(s) = stop {
+                        let deaths = cell
+                            .iter()
+                            .filter(|(_, class)| *class == Class::CoreCollapse)
+                            .count();
+                        if deaths > 0 {
+                            *past.entry(k - s).or_default() += deaths;
+                        }
+                    }
+                    out.extend(cell);
                 }
             }
         }
-        out
-    })
-    .into_iter()
-    .flatten()
-    .collect();
+        (out, past)
+    });
+    let mut all = Vec::new();
+    let mut past: BTreeMap<i32, usize> = BTreeMap::new();
+    for (out, share_past) in parts {
+        all.extend(out);
+        for (cells, deaths) in share_past {
+            *past.entry(cells).or_default() += deaths;
+        }
+    }
     all.sort_by_key(|(r, _)| r.id().raw());
-    all
+    (all, past)
 }
 
 /// A class's entries over the galaxy: every class cell whose mean is not negligible, a column at a
@@ -651,19 +719,42 @@ fn class_entries<P: ClassProcess + Sync>(galaxy: &Galaxy, process: &P, class: Cl
     .sum()
 }
 
-/// C1, the carve-out's census under every 26 hold, the carve-out on against off
+/// Every 26 hold at the budget, the field keeping its whole budget (`FieldShareRules::None`), with
+/// the carve-out `carve_out`.
+fn budget_rules(carve_out: CarveOutRules) -> GalaxyRules {
+    GalaxyRules {
+        field_share: FieldShareRules::None,
+        carve_out,
+        ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
+    }
+}
+
+/// C1, the carve-out's census under every 26 hold at the budget, the carve-out on against off
 /// (decision-galaxy-25-train §1.6), over the fixture's young field in layer E, with its kinematic
 /// tables: every claimed record listed by class, with its ID; each one the grid places without the
 /// carve-out, every other outcome the same; and, research item 4 of the galaxy leans, the classes'
 /// entries against the grid's carve over the galaxy: two Poisson counts of one intensity, the core
 /// collapses' and the luminous blue variables', each difference against the two counts' summed
 /// variance. On wasm32-wasip1, the Sun's columns alone and no comparison.
+///
+/// Both arms are at the budget (`FieldShareRules::None`), as
+/// `core_collapses_over_seeds_under_every_26_hold` builds its budget. The field's share φ
+/// (P09.T2.c) is a thinning that the grid's displaced picks do not take: it thins only a field
+/// pick, and a displaced class's pick is at its whole budget (`settle`). The class holds its field
+/// term and its walkaways at the field's part and only its runaways at the whole budget, the
+/// features listing the rest (P09.T33.b), so under the version's rules the two counts are two
+/// intensities (research-leans-45 item 2). The field share has its own census, that test's.
 #[test]
 #[ignore = "slow: the fixture's whole layer E under either arm, and two classes' cells"]
 fn census_of_the_carve_out() {
-    let off = milky_way(unclaimed_rules()).with_full_potential();
-    let on = milky_way(GalaxyRules::of_version(crate::GENERATOR_VERSION)).with_full_potential();
-    let carved = carved_galaxy(&off, &on);
+    assert!(
+        f64::from(REMNANT_REACH_CELLS) * f64::from(Layer::E.cell_size_ly()) >= remnant_reach_ly(),
+        "the walk's reach covers the remnants' {} ly",
+        remnant_reach_ly()
+    );
+    let off = milky_way(budget_rules(CarveOutRules::Unclaimed)).with_full_potential();
+    let on = milky_way(budget_rules(CarveOutRules::Claimed)).with_full_potential();
+    let (carved, past) = carved_galaxy(&off, &on);
     let mut by_class: BTreeMap<Class, Vec<u64>> = BTreeMap::new();
     for (record, class) in &carved {
         by_class.entry(*class).or_default().push(record.id().raw());
@@ -674,6 +765,11 @@ fn census_of_the_carve_out() {
             eprintln!("  {class:?} {id:#018x}");
         }
     }
+    eprintln!(
+        "core collapses carved past the young field's stop, by the cells past it: {past:?} ({} in \
+         all)",
+        past.values().sum::<usize>()
+    );
     let grid = |class| by_class.get(&class).map_or(0, Vec::len);
     // On wasm32-wasip1, only the Sun's columns: too few for the classes' counts.
     if cfg!(target_family = "wasm") {
