@@ -36,8 +36,9 @@
  * 7. Then a moon of the galaxy (R15.T5's follow-up): the first of the real planets `viewer_randomize`
  *    draws, from draw seed 1, at most {@link MOON_SEARCH_DRAWS}, whose system holds a moon present
  *    at the epoch gives it ({@link firstMoon}). With `SUN` `ORBITAL` again its ID is entered in
- *    `BODY`, and once the panel holds `GENERATE` back with `NO INPUTS` the moon is captured
- *    from orbit as `planet-viewer-moon`.
+ *    `BODY`, and once the panel holds `GENERATE` back with `NO INPUTS` and the moon is drawn
+ *    photorealistic, no longer `PHOTOREALISTIC: PREPARING`, it is captured from orbit as
+ *    `planet-viewer-moon`.
  *
  * Each capture is taken twice: of the whole tab, and with `MAXIMIZE VIEW` on (`-maximized`), its
  * label block and panels hidden, so that the planet fills the view.
@@ -74,6 +75,7 @@ import { RANDOMIZE_KEY } from "../../planet/PlanetViewerBar";
 import { type WhiteBalance, whiteBalanceName } from "../../../view/post/whiteBalance";
 import { MISSING_READING as MISSING, WHITE_BALANCE_LABEL } from "../viewRun";
 import { MAXIMIZE_KEY } from "../displayKeys";
+import { PHOTOREAL_PREPARING } from "../viewRun";
 import { PRIMARY_NAME, PRIMARY_VIEW_NAME } from "../viewNames";
 import {
   exposureEv100,
@@ -955,9 +957,11 @@ async function viewPlanet(
     "the moon was not drawn photorealistic",
     () => controls.styleOf(PRIMARY_NAME) === "photorealistic",
   );
+  // Its photorealistic pipelines are made afresh for a new opening, the wireframe drawn meanwhile.
   await drawn.until(
-    "the moon's lighting and atmosphere stayed pending",
+    "the moon's photorealistic picture, its lighting and its atmosphere stayed pending",
     () =>
+      !plate().statements.includes(PHOTOREAL_PREPARING) &&
       inspectionLighting(plate().statements) !== "pending" &&
       !plate().statements.includes(ATMOSPHERE_STATEMENTS.atmospherePending),
   );
