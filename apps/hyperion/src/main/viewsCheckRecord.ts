@@ -1629,12 +1629,24 @@ function timingClusters(value: unknown): InspectionTimingClusters | null | undef
 }
 
 /**
- * One profiled window (the owner's report): its name, an end not before its start, and its times,
- * each pass's as many as the frames timed in full, each label once, its WebGPU calls and
- * attachments or `null`, its atmosphere reads, its React commits or `null`, and its cluster
- * counters or `null`.
+ * A profiled window whose passes' times are not as many as its frames' GPU times: dropped from the
+ * record, said, the record's other windows kept (lane fix-inspection-timing-record).
  */
-function timingWindow(value: unknown): InspectionTimingWindow | null {
+interface MistimedWindow {
+  readonly mistimed: InspectionTimingWindowName;
+  /** The frames' GPU times the window has. */
+  readonly gpuMs: number;
+  /** The first pass whose times are not as many, its label and their count. */
+  readonly pass: { readonly label: string; readonly ms: number };
+}
+
+/**
+ * One profiled window (the owner's report): its name, an end not before its start, and its times,
+ * each pass's as many as the frames timed in full (a {@link MistimedWindow} where not), each label
+ * once, its WebGPU calls and attachments or `null`, its atmosphere reads, its React commits or
+ * `null`, and its cluster counters or `null`.
+ */
+function timingWindow(value: unknown): InspectionTimingWindow | MistimedWindow | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -1667,7 +1679,6 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     submitMs === null ||
     gpuMs === null ||
     passes === null ||
-    passes.some((pass) => pass.ms.length !== gpuMs.length) ||
     new Set(passes.map((pass) => pass.label)).size !== passes.length ||
     !isCount(untimedFrames) ||
     memory === null ||
@@ -1683,6 +1694,14 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
     marchCensus === undefined
   ) {
     return null;
+  }
+  const mistimed = passes.find((pass) => pass.ms.length !== gpuMs.length);
+  if (mistimed !== undefined) {
+    return {
+      mistimed: name,
+      gpuMs: gpuMs.length,
+      pass: { label: mistimed.label, ms: mistimed.ms.length },
+    };
   }
   return {
     name,
@@ -1711,22 +1730,35 @@ function timingWindow(value: unknown): InspectionTimingWindow | null {
 
 /**
  * `value` as the inspection run's frame profile's record (the owner's report, 2026-11-01), or
- * `null` if it is not one: each window at most once.
+ * `null` if it is not one: each window at most once. A window whose passes' times are not as many
+ * as its frames' GPU times is dropped alone, its name and both counts logged, the others kept
+ * (lane fix-inspection-timing-record).
  */
 export function readInspectionTimingRecord(value: unknown): InspectionTimingRecord | null {
   if (!isRecord(value)) {
     return null;
   }
   const { timer, devicePixelRatio } = value;
-  const windows = listOf(value["windows"], timingWindow);
+  const read = listOf(value["windows"], timingWindow);
   if (
     (timer !== "full" && timer !== "quantized" && timer !== "absent") ||
     !isFiniteNumber(devicePixelRatio) ||
     !(devicePixelRatio > 0) ||
-    windows === null ||
-    new Set(windows.map((each) => each.name)).size !== windows.length
+    read === null ||
+    new Set(read.map((each) => ("mistimed" in each ? each.mistimed : each.name))).size !==
+      read.length
   ) {
     return null;
+  }
+  const windows: InspectionTimingWindow[] = [];
+  for (const each of read) {
+    if ("mistimed" in each) {
+      console.warn(
+        `views check: the timing window ${each.mistimed} dropped: its pass ${each.pass.label} has ${String(each.pass.ms)} times against ${String(each.gpuMs)} frame GPU times`,
+      );
+    } else {
+      windows.push(each);
+    }
   }
   return { timer, devicePixelRatio, windows };
 }

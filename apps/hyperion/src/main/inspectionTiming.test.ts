@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   InspectionGpuAttachment,
@@ -377,6 +377,32 @@ describe("the frame profile's timing file (the owner's report)", () => {
       readInspectionTimingRecord({ ...RECORD, windows: [...RECORD.windows, ...RECORD.windows] }),
     ).toBeNull();
     expect(readInspectionTimingRecord({ ...RECORD, timer: "sometimes" })).toBeNull();
+  });
+
+  it("drops alone a window whose passes are not timed as many frames as its GPU times, and says so (lane fix-inspection-timing-record)", () => {
+    const [window] = RECORD.windows;
+    if (window === undefined) {
+      throw new Error("the record holds a window");
+    }
+    const mistimed = {
+      ...window,
+      name: "orbit",
+      // A resolve that reported after the frames' GPU times were read: 3 pass times against 2.
+      passes: window.passes.map((pass) =>
+        pass.label === "tonemap" ? { ...pass, ms: [...pass.ms, 100] } : pass,
+      ),
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const read = readInspectionTimingRecord({ ...RECORD, windows: [window, mistimed] });
+    expect([read?.windows.map((each) => each.name), warn.mock.calls]).toEqual([
+      ["close"],
+      [
+        [
+          "views check: the timing window orbit dropped: its pass tonemap has 3 times against 2 frame GPU times",
+        ],
+      ],
+    ]);
+    warn.mockRestore();
   });
 
   it("takes a window's march census only whole, or none (R08.T8.d)", () => {
