@@ -3612,6 +3612,17 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
       and its row gives each population one rate a system, where the engine's mergers lie in the
       old thin disc's younger sub-discs: no fit of these tables can give the class the engine's
       ages. The fit takes the masses' distances down a fifth and the ratio's up a half.
+    - Run again on v29 (land/next cd57398f, 460 s on 16 threads), and again with the hold at 31
+      (441 s): every distance the same to the bit, and the Milky Way counts the same (0.314 red
+      novae a year, 8.58 neutron-star mergers).
+  - _The neutron-star mergers against the engine_ (v29, with the hold at 30, whose census and
+    tables are 31's to the bit; 2,863 held-out mergers, 10,000 entries; 149 minutes on 16
+    threads): each neutron star's mass passes (0.040 against the critical 0.053, in-sample
+    0.042), and the black hole's log mass (0.075 against 0.086, in-sample 0.034).
+    - The log merger age misses, 0.729 against 0.064, in-sample 0.718, pinned (`NSM_MISSES`).
+    - _A finding, for P11.T8.c:_ as with the stellar mergers, no fit of these tables gives the
+      class the engine's ages, since it draws one age rank over every component and its row gives
+      each population one rate a system. The medians were not taken.
 - **T9.b's target, after P11.T6's detonatable mark (lane `fix-p11-t6-ia-eligible`, 2026-11-01;
   research `research-p11-t6-ia-rate`, main's lean).** It replaces T9.b's Acceptance:
   - Fill `IA_YIELD` per delay bin and channel with η = min(1, target ÷ pool). The pool is

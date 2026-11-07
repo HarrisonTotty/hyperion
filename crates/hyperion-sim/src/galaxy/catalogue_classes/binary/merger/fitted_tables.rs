@@ -167,8 +167,8 @@ fn the_fitted_merger_tables_are_in_shape() {
 /// The 1% level of the tests here.
 const KS_LEVEL: f64 = 0.01;
 
-/// A mark's comparison at the shape's resolution: the distances of the class's sample from the
-/// engine's held-out half and from its fitted half, and the 1% critical distance of the first.
+/// A mark's comparison: the distances of the class's sample from the engine's held-out half and
+/// from its fitted half, and the 1% critical distance of the first (module documentation).
 #[derive(Debug, Clone, Copy)]
 struct Resolved {
     held_out: KolmogorovSmirnov,
@@ -313,8 +313,8 @@ fn merger_values(m1: f64, q: f64, t: f64) -> [f64; 4] {
 
 /// The class against the engine at 31 (P15.T10.b's merger step; slow): the class's entries in the
 /// stellar merger reference cells against the engine's mergers its channels cover, weighted as
-/// mergers in the horizon, at the shape's resolution, a miss a finding pinned in
-/// [`MERGER_MISSES`]; the channels' and the layers' shares printed.
+/// mergers in the horizon, at 1%, a miss a finding pinned in [`MERGER_MISSES`]; the channels' and
+/// the layers' shares printed.
 #[test]
 #[ignore = "slow: two censuses of 4 × 10⁶ records through the binary engine and 10,000 entries"]
 fn the_stellar_merger_sampler_against_the_engine() {
@@ -471,8 +471,8 @@ fn nsm_values(neutron: &[f64], hole: Option<f64>, t: f64) -> [Vec<f64>; 3] {
 
 /// The class against the engine at 31 (P15.T10.b's merger step; slow): the class's entries in the
 /// neutron-star merger cells about the solar circle against the engine's mergers of a neutron star
-/// with a neutron star or a black hole, weighted as mergers in the horizon, at the shape's
-/// resolution, a miss a finding pinned in [`NSM_MISSES`]; the pair kinds' shares printed.
+/// with a neutron star or a black hole, weighted as mergers in the horizon, at 1%, a miss a
+/// finding pinned in [`NSM_MISSES`]; the pair kinds' shares printed.
 #[test]
 #[ignore = "slow: two censuses of 8 × 10⁶ records of layers D and E through the binary engine"]
 fn the_neutron_star_merger_sampler_against_the_engine() {
@@ -556,8 +556,13 @@ fn the_neutron_star_merger_sampler_against_the_engine() {
 }
 
 /// The neutron-star merger marks whose test misses at 1%, each a finding: the mark's place in
-/// [`NSM_COMPARED`] and its held-out distance, as measured to a millionth.
-const NSM_MISSES: [(usize, f64); 0] = [];
+/// [`NSM_COMPARED`] and its held-out distance, as measured to a millionth (2026-11-07, v29). The
+/// log merger age misses, the fitted half's distance (0.718) as far as the held-out one's: the
+/// class's ages are not the engine's, as the stellar mergers' are not ([`MERGER_MISSES`]), since
+/// it draws one age rank over every component and its row gives one rate a system to a
+/// population. The masses pass: each neutron star's (0.040 against 0.053) and the black hole's
+/// (0.075 against 0.086).
+const NSM_MISSES: [(usize, f64); 1] = [(2, 0.728_585_729_481_149)];
 
 /// The classes at Milky Way parameters under every 31 hold (slow): over ten Milky Way seeds, the
 /// stellar mergers' red novae, the mergers in the source horizon over its span, inside the
