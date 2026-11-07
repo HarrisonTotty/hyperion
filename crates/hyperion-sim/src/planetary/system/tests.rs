@@ -1880,27 +1880,13 @@ fn no_overlapping_orbits_in_generated_systems() {
     no_overlapping_orbits_in(whole_fast(), NO_INNER_MISSES);
 }
 
-/// [`no_overlapping_orbits_in_generated_systems`] over the rest of the sample: the slow tier's chunk
-/// of P14.T54.b.l's §C.7 split, [`whole_rest`] under the version's rules, and until 30's bump the
-/// same chunk generated anew under 30's merged steps ([`MERGED_STEPS_VERSION`]). Below 30
-/// `SystemId(0x42002cae00000001)`'s circumbinary planet `0800` takes its merged pair's product's
-/// white dwarf's birth, 1.89 → 0.63 M☉, as a sudden loss, and ends at e = 0.76, 42% inside its
-/// zone ([`HELD_MERGED_STEPS_INNER_MISSES`]); from 30 it lies 0.258% inside
-/// ([`SUDDEN_LOSS_INNER_MISSES`]). 30's bump keeps the first pass alone, at the second's misses.
-///
-/// [`MERGED_STEPS_VERSION`]: crate::planetary::fate::MERGED_STEPS_VERSION
+/// [`no_overlapping_orbits_in_generated_systems`] over the rest of the sample ([`whole_rest`]): the
+/// slow tier's chunk of P14.T54.b.l's §C.7 split. `SystemId(0x42002cae00000001)`'s circumbinary
+/// planet `0800` lies 0.258% inside its zone's inner limit ([`SUDDEN_LOSS_INNER_MISSES`]).
 #[test]
-#[ignore = "slow: the orbits of 200 whole systems at ±H, twice, the fast tier's other chunk"]
+#[ignore = "slow: the orbits of 200 whole systems at ±H, the fast tier's other chunk"]
 fn no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample() {
-    use crate::planetary::fate::{MergedStepsRules, with_merged_steps};
-    no_overlapping_orbits_in(whole_rest(), HELD_MERGED_STEPS_INNER_MISSES);
-    with_merged_steps(MergedStepsRules::Entry, || {
-        let systems: Vec<(SystemContext, PlanetarySystem)> = sample()[FAST_WHOLE..]
-            .iter()
-            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
-            .collect();
-        no_overlapping_orbits_in(&systems, SUDDEN_LOSS_INNER_MISSES);
-    });
+    no_overlapping_orbits_in(whole_rest(), SUDDEN_LOSS_INNER_MISSES);
 }
 
 /// The bodies a walk of [`no_overlapping_orbits_in`] finds inside their zone's inner limit, past
@@ -1918,25 +1904,16 @@ const NO_INNER_MISSES: InnerMisses = InnerMisses {
     share: 0.0,
 };
 
-/// The rest of the sample's under 30's merged steps, pinned as they stand (P14.T28.g's merged
-/// steps): `SystemId(0x42002cae00000001)`'s circumbinary planet `0800` 0.258% inside its zone's
-/// inner limit after its pair's common envelope, at each of the three times, the one such body of
-/// the sample's 400 systems. A sudden loss of a host's mass leaves a body's pericentre where it
+/// The rest of the sample's, pinned as they stand (P14.T28.g's merged steps):
+/// `SystemId(0x42002cae00000001)`'s circumbinary planet `0800` 0.258% inside its zone's inner
+/// limit after its pair's common envelope, at each of the three times, the one such body of the
+/// sample's 400 systems. A sudden loss of a host's mass leaves a body's pericentre where it
 /// was, while the zone's limit, widened by the host's initial mass over its mass then, moves out by
 /// the mass before over the mass after, and about a zone no pair the engine ran bounds the fate
 /// unbinds no body for it.
 const SUDDEN_LOSS_INNER_MISSES: InnerMisses = InnerMisses {
     count: 3,
     share: 3e-3,
-};
-
-/// The rest of the sample's under the version's rules, below 30 ([`SUDDEN_LOSS_INNER_MISSES`]'s
-/// planet `0800`, 41.5% inside its zone's inner limit at each of the three times, since its host
-/// steps at its pair's product's white dwarf's birth): the merged steps' defect, held. 30's bump
-/// deletes it.
-const HELD_MERGED_STEPS_INNER_MISSES: InnerMisses = InnerMisses {
-    count: 3,
-    share: 0.42,
 };
 
 /// The body of [`no_overlapping_orbits_in_generated_systems`] and its slow twin, over the systems
