@@ -543,6 +543,23 @@ impl KickDraws {
     pub const fn direction(&self) -> UnitVector {
         self.direction
     }
+
+    /// The direction of a Maxwellian kick from these draws ([`maxwellian`]): its three normals'
+    /// own, or the ordinary mode's where all three are zero.
+    #[must_use]
+    fn maxwellian_direction(&self) -> UnitVector {
+        UnitVector::from_components(self.low.map(StandardNormal::value)).unwrap_or(self.direction)
+    }
+
+    /// The directions a natal kick from these draws can take, whatever the death, the progenitor
+    /// and the remnant: the ordinary mode's, which a black hole's kick and a complete fallback's
+    /// nil one take too, and the Maxwellian modes' ([`StandardKickLaw`]'s `kick`). Every kick is
+    /// one of them times its speed, so a reader that knows only the draws knows the lines a kicked
+    /// remnant can leave on (a feature's listed core collapses, P09.T37's cold cost).
+    #[must_use]
+    pub(crate) fn directions(&self) -> [UnitVector; 2] {
+        [self.direction, self.maxwellian_direction()]
+    }
 }
 
 /// A natal kick law: the kick a remnant is born with, from how it was born, its progenitor, its
@@ -807,8 +824,11 @@ impl KickLaw for StandardKickLaw {
 #[must_use]
 fn maxwellian(sigma_km_s: f64, draws: &KickDraws, mode: KickMode) -> NatalKick {
     let z = draws.low.map(StandardNormal::value);
-    let direction = UnitVector::from_components(z).unwrap_or(draws.direction);
-    NatalKick::new(maxwellian_speed(sigma_km_s, z), direction, mode)
+    NatalKick::new(
+        maxwellian_speed(sigma_km_s, z),
+        draws.maxwellian_direction(),
+        mode,
+    )
 }
 
 /// The speed of [`maxwellian`]'s kick of σ `sigma_km_s` (km/s) on the normals `z`: σ |z|.

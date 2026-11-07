@@ -44,7 +44,7 @@
 use std::num::NonZeroU16;
 use std::sync::{Arc, OnceLock};
 
-use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
+use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity, UnitVector};
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::binary::feature::{
     FeatureBinaries, ListedBinary, is_listed_binary,
@@ -60,7 +60,8 @@ use crate::id::{CentreMemberId, FeatureMemberId, MemberSlot, SystemId, SystemIdK
 use crate::math;
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::stellar::Composition;
-use crate::stellar::remnant::NatalKick;
+use crate::stellar::draws::StarDraws;
+use crate::stellar::remnant::{KickDraws, NatalKick};
 use crate::stellar::system::{SystemStars, primary_draws};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, UniverseTime};
 use crate::units::LightYears;
@@ -264,7 +265,10 @@ pub struct FeatureLevelList {
 /// from its draws alone, and the class's test asked of it only when a query's sphere lies within
 /// that bound of its feature: first its death's time, which reads no place and gives a closer
 /// bound, and then, where that bound still reaches the sphere, its place and the rest
-/// ([`FeatureLevelList::kept_deaths`]). Each step is found once and kept, so a query asks no
+/// ([`FeatureLevelList::kept_deaths`]). Before its death's time, its kick, along one of the two
+/// directions its draws allow, must be able to take its remnant within its bound of the sphere,
+/// from its feature's centre and then from its place, which reads no track either. Each step is
+/// found once and kept, so a query asks no
 /// candidate again; a far feature's few dead that can reach a sphere are all a cold query
 /// places, and a cache may keep these apart from the list, some hundred bytes a feature, without
 /// its stars, which each step makes again (`FeatureStars::of`, some 20 µs without its profile's
@@ -298,12 +302,20 @@ enum DeathsStars {
 }
 
 /// One core-collapse candidate of a [`KeptDeaths`]: its index, its bound before its death is
-/// known, and its test's two steps, each found when first asked: its death's time with the bound
-/// that gives, and its death kept, placed.
+/// known, the directions its remnant's kick can take, and its place and its test's two steps, each
+/// found when first asked: its death's time with the bound that gives, and its death kept, placed.
 #[derive(Debug, Clone)]
 pub(crate) struct DeathCandidate {
     index: u16,
     bound: LightYears,
+    /// The directions its kick can take, from its draws alone (`KickDraws::directions`): its
+    /// remnant leaves its candidate's line along one of them, which a query reads before its death
+    /// (P09.T37's cold cost).
+    kick_directions: [UnitVector; 2],
+    /// Its candidate's place at the epoch, on whose line its progenitor moves ([`list_position`]):
+    /// found when first asked, since a far feature's profile tabulates its distribution for it,
+    /// some 0.1 ms (measured 2026-11-06, pod, 16 vCPU), and kept.
+    place: OnceLock<GalacticPosition>,
     told: OnceLock<Option<Told>>,
     placed: OnceLock<Option<Box<Placed>>>,
     kept: OnceLock<Option<Box<KeptDeath>>>,
@@ -341,6 +353,13 @@ pub(crate) struct Told {
 }
 
 impl Told {
+    /// Its remnant's kick, if it has one: for the tests of what reads its directions first.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn kick(&self) -> Option<NatalKick> {
+        self.kick
+    }
+
     /// How far from its candidate's line its remnant lies by +H, with margins over the rounding.
     #[must_use]
     pub(crate) const fn bound(&self) -> LightYears {
@@ -362,6 +381,20 @@ impl DeathCandidate {
     pub(crate) const fn bound(&self) -> LightYears {
         self.bound
     }
+
+    /// Its index on its list: for the tests that name it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn index(&self) -> u16 {
+        self.index
+    }
+
+    /// The directions its remnant can leave its candidate's line along, its kick's, from its draws
+    /// alone: its kick is one of them times its speed, which its track gives.
+    #[must_use]
+    pub(crate) const fn kick_directions(&self) -> &[UnitVector; 2] {
+        &self.kick_directions
+    }
 }
 
 impl KeptDeaths {
@@ -380,9 +413,13 @@ impl KeptDeaths {
             .filter_map(|number| {
                 let index = u16::try_from(number + 1).ok()?;
                 let (record, _) = stars.core_collapse_draws(galaxy, index)?;
+                // The draws its death's test builds its track with, and its kick reads.
+                let draws = primary_draws(galaxy, &record);
                 Some(DeathCandidate {
                     index,
-                    bound: bound_before_death(galaxy, (&record, stars.composition()), bulk),
+                    bound: bound_before_death(galaxy, (&record, stars.composition(), &draws), bulk),
+                    kick_directions: KickDraws::of(&draws).directions(),
+                    place: OnceLock::new(),
                     told: OnceLock::new(),
                     placed: OnceLock::new(),
                     kept: OnceLock::new(),
@@ -441,6 +478,22 @@ impl KeptDeaths {
         }
     }
 
+    /// `candidate`'s place at the epoch, on whose line its progenitor moves and its remnant's line
+    /// leaves ([`list_position`]): found when first asked, and kept.
+    #[must_use]
+    pub(crate) fn place(&self, galaxy: &Galaxy, candidate: &DeathCandidate) -> GalacticPosition {
+        *candidate.place.get_or_init(|| {
+            self.with_stars(galaxy, |stars| {
+                list_position(
+                    (self.seed, self.word, &self.centre),
+                    ClassId::CORE_COLLAPSE,
+                    stars.profile(),
+                    u32::from(candidate.index) - 1,
+                )
+            })
+        })
+    }
+
     /// `candidate`'s death's time and kick, if its runaway's and its death's tests keep it, with the
     /// bound they give, its kick's `|k| dt` by +H: found when first asked, and kept.
     #[must_use]
@@ -480,13 +533,8 @@ impl KeptDeaths {
             .placed
             .get_or_init(|| {
                 let told = self.told(galaxy, candidate)?;
+                let position = self.place(galaxy, candidate);
                 self.with_stars(galaxy, |stars| {
-                    let position = list_position(
-                        (self.seed, self.word, &self.centre),
-                        ClassId::CORE_COLLAPSE,
-                        stars.profile(),
-                        u32::from(candidate.index) - 1,
-                    );
                     let motion = stars.core_collapse_line(
                         galaxy,
                         (candidate.index, &position),
@@ -538,8 +586,18 @@ impl KeptDeaths {
                     let line = CatalogueMotion::straight(position, self.velocity).position_at(end);
                     let off = LightYears::from(motion.position_at(end).distance_to(&line)).value();
                     debug_assert!(
-                        off <= bound.value(),
-                        "{:?}: a remnant {off} ly from its line, past its bound {bound:?}",
+                        off <= bound.value() && off <= candidate.bound.value(),
+                        "{:?}: a remnant {off} ly from its line, past its bound {bound:?} or its \
+                         bound before its death {:?}",
+                        entry.member().record().id(),
+                        candidate.bound
+                    );
+                    // What the kick directions' pre-test reads (`source::kick_may_reach`).
+                    debug_assert!(
+                        told.kick.is_none_or(|kick| {
+                            candidate.kick_directions.contains(&kick.direction())
+                        }),
+                        "{:?}: a kick along none of its draws' directions",
                         entry.member().record().id()
                     );
                 }
@@ -553,12 +611,13 @@ impl KeptDeaths {
             .as_deref()
     }
 
-    /// The bytes it owns on the heap: its candidates' buffer by its capacity, each with its death's
-    /// time and kick in place: what a caller's byte-bounded cache charges it. The place and the
-    /// kept death a candidate's later steps box are not charged: only a candidate whose bound
-    /// reached a query's sphere has them, some thousand of the inner disc's 35,000 (P09.T37's
-    /// cold cost), and a charge for each candidate's would take the cache's whole budget there.
-    /// Its stars are its list's, or made again.
+    /// The bytes it owns on the heap: its candidates' buffer by its capacity, each with its kick's
+    /// directions, its place once found, and its death's time and kick in place: what a caller's
+    /// byte-bounded cache charges it. What a candidate's later steps box, its placed line and its
+    /// kept death, is not charged: only a candidate whose bounds reached a query's sphere has
+    /// them, some thousand of the inner disc's 35,000 (P09.T37's cold cost), and a charge for each
+    /// candidate's would take the cache's whole budget there. Its stars are its list's, or made
+    /// again.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.candidates.capacity() * size_of::<DeathCandidate>()
@@ -656,7 +715,7 @@ const KICK_CEILING_KM_S: f64 = 1_000.0;
 #[must_use]
 fn bound_before_death(
     galaxy: &Galaxy,
-    (record, composition): (&SystemRecord, &Composition),
+    (record, composition, draws): (&SystemRecord, &Composition, &StarDraws),
     speed: f64,
 ) -> LightYears {
     let caps = galaxy.window_caps();
@@ -669,7 +728,7 @@ fn bound_before_death(
     let m0 = record.primary_initial_mass();
     let least = galaxy
         .lifetime_envelope()
-        .bracket(m0, composition, || primary_draws(galaxy, record))
+        .bracket(m0, composition, || draws.clone())
         .or_else(|| LifetimeBracket::shared().bracket(m0))
         .map(|(least, _)| least);
     let dt = least.map_or(cap, |least| {

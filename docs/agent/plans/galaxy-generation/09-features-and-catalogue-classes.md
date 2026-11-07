@@ -6158,3 +6158,12 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     The range plans are not walked in chunks: the hits are not what fills the memory.
   - _Result._ The three pass natively and on wasip1 (wasmtime 49.0.1), peaking at 1.5–3.0 GiB
     there; figures in the lane's outbox.
+- **P09.T37, the listed deaths' kick directions (lane `perf-range-layer-e-in-part`, part 2,
+  2026-11-06; no output moves).**
+  - `DeathCandidate` keeps its kick's two possible directions (`KickDraws::directions`, from its
+    primary's draws) and, lazily, its candidate's place (`KeptDeaths::place`, which `placed` now
+    reads). `death_hits` asks `told` only where a segment from the feature's centre (within its
+    reach), then from that place, along either direction and as long as the bound before death,
+    passes within the sphere's radius and the bulk's pad (`source::kick_may_reach`).
+  - A reader that adds a kick direction, or moves a remnant off its candidate's line other than by
+    its kick times the time since its death, updates `KickDraws::directions` and `kick_may_reach`.

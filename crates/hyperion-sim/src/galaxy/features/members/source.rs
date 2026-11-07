@@ -85,7 +85,7 @@ use crate::galaxy::catalogue_classes::supernova::LIFETIME_REACH;
 use super::super::catalogue::{FeatureCatalogue, FeatureCellCache, FeatureRecord};
 use super::super::interior::LocalCell;
 use super::super::nested::{NestedCell, box_distance};
-use super::level_list::{FeatureLevelList, KeptDeaths};
+use super::level_list::{DeathCandidate, FeatureLevelList, KeptDeaths};
 use super::placement::FeatureInterior;
 use super::recent::{FeatureClassesRules, RecentClass};
 use super::{MemberRecord, local_offset};
@@ -855,6 +855,50 @@ pub(crate) fn listed_death_may_reach(
         <= (sphere.radius() + death_reach(galaxy)).value()
 }
 
+/// Whether a listed core collapse `candidate`, whose candidates move at `speed`, may lie in
+/// `sphere` at its time by the directions its kick can take ([`DeathCandidate`]): whether the
+/// segment from `start` along either of them, as long as its bound before its death, passes
+/// within the sphere's radius, `spread` and its bulk's drift to the sphere's time of the sphere's
+/// centre, where its candidate's place at the epoch lies within `spread` of `start` (P09.T37's
+/// cold cost: its death's time, which the test asks next, builds its track).
+///
+/// Its remnant at a time `t` lies on its candidate's line, displaced by its kick's velocity times
+/// the time since its death, and its progenitor before it on that line: so by at most its kick's
+/// speed times the time from its death to +H, which its bound bounds for a death its test keeps,
+/// along its kick's direction, one of the two its draws allow. Its candidate's line is its place
+/// at the epoch moved by the bulk's velocity, at most its speed times |t| (`member_reach`'s pad,
+/// with its margins). So a remnant or progenitor in the sphere lies within the radius, `spread`
+/// and that pad of a point of one of the segments: a candidate this refuses can make no hit, and
+/// its death's time need not be found. `death_hits` asks it first from its feature's centre,
+/// within the feature's reach, which reads nothing more, and then from its candidate's place.
+///
+/// The cold 50 ly query at the Sun-like point told 4,018 of its far features' 5,215 candidates,
+/// 0.28 ms each, 1.13 s of its 1.9 s in one thread, for no hit: this refuses all of them, and the
+/// served query, every source with the global list, took 141 ms on 8 workers against 249 and
+/// 0.82 s on one against 1.62 (measured 2026-11-06, pod, 16 vCPU). Each candidate's draws, read
+/// when its feature's deaths are made, cost some 1.6 µs.
+#[must_use]
+fn kick_may_reach(
+    (start, spread): (&GalacticPosition, LightYears),
+    candidate: &DeathCandidate,
+    sphere: &QuerySphere,
+    speed: KilometresPerSecond,
+) -> bool {
+    let within = member_reach(sphere.radius() + spread, sphere.time(), speed).value();
+    let to_centre = start
+        .displacement_to(sphere.centre())
+        .metres()
+        .map(|m| m / METRES_PER_LIGHT_YEAR);
+    let length = candidate.bound().value();
+    candidate.kick_directions().iter().any(|direction| {
+        let d = direction.components();
+        let along =
+            (to_centre[0] * d[0] + to_centre[1] * d[1] + to_centre[2] * d[2]).clamp(0.0, length);
+        let off = [0, 1, 2].map(|axis| to_centre[axis] - along * d[axis]);
+        (off[0] * off[0] + off[1] * off[1] + off[2] * off[2]).sqrt() <= within
+    })
+}
+
 /// Whether `feature`'s reach touches the ball of `radius` about `centre`, as the catalogue's lookup
 /// tests it ([`FeatureCatalogue::near`]): the features whose lists the census and the hits read,
 /// for a `radius` the lists' pad bounds.
@@ -1109,9 +1153,11 @@ fn list_hits(
 
 /// The hits in `sphere` among `layers` of `kept`'s core collapses, of a feature `away` ly from the
 /// sphere's centre whose candidates move at `velocity`, each with its index, in index order: a
-/// candidate's test is asked only where its bound before its death reaches the sphere, its place
-/// and the rest only where the bound its death gives does too ([`KeptDeaths`]), and a death kept is
-/// pre-tested on its candidate's line ([`listed_death_may_reach`]) and then tested on its own.
+/// candidate's test is asked only where its bound before its death reaches the sphere along one
+/// of its kick's directions ([`kick_may_reach`], from its feature's centre and then from its
+/// place), its line and the rest only where the bound its death gives does too ([`KeptDeaths`]),
+/// and a death kept is pre-tested on its candidate's line ([`listed_death_may_reach`]) and then
+/// tested on its own.
 fn death_hits<'a>(
     galaxy: &'a Galaxy,
     kept: Option<&'a KeptDeaths>,
@@ -1130,7 +1176,21 @@ fn death_hits<'a>(
         .map_or(&[][..], KeptDeaths::candidates);
     candidates.iter().filter_map(move |candidate| {
         let kept = kept?;
-        if !reaches(candidate.bound()) || !reaches(kept.told(galaxy, candidate)?.bound()) {
+        if !reaches(candidate.bound())
+            || !kick_may_reach(
+                (feature.position(), feature.reach()),
+                candidate,
+                sphere,
+                speed,
+            )
+            || !kick_may_reach(
+                (&kept.place(galaxy, candidate), LightYears::ZERO),
+                candidate,
+                sphere,
+                speed,
+            )
+            || !reaches(kept.told(galaxy, candidate)?.bound())
+        {
             return None;
         }
         // Placed, it is pre-tested on its candidate's line and its remnant on its own before the
@@ -1164,6 +1224,7 @@ mod tests {
     use hyperion_testkit::order::assert_order_independent;
 
     use super::*;
+    use crate::coords::GalacticDisplacement;
     use crate::galaxy::PointLy;
     use crate::galaxy::features::FeatureId;
     use crate::galaxy::features::FeatureProcess;
@@ -1189,6 +1250,137 @@ mod tests {
                 .unwrap()
                 .with_full_potential()
         })
+    }
+
+    /// The kick directions' pre-test ([`kick_may_reach`]) refuses no listed core collapse a
+    /// sphere can hold (P09.T37's cold cost): of the features within 3,000 ly of the Sun-like
+    /// point, every candidate whose death the test tells has its kick, if any, along one of its
+    /// two directions, bit for bit, and its place is its list's entry's, bit for bit; and a sphere
+    /// of 0.01 ly about where each death the test keeps is at −H, −H/2, the epoch, +H/2 and +H,
+    /// its remnant's place or its progenitor's, is one the pre-test lets its candidate reach, from
+    /// its feature's centre and from its own place. A sphere of 50 ly 3,000 ly above its feature
+    /// is refused nearly all of them from their places, and most from their features' centres,
+    /// which is the point. The hits of those spheres are the same in any order, through one kept
+    /// set of deaths and through deaths made afresh each time ([`death_hits`]).
+    #[test]
+    fn the_kick_directions_refuse_no_listed_death_a_sphere_can_hold() {
+        let galaxy = galaxy();
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
+        let (mut candidates, mut far_from_centre, mut far_from_place) = (0, 0, 0);
+        let (mut told, mut kicked, mut kept_deaths) = (0, 0, 0);
+        let mut ordered = 0;
+        for feature in
+            FeatureCatalogue::near(galaxy, &sun, LightYears::new(3_000.0), &NoFeatureCache)
+        {
+            let Some(deaths) = FeatureLevelList::deaths_of(galaxy, &feature) else {
+                continue;
+            };
+            let list = FeatureLevelList::of(galaxy, &feature);
+            let speed = KilometresPerSecond::from(deaths.velocity().speed());
+            let above = GalacticDisplacement::new([0.0, 0.0, 3_000.0 * METRES_PER_LIGHT_YEAR]);
+            let far = feature.position().translated(above).unwrap();
+            let far = QuerySphere::new(
+                far,
+                LightYears::new(50.0),
+                UniverseTime::EPOCH,
+                LightYears::ZERO,
+            )
+            .unwrap();
+            let mut spheres = vec![far];
+            for candidate in deaths.candidates() {
+                candidates += 1;
+                let place = deaths.place(galaxy, candidate);
+                let entry = list
+                    .entry(candidate.index())
+                    .expect("a candidate is an entry");
+                assert_eq!(entry.class(), ClassId::CORE_COLLAPSE);
+                assert_eq!(&place, entry.position(), "{:?}", feature.id());
+                let centre = (feature.position(), feature.reach());
+                far_from_centre += usize::from(kick_may_reach(centre, candidate, &far, speed));
+                let own = (&place, LightYears::ZERO);
+                far_from_place += usize::from(kick_may_reach(own, candidate, &far, speed));
+                let Some(death) = deaths.told(galaxy, candidate) else {
+                    continue;
+                };
+                told += 1;
+                if let Some(kick) = death.kick() {
+                    kicked += 1;
+                    assert!(
+                        candidate.kick_directions().contains(&kick.direction()),
+                        "{:?} candidate {}: kicked along {:?}, not one of {:?}",
+                        feature.id(),
+                        candidate.index(),
+                        kick.direction(),
+                        candidate.kick_directions()
+                    );
+                }
+                let Some(kept) = deaths.kept(galaxy, candidate) else {
+                    continue;
+                };
+                kept_deaths += 1;
+                for years in [-1_000, -500, 0, 500, 1_000] {
+                    let t = UniverseTime::from_julian_years(years).unwrap();
+                    let at = kept.motion().position_at(t);
+                    let sphere =
+                        QuerySphere::new(at, LightYears::new(0.01), t, LightYears::ZERO).unwrap();
+                    for start in [centre, own] {
+                        assert!(
+                            kick_may_reach(start, candidate, &sphere, speed),
+                            "{:?} candidate {} at {years} yr, from {start:?}",
+                            feature.id(),
+                            candidate.index()
+                        );
+                    }
+                    spheres.push(sphere);
+                }
+            }
+            if spheres.len() > 1 && ordered < 4 {
+                ordered += 1;
+                assert_death_hits_in_any_order(galaxy, &feature, &spheres);
+            }
+        }
+        println!(
+            "{told} deaths told, {kicked} kicked, {kept_deaths} kept; of {candidates} candidates \
+             {far_from_centre} may reach a sphere 3,000 ly off from their features' centres and \
+             {far_from_place} from their places; {ordered} features' hits asked in every order"
+        );
+        assert!(
+            told > 200 && kicked > 100 && kept_deaths > 20 && ordered == 4,
+            "{told} told, {kicked} kicked, {kept_deaths} kept, {ordered} ordered"
+        );
+        assert!(
+            far_from_place * 50 < candidates && far_from_centre * 4 < candidates,
+            "{far_from_centre} and {far_from_place} of {candidates} reach a sphere 3,000 ly off"
+        );
+    }
+
+    /// `feature`'s listed deaths' hits in each of `spheres` ([`death_hits`]) are the same in any
+    /// order, through one kept set of deaths and through deaths made afresh each time; and each
+    /// sphere after the first, about a death the test keeps, holds a hit.
+    fn assert_death_hits_in_any_order(
+        galaxy: &Galaxy,
+        feature: &FeatureRecord,
+        spheres: &[QuerySphere],
+    ) {
+        let layers = LayerSet::EMPTY.with(RecentClass::CoreCollapse.layer());
+        let hits = |deaths: &KeptDeaths, sphere: &QuerySphere| {
+            let away = LightYears::from(sphere.centre().distance_to(feature.position()));
+            let at = (feature, away.value(), deaths.velocity());
+            death_hits(galaxy, Some(deaths), at, sphere, layers).collect::<Vec<_>>()
+        };
+        let shared = FeatureLevelList::deaths_of(galaxy, feature).unwrap();
+        assert_order_independent(spheres, |sphere| hits(&shared, sphere));
+        assert_order_independent(spheres, |sphere| {
+            hits(
+                &FeatureLevelList::deaths_of(galaxy, feature).unwrap(),
+                sphere,
+            )
+        });
+        assert!(
+            spheres[1..]
+                .iter()
+                .all(|sphere| hits(&shared, sphere).iter().any(|(_, hit)| hit.is_some()))
+        );
     }
 
     /// The feature-member source (plan 09), each property below on one build of the fixture
