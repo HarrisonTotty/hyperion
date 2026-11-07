@@ -461,7 +461,7 @@ pub(crate) enum CarveOutRules {
 
 /// The generator version from which the carve-out's two residuals are closed (plan 09, P09.T35's
 /// census C1 and P09.T43; research-leans-49): the luminous blue variables' class follows the
-/// grid's living field stars, and a grid record that died within the core collapses' reach of the
+/// grid's living field stars, and a grid record that died within [`recent_death_reach`] of the
 /// epoch takes its exact fate ([`CarveResidualsRules::Matched`]).
 ///
 /// Below it every galaxy takes the held arm, [`CarveResidualsRules::Held`], the code of version 29
@@ -482,7 +482,7 @@ pub(crate) enum CarveResidualsRules {
     Held,
     /// Version 31's: the class takes the budget taken to the field thinned by the grid's
     /// alive-stay odds at the mass, and a table-read dead record that may have died within
-    /// the core collapses' reach takes its exact fate and draws its time since death after it.
+    /// [`recent_death_reach`] takes its exact fate and draws its time since death after it.
     Matched,
 }
 
@@ -497,6 +497,19 @@ impl CarveResidualsRules {
             Self::Held
         }
     }
+}
+
+/// The longest time before the epoch, plus the interval's own +H, that a death the core-collapse
+/// class can list lies: `W_cap` + L + 2H, 4,264,144 Julian years, the interval's start
+/// ([`interval_start`]) and its end. A grid record that died less than this before the epoch
+/// is one the class's window can reach, so under [`CarveResidualsRules::Matched`] its age follows
+/// its exact death age, not the fate table's bracket on it (research-leans-49 §2).
+pub(crate) fn recent_death_reach() -> Years {
+    Years::new(
+        SHELL_WINDOW_CAP.value()
+            + LIGHT_CROSSING_L.as_julian_years_f64()
+            + 2.0 * CLOCK_WINDOW_H.as_julian_years_f64(),
+    )
 }
 
 /// The claim plan 03's carve-out hook passes each layer-E record's [`explosion_site`] to under

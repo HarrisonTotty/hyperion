@@ -6176,3 +6176,9 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   share is the field's × `StayMarks`' alive odds, each node weight × `AliveLaw`'s bound, and a host
   is thinned on `AliveLaw::odds` (lifetime at `Z_ref`, own draws) on `class.lbv.mass` word 2.
   Lean (2026-11-07): thin at the host, after the test, so only hosts pay the lifetime.
+  Its dead-record half (P09.T35's C1): from 31 `placement::marks::dead_age` takes the exact fate of a
+  table-read record whose drawn time since death is under `recent_death_reach()` (`W_cap` + L + 2H)
+  plus the bracket's width, and redraws after its death age at the same `u`; `Tracks::Defer` stops
+  there (`Unbuilt`); a route or reach disagreement keeps the table's draw. `FateRead::Table` gained
+  `lower`. The census builds both arms at the budget with the 31 residuals, and resumes from
+  `HYPERION_CENSUS_CHECKPOINT` (chunks of 512 columns).

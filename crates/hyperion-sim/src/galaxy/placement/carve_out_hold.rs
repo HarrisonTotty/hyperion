@@ -34,7 +34,7 @@ use crate::galaxy::catalogue_classes::{
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
 use crate::galaxy::displaced::hold::field_only_rules;
 use crate::galaxy::displaced::site::{
-    CarveOutRules, ExplosionSite, explosion_site, recent_death_claim,
+    CarveOutRules, CarveResidualsRules, ExplosionSite, explosion_site, recent_death_claim,
 };
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::params::GalaxyParams;
@@ -628,57 +628,224 @@ fn the_census_walk_covers_a_natal_kick_s_reach() {
     );
 }
 
-/// The carve-out over a galaxy's young field, in sixteen shares: every layer-E cell's claimed
-/// records, in ID order, a column at a time from the plane outwards until the young field's mean is
-/// negligible and on for the remnants' reach; and the core collapses carved past that stop, by the
-/// cells past it. The grid places a kicked remnant at its epoch position, away from the site where
-/// the class lists its death, so the carve reaches past the young field's stop
-/// ([`REMNANT_REACH_CELLS`] gives the measured tail).
-fn carved_galaxy(off: &Galaxy, on: &Galaxy) -> (Vec<(SystemRecord, Class)>, BTreeMap<i32, usize>) {
-    let columns = layer_e_columns(on);
-    let shares = 16;
-    let parts = in_shares(shares, shares, |share| {
-        let mut out = Vec::new();
-        let mut past: BTreeMap<i32, usize> = BTreeMap::new();
-        for &[x, y] in columns.iter().skip(share).step_by(shares) {
-            for side in [1, -1] {
-                let mut stop = None;
-                for k in 0.. {
-                    let z = if side > 0 { k } else { -1 - k };
-                    let Ok(key) = CellKey::new(Layer::E, [x, y, z]) else {
-                        break;
-                    };
-                    if stop.is_none() && young_mean(on, key) < NEGLIGIBLE_YOUNG {
-                        stop = Some(k);
-                    }
-                    if stop.is_some_and(|s| k >= s + REMNANT_REACH_CELLS) {
-                        break;
-                    }
-                    let cell = carved(off, on, &[key]);
-                    if let Some(s) = stop {
-                        let deaths = cell
-                            .iter()
-                            .filter(|(_, class)| *class == Class::CoreCollapse)
-                            .count();
-                        if deaths > 0 {
-                            *past.entry(k - s).or_default() += deaths;
-                        }
-                    }
-                    out.extend(cell);
-                }
+/// The census's columns per chunk: the unit its checkpoint records and a resumed run skips.
+const CENSUS_CHUNK_COLUMNS: usize = 512;
+
+/// The environment variable naming the census's checkpoint file: one line per finished chunk of
+/// [`CENSUS_CHUNK_COLUMNS`] columns, appended as each finishes, which a run reads first and whose
+/// chunks it skips (LANE-RULES v7, "Long runs"). Unset, nothing is written or read.
+const CENSUS_CHECKPOINT: &str = "HYPERION_CENSUS_CHECKPOINT";
+
+/// What one chunk of the census's columns carved: each claimed record's ID with its class, in the
+/// order the walk met them, and the core collapses carved past the young field's stop by the cells
+/// past it. A pure function of the chunk's columns, so a chunk read back from the checkpoint is
+/// the one a run computes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CensusChunk {
+    carved: Vec<(u64, Class)>,
+    past: BTreeMap<i32, usize>,
+}
+
+impl CensusChunk {
+    /// The chunk's checkpoint line: `chunk <index> past <cells>:<deaths>,… carved <c|l><id hex>,…
+    /// end`, `-` for an empty list.
+    fn line(&self, index: usize) -> String {
+        let past: Vec<String> = self.past.iter().map(|(k, n)| format!("{k}:{n}")).collect();
+        let carved: Vec<String> = self
+            .carved
+            .iter()
+            .map(|(id, class)| {
+                let tag = match class {
+                    Class::CoreCollapse => 'c',
+                    Class::LuminousBlueVariable => 'l',
+                };
+                format!("{tag}{id:x}")
+            })
+            .collect();
+        let list = |v: &[String]| {
+            if v.is_empty() {
+                "-".to_owned()
+            } else {
+                v.join(",")
+            }
+        };
+        format!(
+            "chunk {index} past {} carved {} end",
+            list(&past),
+            list(&carved)
+        )
+    }
+
+    /// The chunk of a checkpoint line, with its index; `None` for a line cut short.
+    fn parse(line: &str) -> Option<(usize, Self)> {
+        let words: Vec<&str> = line.split(' ').collect();
+        let ["chunk", index, "past", past, "carved", carved, "end"] = words[..] else {
+            return None;
+        };
+        let mut chunk = Self::default();
+        if past != "-" {
+            for entry in past.split(',') {
+                let (k, n) = entry.split_once(':')?;
+                chunk.past.insert(k.parse().ok()?, n.parse().ok()?);
             }
         }
-        (out, past)
+        if carved != "-" {
+            for entry in carved.split(',') {
+                let class = match entry.as_bytes().first()? {
+                    b'c' => Class::CoreCollapse,
+                    b'l' => Class::LuminousBlueVariable,
+                    _ => return None,
+                };
+                chunk
+                    .carved
+                    .push((u64::from_str_radix(&entry[1..], 16).ok()?, class));
+            }
+        }
+        Some((index.parse().ok()?, chunk))
+    }
+}
+
+/// A checkpoint line is read back as the chunk it was written from, and a line cut short is
+/// refused.
+#[test]
+fn a_census_checkpoint_line_reads_back() {
+    let chunk = CensusChunk {
+        carved: vec![
+            (0x0123_4567_89ab_cdef, Class::CoreCollapse),
+            (7, Class::LuminousBlueVariable),
+        ],
+        past: BTreeMap::from([(0, 3), (12, 1)]),
+    };
+    let line = chunk.line(41);
+    assert_eq!(CensusChunk::parse(&line), Some((41, chunk)));
+    assert_eq!(
+        CensusChunk::parse(&CensusChunk::default().line(0)),
+        Some((0, CensusChunk::default()))
+    );
+    assert_eq!(CensusChunk::parse(&line[..line.len() - 4]), None);
+}
+
+/// The carve-out over the columns `columns` of a galaxy's young field: every layer-E cell's
+/// claimed records, in ID order, a column at a time from the plane outwards until the young
+/// field's mean is negligible and on for the remnants' reach; and the core collapses carved past
+/// that stop, by the cells past it. The grid places a kicked remnant at its epoch position, away
+/// from the site where the class lists its death, so the carve reaches past the young field's stop
+/// ([`REMNANT_REACH_CELLS`] gives the measured tail).
+fn carved_columns(off: &Galaxy, on: &Galaxy, columns: &[[i32; 2]]) -> CensusChunk {
+    let mut chunk = CensusChunk::default();
+    for &[x, y] in columns {
+        for side in [1, -1] {
+            let mut stop = None;
+            for k in 0.. {
+                let z = if side > 0 { k } else { -1 - k };
+                let Ok(key) = CellKey::new(Layer::E, [x, y, z]) else {
+                    break;
+                };
+                if stop.is_none() && young_mean(on, key) < NEGLIGIBLE_YOUNG {
+                    stop = Some(k);
+                }
+                if stop.is_some_and(|s| k >= s + REMNANT_REACH_CELLS) {
+                    break;
+                }
+                let cell = carved(off, on, &[key]);
+                if let Some(s) = stop {
+                    let deaths = cell
+                        .iter()
+                        .filter(|(_, class)| *class == Class::CoreCollapse)
+                        .count();
+                    if deaths > 0 {
+                        *chunk.past.entry(k - s).or_default() += deaths;
+                    }
+                }
+                chunk.carved.extend(
+                    cell.iter()
+                        .map(|(record, class)| (record.id().raw(), *class)),
+                );
+            }
+        }
+    }
+    chunk
+}
+
+/// The carve-out over a galaxy's young field ([`carved_columns`]) in chunks of
+/// [`CENSUS_CHUNK_COLUMNS`] columns, taken in turn by sixteen threads: each claimed record's ID
+/// with its class, in ID order, and the core collapses carved past the young field's stop by the
+/// cells past it. Under [`CENSUS_CHECKPOINT`] each finished chunk is appended to the checkpoint,
+/// and the chunks it already holds are read back, not walked again; each is a pure function of its
+/// columns, so the result is the uninterrupted run's bit for bit.
+fn carved_galaxy(off: &Galaxy, on: &Galaxy) -> (Vec<(u64, Class)>, BTreeMap<i32, usize>) {
+    use std::io::Write as _;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let columns = layer_e_columns(on);
+    let chunks: Vec<&[[i32; 2]]> = columns.chunks(CENSUS_CHUNK_COLUMNS).collect();
+    let path = std::env::var_os(CENSUS_CHECKPOINT).map(std::path::PathBuf::from);
+    let mut done: BTreeMap<usize, CensusChunk> = BTreeMap::new();
+    if let Some(path) = &path
+        && let Ok(text) = std::fs::read_to_string(path)
+    {
+        for (index, chunk) in text.lines().filter_map(CensusChunk::parse) {
+            done.insert(index, chunk);
+        }
+    }
+    let todo: Vec<usize> = (0..chunks.len())
+        .filter(|i| !done.contains_key(i))
+        .collect();
+    eprintln!(
+        "census: {} columns in {} chunks, {} from the checkpoint, {} to walk",
+        columns.len(),
+        chunks.len(),
+        done.len(),
+        todo.len()
+    );
+    let file = path.as_ref().map(|path| {
+        Mutex::new(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .expect("the census's checkpoint opens"),
+        )
     });
+    let next = AtomicUsize::new(0);
+    let walked = Mutex::new(BTreeMap::new());
+    let started = std::time::Instant::now();
+    in_shares(16, 16, |_| {
+        loop {
+            let n = next.fetch_add(1, Ordering::Relaxed);
+            let Some(&index) = todo.get(n) else {
+                break;
+            };
+            let chunk = carved_columns(off, on, chunks[index]);
+            if let Some(file) = &file {
+                let mut file = file.lock().expect("no writer panicked");
+                writeln!(file, "{}", chunk.line(index)).expect("the checkpoint writes");
+                file.flush().expect("the checkpoint flushes");
+            }
+            eprintln!(
+                "census: chunk {index} done ({} of {} walked) at {:.0} s",
+                n + 1,
+                todo.len(),
+                started.elapsed().as_secs_f64()
+            );
+            walked
+                .lock()
+                .expect("no walker panicked")
+                .insert(index, chunk);
+        }
+    });
+    done.extend(walked.into_inner().expect("no walker panicked"));
+    assert_eq!(done.len(), chunks.len(), "every chunk walked or read back");
     let mut all = Vec::new();
     let mut past: BTreeMap<i32, usize> = BTreeMap::new();
-    for (out, share_past) in parts {
-        all.extend(out);
-        for (cells, deaths) in share_past {
+    for chunk in done.into_values() {
+        all.extend(chunk.carved);
+        for (cells, deaths) in chunk.past {
             *past.entry(cells).or_default() += deaths;
         }
     }
-    all.sort_by_key(|(r, _)| r.id().raw());
+    all.sort_by_key(|&(id, _)| id);
     (all, past)
 }
 
@@ -720,11 +887,13 @@ fn class_entries<P: ClassProcess + Sync>(galaxy: &Galaxy, process: &P, class: Cl
 }
 
 /// Every 26 hold at the budget, the field keeping its whole budget (`FieldShareRules::None`), with
-/// the carve-out `carve_out`.
-fn budget_rules(carve_out: CarveOutRules) -> GalaxyRules {
+/// the carve-out `carve_out` and the carve-out's residuals `residuals` (the version's held arm, or
+/// 31's).
+fn budget_rules(carve_out: CarveOutRules, residuals: CarveResidualsRules) -> GalaxyRules {
     GalaxyRules {
         field_share: FieldShareRules::None,
         carve_out,
+        residuals,
         ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
     }
 }
@@ -737,6 +906,12 @@ fn budget_rules(carve_out: CarveOutRules) -> GalaxyRules {
 /// collapses' and the luminous blue variables', each difference against the two counts' summed
 /// variance, both printed before either is asserted. On wasm32-wasip1, the Sun's columns alone and
 /// no comparison.
+///
+/// Both arms take the 31 hold's carve-out residuals (`CarveResidualsRules::Matched`,
+/// research-leans-49), which closed the residuals the census measured under the version's rules
+/// (core collapses 16,228 against 16,888, z −3.63; luminous blue variables 279 against 168, z
+/// +5.25). The walk takes hours: under `HYPERION_CENSUS_CHECKPOINT` it records each finished chunk
+/// of columns and resumes past them ([`carved_galaxy`]).
 ///
 /// Both arms are at the budget (`FieldShareRules::None`), as
 /// `core_collapses_over_seeds_under_every_26_hold` builds its budget. The field's share φ
@@ -753,12 +928,13 @@ fn census_of_the_carve_out() {
         "the walk's reach covers the remnants' {} ly",
         remnant_reach_ly()
     );
-    let off = milky_way(budget_rules(CarveOutRules::Unclaimed)).with_full_potential();
-    let on = milky_way(budget_rules(CarveOutRules::Claimed)).with_full_potential();
+    let residuals = CarveResidualsRules::Matched;
+    let off = milky_way(budget_rules(CarveOutRules::Unclaimed, residuals)).with_full_potential();
+    let on = milky_way(budget_rules(CarveOutRules::Claimed, residuals)).with_full_potential();
     let (carved, past) = carved_galaxy(&off, &on);
     let mut by_class: BTreeMap<Class, Vec<u64>> = BTreeMap::new();
-    for (record, class) in &carved {
-        by_class.entry(*class).or_default().push(record.id().raw());
+    for &(id, class) in &carved {
+        by_class.entry(class).or_default().push(id);
     }
     for (class, ids) in &by_class {
         eprintln!("{class:?}: {} carved out", ids.len());
@@ -804,6 +980,93 @@ fn census_of_the_carve_out() {
         assert_p_value(&format!("the {name}' carve against the class"), p, ALPHA);
     }
     assert!(grid(Class::CoreCollapse) > 0 && grid(Class::LuminousBlueVariable) > 0);
+}
+
+/// research-leans-49 §2's cause of the core collapses' residual, on the class side under the
+/// version's rules at the budget: the class's entries whose death lies less than `δ` before the
+/// epoch, `δ` the fate table's excess over the exact death age at the entry's mass, its source's
+/// reference composition and its draws (`upper − d`), where the table answers. The grid draws a
+/// table-read dead record's time since death after the bracket's upper end, so it has none of
+/// these: the count is the residual's size (16,888 − 16,228 = 660 ± 26 by the census).
+#[test]
+#[ignore = "slow: the core collapses' class over the galaxy, an exact fate per entry"]
+fn the_class_s_deaths_inside_the_table_s_excess() {
+    let galaxy = milky_way(budget_rules(
+        CarveOutRules::Claimed,
+        CarveResidualsRules::Held,
+    ))
+    .with_full_potential();
+    let process = CoreCollapseProcess::new(&galaxy);
+    let table = galaxy
+        .fields()
+        .displaced()
+        .expect("the classes are installed")
+        .class_table();
+    let class = ClassId::CORE_COLLAPSE;
+    let edge = 1_i32 << class.cell_log2_ly().expect("a gridded class");
+    let reach = 65_536 / edge;
+    let counts = in_shares(16, 16, |share| {
+        let (mut entries, mut inside, mut answered) = (0_usize, 0_usize, 0_usize);
+        for x in (-reach..reach).skip(share).step_by(16) {
+            for y in -reach..reach {
+                for side in [1, -1] {
+                    for k in 0.. {
+                        let z = if side > 0 { k } else { -1 - k };
+                        let Ok(key) = CatalogueCellKey::new(class, [x, y, z]) else {
+                            break;
+                        };
+                        if process.bound(&galaxy, &key).value() * key.volume_ly3() < 1e-9 {
+                            break;
+                        }
+                        for entry in CatalogueClassCell::generate(&galaxy, &process, key).entries()
+                        {
+                            entries += 1;
+                            let value = entry.value();
+                            let since = -years_after_epoch(value.site().death());
+                            if since < 0.0 {
+                                continue;
+                            }
+                            let record = value.record();
+                            let m = SolarMasses::new(
+                                record
+                                    .primary_initial_mass()
+                                    .value()
+                                    .min(crate::stellar::sse::MAX_INITIAL_MASS.value()),
+                            );
+                            let z_ref = table
+                                .reference_composition(table.component_source(value.component()));
+                            let draws = crate::stellar::system::primary_draws(&galaxy, record);
+                            let Some(super::marks::FateRead::Table { upper, .. }) =
+                                super::marks::table_fate(m, &z_ref, &draws)
+                            else {
+                                continue;
+                            };
+                            answered += 1;
+                            let exact = crate::stellar::sse::fate_of(
+                                m,
+                                &z_ref,
+                                &draws,
+                                crate::stellar::sse::TrackOptions::default()
+                                    .with_rules(galaxy.rules().stellar),
+                            );
+                            if since < upper.value() - exact.death.age().value() {
+                                inside += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (entries, inside, answered)
+    });
+    let (entries, inside, answered) = counts
+        .into_iter()
+        .fold((0, 0, 0), |(a, b, c), (d, e, f)| (a + d, b + e, c + f));
+    eprintln!(
+        "core collapses: {entries} entries, {answered} dead at the epoch with a table fate, \
+         {inside} inside the table's excess"
+    );
+    assert!(inside > 0);
 }
 
 /// The class's band: a claim is asked of layer E alone.

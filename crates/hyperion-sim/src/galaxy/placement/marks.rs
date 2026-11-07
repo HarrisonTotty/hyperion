@@ -45,6 +45,12 @@
 //! by the bracket. Where it cannot, the exact fate is taken, as before. The record's age is then no
 //! longer its lifetime plus `s` to the bit, but at most the bracket's width more.
 //!
+//! From 31 (`CarveResidualsRules::Matched`, P09.T35's census C1) a table-read record whose time
+//! since death may be under the core collapses' reach takes its exact fate after all, and draws
+//! its time since death after that death age ([`dead_age`]): the class lists deaths at their exact
+//! age, and the table's bracket left the grid no record dead less than the bracket's excess ago
+//! (research-leans-49 §2).
+//!
 //! A census that counts a record without reading it (plan 12's lens walk) draws the marks without
 //! that track ([`Tracks::Defer`]): where the table cannot answer, they stop with what the track
 //! cannot change, the primaries the record can have and how its age follows its death
@@ -76,7 +82,7 @@ use crate::galaxy::displaced::marks::{
     time_since_death,
 };
 use crate::galaxy::displaced::runaway::Ejected;
-use crate::galaxy::displaced::site::table_bracket;
+use crate::galaxy::displaced::site::{CarveResidualsRules, recent_death_reach, table_bracket};
 use crate::galaxy::displaced::survivors::{DonorKind, SurvivorFlight, donor_progenitor_mass};
 use crate::galaxy::displaced::{
     BirthSource, DisplacedClassId, DisplacedFields, DisplacedKind, PlacementClass, SpeedBin,
@@ -378,6 +384,8 @@ pub(super) enum FateRead {
         route: FateRoute,
         remnant: bool,
         upper: Years,
+        /// The lower end of the bracket.
+        lower: Years,
     },
 }
 
@@ -431,21 +439,32 @@ fn fate(
     } else {
         m
     };
-    let rules = galaxy.rules();
     if let Some(read) = table_fate(m, composition, draws) {
         return Some(read);
     }
     if tracks == Tracks::Defer {
         return None;
     }
+    Some(exact_fate(galaxy, m, composition, draws))
+}
+
+/// The track's fate of a star of `m` (at most [`MAX_INITIAL_MASS`]), `composition` and `draws`
+/// under the galaxy's stellar rules, bit for bit; counted in test builds as a lifetime call.
+#[must_use]
+fn exact_fate(
+    galaxy: &Galaxy,
+    m: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+) -> FateRead {
     #[cfg(test)]
     LIFETIME_CALLS.with(|calls| calls.set(calls.get() + 1));
-    Some(FateRead::Exact(fate_of(
+    FateRead::Exact(fate_of(
         m,
         composition,
         draws,
-        TrackOptions::default().with_rules(rules.stellar),
-    )))
+        TrackOptions::default().with_rules(galaxy.rules().stellar),
+    ))
 }
 
 /// The fate table's read of the fate of a star of `m` (at most [`MAX_INITIAL_MASS`]),
@@ -501,11 +520,12 @@ pub(super) fn table_fate(
             centre
         }
     };
-    let (_, upper) = table_bracket(&fate);
+    let (lower, upper) = table_bracket(&fate);
     upper.value().is_finite().then_some(FateRead::Table {
         route: fate.route,
         remnant,
         upper,
+        lower,
     })
 }
 
@@ -611,20 +631,119 @@ fn progenitor(
         .ok_or_else(|| Primaries::one(redrawn, born(redrawn)))
 }
 
+/// What [`dead_age`] reads to take a recently dead record's exact fate (from 31): its source's
+/// reference composition and its draws, the speed bin its kick must reach (`None` for a
+/// hypervelocity survivor's donor, which is not kicked into one), and whether it may build the
+/// track.
+#[derive(Clone, Copy)]
+struct ExactRead<'a> {
+    z_ref: &'a Composition,
+    draws: &'a StarDraws,
+    reach: Option<Reach>,
+    tracks: Tracks,
+}
+
+impl<'a> ExactRead<'a> {
+    /// What [`dead_age`] reads: `z_ref`, `draws`, `reach` and `tracks`.
+    #[must_use]
+    const fn new(
+        z_ref: &'a Composition,
+        draws: &'a StarDraws,
+        reach: Option<Reach>,
+        tracks: Tracks,
+    ) -> Self {
+        Self {
+            z_ref,
+            draws,
+            reach,
+            tracks,
+        }
+    }
+}
+
+/// [`dead_age`] of a record of placement `placement`, or, where it stops before the track under
+/// [`Tracks::Defer`], what the marks know of the record: its one primary, its placement, its time
+/// since death's range and its rank.
+fn dead_age_or_unbuilt(
+    galaxy: &Galaxy,
+    star: &Progenitor,
+    (since, u): ((Years, Option<Years>), f64),
+    read: ExactRead<'_>,
+    placement: PlacementClass,
+) -> Result<(Years, Option<Years>), Unbuilt> {
+    dead_age(galaxy, star, since, u, read).map_err(|()| Unbuilt {
+        primaries: Primaries::one(star.mass, star.component),
+        placement,
+        since,
+        u,
+    })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// This thread's recently dead records whose exact fate disagreed with the table's route or
+    /// kick reach, so kept the table's draw ([`recent_disagreements`]).
+    static RECENT_DISAGREEMENTS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The recently dead records this thread's marks kept on the table's draw since it started, the
+/// exact fate disagreeing with the table's route or kick reach: a test build's counter.
+#[cfg(test)]
+#[must_use]
+pub(super) fn recent_disagreements() -> u64 {
+    RECENT_DISAGREEMENTS.with(Cell::get)
+}
+
 /// A dead record's age and lifetime: the time since death on `[lo, hi]` of its birth component's
 /// ages after its lifetime, at the rank `u`, and the lifetime itself, its fate's death age (Design
 /// note 19 at the reference composition). A fate the table read has no lifetime: the time since
 /// death is drawn after the upper end of the table's bracket on it ([`FateRead::death_bound`]).
+///
+/// From 31 ([`CarveResidualsRules::Matched`]; research-leans-49 §2) a table-read record whose time
+/// since death so drawn is under [`recent_death_reach`] plus the bracket's width may have died
+/// within the core collapses' reach, where the class lists deaths by their exact age: it takes
+/// its exact fate and draws its time since death after that death age at the same rank `u`, so
+/// that every record dead less than the reach ago has its exact age (its true time since death is
+/// at least the drawn one). Where the exact fate disagrees with the table's route or kick reach,
+/// the table's draw stands (counted in test builds). Under [`Tracks::Defer`] it stops there
+/// instead (`Err`).
 fn dead_age(
     galaxy: &Galaxy,
     star: &Progenitor,
     (lo, hi): (Years, Option<Years>),
     u: f64,
-) -> (Years, Option<Years>) {
+    read: ExactRead<'_>,
+) -> Result<(Years, Option<Years>), ()> {
     let (bound, life) = star.fate.death_bound();
     let ages = galaxy.fields().component(star.component).ages();
     let since = time_since_death(ages, bound, lo, hi, u);
-    (Years::new(bound.value() + since.value()), life)
+    if galaxy.rules().residuals == CarveResidualsRules::Matched
+        && let FateRead::Table { upper, lower, .. } = star.fate
+        && since.value() < recent_death_reach().value() + (upper.value() - lower.value())
+    {
+        if read.tracks == Tracks::Defer {
+            return Err(());
+        }
+        let m = if star.mass > MAX_INITIAL_MASS {
+            MAX_INITIAL_MASS
+        } else {
+            star.mass
+        };
+        let exact = exact_fate(galaxy, m, read.z_ref, read.draws);
+        let agrees = exact.leaves_remnant() == star.fate.leaves_remnant()
+            && exact.iron_core() == star.fate.iron_core()
+            && read
+                .reach
+                .is_none_or(|reach| kickable(&exact, reach) == kickable(&star.fate, reach));
+        if agrees {
+            let (death, life) = exact.death_bound();
+            let since = time_since_death(ages, death, lo, hi, u);
+            return Ok((Years::new(death.value() + since.value()), life));
+        }
+        #[cfg(test)]
+        RECENT_DISAGREEMENTS.with(|c| c.set(c.get() + 1));
+    }
+    Ok((Years::new(bound.value() + since.value()), life))
 }
 
 /// The primary's draws at attempt 0.
@@ -689,9 +808,10 @@ fn stay(
         StayCategory::Retained(speed) => {
             let placement = PlacementClass::Retained { speed };
             let since = (Years::ZERO, None);
+            let draws = draws_of(galaxy, id);
             let star = progenitor(
                 galaxy,
-                (&z_ref, &draws_of(galaxy, id)),
+                (&z_ref, &draws),
                 (marks.masses(), marks.node_density(category)),
                 |_| c,
                 (Reach::of(speed), tracks),
@@ -703,7 +823,8 @@ fn stay(
                 since,
                 u,
             })?;
-            let (age, life) = dead_age(galaxy, &star, since, u);
+            let read = ExactRead::new(&z_ref, &draws, Some(Reach::of(speed)), tracks);
+            let (age, life) = dead_age_or_unbuilt(galaxy, &star, (since, u), read, placement)?;
             Ok(DrawnMarks {
                 component: c,
                 mass: star.mass,
@@ -748,9 +869,10 @@ fn displaced_marks(
     let placement = PlacementClass::Displaced { class, kind };
     if kind == DisplacedKind::Remnant {
         let origin = origin_bin(galaxy, table, band, class, id);
+        let draws = draws_of(galaxy, id);
         let star = progenitor(
             galaxy,
-            (&z_ref, &draws_of(galaxy, id)),
+            (&z_ref, &draws),
             (marks.masses(), &marks.node_density(kind)),
             |m| marks.component_at(kind, m, birth),
             (Reach::of(origin), tracks),
@@ -762,7 +884,8 @@ fn displaced_marks(
             since: (lo, hi),
             u,
         })?;
-        let (age, life) = dead_age(galaxy, &star, (lo, hi), u);
+        let read = ExactRead::new(&z_ref, &draws, Some(Reach::of(origin)), tracks);
+        let (age, life) = dead_age_or_unbuilt(galaxy, &star, ((lo, hi), u), read, placement)?;
         return Ok(DrawnMarks {
             component: star.component,
             mass: star.mass,
@@ -871,17 +994,19 @@ fn survivor_marks(
             let z_ref = table.reference_composition(table.component_source(component));
             let since = (flight.since_launch(), None);
             let u = stream(galaxy, tags::DISPLACED_DEATH, id).uniform();
+            let draws = draws_of(galaxy, id);
             let star = Progenitor {
                 mass,
                 component,
-                fate: fate(galaxy, mass, &z_ref, &draws_of(galaxy, id), tracks).ok_or(Unbuilt {
+                fate: fate(galaxy, mass, &z_ref, &draws, tracks).ok_or(Unbuilt {
                     primaries: Primaries::one(mass, component),
                     placement,
                     since,
                     u,
                 })?,
             };
-            let (age, life) = dead_age(galaxy, &star, since, u);
+            let read = ExactRead::new(&z_ref, &draws, None, tracks);
+            let (age, life) = dead_age_or_unbuilt(galaxy, &star, (since, u), read, placement)?;
             Ok(DrawnMarks {
                 component,
                 mass,
@@ -1295,7 +1420,22 @@ mod tests {
     /// the bulge, at Baade's window and at the Sun-like point.
     #[test]
     fn deferred_marks_are_the_marks_or_bound_the_record() {
-        let galaxy = held();
+        deferred_marks_in(held());
+    }
+
+    /// The same under every 31 hold's carve-out residuals, whose recently dead records stop
+    /// before the exact fate they take (P09.T35's census C1).
+    #[test]
+    fn deferred_marks_are_the_marks_or_bound_the_record_under_the_31_residuals() {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            residuals: CarveResidualsRules::Matched,
+            ..held().rules()
+        };
+        deferred_marks_in(&held().clone().with_rules(rules));
+    }
+
+    /// [`deferred_marks_are_the_marks_or_bound_the_record`] in `galaxy`.
+    fn deferred_marks_in(galaxy: &Galaxy) {
         let displaced = galaxy
             .fields()
             .displaced()
@@ -1358,5 +1498,111 @@ mod tests {
             drawn > 2_000 && stopped > 100,
             "{drawn} drawn, {stopped} stopped"
         );
+    }
+
+    /// The layer-E cells on each arm's ridge in the plane at 26,000 ly, `count` along each.
+    fn ridge(galaxy: &Galaxy, count: i32) -> Vec<CellKey> {
+        let arms = galaxy.fields().arms();
+        let r = 26_000.0;
+        let mut keys = Vec::new();
+        for arm in 0..4 {
+            let (sin, cos) = crate::math::sin_cos(arms.ridge_azimuth(r, arm));
+            for step in -count / 2..count / 2 {
+                let along = f64::from(step) * f64::from(Layer::E.cell_size_ly());
+                let at = GalacticPosition::from_light_years([
+                    r * cos - along * sin,
+                    r * sin + along * cos,
+                    0.0,
+                ])
+                .expect("in the cube");
+                let key = CellKey::containing(Layer::E, &at).expect("in the cube");
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+        keys
+    }
+
+    /// Over the dead layer-E records of `cells` in `galaxy`, in sixteen shares: those whose fate
+    /// the table read with a true time since death (the record's age less its exact death age at
+    /// its reference composition and draws) under [`recent_death_reach`], and those whose exact
+    /// fate the marks took though the table answers, and those kept on the table's draw by a
+    /// disagreement ([`recent_disagreements`]).
+    fn recent_table_reads(galaxy: &Galaxy, cells: &[CellKey]) -> (u64, u64, u64) {
+        let displaced = galaxy
+            .fields()
+            .displaced()
+            .expect("the classes are installed");
+        let table = displaced.class_table();
+        let reach = recent_death_reach().value();
+        let parts = crate::planetary::testing::in_shares(16, 16, |share| {
+            let (mut short, mut switched) = (0_u64, 0_u64);
+            let disagreed = recent_disagreements();
+            for &key in cells.iter().skip(share).step_by(16) {
+                let bound = CellBound::of(galaxy, key);
+                for index in 0..candidate_count(galaxy, key) {
+                    let Some(placed) = place(galaxy, key, index, &bound) else {
+                        continue;
+                    };
+                    let (id, position, picked) = placed.parts();
+                    let Some(marks) = draw(galaxy, displaced, key, id, &position, picked) else {
+                        continue;
+                    };
+                    if marks.metallicity_age_years.is_some() {
+                        continue;
+                    }
+                    let m = if marks.mass > MAX_INITIAL_MASS {
+                        MAX_INITIAL_MASS
+                    } else {
+                        marks.mass
+                    };
+                    let z_ref =
+                        table.reference_composition(table.component_source(marks.component));
+                    let draws = draws_of(galaxy, id);
+                    if !matches!(table_fate(m, &z_ref, &draws), Some(FateRead::Table { .. })) {
+                        continue;
+                    }
+                    if marks.lifetime.is_some() {
+                        switched += 1;
+                    } else if let FateRead::Exact(fate) = exact_fate(galaxy, m, &z_ref, &draws)
+                        && marks.age.value() - fate.death.age().value() < reach
+                    {
+                        short += 1;
+                    }
+                }
+            }
+            (short, switched, recent_disagreements() - disagreed)
+        });
+        parts
+            .into_iter()
+            .fold((0, 0, 0), |(a, b, c), (d, e, f)| (a + d, b + e, c + f))
+    }
+
+    /// P09.T35's census C1 (research-leans-49 §2): under every 31 hold's carve-out residuals no
+    /// table-read dead record of layer E died less than the core collapses' reach ago, and some
+    /// took their exact fate for it; under the version's rules some did, the residual's cause.
+    #[test]
+    #[ignore = "slow: 512 ridge cells of layer E, twice"]
+    fn no_table_read_dead_record_died_within_the_reach() {
+        let cells = ridge(held(), 128);
+        let (short_held, switched_held, _) = recent_table_reads(held(), &cells);
+        let rules = crate::galaxy::rules::GalaxyRules {
+            residuals: CarveResidualsRules::Matched,
+            ..held().rules()
+        };
+        let matched = held().clone().with_rules(rules);
+        let (short, switched, disagreed) = recent_table_reads(&matched, &cells);
+        eprintln!(
+            "held: {short_held} table reads dead within the reach, {switched_held} exact; \
+             matched: {short} and {switched}, {disagreed} kept on the table by a disagreement"
+        );
+        assert_eq!(switched_held, 0);
+        assert!(short_held > 0, "the held arm shows the residual's cause");
+        assert!(
+            short <= disagreed,
+            "{short} short table reads, {disagreed} disagreements"
+        );
+        assert!(switched > 0);
     }
 }

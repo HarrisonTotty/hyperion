@@ -377,6 +377,12 @@ threads-required = "num-cpus"
 filter = "package(hyperion-sim) & test(=galaxy::placement::carve_out_hold::census_of_the_carve_out)"
 threads-required = 16
 
+# The carve-out residuals' cheap tests (research-leans-49) run sixteen shares of their own
+# (`in_shares`): the core collapses' class walk, the ridge cells' dead records and living hosts.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & (test(=galaxy::placement::carve_out_hold::the_class_s_deaths_inside_the_table_s_excess) | test(=galaxy::placement::marks::tests::no_table_read_dead_record_died_within_the_reach) | test(=galaxy::catalogue_classes::lbv::residuals_hold::ridge_cells_living_hosts_match_the_grid))"
+threads-required = 16
+
 # P11.T4's neutron-star accretion census runs two slab censuses of the binary engine's pairs in
 # sixteen shares of its own (`in_shares`, `stellar::binary::testing::census::THREADS`), so it
 # reserves sixteen slots.
