@@ -806,9 +806,9 @@ export interface RenderEngine {
   /**
    * Runs `write` with its buffer and texture writes staged (lane perf-page-long-tasks): their
    * bytes copied, as each is made, into one buffer mapped at its creation, and copied from it on
-   * the GPU in the order made, submitted as `write` returns or throws, or before any submission the
-   * engine makes inside it, so that each takes effect before anything submitted after it, as a
-   * queue write does; a scope inside another joins it.
+   * the GPU in the order made, submitted with the engine's next submission (a frame's) or before
+   * its next destruction or write outside a scope, so that each takes effect before anything that
+   * could read it, as a queue write does; a scope inside another joins it.
    *
    * @remarks
    * A queue write passes its bytes through the GPU process's command stream, which the page's

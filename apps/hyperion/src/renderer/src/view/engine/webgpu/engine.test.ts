@@ -220,7 +220,7 @@ describe("the readback guard", () => {
 });
 
 describe("staged writes (lane perf-page-long-tasks)", () => {
-  it("submits a scope's writes before a submission the engine makes inside it, and after it nothing more", async () => {
+  it("submits a scope's writes with the engine's next submission, inside the scope or after it", async () => {
     const { engine, gpu } = await engineOn();
     const usage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC | BUFFER_USAGE.COPY_DST;
     const heights = engine.createBuffer({ name: "heights", bytes: 64, usage, category: "other" });
@@ -232,9 +232,14 @@ describe("staged writes (lane perf-page-long-tasks)", () => {
       return reading;
     });
     await read;
-    expect([gpu.queue.writes, gpu.queue.submitted.map((buffer) => buffer.label)]).toEqual([
-      [],
-      ["terrain upload", "counts readback", "terrain upload"],
+    const submitted = (): string[] => gpu.queue.submitted.map((buffer) => buffer.label);
+    expect([gpu.queue.writes, submitted()]).toEqual([[], ["terrain upload", "counts readback"]]);
+    await engine.readBuffer(counts);
+    expect(submitted()).toEqual([
+      "terrain upload",
+      "counts readback",
+      "terrain upload",
+      "counts readback",
     ]);
   });
 });

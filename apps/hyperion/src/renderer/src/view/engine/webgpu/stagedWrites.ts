@@ -15,11 +15,19 @@
  *
  * The bytes are copied as each write is made, so that a caller may reuse its array at once, as it
  * may after a queue write. The copies are encoded in the order the writes were made and submitted
- * in one command buffer when the outermost scope ends, or earlier when the engine submits anything
- * else ({@link StagedWrites.flush}): every staged write takes effect before anything submitted
- * after it, as a queue write does, and the buffers and textures hold the same bytes for every
- * command that reads them. A texture's rows are laid out 256-byte aligned for
- * `copyBufferToTexture`; the bytes that reach the texture are the rows given.
+ * in one command buffer with the engine's next submission, which goes after them, or before the
+ * engine's next destruction or queue write outside a scope, or as a part fills
+ * ({@link StagedWrites.flush}): nothing on the GPU reads a resource but in a submission, so every
+ * staged write takes effect before anything that could read it, as a queue write does, and the
+ * buffers and textures hold the same bytes for every command that reads them. A texture's rows are
+ * laid out 256-byte aligned for `copyBufferToTexture`; the bytes that reach the texture are the
+ * rows given.
+ *
+ * The copies wait for the engine's next submission, rather than going at the scope's end, because
+ * the WebGPU calls that make and submit them can wait too: behind a SwiftShader frame of 16 s, a
+ * height worker's reply waited 10 and 14 s in the staging's own `queue.submit` (lane
+ * perf-page-long-tasks, part 2). The engine's next submission is its frame's, drawn once the GPU
+ * process has finished the frame before, so they are made when it is free.
  *
  * A write the copies cannot make (unaligned, out of bounds, to a resource without `COPY_DST`, of a
  * depth or stencil format) is not staged: the registry submits what is staged and hands it to the
@@ -116,6 +124,9 @@ export class StagedWrites {
   readonly #device: GPUDevice;
   readonly #partBytes: number;
   #depth = 0;
+  /** The outermost open scope's label. */
+  #scopeLabel = "";
+  /** The staging's label: the scope's whose write was staged first since the last submission. */
   #label = "";
   #scratch = new Uint8Array(0);
   #used = 0;
@@ -136,39 +147,21 @@ export class StagedWrites {
   }
 
   /**
-   * Runs `write` in a scope, and submits the writes staged in it as the outermost scope ends, if
-   * `write` throws as well: those made before take effect, as queue writes would have.
+   * Runs `write` in a scope, its writes staged for the next {@link StagedWrites.flush}, if `write`
+   * throws as well: those made before take effect, as queue writes would have.
    *
-   * @param label - The submission's label; an inner scope's joins the outer's.
+   * @param label - The staging's label, where a write of this scope is the first staged since the
+   *   last submission; an inner scope's joins the outer's.
    */
   run<T>(label: string, write: () => T): T {
     if (this.#depth === 0) {
-      this.#label = label;
+      this.#scopeLabel = label;
     }
     this.#depth += 1;
-    let threw = false;
     try {
       return write();
-    } catch (error: unknown) {
-      threw = true;
-      throw error;
     } finally {
       this.#depth -= 1;
-      if (this.#depth === 0) {
-        if (threw) {
-          // The scope's own error is the one thrown; a submission that fails after it is said.
-          try {
-            this.flush();
-          } catch (flushError: unknown) {
-            console.error(
-              `the staged writes of ${this.#label} could not be submitted:`,
-              flushError,
-            );
-          }
-        } else {
-          this.flush();
-        }
-      }
     }
   }
 
@@ -196,7 +189,7 @@ export class StagedWrites {
     }
     const fromBytes = this.#reserve(bytes, COPY_ALIGNMENT);
     this.#scratch.set(bytesOf(data), fromBytes);
-    this.#copies.push({ kind: "buffer", fromBytes, buffer, offsetBytes, bytes });
+    this.#stage({ kind: "buffer", fromBytes, buffer, offsetBytes, bytes });
     return true;
   }
 
@@ -245,7 +238,7 @@ export class StagedWrites {
         );
       }
     }
-    this.#copies.push({
+    this.#stage({
       kind: "texture",
       fromBytes,
       texture,
@@ -259,7 +252,7 @@ export class StagedWrites {
 
   /**
    * Submits the writes staged so far, in the order made, in one command buffer: before anything
-   * else the engine submits, and as the outermost scope ends. Nothing is submitted with none.
+   * else the engine submits, destroys or writes through the queue. Nothing is submitted with none.
    */
   flush(): void {
     const copies = this.#copies;
@@ -312,6 +305,14 @@ export class StagedWrites {
         this.#scratch = new Uint8Array(0);
       }
     }
+  }
+
+  /** Stages one copy, the first since the last submission naming the staging. */
+  #stage(copy: StagedCopy): void {
+    if (this.#copies.length === 0) {
+      this.#label = this.#scopeLabel;
+    }
+    this.#copies.push(copy);
   }
 
   /** Drops the writes staged so far unsubmitted: their buffers and textures are being destroyed. */

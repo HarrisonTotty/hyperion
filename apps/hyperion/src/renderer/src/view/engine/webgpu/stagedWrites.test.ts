@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   FakeAdapter,
@@ -311,16 +311,18 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
     staged.resources.staged("upload", () => {
       writeAll(staged);
     });
+    staged.resources.flushStaged();
     expect(contents(staged)).toEqual(contents(direct));
     expect(contents(direct)[0]?.some((byte) => byte !== 0)).toBe(true);
   });
 
-  it("makes no queue write, and submits one command buffer as the scope ends", async () => {
+  it("makes no queue write and submits nothing as the scope ends, then one command buffer with the engine's next submission", async () => {
     const staged = await registry();
     staged.resources.staged("upload", () => {
       writeAll(staged);
-      expect(staged.memory.operations).toEqual([]);
     });
+    expect(staged.memory.operations).toEqual([]);
+    staged.resources.flushStaged();
     expect(staged.memory.operations).toEqual(["submit upload"]);
     const staging = staged.gpu.buffers.at(-1);
     expect([staging?.usage, staging?.destroyed]).toEqual([
@@ -334,6 +336,7 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
     staged.resources.staged("mask", () => {
       staged.resources.writeTexture(staged.mask, [0, 0, 0], [20, 20, 6], counting(2400, 3));
     });
+    staged.resources.flushStaged();
     const [command] = staged.gpu.queue.submitted.flatMap((buffer) =>
       buffer instanceof FakeCommandBuffer ? buffer.commands : [],
     );
@@ -341,20 +344,37 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
     expect(command?.args[0]).toMatchObject({ offset: 0, bytesPerRow: 256, rowsPerImage: 20 });
   });
 
-  it("joins a scope inside another, and submits nothing for a scope that writes nothing", async () => {
+  it("joins a scope inside another and the scopes after it into one submission, named for the first that staged a write", async () => {
     const staged = await registry();
+    staged.resources.staged("empty", () => undefined);
     staged.resources.staged("outer", () => {
       staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
       staged.resources.staged("inner", () => {
         staged.resources.writeBuffer(staged.b, 0, counting(16, 2));
       });
-      expect(staged.memory.operations).toEqual([]);
     });
-    staged.resources.staged("empty", () => undefined);
+    staged.resources.staged("later", () => {
+      staged.resources.writeBuffer(staged.b, 16, counting(16, 3));
+    });
+    expect(staged.memory.operations).toEqual([]);
+    staged.resources.flushStaged();
+    staged.resources.flushStaged();
     expect(staged.memory.operations).toEqual(["submit outer"]);
   });
 
-  it("submits the writes made before a throw, and throws on", async () => {
+  it("submits what is staged before a write outside a scope, which lands after it", async () => {
+    const staged = await registry();
+    staged.resources.staged("upload", () => {
+      staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
+    });
+    staged.resources.writeBuffer(staged.a, 0, counting(8, 9));
+    expect(staged.memory.operations).toEqual(["submit upload", "write"]);
+    expect(staged.memory.buffer(staged.resources.bufferOf(staged.a).buffer).slice(0, 16)).toEqual(
+      Uint8Array.from([...counting(8, 9), ...counting(16, 1).slice(8)]),
+    );
+  });
+
+  it("keeps the writes made before a throw for the next submission, and throws on", async () => {
     const staged = await registry();
     expect(() =>
       staged.resources.staged("upload", () => {
@@ -362,6 +382,7 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
         throw new Error("a bake that did not fit");
       }),
     ).toThrow("a bake that did not fit");
+    staged.resources.flushStaged();
     expect(staged.memory.operations).toEqual(["submit upload"]);
     expect(staged.memory.buffer(staged.resources.bufferOf(staged.a).buffer).slice(0, 16)).toEqual(
       counting(16, 1),
@@ -400,6 +421,7 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
     staged.resources.staged("upload", () => {
       writeAll(staged);
     });
+    staged.resources.flushStaged();
     expect(contents(staged)).toEqual(contents(direct));
     expect(staged.memory.operations.length).toBeGreaterThan(2);
     expect(new Set(staged.memory.operations)).toEqual(new Set(["submit upload"]));
@@ -443,6 +465,7 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
       staged.resources.writeBuffer(staged.a, 16, counting(3, 2));
       staged.resources.writeBuffer(staged.a, 20, counting(8, 3));
     });
+    staged.resources.flushStaged();
     expect(staged.memory.operations).toEqual(["submit upload", "write", "submit upload"]);
     expect(staged.memory.buffer(staged.resources.bufferOf(staged.a).buffer).slice(0, 28)).toEqual(
       Uint8Array.from([...counting(16, 1), ...counting(3, 2), 0, ...counting(8, 3)]),
@@ -459,21 +482,7 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
       staged.resources.writeTexture(staged.normals, moving, [3, 2, 1], counting(48, 5));
       moving.x = 4;
     });
+    staged.resources.flushStaged();
     expect(contents(staged)).toEqual(contents(direct));
-  });
-
-  it("throws the scope's own error where its submission then fails too", async () => {
-    const staged = await registry();
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    staged.gpu.queue.submit = () => {
-      throw new Error("the device was lost");
-    };
-    expect(() =>
-      staged.resources.staged("upload", () => {
-        staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
-        throw new Error("a bake that did not fit");
-      }),
-    ).toThrow("a bake that did not fit");
-    expect(error).toHaveBeenCalledTimes(1);
   });
 });

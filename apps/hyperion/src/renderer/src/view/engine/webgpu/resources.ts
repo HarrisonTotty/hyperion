@@ -132,8 +132,8 @@ export class ResourceRegistry {
 
   /**
    * Runs `write` with every buffer and texture write made through the registry staged
-   * (`stagedWrites.ts`; lane perf-page-long-tasks), submitted as the outermost scope ends or before
-   * the engine's next submission ({@link ResourceRegistry.flushStaged}).
+   * (`stagedWrites.ts`; lane perf-page-long-tasks), submitted before the engine's next submission
+   * ({@link ResourceRegistry.flushStaged}), destruction or write outside a scope.
    */
   staged<T>(label: string, write: () => T): T {
     return this.#staged.run(label, write);
