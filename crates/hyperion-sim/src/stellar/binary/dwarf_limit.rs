@@ -31,9 +31,9 @@
 //!   (`Track::remains_at`), and plan 06 ends it (lean, 2026-11-02: an accretion-induced collapse
 //!   would leave a 1.26 M☉ neutron star of a 26 M☉ core, and pool it as a Type Ia candidate);
 //! - a merger that leaves a white dwarf at or above the Chandrasekhar mass collapses at once as an
-//!   accreting one does (`Engine::finish_merger`): a Type Ia candidate pooled unless it is
-//!   oxygen–neon, then the accretion-induced collapse (from 30 a disruption that leaves nothing
-//!   unless it is oxygen–neon, P11.T4's `co_chandrasekhar`);
+//!   accreting one does (`Engine::finish_merger`): an oxygen–neon one by accretion-induced
+//!   collapse, and any other in a disruption that leaves nothing after its Type Ia candidate
+//!   (P11.T4's `co_chandrasekhar`);
 //! - a dwarf fed helium at or above the Chandrasekhar mass collapses, edge-lit or not
 //!   ([`collapses`]);
 //! - a dwarf a wind feeds in a detached phase stops at the Chandrasekhar mass and collapses there
@@ -157,8 +157,7 @@ pub(super) enum Unplaced {
     },
     /// A helium star of `mass` whose carbon–oxygen core ignites carbon at the Chandrasekhar mass,
     /// which disrupts it and leaves nothing (P11.T4's kept-core endings; plan 06's
-    /// `helium_star_end`), with no Type Ia candidate below 30 and one from it (P11.T4's
-    /// `co_chandrasekhar`).
+    /// `helium_star_end`), with one Type Ia candidate (P11.T4's `co_chandrasekhar`).
     Disruption {
         /// Its mass.
         mass: SolarMasses,

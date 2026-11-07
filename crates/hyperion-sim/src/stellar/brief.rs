@@ -756,7 +756,7 @@ struct Gate {
 /// times across the window. The pair-light and reach tables the test reads are the version's
 /// tracks', so under another Humphreys–Davidson arm (P06.T42.b's hold) no pair is certified, nor
 /// under a stellar hold's arm other than the version's that the binary engine reads (P11.T4's
-/// `co_chandrasekhar` and `merged_capture` at 30).
+/// `merged_capture` at 30).
 ///
 /// `primary` says where the hierarchy reads the primary's stripped mark: the kick loop's kept
 /// attempt, for a record whose class constrains its kick (P08.T12.c).
@@ -787,8 +787,7 @@ fn gate(
         ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
     let stars = attempt.stars();
     let stellar = galaxy.rules().stellar;
-    let tables_hold = stellar.co_chandrasekhar.fitted_tables_hold()
-        && stellar.merged_capture.fitted_tables_hold();
+    let tables_hold = stellar.merged_capture.fitted_tables_hold();
     // A supernova that unbinds any pair changes what the system shows (P11.T10), so every pair is
     // checked, as for a system the grid redraws.
     let certified = attempt.pairs().iter().all(|pair| {

@@ -70,10 +70,10 @@
 //!   carbon–oxygen dwarf that has taken 0.15 M☉ of helium, and a dwarf at the Chandrasekhar mass
 //!   are plan 11's pooled Type Ia candidates (`pooled_ia`); the engine continues as if they did
 //!   not explode (P11.T6's mark decides): the helium dwarf ignites as a helium star, the edge-lit
-//!   detonation leaves the dwarf accreting, and a dwarf at the Chandrasekhar mass collapses to a
-//!   neutron star, as an oxygen–neon dwarf does by accretion-induced collapse (section 2.6.5); from
-//!   generator version 30 a helium or carbon–oxygen one disrupts and leaves nothing instead
-//!   ([`co_chandrasekhar`](super::co_chandrasekhar), P11.T4's fix).
+//!   detonation leaves the dwarf accreting, and a helium or carbon–oxygen dwarf at the
+//!   Chandrasekhar mass disrupts and leaves nothing, while an oxygen–neon dwarf collapses to a
+//!   neutron star by accretion-induced collapse (section 2.6.5;
+//!   [`co_chandrasekhar`](super::co_chandrasekhar), P11.T4's fix).
 //! - **Contact.** An accretor that fills its own lobe brings the pair into contact (section
 //!   2.6.6). Two main-sequence stars stay in contact (ruling 108.1; see `Engine::contact`), and
 //!   any other pair collides: a common envelope where either star is giant-like, a coalescence
@@ -1256,7 +1256,7 @@ impl Engine {
                 false
             }
             // An oxygen–neon dwarf collapses at its capture mass (P11.T4's kept-core endings), any
-            // other from 30 disrupts.
+            // other disrupts.
             Kind::HeliumWhiteDwarf | Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf
                 if white_dwarf_phase(ka)
                     .is_some_and(|phase| ma >= self.collapse_mass(phase).value()) =>
@@ -1469,10 +1469,9 @@ impl Engine {
 
     /// Member `i`, a white dwarf a wind has fed to the Chandrasekhar mass in a detached phase,
     /// ends as a dwarf fed by stable transfer does there ([`Engine::accretor_events`]; P11.T4's
-    /// `dwarf_limit`): an oxygen–neon one by its accretion-induced collapse, and any other as the
-    /// stellar rules' `co_chandrasekhar` arm ends it ([`Engine::end_at_the_chandrasekhar_mass`]),
-    /// its Type Ia candidate of the two stars' masses then pooled first: under the held arm by its
-    /// accretion-induced collapse, and from 30 by a disruption that leaves nothing.
+    /// `dwarf_limit`): an oxygen–neon one by its accretion-induced collapse, and any other by a
+    /// disruption that leaves nothing ([`Engine::end_at_the_chandrasekhar_mass`]), its Type Ia
+    /// candidate of the two stars' masses then pooled first.
     pub(super) fn collapse_fed_dwarf(&mut self, i: usize) {
         let (m, _) = self.current(i);
         let (other, _) = self.current(1 - i);

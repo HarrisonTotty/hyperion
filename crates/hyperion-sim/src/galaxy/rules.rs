@@ -69,7 +69,7 @@ impl GalaxyRules {
 
     /// Every galaxy and stellar hold at 30 in force, for a test that asserts a 30 figure: the
     /// version's rules from 30, the stellar holds ([`StellarRules::every_30_hold`], P11.T4's
-    /// carbon–oxygen dwarfs at the Chandrasekhar mass) among them. The 30 bump deletes it with them.
+    /// merged capture) among them. The 30 bump deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_30_hold() -> Self {

@@ -531,7 +531,7 @@ pub enum IaPoolChannel {
     Merger,
     /// An accreting white dwarf reaches ignition: the Chandrasekhar mass, 0.15 M☉ of accreted
     /// helium on a carbon–oxygen dwarf (an edge-lit detonation), or 0.7 M☉ for a helium dwarf
-    /// (Hurley, Tout and Pols 2002, section 2.6.6); and from 30 any carbon–oxygen white dwarf or
+    /// (Hurley, Tout and Pols 2002, section 2.6.6); and any carbon–oxygen white dwarf or
     /// core that reaches the Chandrasekhar mass, a merger's product's and a giant's whose core is a
     /// dwarf's among them (P11.T4's `co_chandrasekhar`).
     Accretion,

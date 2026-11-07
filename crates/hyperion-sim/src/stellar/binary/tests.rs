@@ -6663,13 +6663,12 @@ fn an_unplaced_helium_core_is_its_helium_star() {
 }
 
 /// P11.T4's dwarf limit: a carbon–oxygen dwarf fed helium past the edge-lit detonation's 0.15 M☉
-/// collapses at the Chandrasekhar mass. Two pairs whose primary's dwarf is fed by its companion's
-/// naked helium star after a common envelope (5.43 + 1.69 M☉ at 7 d and 6.6 + 1.65 M☉ at 3.4 d,
-/// solar), which showed a dwarf above the Chandrasekhar mass under the held arm, show none: the
-/// dwarf collapses to the 1.26 M☉ neutron star of an accretion-induced collapse, its edge-lit
-/// candidate pooled first.
+/// ends at the Chandrasekhar mass. Two pairs whose primary's dwarf is fed by its companion's naked
+/// helium star after a common envelope (5.43 + 1.69 M☉ at 7 d and 6.6 + 1.65 M☉ at 3.4 d, solar),
+/// which showed a dwarf above the Chandrasekhar mass before the dwarf limit, show none: the dwarf
+/// disrupts and leaves nothing (P11.T4's `co_chandrasekhar`), its edge-lit candidate pooled first.
 #[test]
-fn a_dwarf_fed_helium_collapses_at_the_chandrasekhar_mass() {
+fn a_dwarf_fed_helium_disrupts_at_the_chandrasekhar_mass() {
     use super::testing::shows_a_dwarf_above_the_limit;
 
     let until = 1.2e10;
@@ -6687,17 +6686,17 @@ fn a_dwarf_fed_helium_collapses_at_the_chandrasekhar_mass() {
             .supernovae()
             .iter()
             .find(|s| s.age() > pooled.age())
-            .unwrap_or_else(|| panic!("{m1} + {m2}'s dwarf collapses: {}", describe(&arm)));
+            .unwrap_or_else(|| panic!("{m1} + {m2}'s dwarf disrupts: {}", describe(&arm)));
         assert_eq!(
-            collapse.remnant(),
-            crate::stellar::remnant::collapse::electron_capture_remnant(),
+            collapse.remnant().kind(),
+            crate::stellar::remnant::RemnantKind::None,
             "{m1} + {m2}"
         );
         let before = arm.state_at(Years::new(collapse.age().value() * (1.0 - 1e-12)));
         let dwarf = before.stars()[collapse.component().index()];
         assert_eq!(dwarf.phase(), Phase::CarbonOxygenWhiteDwarf, "{m1} + {m2}");
         println!(
-            "{m1} + {m2}: collapses at {:?} from {:?}",
+            "{m1} + {m2}: disrupts at {:?} from {:?}",
             collapse.age(),
             dwarf.mass()
         );
@@ -6977,21 +6976,21 @@ fn wind_fed_dwarf_engine(
 }
 
 /// P11.T4's dwarf limit: a carbon–oxygen dwarf of 1.439 M☉ that a 3 M☉ star's AGB wind feeds in a
-/// detached phase stops at the Chandrasekhar mass and collapses there to the
-/// 1.26 M☉ neutron star of an accretion-induced collapse, its Type Ia candidate pooled first (as
-/// first built, it grew past the limit to 1.4454 M☉ by the end of the giant's AGB).
+/// detached phase stops at the Chandrasekhar mass and disrupts there, leaving nothing (P11.T4's
+/// `co_chandrasekhar`), its Type Ia candidate pooled first (as first built, it grew past the limit
+/// to 1.4454 M☉ by the end of the giant's AGB).
 #[test]
 fn a_dwarf_a_wind_feeds_stops_at_the_chandrasekhar_mass() {
-    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::RemnantKind;
     use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
 
     let rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
     let mut engine = wind_fed_dwarf_engine(1.439, rules);
     engine.detached_phase();
     let [collapse] = engine.supernovae.as_slice() else {
-        panic!("one collapse, not {:?}", engine.supernovae);
+        panic!("one death, not {:?}", engine.supernovae);
     };
-    assert_eq!(collapse.remnant(), electron_capture_remnant());
+    assert_eq!(collapse.remnant().kind(), RemnantKind::None);
     assert!(
         collapse
             .age()
@@ -7426,8 +7425,8 @@ fn a_swollen_dwarf_s_giant_leaves_the_dwarf_s_kind() {
 /// P11.T4's swollen dwarf: a carbon–oxygen dwarf of 1.43 M☉ at Z = 0.004 swells onto the thermally
 /// pulsing AGB track of a 7.41 M☉ star, whose oxygen–neon core collapses by electron capture at
 /// its death. The giant's carbon–oxygen core ignites carbon there and nothing is left (HPT section
-/// 6), where BSE's giant, of the track's kind, collapsed to the 1.26 M☉ neutron star; no Type Ia
-/// candidate is pooled.
+/// 6), where BSE's giant, of the track's kind, collapsed to the 1.26 M☉ neutron star; its core's
+/// Type Ia candidate is pooled (P11.T4's `co_chandrasekhar`).
 #[test]
 fn a_swollen_carbon_oxygen_dwarf_s_giant_disrupts_where_its_track_captures_electrons() {
     use super::star::Member;
@@ -7449,20 +7448,23 @@ fn a_swollen_carbon_oxygen_dwarf_s_giant_disrupts_where_its_track_captures_elect
         panic!("one death, not {:?}", engine.supernovae);
     };
     assert_eq!(collapse.remnant().kind(), RemnantKind::None);
-    assert!(engine.pooled.is_none());
+    let pooled = engine.pooled.expect("the core's candidate");
+    assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
 }
 
-/// P11.T4's swollen dwarf under every 29 hold: a thermally pulsing AGB product of 4.33 M☉ around a
-/// 1.76 M☉ core that no star can hold, made from the giant an oxygen–neon or carbon–oxygen dwarf
-/// swelled into, is a dwarf of that kind, not an iron core (the product of no dwarf's, as
+/// P11.T4's swollen dwarf: a thermally pulsing AGB product of 4.33 M☉ around a 1.76 M☉ core that
+/// no star can hold, made from the giant an oxygen–neon or carbon–oxygen dwarf swelled into, is a
+/// dwarf of that kind, not an iron core (the product of no dwarf's, as
 /// `an_unplaced_merger_product_takes_the_engine_s_own_remnant` has it): above the Chandrasekhar mass
-/// it collapses at once to the 1.26 M☉ neutron star of an accretion-induced collapse, a Type Ia
-/// candidate pooled for the carbon–oxygen one only.
+/// the oxygen–neon one collapses at once to the 1.26 M☉ neutron star of an accretion-induced
+/// collapse, and the carbon–oxygen one disrupts and leaves nothing after its Type Ia candidate
+/// (P11.T4's `co_chandrasekhar`).
 #[test]
 fn an_unplaced_product_of_a_swollen_dwarf_keeps_its_kind() {
     use super::common_envelope::CoalescedProduct;
     use super::star::Kind;
     use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::{CompactRemnant, RemnantKind};
     use crate::stellar::rules::StellarRules;
 
     for (phase, dwarf, pooled) in [
@@ -7489,10 +7491,15 @@ fn an_unplaced_product_of_a_swollen_dwarf_keeps_its_kind() {
             source,
         );
         engine.finish_merger_with(product);
-        let [collapse] = engine.supernovae.as_slice() else {
-            panic!("{case}: one collapse, not {:?}", engine.supernovae);
+        let [death] = engine.supernovae.as_slice() else {
+            panic!("{case}: one death, not {:?}", engine.supernovae);
         };
-        assert_eq!(collapse.remnant(), electron_capture_remnant(), "{case}");
+        let remnant = if pooled {
+            CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO)
+        } else {
+            electron_capture_remnant()
+        };
+        assert_eq!(death.remnant(), remnant, "{case}");
         assert_eq!(engine.pooled.is_some(), pooled, "{case}");
     }
 }
@@ -7534,7 +7541,8 @@ fn placed_product_engine(
 /// whose 1.82 M☉ would type it oxygen–neon: the strip and the track's death leave the dwarf's kind,
 /// where version 27's left the track's. A carbon–oxygen one of 1.43 M☉ at Z = 0.004 is placed on a
 /// 7.41 M☉ track that collapses by electron capture at its death: its carbon–oxygen core takes the
-/// carbon–oxygen ending there, a disruption that leaves nothing, not a neutron star.
+/// carbon–oxygen ending there, a disruption that leaves nothing, not a neutron star, after its Type
+/// Ia candidate (P11.T4's `co_chandrasekhar`).
 #[test]
 fn a_placed_product_of_a_dwarf_keeps_its_kind() {
     use super::star::Member;
@@ -7565,7 +7573,7 @@ fn a_placed_product_of_a_dwarf_keeps_its_kind() {
         engine.die(0);
         let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
         assert_eq!(dead.phase(), kind, "{case}: dead, {dead:?}");
-        assert!(engine.pooled.is_none(), "{case}");
+        assert_eq!(engine.pooled.is_some(), kind == Phase::NoRemnant, "{case}");
     }
 }
 
@@ -7959,7 +7967,7 @@ fn until_a_death(engine: &mut super::evolve::Engine) {
 ///   brief's 1.2 M☉ dwarf's track loses its envelope at 1.22 M☉, below the cap, and leaves that.
 /// - One of 1.43 M☉ at Z = 0.004, placed on a track inside the window that collapses by electron
 ///   capture at `Mc,SN`, the Chandrasekhar mass, ends in a thermonuclear disruption that leaves
-///   nothing, with no Type Ia candidate pooled.
+///   nothing, with a Type Ia candidate of its core pooled (P11.T4's `co_chandrasekhar`).
 /// - An early-AGB product of 4.5 M☉ around a 2.4 M☉ helium core of a carbon–oxygen dwarf's, whose
 ///   track collapses an iron core, collapses as the track does (before the fix the placed
 ///   product's kept core disrupted at the Chandrasekhar mass on the way).
@@ -7997,7 +8005,7 @@ fn a_kept_core_ends_as_its_track_does_from_29() {
             };
             assert_eq!(death.remnant().kind(), RemnantKind::None, "{case}");
         }
-        assert!(engine.pooled.is_none(), "{case}");
+        assert_eq!(engine.pooled.is_some(), phase != co, "{case}");
     }
     let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
     let product = engine.product_member(
@@ -8101,9 +8109,9 @@ fn no_helium_star_leaves_an_oxygen_neon_dwarf_above_the_capture_mass_from_29() {
 /// P11.T4's kept-core endings: a merger's helium-giant product that no star holds, of no pinned
 /// primary, ends by its mass, which stands for `Mc,BAGB` (research-leans-38 and 40; HPT sections 6 and
 /// 6.1, plan 06's `helium_star_end`): an iron core from 2.25 M☉, an oxygen–neon core's electron
-/// capture from 1.6 M☉, a thermonuclear disruption with no Type Ia candidate from 1.44 M☉, a
-/// carbon–oxygen dwarf below; a thermally pulsing AGB product keeps its iron core at a 1.438 M☉
-/// carbon–oxygen core. The disruption leaves nothing.
+/// capture from 1.6 M☉, a thermonuclear disruption from 1.44 M☉, a carbon–oxygen dwarf below; a
+/// thermally pulsing AGB product keeps its iron core at a 1.438 M☉ carbon–oxygen core. The
+/// disruption leaves nothing, with a Type Ia candidate of its mass (P11.T4's `co_chandrasekhar`).
 #[test]
 fn an_unplaced_helium_giant_ends_by_its_mass_from_29() {
     use super::common_envelope::Product;
@@ -8185,7 +8193,10 @@ fn an_unplaced_helium_giant_ends_by_its_mass_from_29() {
         panic!("one death, not {:?}", engine.supernovae);
     };
     assert_eq!(death.remnant().kind(), RemnantKind::None);
-    assert!(engine.pooled.is_none());
+    assert!(
+        engine.pooled.is_some(),
+        "its Type Ia candidate (P11.T4's `co_chandrasekhar`)"
+    );
     assert_eq!(
         engine.members[0]
             .state_at(&engine.ctx, 0, engine.age)
@@ -8393,12 +8404,12 @@ fn the_core_endings_arm_is_deterministic() {
     }
 }
 
-// --- P11.T4: the carbon–oxygen dwarfs at the Chandrasekhar mass (held at 30) -------------------
+// --- P11.T4: the carbon–oxygen dwarfs at the Chandrasekhar mass --------------------------------
 
 /// Asserts that `engine`'s member `i` has ended in a disruption that left nothing, its pair's only
 /// death, with its companion alone on no orbit, and that the pair's Type Ia candidate is pooled on
 /// the accretion channel at the death, of a dwarf of `dwarf` M☉ (to 10⁻⁶), and can detonate
-/// (P11.T4's `co_chandrasekhar` from 30).
+/// (P11.T4's `co_chandrasekhar`).
 fn assert_disrupted_with_a_candidate(
     engine: &super::evolve::Engine,
     i: usize,
@@ -8432,15 +8443,14 @@ fn assert_disrupted_with_a_candidate(
 }
 
 /// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a white dwarf a companion feeds (the
-/// paths `Transfer` and `Wind`): under every 29 hold a carbon–oxygen dwarf of 1.4401 M☉ that
-/// `fed_dwarf_engine`'s main-sequence donor feeds, and one of 1.439 M☉ that a 3 M☉ star's AGB wind
-/// feeds to it in a detached phase, pool a Type Ia candidate and collapse into the 1.26 M☉ neutron
-/// star of an accretion-induced collapse; under every 30 hold each disrupts and leaves nothing, its
-/// companion alone, with the same candidate, the wind's at the same age. An oxygen–neon dwarf of
+/// paths `Transfer` and `Wind`): a carbon–oxygen dwarf of 1.4401 M☉ that `fed_dwarf_engine`'s
+/// main-sequence donor feeds, and one of 1.439 M☉ that a 3 M☉ star's AGB wind feeds to it in a
+/// detached phase, each disrupt and leave nothing, their companion alone, with a Type Ia candidate,
+/// the wind's at the age it collapsed at before the fold. An oxygen–neon dwarf of
 /// 1.375 M☉ fed by the same donor keeps its accretion-induced collapse at the capture mass, with no
 /// candidate (Hurley, Tout and Pols 2002, section 2.6, as BSE's `evolv2.f` codes it).
 #[test]
-fn a_fed_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_from_30() {
+fn a_fed_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
     use super::rlof::{Accretion, Fed};
     use super::star::{Kind, Member, Path};
     use crate::stellar::remnant::collapse::electron_capture_remnant;
@@ -8475,22 +8485,8 @@ fn a_fed_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_from_30() {
     };
     let co = Phase::CarbonOxygenWhiteDwarf;
     let dwarf = 1.4401;
-    let held = fed_by_transfer(
-        co,
-        dwarf,
-        StellarRules::of_version(crate::GENERATOR_VERSION),
-    );
-    let [collapse] = held.supernovae.as_slice() else {
-        panic!("every 29 hold: one collapse, not {:?}", held.supernovae);
-    };
-    assert_eq!(collapse.remnant(), electron_capture_remnant());
-    assert!(
-        held.pooled.is_some(),
-        "every 29 hold: the candidate is pooled"
-    );
     let disrupted = fed_by_transfer(co, dwarf, StellarRules::every_30_hold());
     assert_disrupted_with_a_candidate(&disrupted, 0, dwarf, "transfer, every 30 hold");
-    assert_eq!(disrupted.pooled, held.pooled, "the same candidate");
     let companion = disrupted.members[1].state_at(&disrupted.ctx, 1, disrupted.age);
     assert_eq!(companion.phase(), Phase::MainSequence, "{companion:?}");
 
@@ -8511,15 +8507,6 @@ fn a_fed_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_from_30() {
         "an oxygen–neon dwarf pools no candidate"
     );
 
-    let mut held = wind_fed_dwarf_engine(1.439, StellarRules::of_version(crate::GENERATOR_VERSION));
-    held.detached_phase();
-    let [collapse] = held.supernovae.as_slice() else {
-        panic!(
-            "wind, every 29 hold: one collapse, not {:?}",
-            held.supernovae
-        );
-    };
-    assert_eq!(collapse.remnant(), electron_capture_remnant());
     let mut wind = wind_fed_dwarf_engine(1.439, StellarRules::every_30_hold());
     wind.detached_phase();
     assert_disrupted_with_a_candidate(&wind, 0, CHANDRASEKHAR_MASS.value(), "wind, every 30 hold");
@@ -8532,24 +8519,19 @@ fn a_fed_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_from_30() {
         "{:?}",
         wind.supernovae
     );
-    assert_eq!(wind.pooled, held.pooled, "the same candidate");
 }
 
 /// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a merger's product (the paths
-/// `MergedDwarf` and `UnplacedProduct`): under every 29 hold the thermally pulsing AGB product of
-/// 4.33 M☉ around a 1.765 M☉ core that no star holds, made from the giant a 1.25 M☉ carbon–oxygen
-/// dwarf swelled into, is a carbon–oxygen dwarf of its core, which pools a Type Ia candidate of the
-/// two stars' masses before the merger and collapses into the 1.26 M☉ neutron star of an
-/// accretion-induced collapse; under every 30 hold it disrupts and leaves nothing, with a
+/// `MergedDwarf` and `UnplacedProduct`): the thermally pulsing AGB product of 4.33 M☉ around a
+/// 1.765 M☉ core that no star holds, made from the giant a 1.25 M☉ carbon–oxygen dwarf swelled
+/// into, is a carbon–oxygen dwarf of its core, which disrupts and leaves nothing, with a Type Ia
 /// candidate of the dwarf's mass alone. A merger's helium-giant product of 1.5 M☉ that no star
-/// holds, whose core ignites carbon (`Product::Disruption`), disrupts under both, with a candidate
-/// of its mass alone only under every 30 hold.
+/// holds, whose core ignites carbon (`Product::Disruption`), disrupts, with a candidate of its mass
+/// alone.
 #[test]
-fn a_merged_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_from_30() {
+fn a_merged_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
     use super::common_envelope::{CoalescedProduct, Product};
     use super::star::Kind;
-    use crate::stellar::remnant::RemnantKind;
-    use crate::stellar::remnant::collapse::electron_capture_remnant;
 
     let core = 1.764_8;
     let merged = |rules: StellarRules| {
@@ -8568,15 +8550,6 @@ fn a_merged_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_from_30() {
         engine.finish_merger_with(product);
         engine
     };
-    let held = merged(StellarRules::of_version(crate::GENERATOR_VERSION));
-    let [collapse] = held.supernovae.as_slice() else {
-        panic!("every 29 hold: one collapse, not {:?}", held.supernovae);
-    };
-    assert_eq!(collapse.remnant(), electron_capture_remnant());
-    assert!(
-        held.pooled.is_some(),
-        "every 29 hold: the candidate is pooled"
-    );
     let disrupted = merged(StellarRules::every_30_hold());
     assert_disrupted_with_a_candidate(&disrupted, 0, core, "the merged dwarf, every 30 hold");
     assert_eq!(
@@ -8591,28 +8564,20 @@ fn a_merged_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_from_30() {
         });
         engine
     };
-    let held = unplaced(StellarRules::of_version(crate::GENERATOR_VERSION));
-    let [death] = held.supernovae.as_slice() else {
-        panic!("every 29 hold: one death, not {:?}", held.supernovae);
-    };
-    assert_eq!(death.remnant().kind(), RemnantKind::None);
-    assert!(held.pooled.is_none(), "every 29 hold: no candidate");
     let disrupted = unplaced(StellarRules::every_30_hold());
     assert_disrupted_with_a_candidate(&disrupted, 0, 1.5, "the unplaced product, every 30 hold");
-    assert_eq!(disrupted.supernovae, held.supernovae, "the same death");
 }
 
 /// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a giant whose core is a carbon–oxygen
 /// dwarf's (the path `KeptCoreAtDeath`): the 1.43 M☉ dwarf placed with a 2.5 M☉ main-sequence star
-/// at Z = 0.004 on a track that captures electrons at its death disrupts and leaves nothing under
-/// both arms, with no Type Ia candidate under the held arm and one of the core and nothing beside it
-/// (the product's companion gone in the merger) under the arm of 30. Since the 29 folds a kept
+/// at Z = 0.004 on a track that captures electrons at its death disrupts and leaves nothing, with a
+/// Type Ia candidate of the core and nothing beside it (the product's companion gone in the
+/// merger). Since the 29 folds a kept
 /// carbon–oxygen core has no limit of its own (`a_kept_core_ends_as_its_track_does_from_29`), so no
 /// path ends one at the Chandrasekhar mass before its track dies.
 #[test]
-fn a_kept_carbon_oxygen_core_at_the_chandrasekhar_mass_pools_a_candidate_from_30() {
+fn a_kept_carbon_oxygen_core_at_the_chandrasekhar_mass_pools_a_candidate() {
     use super::star::Member;
-    use crate::stellar::remnant::RemnantKind;
 
     let at_death = |rules: StellarRules| {
         let mut engine = placed_product_engine(Phase::CarbonOxygenWhiteDwarf, 1.43, 0.004, rules);
@@ -8625,23 +8590,16 @@ fn a_kept_carbon_oxygen_core_at_the_chandrasekhar_mass_pools_a_candidate_from_30
         engine.die(0);
         (engine, core)
     };
-    let (held, _) = at_death(StellarRules::of_version(crate::GENERATOR_VERSION));
-    let [death] = held.supernovae.as_slice() else {
-        panic!("every 29 hold: one death, not {:?}", held.supernovae);
-    };
-    assert_eq!(death.remnant().kind(), RemnantKind::None);
-    assert!(held.pooled.is_none(), "every 29 hold: no candidate");
     let (disrupted, core) = at_death(StellarRules::every_30_hold());
     assert_disrupted_with_a_candidate(&disrupted, 0, core, "at its death, every 30 hold");
-    assert_eq!(disrupted.supernovae, held.supernovae, "the same death");
 }
 
-/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass: the arm of 30 is deterministic. The
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass are deterministic. The
 /// fed dwarf's, the wind-fed dwarf's and the unplaced product's engines twice under every 30 hold
 /// give the same members, deaths and candidates, and so do pinned pair 0080 and a swollen dwarf's
 /// pair (1.1 + 0.9 M☉ at 100 d, Z = 0.004) evolved twice.
 #[test]
-fn the_co_chandrasekhar_arm_is_deterministic() {
+fn the_co_chandrasekhar_ending_is_deterministic() {
     use super::common_envelope::Product;
 
     let every_30 = StellarRules::every_30_hold();
@@ -8669,14 +8627,12 @@ fn the_co_chandrasekhar_arm_is_deterministic() {
 /// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a pinned primary's merged dwarf (the
 /// path `PinnedMerger`): two carbon–oxygen dwarfs of 0.8 M☉ in the 17 + 12 M☉ pinned pair's places,
 /// its pin pending, merge (`Engine::mix`) into a 1.6 M☉ dwarf, which pools the pair's `Merger`
-/// candidate and ends at once: under every 29 hold by accretion-induced collapse into the 1.26 M☉
-/// neutron star, under every 30 hold by a disruption that leaves nothing, the pair's candidate still
-/// the merger's, its first.
+/// candidate and ends at once by a disruption that leaves nothing, the pair's candidate still the
+/// merger's, its first.
 #[test]
-fn a_pinned_primary_s_merged_dwarf_disrupts_from_30() {
+fn a_pinned_primary_s_merged_dwarf_disrupts() {
     use super::star::{Member, Path};
     use crate::stellar::remnant::RemnantKind;
-    use crate::stellar::remnant::collapse::electron_capture_remnant;
 
     let merged = |rules: StellarRules| {
         let (input, pin) = untouched_pinned_pair();
@@ -8696,11 +8652,6 @@ fn a_pinned_primary_s_merged_dwarf_disrupts_from_30() {
         engine.mix();
         engine
     };
-    let held = merged(StellarRules::of_version(crate::GENERATOR_VERSION));
-    let [collapse] = held.supernovae.as_slice() else {
-        panic!("every 29 hold: one collapse, not {:?}", held.supernovae);
-    };
-    assert_eq!(collapse.remnant(), electron_capture_remnant());
     let disrupted = merged(StellarRules::every_30_hold());
     let [death] = disrupted.supernovae.as_slice() else {
         panic!("every 30 hold: one death, not {:?}", disrupted.supernovae);
@@ -8708,21 +8659,17 @@ fn a_pinned_primary_s_merged_dwarf_disrupts_from_30() {
     assert_eq!(death.remnant().kind(), RemnantKind::None);
     let left = disrupted.members[0].state_at(&disrupted.ctx, 0, disrupted.age);
     assert_eq!(left.phase(), Phase::NoRemnant, "{left:?}");
-    for engine in [&held, &disrupted] {
-        let pooled = engine.pooled.expect("the merger's candidate");
-        assert_eq!(pooled.channel(), IaPoolChannel::Merger);
-    }
-    assert_eq!(disrupted.pooled, held.pooled, "the same, first, candidate");
+    let pooled = disrupted.pooled.expect("the merger's candidate");
+    assert_eq!(pooled.channel(), IaPoolChannel::Merger);
 }
 
 /// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a kept core's own carbon ignition (the
 /// path `KeptCoreIgnition`, which no built track reaches: none of 3–9 M☉ at Z 0.0001–0.02, nor a
 /// helium star of 1.40–1.69 M☉, dies by carbon ignition): where a giant whose core is a carbon–oxygen
 /// dwarf's dies by its own track's thermonuclear disruption, `Engine::own_carbon_ignition` pools a
-/// candidate of its core, 1.38 M☉, beside its companion under every 30 hold, and none under every
-/// 29 hold or for any other death.
+/// candidate of its core, 1.38 M☉, beside its companion, and none for any other death.
 #[test]
-fn a_kept_core_s_own_carbon_ignition_pools_a_candidate_from_30() {
+fn a_kept_core_s_own_carbon_ignition_pools_a_candidate() {
     use crate::stellar::remnant::DeathKind;
 
     let (core, before) = (SolarMasses::new(1.38), 1.9);
@@ -8736,13 +8683,6 @@ fn a_kept_core_s_own_carbon_ignition_pools_a_candidate_from_30() {
     assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
     assert_eq!(pooled.masses(), [core, SolarMasses::new(2.5)]);
     assert!(super::ia::is_detonatable(&pooled), "{pooled:?}");
-    assert_eq!(
-        ignited(
-            StellarRules::of_version(crate::GENERATOR_VERSION),
-            DeathKind::ThermonuclearDisruption
-        ),
-        None
-    );
     assert_eq!(ignited(every_30, DeathKind::EnvelopeLoss), None);
 }
 

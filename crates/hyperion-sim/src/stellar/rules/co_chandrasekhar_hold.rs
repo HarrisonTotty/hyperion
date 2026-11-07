@@ -1,24 +1,17 @@
-//! The tests of P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass,
-//! [`CO_CHANDRASEKHAR_VERSION`]: from it every carbon–oxygen white dwarf or core at the
-//! Chandrasekhar mass disrupts, leaves nothing and pools one Type Ia candidate, only under the
-//! rules that turn it on, read by the binary engine through its input's rules
-//! (`Engine::end_at_the_chandrasekhar_mass`). The engine's own cases, path by path, are
-//! `stellar::binary::tests`' (P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass there).
+//! The tests of P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, on the record since the
+//! 30 folds: every carbon–oxygen white dwarf or core at the Chandrasekhar mass disrupts, leaves
+//! nothing and pools one Type Ia candidate (`Engine::end_at_the_chandrasekhar_mass`). The engine's
+//! own cases, path by path, are `stellar::binary::tests`' (P11.T4's carbon–oxygen dwarfs at the
+//! Chandrasekhar mass there).
 //!
-//! - The version's rules keep the held arm, and the tripwire holds it only until the bump.
 //! - The server golden's carbon–oxygen dwarf of 1.12 M☉ (alone) that its pair ends as a neutron star
 //!   (plan 15's P15.T9.b, from P11.T11.a's records) takes none of the paths: its dwarf merges with
 //!   a helium star, and the product, keeping the dwarf's core, collapses an iron core at its
-//!   track's death under every 29 hold (research-leans-38's kept core), and by electron capture at
-//!   the merger under every 30 hold (P11.T4's `merged_capture`).
-//! - Slow: the dwarf-limit census's 6 × 10⁴ pairs of layers C, D and E near the Sun under every 29
-//!   hold and every 30 hold: each path's endings and first candidates, the pairs' candidates by
-//!   channel, and the pairs that show a neutron star at their age.
-//!
-//! Nothing moves at 24–29, the held arm being the version's code. The movers at the bump were not
-//! surveyed by turning the hold on at the version; they hold at least the pair-light and reach
-//! tables, which the engine's runs fit and the bump refits, and `type_ia_yield`'s pool is this
-//! arm's (plan 15's P15.T9.b).
+//!   track's death under the version's rules, and by electron capture at the merger under every 30
+//!   hold (P11.T4's `merged_capture`).
+//! - Slow: the dwarf-limit census's 6 × 10⁴ pairs of layers C, D and E near the Sun under every 30
+//!   hold: each path's endings and first candidates, the pairs' candidates by channel, and the
+//!   pairs that show a neutron star at their age.
 
 use crate::planetary::testing::in_shares;
 
@@ -30,9 +23,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::id::Layer;
 use crate::rng::Seed;
 use crate::stellar::Phase;
-use crate::stellar::binary::co_chandrasekhar::{
-    CO_CHANDRASEKHAR_VERSION, ChandrasekharPath, CoChandrasekharRules, chandrasekhar_endings,
-};
+use crate::stellar::binary::co_chandrasekhar::{ChandrasekharPath, chandrasekhar_endings};
 use crate::stellar::binary::ia::is_detonatable;
 use crate::stellar::binary::testing::generated_pairs;
 use crate::stellar::binary::{IaPoolChannel, can_interact, evolve};
@@ -56,85 +47,6 @@ const SHARES: usize = 64;
 
 /// The threads the census runs on.
 const THREADS: usize = 16;
-
-/// The version's rules.
-fn version() -> StellarRules {
-    StellarRules::of_version(GENERATOR_VERSION)
-}
-
-/// The version's rules keep the held arm, every version from 24 to 29 does and 30 disrupts every
-/// carbon–oxygen dwarf or core at the Chandrasekhar mass; the fitted tables hold only under the
-/// version's arm. The tripwire: the bump to 30 deletes this hold.
-#[test]
-fn the_co_chandrasekhar_ending_is_held_only_until_the_30_bump() {
-    assert!(
-        GENERATOR_VERSION < CO_CHANDRASEKHAR_VERSION,
-        "the bump to 30 deletes P11.T4's hold on the carbon–oxygen dwarfs at the Chandrasekhar \
-         mass, not its rule: `CO_CHANDRASEKHAR_VERSION`, `CoChandrasekharRules` with its `Held` \
-         arm and `ChandrasekharPath::held_ending`, `StellarRules::co_chandrasekhar` and its reads \
-         in `Engine::end_at_the_chandrasekhar_mass`, `Engine::chandrasekhar_candidate` and \
-         `Engine::finish_merger`, the brief's read of \
-         `CoChandrasekharRules::fitted_tables_hold`, this module and its line in \
-         `stellar/rules.rs`; it keeps the disruption with its candidate applied always, and \
-         refits the pair-light and reach tables"
-    );
-    assert_eq!(version().co_chandrasekhar, CoChandrasekharRules::Held);
-    let at = |v: u32| StellarRules::of_version(crate::GeneratorVersion::new(v)).co_chandrasekhar;
-    for v in [24, 25, 26, 27, 28, 29] {
-        assert_eq!(at(v), CoChandrasekharRules::Held, "version {v}");
-    }
-    assert_eq!(at(30), CoChandrasekharRules::Disrupted);
-    assert_eq!(
-        StellarRules::every_30_hold().co_chandrasekhar,
-        CoChandrasekharRules::Disrupted
-    );
-    assert_eq!(
-        GalaxyRules::every_30_hold().stellar,
-        StellarRules::every_30_hold()
-    );
-    // Every 30 hold is the version's rules but for this one.
-    assert_eq!(
-        StellarRules {
-            co_chandrasekhar: CoChandrasekharRules::Held,
-            merged_capture: crate::stellar::binary::merged_capture::MergedCaptureRules::Held,
-            ..StellarRules::every_30_hold()
-        },
-        version()
-    );
-    assert!(version().co_chandrasekhar.fitted_tables_hold());
-    assert!(!CoChandrasekharRules::Disrupted.fitted_tables_hold());
-}
-
-/// Each path's ending and candidate: under the held arm a white dwarf's collapse with a candidate
-/// and a core's disruption with none, and under every 30 hold a disruption with one for every path.
-#[test]
-fn every_path_disrupts_and_pools_from_30() {
-    use crate::stellar::binary::co_chandrasekhar::ChandrasekharEnding;
-
-    let (collapse, disruption) = (
-        ChandrasekharEnding::Collapse,
-        ChandrasekharEnding::Disruption,
-    );
-    for path in ChandrasekharPath::ALL {
-        let white_dwarf = matches!(
-            path,
-            ChandrasekharPath::Transfer
-                | ChandrasekharPath::Wind
-                | ChandrasekharPath::MergedDwarf
-                | ChandrasekharPath::PinnedMerger
-        );
-        let held = CoChandrasekharRules::Held;
-        assert_eq!(
-            held.ending(path),
-            if white_dwarf { collapse } else { disruption },
-            "{path:?}"
-        );
-        assert_eq!(held.pools(path), white_dwarf, "{path:?}");
-        let disrupted = CoChandrasekharRules::Disrupted;
-        assert_eq!(disrupted.ending(path), disruption, "{path:?}");
-        assert!(disrupted.pools(path), "{path:?}");
-    }
-}
 
 /// The server golden's grid record `0x6200_5957_fe00_0024` of the galaxy of seed 1234
 /// (`systems_in_range_briefs`, GPF 000N1Z D-36), whose 5.71 M☉ primary alone leaves a carbon–oxygen
@@ -232,11 +144,10 @@ struct Figures {
     /// The pairs run, those that can interact by [`UNTIL`], in layers C, D and E.
     run: [usize; 3],
     /// The endings at the Chandrasekhar mass by path ([`ChandrasekharPath::ALL`]'s order;
-    /// `co_chandrasekhar::chandrasekhar_endings`): each path's endings, its accretion-induced
-    /// collapses and disruptions, the candidates it pooled first for their pairs, with those that
-    /// can detonate, and the candidates that can detonate but sit behind an earlier one of their
-    /// pair's that cannot.
-    paths: [[[usize; 6]; 7]; 3],
+    /// `co_chandrasekhar::chandrasekhar_endings`): each path's endings, every one a disruption, the
+    /// candidates it pooled first for their pairs, with those that can detonate, and the candidates
+    /// that can detonate but sit behind an earlier one of their pair's that cannot.
+    paths: [[[usize; 4]; 7]; 3],
     /// The pairs' Type Ia candidates (P11.T6's pool) by channel, the merger first: those pooled,
     /// and those that can detonate (`ia::is_detonatable`).
     candidates: [[[usize; 2]; 2]; 3],
@@ -248,7 +159,7 @@ struct Figures {
 fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
     let mut figures = Figures {
         run: [0; 3],
-        paths: [[[0; 6]; 7]; 3],
+        paths: [[[0; 4]; 7]; 3],
         candidates: [[[0; 2]; 2]; 3],
         neutron_stars: [0; 3],
     };
@@ -283,7 +194,7 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
                 );
             }
             let after = chandrasekhar_endings();
-            let paths: [[usize; 6]; 7] =
+            let paths: [[usize; 4]; 7] =
                 core::array::from_fn(|p| core::array::from_fn(|j| after[p][j] - before[p][j]));
             (counts, paths)
         });
@@ -304,104 +215,59 @@ fn census(galaxy: &Galaxy, rules: StellarRules) -> Figures {
     figures
 }
 
-/// The census's figures under every 29 hold and every 30 hold, as measured (2026-11-05, at
-/// generator version 28; 272 s for both, pod, 16 vCPU). Layer C reaches the Chandrasekhar mass by
-/// no path. Under every 29 hold layer D's 148 white dwarfs fed by transfer and 10 merged dwarfs
-/// collapse into neutron stars, all but 5 of the fed ones having pooled their pair's candidate
-/// before, and its 36 kept cores disrupt with none; layer E's 11 fed dwarfs collapse and its 2 kept
-/// cores disrupt. Under every 30 hold every one of them
-/// disrupts: 35 of layer D's kept cores pool their pair's first candidate, every one detonatable,
-/// so that layer D pools 319 accretions, not 284 (234 detonatable, not 199). Of layer D's pairs
-/// 1,987 rather than 2,127 show a neutron star at their age with this hold alone, and 2,072 with
-/// every 30 hold, whose oxygen–neon dwarfs' coalescences collapse at once (P11.T4's
-/// `merged_capture`, 2026-11-06); layer E's 11,193 become 11,187 and 11,190. Behind an earlier
-/// candidate of their pair's that cannot detonate, 9 of layer D's fed dwarfs and, under every 30
-/// hold, 2 of layer E's kept cores could have detonated, which the pool, holding a pair's first,
-/// does not record (2026-11-06, 141 s).
-const CENSUS_FIGURES: [Figures; 2] = [
-    Figures {
-        run: [8_519, 17_814, 19_213],
-        paths: [
-            [[0; 6]; 7],
-            [
-                [148, 148, 0, 5, 5, 9],
-                [0; 6],
-                [10, 10, 0, 0, 0, 0],
-                [0; 6],
-                [0; 6],
-                [36, 0, 36, 0, 0, 0],
-                [0; 6],
-            ],
-            [
-                [11, 11, 0, 0, 0, 0],
-                [0; 6],
-                [0; 6],
-                [0; 6],
-                [0; 6],
-                [2, 0, 2, 0, 0, 0],
-                [0; 6],
-            ],
+/// The census's figures under every 30 hold, as measured (2026-11-05 and 2026-11-06, at generator
+/// version 28; pod, 16 vCPU). Layer C reaches the Chandrasekhar mass by no path. Every ending
+/// disrupts: layer D's 148 white dwarfs fed by transfer and 10 merged dwarfs, all but 5 of the fed
+/// ones having pooled their pair's candidate before, and its 36 kept cores, 35 of which pool their
+/// pair's first candidate, every one detonatable, so that layer D pools 319 accretions (234
+/// detonatable); layer E's 11 fed dwarfs and 2 kept cores. Of layer D's pairs 2,072 show a neutron
+/// star at their age, and of layer E's 11,190, where under every 29 hold 2,127 and 11,193 did.
+/// Behind an earlier candidate of their pair's that cannot detonate, 9 of layer D's fed dwarfs and
+/// 2 of layer E's kept cores could have detonated, which the pool, holding a pair's first, does not
+/// record.
+const CENSUS_FIGURES: Figures = Figures {
+    run: [8_519, 17_814, 19_213],
+    paths: [
+        [[0; 4]; 7],
+        [
+            [148, 5, 5, 9],
+            [0; 4],
+            [10, 0, 0, 0],
+            [0; 4],
+            [0; 4],
+            [36, 35, 35, 0],
+            [0; 4],
         ],
-        candidates: [
-            [[59, 0], [15, 0]],
-            [[124, 55], [284, 199]],
-            [[5, 5], [25, 21]],
+        [
+            [11, 0, 0, 0],
+            [0; 4],
+            [0; 4],
+            [0; 4],
+            [0; 4],
+            [2, 0, 0, 2],
+            [0; 4],
         ],
-        neutron_stars: [1, 2_127, 11_193],
-    },
-    Figures {
-        run: [8_519, 17_814, 19_213],
-        paths: [
-            [[0; 6]; 7],
-            [
-                [148, 0, 148, 5, 5, 9],
-                [0; 6],
-                [10, 0, 10, 0, 0, 0],
-                [0; 6],
-                [0; 6],
-                [36, 0, 36, 35, 35, 0],
-                [0; 6],
-            ],
-            [
-                [11, 0, 11, 0, 0, 0],
-                [0; 6],
-                [0; 6],
-                [0; 6],
-                [0; 6],
-                [2, 0, 2, 0, 0, 2],
-                [0; 6],
-            ],
-        ],
-        candidates: [
-            [[59, 0], [15, 0]],
-            [[124, 55], [319, 234]],
-            [[5, 5], [25, 21]],
-        ],
-        neutron_stars: [1, 2_072, 11_190],
-    },
-];
+    ],
+    candidates: [
+        [[59, 0], [15, 0]],
+        [[124, 55], [319, 234]],
+        [[5, 5], [25, 21]],
+    ],
+    neutron_stars: [1, 2_072, 11_190],
+};
 
-/// A census of 6 × 10⁴ generated pairs ([`census`]) under every 29 hold and every 30 hold: under
-/// every 30 hold no path collapses a dwarf, every ending is a disruption, and every candidate a
-/// path pools first can detonate.
+/// A census of 6 × 10⁴ generated pairs ([`census`]) under every 30 hold: every ending is a
+/// disruption, and every candidate a path pools first can detonate.
 #[test]
-#[ignore = "slow: 6 × 10⁴ generated pairs run through the binary engine to 13.8 Gyr, twice"]
+#[ignore = "slow: 6 × 10⁴ generated pairs run through the binary engine to 13.8 Gyr"]
 fn every_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts_under_every_30_hold() {
     let galaxy = Galaxy::from_params(Seed::new(CENSUS_SEED), GalaxyParams::milky_way_like())
         .expect("the Milky Way fixture's gas is mostly neutral");
-    let figures = [version(), StellarRules::every_30_hold()].map(|rules| {
-        let figures = census(&galaxy, rules);
-        println!("{:?}: {figures:?}", rules.co_chandrasekhar);
-        figures
-    });
-    for (layer, paths) in figures[1].paths.iter().enumerate() {
-        for (path, [events, collapses, disruptions, first, detonatable, _]) in
-            ChandrasekharPath::ALL.iter().zip(paths)
-        {
-            let case = format!("layer {layer}, {path:?}");
-            assert_eq!(*collapses, 0, "{case}");
-            assert_eq!(disruptions, events, "{case}");
-            assert_eq!(detonatable, first, "{case}");
+    let figures = census(&galaxy, StellarRules::every_30_hold());
+    println!("{figures:?}");
+    for (layer, paths) in figures.paths.iter().enumerate() {
+        for (path, [_, first, detonatable, _]) in ChandrasekharPath::ALL.iter().zip(paths) {
+            assert_eq!(detonatable, first, "layer {layer}, {path:?}");
         }
     }
     assert_eq!(figures, CENSUS_FIGURES);

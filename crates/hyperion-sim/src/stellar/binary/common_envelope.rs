@@ -44,7 +44,7 @@ use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
 use crate::stellar::{Phase, StarState, StarStateParts};
 use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
-use super::co_chandrasekhar::{ChandrasekharPath, CoChandrasekharRules};
+use super::co_chandrasekhar::ChandrasekharPath;
 use super::dwarf_limit::{self, CoreSource, ProductTyping, Unplaced};
 use super::evolve::{Engine, roche_lobe, track_mass};
 use super::merged_capture::MergedCaptureRules;
@@ -833,9 +833,9 @@ impl Engine {
                 } else {
                     Phase::CarbonOxygenWhiteDwarf
                 };
-                // `finish_merger` collapses a dwarf at the Chandrasekhar mass (P11.T4's fix), but for
-                // a pinned primary's, which collapses at once at it as before the fix, and from 30
-                // disrupts unless it is oxygen–neon (`co_chandrasekhar`).
+                // `finish_merger` ends a dwarf at the Chandrasekhar mass (P11.T4's fix), but for a
+                // pinned primary's, which ends at once at it: it disrupts unless it is oxygen–neon
+                // (`co_chandrasekhar`).
                 if self.pin_pending(0) && dwarf_limit::collapses(total) {
                     self.finish_merger(self.white_dwarf(phase, total).into());
                     if phase == Phase::OxygenNeonWhiteDwarf {
@@ -897,16 +897,14 @@ impl Engine {
     ///
     /// A white dwarf product at or above the Chandrasekhar mass ends at once, as an accreting one
     /// does (`Engine::accretor_events`): an oxygen–neon one by accretion-induced collapse, and any
-    /// other as the stellar rules' `co_chandrasekhar` arm ends it
-    /// ([`Engine::end_at_the_chandrasekhar_mass`]), its Type Ia candidate pooled first: under the
-    /// held arm with the two stars' masses before the merger, then its accretion-induced collapse
-    /// (P11.T4's fix, `dwarf_limit::collapses`), and from 30 with the product's mass alone, then a
-    /// disruption that leaves nothing. A pinned primary's product is left to its pin
+    /// other in a disruption that leaves nothing ([`Engine::end_at_the_chandrasekhar_mass`], P11.T4's
+    /// fix, `dwarf_limit::collapses`), its Type Ia candidate, of the product's mass alone, pooled
+    /// first. A pinned primary's product is left to its pin
     /// ([`Engine::pin_pending`], P11.T4's dwarf limit), and an unplaced product's iron core
     /// ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]), as does its
     /// oxygen–neon core by electron capture ([`Product::ElectronCapture`],
     /// [`Engine::capture_collapse`]), with no candidate, and its disruption leaves nothing
-    /// ([`Product::Disruption`]), with a candidate of its mass alone from 30. A product whose core
+    /// ([`Product::Disruption`]), with a candidate of its mass alone. A product whose core
     /// is a carbon–oxygen or oxygen–neon dwarf's keeps that kind ([`Engine::dwarf_cores`]).
     fn finish_merger(&mut self, product: Product) {
         let (product, source, ending) = match product {
@@ -930,7 +928,6 @@ impl Engine {
         } else {
             None
         };
-        let masses = dwarf.map(|_| [0, 1].map(|i| SolarMasses::new(self.current(i).0)));
         self.close_segment();
         self.set_member(0, product);
         self.dwarf_cores[0] = source;
@@ -956,15 +953,12 @@ impl Engine {
             ),
             Some(Product::Member(..)) | None => {}
         }
-        if let (Some((phase, m)), Some(masses)) = (dwarf, masses) {
+        if let Some((phase, m)) = dwarf {
             if phase == Phase::OxygenNeonWhiteDwarf {
                 self.accretion_induced_collapse(0, m);
             } else {
-                // From 30 the candidate is the product's alone, so that it can detonate.
-                let masses = match self.ctx.rules().co_chandrasekhar {
-                    CoChandrasekharRules::Held => masses,
-                    CoChandrasekharRules::Disrupted => [SolarMasses::new(m), SolarMasses::ZERO],
-                };
+                // The candidate is the product's alone, so that it can detonate.
+                let masses = [SolarMasses::new(m), SolarMasses::ZERO];
                 self.end_at_the_chandrasekhar_mass(0, m, ChandrasekharPath::MergedDwarf, masses);
             }
         }

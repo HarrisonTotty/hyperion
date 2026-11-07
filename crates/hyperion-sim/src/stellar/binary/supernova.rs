@@ -102,7 +102,7 @@ pub(super) enum SwollenDeath {
     ElectronCapture,
     /// A carbon–oxygen core that dies with its envelope on where the track's would not ignite
     /// carbon: carbon ignites in the degenerate core at `Mc,SN` and nothing is left (HPT section 6,
-    /// [`DeathKind::ThermonuclearDisruption`]), a Type Ia candidate from 30 (P11.T4's
+    /// [`DeathKind::ThermonuclearDisruption`]), with a Type Ia candidate (P11.T4's
     /// `co_chandrasekhar`).
     Disruption,
 }
