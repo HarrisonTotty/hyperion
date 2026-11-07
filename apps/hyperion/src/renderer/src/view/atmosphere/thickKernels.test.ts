@@ -133,14 +133,14 @@ function digestOf(pair: KernelPair): string {
 const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_KERNEL, "3bb14d598c384edb"],
   [AERIAL_PERSPECTIVE_KERNEL, "1ccb804c63ae75c8"],
-  [RAY_MARCH_PER_STEP_KERNEL, "cc8e7af7c78255b0"],
-  [RAY_MARCH_SLOTS_PER_STEP_KERNEL, "ede79b76f32057bc"],
-  [RAY_MARCH_KERNEL, "f22eff4c308484ad"],
-  [RAY_MARCH_SLOTS_KERNEL, "57baa6247508be7a"],
-  [RAY_MARCH_CENTRE_KERNEL, "d85ad18274dc8257"],
-  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "d4b02e1d5c42d04c"],
-  [RAY_MARCH_SPECIAL_KERNEL, "217e73b4c44ddc1f"],
-  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "a7a9731c85fe6a92"],
+  [RAY_MARCH_PER_STEP_KERNEL, "1888da134cc7c225"],
+  [RAY_MARCH_SLOTS_PER_STEP_KERNEL, "68e77a0c5aae1e2b"],
+  [RAY_MARCH_KERNEL, "d69ccbe62519d1a0"],
+  [RAY_MARCH_SLOTS_KERNEL, "3944c5d6e9fa0d93"],
+  [RAY_MARCH_CENTRE_KERNEL, "d411d66636070a76"],
+  [RAY_MARCH_SLOTS_CENTRE_KERNEL, "9ade1ff0ec1d6741"],
+  [RAY_MARCH_SPECIAL_KERNEL, "31d8340c55e3a7f6"],
+  [RAY_MARCH_SLOTS_SPECIAL_KERNEL, "fd2cb14cf8c0422f"],
   [RAY_MARCH_FILL_KERNEL, "fdc424b1001af7c6"],
 ];
 
@@ -155,10 +155,10 @@ const THIN_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
 const THICK_DIGESTS: ReadonlyArray<readonly [KernelPair, string]> = [
   [SKY_VIEW_THICK_KERNEL, "b615d3a929d28bef"],
   [AERIAL_PERSPECTIVE_THICK_KERNEL, "861e34c18a663dca"],
-  [RAY_MARCH_THICK_KERNEL, "d0a31d6e2c22cb97"],
-  [RAY_MARCH_SLOTS_THICK_KERNEL, "c1f0d3b91ca7bc0d"],
-  [RAY_MARCH_THICK_SPECIAL_KERNEL, "3832672a3953eeef"],
-  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "4234adc6728b8ad5"],
+  [RAY_MARCH_THICK_KERNEL, "ab78b95d24cfe142"],
+  [RAY_MARCH_SLOTS_THICK_KERNEL, "12de7b562c2fcaa2"],
+  [RAY_MARCH_THICK_SPECIAL_KERNEL, "e03922675593b476"],
+  [RAY_MARCH_SLOTS_THICK_SPECIAL_KERNEL, "7b1c339c8c507e06"],
 ];
 
 /** Each thick kernel beside the thin one it is made from. */
@@ -205,7 +205,7 @@ const THICK_SURFACE_LOBES =
 const DEPARTS = "let departs = false;";
 const THICK_DEPARTS = "let departs = surfaceLobes && !thickCorrectionOnly();";
 const SKY_LIT = "let skyLit = vec3f(0.0);";
-const THICK_SKY_LIT = "let skyLit = thickDepartureSkyAt(body, start, muSun, slot);";
+const THICK_SKY_LIT = "let skyLit = thickDepartureSkyAt(body, start, first, datum.normal);";
 const THICK_SLOT_SOURCE_AT =
   "let one = thickSourceAt(body, start, light, muSun, slot, local, phased, ray, dir, up);";
 

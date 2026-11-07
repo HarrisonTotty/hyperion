@@ -4244,7 +4244,7 @@ export type RayMarchSettings = Pick<
  * Where it is given, a march on a bake's table (`thick`) keeps a drawn surface's lobes' light and
  * takes the bake's ground's share of it from its in-scatter, S̄ (T_lobe − T_direct), S̄ the drawn
  * ground's light at the ray's end with the medium's ground albedo, each source's transmittance to
- * it and this sky's irradiance there.
+ * it and this sky's irradiance there, the first source's alone, as the kernel reads it.
  */
 export interface TwinDeparture {
   /**
@@ -4527,7 +4527,7 @@ function rayMarchTexelInto(
   // Where the ray departs from a decked air's bake (fix-r08-decked-air-route; `rayMarch.wgsl`'s
   // header), its in-scatter less the bake's ground's share of its lobes' light, S̄ (T_lobe −
   // T_direct), at least 0: S̄ the drawn ground's light at the ray's end with the medium's ground
-  // albedo, each source's transmittance to it and the sky's irradiance there.
+  // albedo, each source's transmittance to it and the first source's sky's irradiance there.
   if (departure !== null && marcher.departs) {
     const o = ray.originM;
     const d = ray.direction;
@@ -4539,13 +4539,17 @@ function rayMarchTexelInto(
     const toSun: TwinRgb = [0, 0, 0];
     const lit: [number, number, number] = [0, 0, 0];
     const lights = ray.sources ?? [{ direction: ray.sun, weight: [1, 1, 1], slot: 0 }];
-    for (const light of lights) {
+    // The sky's light the first source's alone, the brightest, as the kernel takes it.
+    lights.forEach((light, k) => {
       const at = departureLightInto(reads, view.figure, endM, light, toSun);
-      const sky = departure.skyIrradiance(at.heightM, at.muSun, at.latitudeRad, light.slot);
+      const sky: Rgb =
+        k === 0
+          ? departure.skyIrradiance(at.heightM, at.muSun, at.latitudeRad, light.slot)
+          : [0, 0, 0];
       for (const c of CHANNELS) {
         lit[c] += light.weight[c] * (toSun[c] * Math.max(at.muSun, 0) + sky[c]);
       }
-    }
+    });
     for (const c of CHANNELS) {
       const kept = Math.max(surface[c] - t[c], 0);
       luminance[c] = Math.max(

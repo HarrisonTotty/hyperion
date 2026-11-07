@@ -1567,7 +1567,7 @@ const THICK_READ: ReadonlyArray<{
   },
   {
     general: "let skyLit = vec3f(0.0);",
-    thick: "let skyLit = thickDepartureSkyAt(body, start, muSun, slot);",
+    thick: "let skyLit = thickDepartureSkyAt(body, start, first, datum.normal);",
     least: 0,
     most: 1,
   },
@@ -1944,7 +1944,10 @@ export function withThermalSource(
   pair: KernelPair,
   light: ThermalLight = "emitted and scattered",
 ): KernelPair {
-  const rewrite = (wgsl: string): string => {
+  const rewrite = (sources: string): string => {
+    // No self-luminous body draws a decked air: its departure is compiled out
+    // (fix-r08-decked-air-route).
+    const wgsl = withoutDeparture(sources, pair.name);
     let steps = 0;
     const code = THERMAL_SOURCE.reduce((text, { general, thermal, least, most }, i) => {
       const count = text.split(general).length - 1;
@@ -2033,6 +2036,44 @@ const DECK_NEEDED: readonly [string, string] = [
 ];
 
 /**
+ * The rewrites that compile a thick ray march's departure from a decked air's bake out of it (plan
+ * R08, fix-r08-decked-air-route; {@link DeckedAirSurface}): a deck's march and the thermal forms,
+ * none of which draws a decked air, with `thickDeparture.wgsl` dropped beside them
+ * ({@link withoutDeparture}). With it the thermal thick march crashed SwiftShader's GPU process as
+ * it compiled (exit_code=139, test-render part 12, pod, 2026-11-07).
+ */
+const NO_DEPARTURE: ReadonlyArray<readonly [string, string]> = [
+  ["let departs = surfaceLobes && !thickCorrectionOnly();", "let departs = false;"],
+  [
+    "let skyLit = thickDepartureSkyAt(body, start, first, datum.normal);",
+    "let skyLit = vec3f(0.0);",
+  ],
+];
+
+/**
+ * `wgsl`, a thick ray march's, with its departure compiled out ({@link NO_DEPARTURE}) and
+ * `thickDeparture.wgsl` dropped; any other kernel, which holds none, as it is.
+ *
+ * @throws Error naming the kernel `name` where it holds the departure's sky but not each rewritten
+ *   line once.
+ */
+function withoutDeparture(wgsl: string, name: string): string {
+  const appended = `\n${THICK_DEPARTURE_WGSL}`;
+  if (!wgsl.includes(appended)) {
+    return wgsl;
+  }
+  return NO_DEPARTURE.reduce(
+    (text, [general, none]) => {
+      if (text.split(general).length !== 2) {
+        throw new Error(`kernel ${name} holds no single place for: ${general}`);
+      }
+      return text.replace(general, none);
+    },
+    wgsl.replace(appended, ""),
+  );
+}
+
+/**
  * The deck read's rewrites of a thick ray march's drawn surface's forward lobes' light (plan R08,
  * fix-r08-decked-air-route; `hillaire.ts`'s {@link SurfaceLobes}): none, compiled out. A deck's
  * march reads a bake's table, whose J holds that light, so the thick march never forms the term
@@ -2046,8 +2087,6 @@ const DECK_NO_SURFACE_LOBES: ReadonlyArray<readonly [string, string]> = [
       "(thickCorrectionOnly() || view.forward.w > 1.5);",
     "let surfaceLobes = false;",
   ],
-  ["let departs = surfaceLobes && !thickCorrectionOnly();", "let departs = false;"],
-  ["let skyLit = thickDepartureSkyAt(body, start, muSun, slot);", "let skyLit = vec3f(0.0);"],
   [
     "rayMarchSurfaceStep(surfaceDepth, march, local, absorbedBefore, stepAt.dtM, surfaceLobes);",
     "// No drawn surface's lobes' light over a deck (fix-r08-decked-air-route).",
@@ -2082,7 +2121,7 @@ export function withDeckRead(pair: KernelPair): KernelPair {
     // A deck's march reads no departure's sky (fix-r08-decked-air-route): its table goes with it.
     const code = [...DECK_READ, DECK_NEEDED, ...DECK_NO_SURFACE_LOBES, ...DECK_GROUND].reduce(
       (text, rewritten) => replaced(text, rewritten, 1),
-      wgsl.replace(`\n${THICK_DEPARTURE_WGSL}`, ""),
+      withoutDeparture(wgsl, pair.name),
     );
     return `${code}\n${deckReadWgsl}`;
   };
@@ -4652,11 +4691,13 @@ export class HillaireAtmosphere {
       sourceTable = tables.sourceTransmittance();
     }
     const sourceTableBound = sourceTable === null ? {} : { atmosphere_source_table: sourceTable };
-    // Every march on the thick read but over a deck (thermal or not) declares the sky's irradiance,
-    // which its departure reads (fix-r08-decked-air-route; `thickDeparture.wgsl`), built at its
-    // first read after each build of the tables, as the lit passes take it.
+    // Every march on the thick read but over a deck or in its thermal forms declares the sky's
+    // irradiance, which its departure reads (fix-r08-decked-air-route; `thickDeparture.wgsl`), built
+    // at its first read after each build of the tables, as the lit passes take it.
     const departureBound =
-      thickTable === null || deckTable !== null ? {} : { marchIrradiance: tables.irradiance() };
+      thickTable === null || deckTable !== null || thermal !== null
+        ? {}
+        : { marchIrradiance: tables.irradiance() };
     // The march's kernels: the thin read's, with the tile cull's centre ray, or the thick read's,
     // from the sources' table where its lever takes it.
     const march = (): FrameMarch =>

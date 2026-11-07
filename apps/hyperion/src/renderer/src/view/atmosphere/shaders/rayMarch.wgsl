@@ -180,7 +180,9 @@
 // target, T_lobe, and its in-scatter loses the bake's ground's share of that light,
 // S_bar (T_lobe - T_direct), at least 0, the in-scatter held at 0 or more. S_bar is the drawn
 // ground's light at the ray's end with the bake's ground albedo: each source's transmittance to it
-// and the sky's irradiance there (the table the lit passes read, `thickDeparture.wgsl`), at the
+// and the first source's sky's irradiance there (the table the lit passes read, on band 0's layer,
+// `thickDeparture.wgsl`: with the bands' read and a lookup a source the thick marches crashed
+// SwiftShader's compile, exit_code=139), at the
 // datum's normal, times albedo / pi. Over a ground of the bake's albedo the pixel is the route's,
 // L_in + S T_direct; over a drawn map it is L_routed(rho_bar) + (S - S_bar) T_lobe, 6S's form with
 // the surroundings at the bake's mean (Tanre, Herman and Deschamps 1981, Appl. Opt. 20, 3676;
@@ -1012,13 +1014,20 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
   let bare = depth == 0.0 && hitsGround && ground.x <= tEnd;
   let departs = false;
   if (bare || departs) {
-    var p = origin + ground.x * dir;
+    // The drawn surface's end, its ground quadric formed as the count's is (`drawnQ`), about the
+    // closest approach beyond h0.
+    var tAt = ground.x;
     var quadricM2 = 0.0;
     for (var drawn = departs; drawn; drawn = false) {
-      let place = rayMarchPlaceAt(ray, split.lowestM, tEnd - split.lowestM);
-      p = place.p;
-      quadricM2 = place.quadricM2;
+      tAt = tEnd;
+      let fromStar = (tEnd - nearest) + nearestFromStar;
+      quadricM2 = select(
+        tEnd * (groundQ.qa * tEnd + 2.0 * groundQ.qb) + groundQ.qc,
+        groundQ.qa * fromStar * fromStar + qStar,
+        far,
+      );
     }
+    let p = origin + tAt * dir;
     let datum = datumPointOf(body, p, quadricM2);
     let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
     let local = sampleMediumAt(s * datum.heightM);
@@ -1035,12 +1044,14 @@ fn marchRay(uv : vec2f, depth : f32) -> MarchedRay {
         luminance += viewThroughputOf(&march, slot) * source.weight.rgb * toSun
           * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;
       }
-      for (var drawn = departs; drawn; drawn = false) {
-        let skyLit = vec3f(0.0);
-        lit += source.weight.rgb * (toSun * max(muSun, 0.0) + skyLit);
-      }
+      lit += source.weight.rgb * toSun * max(muSun, 0.0);
     }
-    for (var drawn = departs; drawn; drawn = false) {
+    // The sky's light, the first source's alone, the brightest (`frameSourcesOf`'s order): one
+    // lookup a ray, which SwiftShader's compile of the thick marches holds to.
+    for (var drawn = departs && count > 0u; drawn; drawn = false) {
+      let first = view.sources[0];
+      let skyLit = vec3f(0.0);
+      lit += first.weight.rgb * skyLit;
       let groundShare = lit * medium.groundAlbedo.rgb / PI_VIEW;
       let kept = max(exp(-surfaceDepth) - march.throughput0, vec3f(0.0));
       luminance = max(luminance - groundShare * kept, vec3f(0.0));

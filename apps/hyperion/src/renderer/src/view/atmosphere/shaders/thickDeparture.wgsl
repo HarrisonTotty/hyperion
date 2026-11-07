@@ -12,13 +12,20 @@
 @group(0) @binding(26) var marchIrradiance : texture_2d_array<f32>;
 
 // The sky's irradiance on a horizontal surface at the lookup's start, per unit of the source's
-// illuminance, for a source of light slot `slot` at zenith cosine `muSun` against the datum's normal
-// there: `surfaceLighting.wgsl`'s read at the start's h* (its s times its height above the datum)
-// and s, in x_r = sqrt(h* / H) and mu_s / 2 + 1/2, between the bands about s.
-fn thickDepartureSkyAt(body : OblateBody, start : LookupStart, muSun : f32, slot : u32) -> vec3f {
+// illuminance, for the source `source` against the datum's normal `normal` there:
+// `surfaceLighting.wgsl`'s read at the start's h* (its s times its height above the datum), in
+// x_r = sqrt(h* / H) and mu_s / 2 + 1/2, on band 0's layer of the source's light slot alone, where
+// the lit passes' read lies between the bands about s (`bandTableAt`): one band on a body of one, the
+// decked air's, and SwiftShader's compile of the thick marches crashed (exit_code=139) with the
+// bands' read in them.
+fn thickDepartureSkyAt(
+  body : OblateBody,
+  start : LookupStart,
+  source : SkySource,
+  normal : vec3f,
+) -> vec3f {
+  let muSun = dot(source.direction.xyz, normal);
   let unit = vec2f(muSun * 0.5 + 0.5, sqrt(max(start.scaledHeightM, 0.0) / body.counts.w));
-  return bandTableAt(
-    body, oblateBody, marchIrradiance, clamp(unit, vec2f(0.0), vec2f(1.0)), start.gravityRatio,
-    slot
-  );
+  let layer = min(skySlotOf(source), oblateLayersPerBand(body) - 1u);
+  return tableAtUnitLayer(marchIrradiance, layer, unit).rgb;
 }

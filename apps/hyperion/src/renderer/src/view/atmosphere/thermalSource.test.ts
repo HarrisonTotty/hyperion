@@ -133,13 +133,26 @@ describe("the per-frame kernels' thermal forms (R08.T18.b)", () => {
       const thermal = withThermalSource(pair);
       expect(thermal.name).toBe(`${pair.name}, thermal`);
       expect(thermal.reference.endsWith(`\n${thermalSourceWgsl}`)).toBe(true);
+      // A thick march's departure's sky goes with its departure (fix-r08-decked-air-route).
       expect([...kernelBindings(thermal.reference).keys()]).toEqual([
-        ...kernelBindings(pair.reference).keys(),
+        ...[...kernelBindings(pair.reference).keys()].filter((name) => name !== "marchIrradiance"),
         "thermalSource",
       ]);
       expect(thermal.reference).toContain("thermalPlanckAt(heightM) * view.marchSky.w, absorbing)");
       expect(thermal.reference).toContain("local.planck * (local.absorbing * dtM");
       expect(thermal.reference).toMatch(/let shares = thermalSharesOf\(/u);
+    },
+  );
+
+  it.each([RAY_MARCH_THICK_THERMAL_KERNEL, RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL])(
+    "compiles the decked air's departure out of %s, which no self-luminous body takes (fix-r08-decked-air-route)",
+    (pair) => {
+      const code = pair.reference.replaceAll(/\/\/[^\n]*/gu, "");
+      expect([
+        code.includes("thickDepartureSkyAt("),
+        code.includes("let departs = false;"),
+        kernelBindings(pair.reference).has("marchIrradiance"),
+      ]).toEqual([false, true, false]);
     },
   );
 

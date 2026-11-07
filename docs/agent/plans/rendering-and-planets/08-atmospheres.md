@@ -25271,3 +25271,10 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     moved (through T_lobe).
   - Step 3: `DECKED_AIR_ROUTE_RANGE.mostGroundAlbedo` 0.3; `DECKED_AIR_BRIGHT_GATE_TALLIES` (held to
     `bright.routed`) and `thickRouteRangesOf`'s `brightTallies`, both grounds' gates required.
+  - The gate's fix: `thickDepartureSkyAt(body, start, source, normal)` reads the first source's sky
+    on band 0's layer once a ray; `withoutDeparture` (`NO_DEPARTURE`) compiles the departure out of
+    a deck's march and the thermal forms, which bind no `marchIrradiance`. The departure's code had
+    crashed SwiftShader's compile of the thick marches (test-render parts 10 and 12, exit 139).
+  - Pending: the owner's RTX frame of the routed decked world against 16.67 ms, and the lobe term's
+    and the departure's cost there; the departure below its range (a pixel under about 0.6 times the
+    deck's height).
