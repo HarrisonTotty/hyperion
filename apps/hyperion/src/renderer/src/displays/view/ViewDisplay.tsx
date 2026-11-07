@@ -467,7 +467,7 @@ interface ViewDisplayProps {
   /**
    * Opens the body inspection's planet in the `PLANET VIEWER`, as the `SCENE` bar's
    * `OPEN IN PLANET VIEWER` asks (`App`'s; plan R15, T5), where the launch offers the viewer and
-   * the inspection is of a planet; absent, and the control with it, otherwise.
+   * the inspection is of a planet or a moon; absent, and the control with it, otherwise.
    */
   readonly onPlanetViewer?: (() => void) | undefined;
 }

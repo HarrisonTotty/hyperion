@@ -53,7 +53,8 @@ export interface PlanetViewerDisplayProps {
  *   with no `SCENE` selector and no subscription to the server's scene. Each planet shown is a new
  *   opening, its camera framed afresh.
  * - A planet handed over by `OPEN IN PLANET VIEWER` is opened as the display is next shown, the
- *   galaxy's own, its inputs read back onto the panel (plan R15, T5).
+ *   galaxy's own, its inputs read back onto the panel (plan R15, T5); a moon is opened so too, with
+ *   none, `GENERATE` and `SHARE` held back while the panel holds none of its own.
  * - Until a planet is shown the view's place says how to show one. While `SUN` is `HELD` the
  *   view's label block says where (`heldSunStatement`), since the light is not the records'.
  * - `G` generates and `N` randomizes from anywhere on the display but a text field and a view's
@@ -72,6 +73,7 @@ function PlanetViewerPanels({
   opening,
 }: PlanetViewerDisplayProps) {
   const heldBackId = useId();
+  const noInputsId = useId();
   const { ref: inputsRef, size: inputsSize } = useElementSize();
   const link = useServerLink();
   const universe = useUniverse().open?.id ?? null;
@@ -82,7 +84,7 @@ function PlanetViewerPanels({
       : link.status === "connected"
         ? null
         : "no link to the server";
-  const { generate, randomize: draw } = viewer;
+  const { generate, randomize: draw, noInputs } = viewer;
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.repeat) {
@@ -92,7 +94,7 @@ function PlanetViewerPanels({
         return;
       }
       const key = event.key.toLowerCase();
-      if (key === GENERATE_KEY && heldBack === null) {
+      if (key === GENERATE_KEY && heldBack === null && !noInputs) {
         event.preventDefault();
         generate();
       } else if (key === RANDOMIZE_KEY && heldBack === null) {
@@ -104,7 +106,7 @@ function PlanetViewerPanels({
     return () => {
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [generate, draw, heldBack]);
+  }, [generate, draw, heldBack, noInputs]);
   const sunStatement = heldSunStatement(viewer.sun);
   const hostStatements = useMemo(
     () => (sunStatement === null ? NO_STATEMENTS : [sunStatement]),
@@ -144,6 +146,7 @@ function PlanetViewerPanels({
           viewer={viewer}
           heldBack={heldBack}
           heldBackId={heldBackId}
+          noInputsId={noInputsId}
           sun={<SunControl sun={viewer.sun} onSun={viewer.setSun} />}
           layout={inputsLayout(inputsSize)}
         />
@@ -159,6 +162,8 @@ function PlanetViewerPanels({
           heldBack={heldBack}
           heldBackId={heldBackId}
           onRandomize={draw}
+          noInputs={noInputs}
+          noInputsId={noInputsId}
         />
         {shown === null ? (
           <p className="panel__empty planet-viewer__empty">

@@ -4362,6 +4362,15 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   letter-spacing: 0;
 }
 
+/*
+ * A moon on show has none of the inputs: the groups' last values, which are another planet's, read
+ * muted, as a value not of the body shown, until an input is entered.
+ */
+.planet-inputs__groups--none .form-field__input,
+.planet-inputs__groups--none .planet-inputs__legend > .planet-inputs__summary {
+  color: var(--text-muted);
+}
+
 /* SUN's legend holds its two settings beside its name. */
 .planet-sun__legend {
   display: flex;

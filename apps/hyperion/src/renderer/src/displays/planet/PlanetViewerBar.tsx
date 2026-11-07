@@ -31,6 +31,10 @@ export interface PlanetViewerBarProps {
   readonly onRandomize: () => void;
   /** The viewer's last command, whose state stands here while it is a draw. */
   readonly command: ViewerCommand | null;
+  /** Whether the viewer holds no inputs (a moon on show), which holds `SHARE` back. */
+  readonly noInputs: boolean;
+  /** The ID of the panel's words saying so (`NO INPUTS: A MOON`), which `SHARE` cites. */
+  readonly noInputsId: string;
 }
 
 /**
@@ -47,7 +51,8 @@ export interface PlanetViewerBarProps {
  * - `SHARE` holds the panel's inputs' string, which reproduces the planet in any universe of this
  *   generator version: selected whole as it takes the focus, to copy; or paste one and `LOAD` it
  *   (`Enter`), which puts its inputs on the panel, refusing a string it cannot read with what is
- *   valid.
+ *   valid. While the viewer holds no inputs, a moon on show, it is held back, its last string muted
+ *   and `LOAD` refused, with the panel's reason; `RANDOMIZE` stays offered.
  */
 export function PlanetViewerBar({
   inputs,
@@ -59,6 +64,8 @@ export function PlanetViewerBar({
   heldBackId,
   onRandomize,
   command,
+  noInputs,
+  noInputsId,
 }: PlanetViewerBarProps) {
   const statusId = useId();
   const status =
@@ -99,7 +106,7 @@ export function PlanetViewerBar({
           <RequestStatus state={status} id={statusId} subject="RANDOMIZE" />
         )}
       </div>
-      <ShareField inputs={inputs} onLoad={onLoad} />
+      <ShareField inputs={inputs} onLoad={onLoad} heldId={noInputs ? noInputsId : null} />
       {heldBack === null ? null : (
         <p className="planet-viewer__held" id={heldBackId}>
           <StatusText text={`NOT AVAILABLE: ${heldBack}`} />
@@ -113,17 +120,23 @@ export function PlanetViewerBar({
 interface ShareFieldProps {
   readonly inputs: PlanetInputs;
   readonly onLoad: (inputs: PlanetInputs) => void;
+  /** The ID of the reason it is held back, or `null` while it is offered. */
+  readonly heldId: string | null;
 }
 
-/** The inputs' string, to copy, or a pasted one to `LOAD`. */
-function ShareField({ inputs, onLoad }: ShareFieldProps) {
+/** The inputs' string, to copy, or a pasted one to `LOAD`; held back, read only, with `heldId`. */
+function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
   const fieldId = useId();
   const errorId = useId();
   const field = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const text = formatInputsString(inputs);
+  const held = heldId !== null;
   const load = (): void => {
+    if (held) {
+      return;
+    }
     if (draft === null || isEmptyEntry(draft)) {
       setDraft(null);
       setRefusal(null);
@@ -150,9 +163,11 @@ function ShareField({ inputs, onLoad }: ShareFieldProps) {
         type="text"
         autoComplete="off"
         spellCheck={false}
-        value={draft ?? text}
-        aria-invalid={refusal === null ? undefined : "true"}
-        aria-describedby={refusal === null ? undefined : errorId}
+        value={held ? text : (draft ?? text)}
+        readOnly={held}
+        aria-disabled={held ? "true" : undefined}
+        aria-invalid={refusal === null || held ? undefined : "true"}
+        aria-describedby={describedBy([heldId, refusal === null || held ? null : errorId])}
         onChange={(event) => {
           setDraft(event.target.value);
           setRefusal(null);
@@ -175,6 +190,8 @@ function ShareField({ inputs, onLoad }: ShareFieldProps) {
       <button
         type="button"
         className="command"
+        aria-disabled={held ? "true" : undefined}
+        aria-describedby={heldId ?? undefined}
         onClick={() => {
           load();
           field.current?.focus();
@@ -182,7 +199,7 @@ function ShareField({ inputs, onLoad }: ShareFieldProps) {
       >
         LOAD
       </button>
-      {refusal === null ? null : (
+      {refusal === null || held ? null : (
         <p className="form-field__error planet-inputs__error" id={errorId}>
           <StatusText text={refusal} />
         </p>

@@ -26,8 +26,17 @@ import {
   aUniverse,
   aUniverseList,
 } from "../../test/galaxyFixtures";
-import { sliceEarthInspection } from "../../test/inspectionFixture";
-import { FIXTURE_EARTH, FIXTURE_SYSTEM, sliceBodies } from "../../test/planetaryFixture";
+import {
+  FIXTURE_MOON,
+  populatedMoonInspection,
+  sliceEarthInspection,
+} from "../../test/inspectionFixture";
+import {
+  FIXTURE_EARTH,
+  FIXTURE_SYSTEM,
+  populatedBodies,
+  sliceBodies,
+} from "../../test/planetaryFixture";
 import { REQUEST_TIMEOUT_MS } from "../../lib/useServerRequest";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { stubViewLayout } from "../../test/viewDisplayHarness";
@@ -244,6 +253,42 @@ async function answerOpen(socket: FakeWebSocket, multipleStars = false): Promise
   });
   await act(async () => {
     socket.serverAnswers("system_bodies", () => sliceBodies());
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await settle();
+}
+
+/** Refuses the pending `viewer_inputs` as the server refuses a body that is no planet. */
+async function refuseAsNoPlanet(socket: FakeWebSocket): Promise<void> {
+  const [asked] = socket.requestsOfKind("viewer_inputs");
+  await act(async () => {
+    if (asked !== undefined) {
+      socket.serverRejects(asked.id, {
+        code: "bad_request",
+        message: "body is no planet: the viewer reads a planet's inputs",
+        field: "body",
+      });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+/** Answers an `OPEN BODY`'s system's record, then its bodies with `bodies`. */
+async function answerSystem(
+  socket: FakeWebSocket,
+  bodies: ResponseFor<"system_bodies">,
+): Promise<void> {
+  await act(async () => {
+    socket.serverAnswers("resolve_system", () => ({
+      kind: "resolve_system",
+      universe: aUniverse().id,
+      time: { seconds: 0, nanos: 0 },
+      record: { ...aSystemRecord({ positionLy: [26_000, 0, 12] }), id: FIXTURE_SYSTEM },
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  await act(async () => {
+    socket.serverAnswers("system_bodies", () => bodies);
     await vi.advanceTimersByTimeAsync(0);
   });
   await settle();
@@ -547,21 +592,12 @@ describe("nextDrawSeed", () => {
       ]).toEqual([1, 0]);
     });
 
-    it("states the server's refusal of a body that is no planet", async () => {
+    it("states the server's refusal of a body that is no planet, once its system says it is no moon", async () => {
       const { socket, user } = await renderViewer();
       await openUniverse(socket, user);
       await openTyped(user, FIXTURE_EARTH);
-      const [asked] = socket.requestsOfKind("viewer_inputs");
-      await act(async () => {
-        if (asked !== undefined) {
-          socket.serverRejects(asked.id, {
-            code: "bad_request",
-            message: "body is no planet: the viewer reads a planet's inputs",
-            field: "body",
-          });
-        }
-        await vi.advanceTimersByTimeAsync(0);
-      });
+      await refuseAsNoPlanet(socket);
+      await answerSystem(socket, sliceBodies());
       expect(
         wholeText("OPEN BODY REJECTED: body is no planet: the viewer reads a planet's inputs"),
       ).toHaveLength(1);
@@ -622,6 +658,119 @@ describe("nextDrawSeed", () => {
       show(true);
       await settle();
       expect(socket.requestsOfKind("viewer_inputs")).toHaveLength(1);
+    });
+  });
+
+  describe("a moon of the galaxy (R15.T5's follow-up)", () => {
+    /** Hands the populated answer's moon over, as `OPEN IN PLANET VIEWER` does. */
+    async function handOverMoon() {
+      const rendered = await renderViewer();
+      await openUniverse(rendered.socket, rendered.user);
+      rendered.handOver({ inspection: populatedMoonInspection(), sequence: 1 });
+      await settle();
+      return rendered;
+    }
+
+    it("is opened as OPEN IN PLANET VIEWER hands it over, asking no inputs of it", async () => {
+      const { socket, user } = await handOverMoon();
+      await openShown(user);
+      expect([
+        screen.queryByText(/NO PLANET/u),
+        screen.getByRole("textbox", { name: "BODY" }).getAttribute("value"),
+        socket.requestsOfKind("viewer_inputs").length,
+      ]).toEqual([null, FIXTURE_MOON.toUpperCase(), 0]);
+    });
+
+    it("says, folded, that the moon is shown as a body of the galaxy", async () => {
+      const { user } = await handOverMoon();
+      await user.click(screen.getByRole("button", { name: "SHOWN" }));
+      expect(wholeText(`BODY ${FIXTURE_MOON.toUpperCase()}`)).toHaveLength(1);
+    });
+
+    it("is opened by the ID typed in BODY, the server's refusal of its inputs read as none", async () => {
+      const { socket, user } = await renderViewer();
+      await openUniverse(socket, user);
+      await openTyped(user, FIXTURE_MOON);
+      await refuseAsNoPlanet(socket);
+      await answerSystem(socket, populatedBodies());
+      expect([
+        screen.queryByText(/NO PLANET/u),
+        screen.queryByText(/OPEN BODY REJECTED/u),
+        wholeText("NO INPUTS: A MOON").length,
+      ]).toEqual([null, null, 1]);
+    });
+
+    it("keeps the panel's last inputs", async () => {
+      await handOverMoon();
+      expect(screen.getByRole("textbox", { name: "SMA" })).toHaveProperty("value", "1");
+    });
+
+    it("holds GENERATE back, saying why", async () => {
+      const { socket, user } = await handOverMoon();
+      const generate = screen.getByRole("button", { name: "G GENERATE" });
+      await user.click(generate);
+      await user.keyboard("g");
+      expect([
+        generate.getAttribute("aria-disabled"),
+        socket.requestsOfKind("viewer_planet").length,
+      ]).toEqual(["true", 0]);
+      expect(generate).toHaveAccessibleDescription("NO INPUTS: A MOON");
+    });
+
+    it("holds SHARE and its LOAD back, saying why", async () => {
+      await handOverMoon();
+      const share = screen.getByRole("textbox", { name: "SHARE" });
+      const load = screen.getByRole("button", { name: "LOAD" });
+      expect([share.getAttribute("aria-disabled"), load.getAttribute("aria-disabled")]).toEqual([
+        "true",
+        "true",
+      ]);
+      expect(load).toHaveAccessibleDescription("NO INPUTS: A MOON");
+    });
+
+    it("still offers RANDOMIZE", async () => {
+      const { socket, user } = await handOverMoon();
+      const randomize = screen.getByRole("button", { name: "N RANDOMIZE" });
+      await user.click(randomize);
+      expect([
+        randomize.getAttribute("aria-disabled"),
+        socket.requestsOfKind("viewer_randomize").length,
+      ]).toEqual([null, 1]);
+    });
+
+    it("offers GENERATE again once an input is entered", async () => {
+      const { socket, user } = await handOverMoon();
+      const sma = screen.getByRole("textbox", { name: "SMA" });
+      await user.clear(sma);
+      await user.type(sma, "2{Enter}");
+      await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+      expect([
+        screen.queryByText(/NO INPUTS/u),
+        socket.requestsOfKind("viewer_planet").length,
+      ]).toEqual([null, 1]);
+    });
+
+    it("gives a planet opened after it its inputs again", async () => {
+      const { socket, user, handOver } = await handOverMoon();
+      handOver({ inspection: sliceEarthInspection(), sequence: 2 });
+      await act(async () => {
+        socket.serverAnswers("viewer_inputs", () => readAnswer());
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await settle();
+      await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+      expect([
+        screen.queryByText(/NO INPUTS/u),
+        socket.requestsOfKind("viewer_planet").length,
+      ]).toEqual([null, 1]);
+    });
+
+    it("opens in VIEW's ORBIT camera about the moon", async () => {
+      await handOverMoon();
+      expect(screen.getByRole("button", { name: "0 ORBIT" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
     });
   });
 

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { dot, normalise, sub } from "../../geometry/vec3";
-import { sliceEarthInspection } from "../../test/inspectionFixture";
+import {
+  FIXTURE_MOON,
+  FIXTURE_MOONS_PLANET,
+  populatedMoonInspection,
+  sliceEarthInspection,
+} from "../../test/inspectionFixture";
 import { FIXTURE_EARTH } from "../../test/planetaryFixture";
 import { PHASE_GIANT, phaseScene } from "../../view/scenes/phaseScene";
 import {
@@ -58,6 +63,43 @@ describe("the viewer's scene", () => {
     const before = starOf(0)?.centreM;
     holder.current = { kind: "held", latitudeDeg: 30, longitudeDeg: 120 };
     expect(starOf(0)?.centreM).not.toEqual(before);
+  });
+});
+
+/** The populated answer's moon's kept scene at its first frame, its sun as `sun` sets it. */
+function moonScene(sun: SunHolder["current"]) {
+  return viewerScene(populatedMoonInspection(), { current: sun }).sceneAt(0);
+}
+
+describe("the viewer's scene of a moon (R15.T5's follow-up)", () => {
+  it("offers ORBIT about the moon", () => {
+    expect(moonScene(ORBITAL_SUN).orbitHome).toBe(FIXTURE_MOON);
+  });
+
+  it("turns the host star over the moon's held point under HELD", () => {
+    const held = moonScene({ kind: "held", latitudeDeg: 0, longitudeDeg: 0 });
+    const moon = held.bodies.find((body) => body.id === FIXTURE_MOON);
+    const star = held.bodies.find((body) => body.kind === "star");
+    const before = moonScene(ORBITAL_SUN).bodies.find((body) => body.kind === "star");
+    if (moon === undefined || star === undefined || before === undefined) {
+      throw new Error("the scene holds its moon and its star");
+    }
+    const distance = (centre: typeof star.centreM): number =>
+      Math.hypot(centre.x - moon.centreM.x, centre.y - moon.centreM.y, centre.z - moon.centreM.z);
+    expect([
+      star.centreM === before.centreM,
+      distance(star.centreM) / distance(before.centreM),
+    ]).toEqual([false, expect.closeTo(1, 12)]);
+  });
+
+  it("keeps the moon's planet where the records put it under HELD", () => {
+    const planetOf = (sun: SunHolder["current"]) =>
+      moonScene(sun).bodies.find((body) => body.id === FIXTURE_MOONS_PLANET)?.centreM;
+    const orbital = planetOf(ORBITAL_SUN);
+    if (orbital === undefined) {
+      throw new Error("the moon's scene holds its planet");
+    }
+    expect(planetOf({ kind: "held", latitudeDeg: 30, longitudeDeg: 120 })).toEqual(orbital);
   });
 });
 

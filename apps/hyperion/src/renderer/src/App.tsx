@@ -73,7 +73,7 @@ interface DisplayInputs {
   readonly planetViewer: ((inspection: BodyInspection) => void) | undefined;
   /**
    * Opens `VIEW`'s body inspection's planet in the `PLANET VIEWER`, from its `SCENE` bar, where the
-   * launch offers the viewer and the inspection is of a planet; else `undefined`.
+   * launch offers the viewer and the inspection is of a planet or a moon; else `undefined`.
    */
   readonly inspectionToViewer: (() => void) | undefined;
   /** The latest planet handed over to the `PLANET VIEWER`, or `null` before the first. */

@@ -301,13 +301,19 @@ describe("the SYSTEM display", () => {
       expect(within(scenes).queryByRole("button", { name: "OPEN IN PLANET VIEWER" })).toBeNull();
     });
 
-    it("is not offered on VIEW's SCENE bar for a moon, which has none of the viewer's inputs", async () => {
-      const { user } = await focusPlanet();
+    it("hands a moon over from VIEW's SCENE bar, asking none of the viewer's inputs of it", async () => {
+      const { user, socket } = await focusPlanet();
       const tree = screen.getByRole("tree", { name: "Bodies" });
       await user.click(within(tree).getByRole("treeitem", { name: /\/257,/ }));
       await user.keyboard("v");
       const scenes = screen.getByRole("group", { name: "Scene" });
-      expect(within(scenes).queryByRole("button", { name: "OPEN IN PLANET VIEWER" })).toBeNull();
+      await user.click(within(scenes).getByRole("button", { name: "OPEN IN PLANET VIEWER" }));
+      expect([
+        within(navigation())
+          .getByRole("button", { name: "F5 Planet Viewer" })
+          .getAttribute("aria-current"),
+        socket.requestsOfKind("viewer_inputs").length,
+      ]).toEqual(["page", 0]);
     });
 
     it("hands VIEW's body inspection's planet over from its SCENE bar", async () => {

@@ -272,3 +272,11 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   request in flight (`SkyFlight`) decodes its own replies, so a remount mid-decode loses none; a
   failure is not carried. It holds for every new scene of the same arrival, a `VIEW BODY` in the
   server scene's system among them.
+- R15.T5 (built, moons): `opensInViewer` takes moons, so `SYSTEM`'s `P` and `VIEW`'s bar offer one
+  (`NOT A PLANET` is gone). A hand-over of a moon asks no `viewer_inputs`; `OPEN BODY` reads a
+  `bad_request` on `body` as no inputs once `system_bodies` says the body is a moon.
+- R15.T5 (built): `ShownSource` gains `{ kind: "moon" }`, `ShownPlanet.inputs` is `null` for it,
+  and `PlanetViewer.noInputs` holds `GENERATE` (and `G`) and the bar's `SHARE`/`LOAD` back.
+- R15.T5 (lean, 2026-11-07): with a moon shown, the groups keep their last values, muted and still
+  editable, under `NO INPUTS: A MOON`; an input entered (or a planet shown) ends the hold, and
+  `RANDOMIZE` and `OPEN BODY` stay offered. `SUN` `HELD` turns the stars about the moon alone.

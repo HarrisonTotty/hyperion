@@ -2382,25 +2382,17 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
       expect(openInViewer()).toHaveAccessibleDescription("NO BODY FOCUSED");
     });
 
-    it("is held back for a moon, which has none of the viewer's inputs", async () => {
+    it("opens a selected moon, which the viewer shows with none of its inputs", async () => {
       const opened = vi.fn<(inspection: BodyInspection) => void>();
       const { user, socket } = renderView(undefined, opened);
       await answer(socket, populatedBodies());
       await selectRow(user, /\/257,/);
       await user.keyboard("c");
       await user.keyboard("p");
-      expect([openInViewer()?.getAttribute("aria-disabled"), opened.mock.calls.length]).toEqual([
-        "true",
-        0,
-      ]);
-    });
-
-    it("says NOT A PLANET of a moon", async () => {
-      const { user, socket } = renderView(undefined, () => undefined);
-      await answer(socket, populatedBodies());
-      await selectRow(user, /\/257,/);
-      await user.keyboard("c");
-      expect(openInViewer()).toHaveAccessibleDescription("NOT A PLANET");
+      expect([
+        openInViewer()?.getAttribute("aria-disabled"),
+        opened.mock.calls.map(([inspection]) => inspection.body),
+      ]).toEqual([null, [`${FIXTURE_SYSTEM}.0101`]]);
     });
   });
 

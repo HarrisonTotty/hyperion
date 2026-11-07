@@ -17,6 +17,11 @@
  *   already read, at that display's time. Its inputs, read back, go on the panel, so that
  *   `GENERATE` makes a planet of them, whose other draws are its own; the planet shown is the
  *   galaxy's.
+ * - **A moon** opens as the galaxy's own body too, from `SYSTEM`'s or `VIEW`'s hand-over or by its
+ *   ID, but has none of the viewer's inputs: the hand-over asks no `viewer_inputs` of it, and by its
+ *   ID the server's refusal of it is read as no inputs once its system's bodies say it is a moon.
+ *   The panel then keeps its last inputs and holds `GENERATE` and `SHARE` back (`noInputs`) until
+ *   an input is entered or another planet shown.
  * - **A command** shows `PENDING` and then its outcome, closed-loop as the guide asks: the planet
  *   shown, or the server's refusal, which names the input it is of, or its failure or time-out. A
  *   newer command cancels the one in flight, and so does leaving the display mounted no longer.
@@ -81,11 +86,14 @@ export interface ViewerCommand {
 }
 
 /**
- * Where the planet shown comes from: generated from the inputs, or the galaxy's own, its inputs
- * read back, with whether its system has more stars than the inputs' one host.
+ * Where the planet shown comes from: generated from the inputs; the galaxy's own, its inputs read
+ * back, with whether its system has more stars than the inputs' one host; or a moon of the galaxy,
+ * which has no inputs to read back.
  */
 export type ShownSource =
-  { readonly kind: "generated" } | { readonly kind: "body"; readonly multipleStars: boolean };
+  | { readonly kind: "generated" }
+  | { readonly kind: "body"; readonly multipleStars: boolean }
+  | { readonly kind: "moon" };
 
 /** The planet the viewer shows: the inspection it opened, and what it was made from. */
 export interface ShownPlanet {
@@ -94,8 +102,8 @@ export interface ShownPlanet {
   /** Its system: at the Sun-like point, or where the galaxy's stands. */
   readonly place: SystemPlace;
   readonly source: ShownSource;
-  /** Its inputs as the server read them. */
-  readonly inputs: PlanetInputs;
+  /** Its inputs as the server read them, or `null` for a moon, which has none. */
+  readonly inputs: PlanetInputs | null;
   /** What the generator drew for each input left to it, and where the planet formed. */
   readonly drawn: Readonly<Partial<Record<NumericInputName, number | null>>>;
   /** Its opening as `VIEW`'s body inspection. */
@@ -114,6 +122,11 @@ export interface PlanetViewer {
   readonly command: ViewerCommand | null;
   /** The planet on show, or `null` before the first. */
   readonly shown: ShownPlanet | null;
+  /**
+   * Whether the panel holds no inputs of the body on show: a moon is shown and no input has been
+   * entered since, so that `GENERATE` and `SHARE` are held back.
+   */
+  readonly noInputs: boolean;
   /** Generates the panel's inputs. */
   readonly generate: () => void;
   /**
@@ -245,13 +258,28 @@ function openedOption(
   }
 }
 
+/** The kind of `inspection`'s body as its system's bodies give it, or `undefined`. */
+function inspectedKind(inspection: BodyInspection): string | undefined {
+  return inspection.bodies.bodies.find((body) => body.id === inspection.body)?.kind.kind;
+}
+
 /**
  * Whether the viewer opens `inspection`'s body (plan R15, T5): a planet or a dwarf planet, whose
- * inputs the server reads back; a moon has none of the viewer's inputs.
+ * inputs the server reads back, or a moon, shown with none.
  */
 export function opensInViewer(inspection: BodyInspection): boolean {
-  const kind = inspection.bodies.bodies.find((body) => body.id === inspection.body)?.kind.kind;
-  return kind === "planet" || kind === "dwarf_planet";
+  const kind = inspectedKind(inspection);
+  return kind === "planet" || kind === "dwarf_planet" || kind === "moon";
+}
+
+/** Whether `inspection`'s body is a moon, which has none of the viewer's inputs. */
+function isMoon(inspection: BodyInspection): boolean {
+  return inspectedKind(inspection) === "moon";
+}
+
+/** A moon opened as the galaxy's own body, with no inputs. */
+function openedMoon(inspection: BodyInspection): Opened {
+  return { kind: "opened", inspection, inputs: null, drawn: NONE_DRAWN, source: { kind: "moon" } };
 }
 
 /** The viewer system's designation: `VIEWER` and its ID's last six digits, upper case. */
@@ -267,7 +295,8 @@ type Opened =
   | {
       readonly kind: "opened";
       readonly inspection: BodyInspection;
-      readonly inputs: PlanetInputs;
+      /** Its inputs, or `null` for a moon, which has none. */
+      readonly inputs: PlanetInputs | null;
       readonly drawn: ShownPlanet["drawn"];
       readonly source: ShownSource;
     }
@@ -324,6 +353,9 @@ async function readBack(
   inspection: BodyInspection,
   signal: AbortSignal,
 ): Promise<Opened> {
+  if (isMoon(inspection)) {
+    return openedMoon(inspection);
+  }
   const read = await asked<"viewer_inputs">(
     requests,
     { kind: "viewer_inputs", universe: inspection.universe, body: inspection.body },
@@ -345,8 +377,21 @@ async function readBack(
 }
 
 /**
+ * Whether `outcome` is the server's refusal of `viewer_inputs` for a body that is no planet:
+ * `bad_request` on the field `body` (the server's `viewer::inputs`).
+ */
+function refusedAsNoPlanet(outcome: Asked<"viewer_inputs">): boolean {
+  return (
+    outcome.kind === "failed" &&
+    outcome.failure.code === "bad_request" &&
+    "field" in outcome.failure &&
+    outcome.failure.field === "body"
+  );
+}
+
+/**
  * Reads the galaxy's planet `body` of `universe`: its inputs, then its system's record and its
- * bodies at the epoch.
+ * bodies at the epoch; or, the inputs refused as no planet's, a moon with none.
  */
 async function galaxyPlanet(
   requests: Pick<RequestClient, "request">,
@@ -354,7 +399,8 @@ async function galaxyPlanet(
   body: BodyIdHex,
   signal: AbortSignal,
 ): Promise<Opened> {
-  // The inputs first: a body that is no planet is refused before its system is read.
+  // The inputs first, as a planet's path has always asked them; a body refused as no planet may
+  // still be a moon, which its system's bodies tell.
   const probe = await asked<"viewer_inputs">(
     requests,
     { kind: "viewer_inputs", universe, body },
@@ -363,7 +409,8 @@ async function galaxyPlanet(
   if (probe.kind === "aborted") {
     return probe;
   }
-  if (probe.kind !== "ok") {
+  const noPlanet = refusedAsNoPlanet(probe);
+  if (probe.kind !== "ok" && !noPlanet) {
     return { kind: "failed", command: failedCommand("open", probe) };
   }
   const { system } = parseBodyId(body);
@@ -388,6 +435,13 @@ async function galaxyPlanet(
   const read = await inspectionAt(requests, universe, place, body, "open", signal);
   if (read.kind !== "read") {
     return read;
+  }
+  if (probe.kind !== "ok") {
+    // Refused as no planet: a moon opens with no inputs; anything else is refused as the server
+    // refused it.
+    return isMoon(read.inspection)
+      ? openedMoon(read.inspection)
+      : { kind: "failed", command: failedCommand("open", probe) };
   }
   return {
     kind: "opened",
@@ -461,6 +515,7 @@ export function usePlanetViewer(
   const [inputs, setInputsState] = useState<PlanetInputs>(DEFAULT_INPUTS);
   const [command, setCommand] = useState<ViewerCommand | null>(null);
   const [shown, setShown] = useState<ShownPlanet | null>(null);
+  const [noInputs, setNoInputs] = useState(false);
   const [drawSeed, setDrawSeed] = useState<SeedHex>(FIRST_DRAW_SEED);
   const [sun, setSunState] = useState<SunSetting>(ORBITAL_SUN);
   // The scene reads the sun at every frame from this holder, which `setSun` writes with the state.
@@ -515,7 +570,13 @@ export function usePlanetViewer(
         }
         return settled;
       });
-      setInputsState(outcome.inputs);
+      // A moon keeps the panel's last inputs, which are none of its own.
+      if (outcome.inputs === null) {
+        setNoInputs(true);
+      } else {
+        setInputsState(outcome.inputs);
+        setNoInputs(false);
+      }
       setShown((previous) => ({
         body: outcome.inspection.body,
         place: outcome.inspection.place,
@@ -555,7 +616,7 @@ export function usePlanetViewer(
   );
 
   const generate = useCallback((): void => {
-    if (universe === null) {
+    if (universe === null || noInputs) {
       return;
     }
     const signal = start();
@@ -563,7 +624,7 @@ export function usePlanetViewer(
     open("generate", universe, inputs, signal).catch((error: unknown) => {
       failed("generate", signal, error);
     });
-  }, [universe, inputs, start, open, failed]);
+  }, [universe, inputs, noInputs, start, open, failed]);
 
   const randomize = useCallback((): void => {
     if (universe === null) {
@@ -643,14 +704,18 @@ export function usePlanetViewer(
     };
   }, [opening, requests, start, present, failed]);
 
+  // An input entered gives the panel inputs of its own again.
   const setInput = useCallback((name: NumericInputName, wire: number | null): void => {
     setInputsState((previous) => ({ ...previous, values: { ...previous.values, [name]: wire } }));
+    setNoInputs(false);
   }, []);
   const setSeed = useCallback((seed: SeedHex): void => {
     setInputsState((previous) => ({ ...previous, seed }));
+    setNoInputs(false);
   }, []);
   const setInputs = useCallback((next: PlanetInputs): void => {
     setInputsState(next);
+    setNoInputs(false);
   }, []);
   const setSun = useCallback((next: SunSetting): void => {
     sunHolder.current.current = next;
@@ -664,6 +729,7 @@ export function usePlanetViewer(
     setInputs,
     command,
     shown,
+    noInputs,
     generate,
     randomize,
     openBody,
