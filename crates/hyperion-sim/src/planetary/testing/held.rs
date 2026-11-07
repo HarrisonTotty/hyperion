@@ -256,10 +256,15 @@ mod tests {
             "u32",
         ];
 
+        /// The surface crate's own holds, whose switches are that crate's `cfg(test)` alone, set by
+        /// its own tests: no sim test can set one, so a pool here carries none, and the sim's reads
+        /// the version's rules (the mature colour, `material::weathering::MATURE_COLOUR_VERSION`).
+        const SURFACE_HOLDS: [&str; 1] = ["MatureColourRules"];
+
         /// Every `Cell<Option<…>>` in the sim's sources and the surface crate's (not a `RefCell` or
-        /// a `OnceCell`) is a hold with its line in [`HeldRules`], once, or a cell known not to be
-        /// one ([`NOT_HOLDS`], or of a tuple), so that a hold added later reaches a pool's threads
-        /// too, or fails here until it is listed.
+        /// a `OnceCell`) is a hold with its line in [`HeldRules`], once, a surface crate's hold
+        /// ([`SURFACE_HOLDS`]), or a cell known not to be one ([`NOT_HOLDS`], or of a tuple), so
+        /// that a hold added later reaches a pool's threads too, or fails here until it is listed.
         #[test]
         fn every_cell_of_an_optional_rule_is_a_carried_hold_or_known_not_one() {
             let mut holds = Vec::new();
@@ -275,7 +280,10 @@ mod tests {
                         .take_while(|&c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
                         .collect();
                     let name = path.rsplit("::").next().unwrap_or_default().to_owned();
-                    if name.is_empty() || NOT_HOLDS.contains(&name.as_str()) {
+                    if name.is_empty()
+                        || NOT_HOLDS.contains(&name.as_str())
+                        || SURFACE_HOLDS.contains(&name.as_str())
+                    {
                         continue;
                     }
                     holds.push(name);

@@ -11,14 +11,12 @@
 //! linear sRGB taken to XYZ by IEC 61966-2-1's primaries at ASTM E308's D65 white (0.95047, 1,
 //! 1.08883), which CIELAB's white takes too, so that a grey is achromatic. A
 //! colour is grey at C* below 6 and orange-brown at C* of 15 or more at h 25–85°, the planet-variety
-//! census's thresholds. Each draw is generated twice, under version 29's rules (its template's
-//! row) and 30's (its own surface), and nothing else differs. A census of the native build alone:
+//! census's thresholds. Each draw is generated twice, under version 30's rules (its template's
+//! row) and 31's (its own surface), and nothing else differs. A census of the native build alone:
 //! its 200 draws on one WebAssembly thread would take the slow suite's time for no check of its
 //! bits that the golden systems do not make.
 
 use std::collections::BTreeMap;
-
-use hyperion_testkit::float::assert_same_bits;
 
 use super::tests::{galaxy, grid};
 use super::*;
@@ -220,14 +218,59 @@ fn summary(colours: &[Colour]) -> String {
     )
 }
 
+/// The grey shares of the discs `draws` under 30's rules and 31's, their colours `colours` in that
+/// order, one line each: all the discs', the snowballs' and Venus decks' apart (grey in nature too),
+/// the rest's, and the mature airless `basalt` and `basalt_fe` lids'.
+fn grey_shares(draws: &[Drawn], colours: [&[Colour]; 2]) -> String {
+    // The discs grey in nature too: a snowball's ice and Venus's deck, counted apart.
+    let truly_grey = |d: &Drawn| {
+        matches!(
+            d.surface.template,
+            PhaseTemplate::Snowball | PhaseTemplate::Venus
+        )
+    };
+    let mature_basalt = |d: &Drawn| {
+        d.surface.template == PhaseTemplate::Mercury
+            && matches!(d.lid.as_str(), "basalt" | "basalt_fe")
+            && d.maturity.is_some_and(|m| m >= 0.95)
+    };
+    let count = |k: usize| f64::from(u32::try_from(k).expect("a census's count fits"));
+    let mut shares = String::new();
+    for (rules, colours) in [("30", colours[0]), ("31", colours[1])] {
+        let grey = |keep: &dyn Fn(&Drawn) -> bool| {
+            draws
+                .iter()
+                .zip(colours.iter())
+                .filter(|(d, _)| keep(d))
+                .fold((0, 0), |(n, g), (_, c)| {
+                    (n + 1, g + usize::from(c.chroma < GREY_CHROMA))
+                })
+        };
+        let (all, all_grey) = grey(&|_| true);
+        let (apart, apart_grey) = grey(&truly_grey);
+        let (rest, rest_grey) = grey(&|d| !truly_grey(d));
+        let (basalts, basalts_grey) = grey(&mature_basalt);
+        writeln!(
+            shares,
+            "{rules}: grey {all_grey} of {all} ({:.0}%); snowballs and Venus decks {apart_grey} of \
+             {apart} grey; the rest {rest_grey} of {rest} grey ({:.0}%); mature airless basalt and \
+             basalt_fe lids {basalts_grey} of {basalts} grey",
+            100.0 * count(all_grey) / count(all),
+            100.0 * count(rest_grey) / count(rest),
+        )
+        .unwrap();
+    }
+    shares
+}
+
 /// The census: `RANDOMIZE`'s first 200 draws, each disc's colour under the Sun under version
-/// 29's rules and 30's, stated draw by draw and by template, with the same template and `p_V` to
-/// the bit under both. Under 30's the distinct colours are more than twice 29's (the lane's
-/// acceptance, "well above 18"); its grey share, the acceptance's other figure (under half), is
-/// stated, with the discs it holds grey only by R10.T1.d's terrain colour spread: a mature (m ≥
-/// 0.95) airless `basalt` or `basalt_fe` lid, whose weathered colour the law returns near grey
-/// where the Moon's maria are red-sloped (decision-r10-t1d-anchor-colour's recorded miss; a
-/// finding).
+/// 30's rules and 31's, stated draw by draw and by template, with the same template under both
+/// (`p_V` moves by the Bond albedo alone, which a weathered lid's mature colour moves in its B, R
+/// and near-infrared bins). Under 31's the distinct colours are more than twice 30's (the lane's
+/// acceptance, "well above 18"). Its grey share is stated under both, all the discs', the
+/// snowballs' and Venus decks' apart (grey in nature too), and the rest's, with the mature (m ≥
+/// 0.95) airless `basalt` and `basalt_fe` lids', which the slab alone returns near grey and the
+/// mature colour draws toward the Moon's (`toward_mature_colour`).
 #[test]
 #[ignore = "slow: 200 viewer draws generated twice, some minutes"]
 fn under_the_surface_colour_randomize_s_discs_take_their_own_colours() {
@@ -240,7 +283,7 @@ fn under_the_surface_colour_randomize_s_discs_take_their_own_colours() {
     let mut out = String::new();
     writeln!(
         out,
-        "| draw | host K | a au | mass Me | state | lid | maturity | template | 29 p B/V/R | 29 colour | 30 p B/V/R | 30 colour |"
+        "| draw | host K | a au | mass Me | state | lid | maturity | template | 30 p B/V/R | 30 colour | 31 p B/V/R | 31 colour |"
     )
     .unwrap();
     writeln!(out, "|---|---|---|---|---|---|---|---|---|---|---|---|").unwrap();
@@ -272,8 +315,6 @@ fn under_the_surface_colour_randomize_s_discs_take_their_own_colours() {
         )
         .unwrap();
         assert_eq!(d.template.template, d.surface.template, "draw {}", d.seed);
-        // p_V is the template's scale under both rules, to the bit.
-        assert_same_bits(d.template.p.v, d.surface.p.v);
         before.push(old);
         after.push(new);
         let entry = by_template
@@ -282,12 +323,12 @@ fn under_the_surface_colour_randomize_s_discs_take_their_own_colours() {
         entry.0.push(old);
         entry.1.push(new);
     }
-    writeln!(out, "\n29 (template): {}", summary(&before)).unwrap();
-    writeln!(out, "30 (surface):  {}", summary(&after)).unwrap();
+    writeln!(out, "\n30 (template): {}", summary(&before)).unwrap();
+    writeln!(out, "31 (surface):  {}", summary(&after)).unwrap();
     for (template, (old, new)) in &by_template {
         writeln!(
             out,
-            "- {template}: 29 {}; 30 {}",
+            "- {template}: 30 {}; 31 {}",
             summary(old),
             summary(new)
         )
@@ -300,22 +341,7 @@ fn under_the_surface_colour_randomize_s_discs_take_their_own_colours() {
         codes.dedup();
         codes.len()
     };
-    let grey = after.iter().filter(|c| c.chroma < GREY_CHROMA).count();
-    let dark_end = draws
-        .iter()
-        .zip(&after)
-        .filter(|(d, c)| {
-            c.chroma < GREY_CHROMA
-                && d.surface.template == PhaseTemplate::Mercury
-                && matches!(d.lid.as_str(), "basalt" | "basalt_fe")
-                && d.maturity.is_some_and(|m| m >= 0.95)
-        })
-        .count();
-    eprintln!(
-        "30's grey discs: {grey} of {}, {dark_end} of them mature airless basalt or basalt_fe \
-         lids, grey by the weathering law's terrain colour spread",
-        after.len()
-    );
+    eprintln!("{}", grey_shares(&draws, [&before, &after]));
     assert!(
         distinct(&after) > 2 * distinct(&before),
         "{} against {}",

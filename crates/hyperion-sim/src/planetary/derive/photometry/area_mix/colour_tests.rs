@@ -247,3 +247,63 @@ fn space_weathering_reddens_the_airless_silicate_lids() {
         eprintln!("{line}; the Moon's {moon_b:.3} {moon_r:.3}");
     }
 }
+
+/// From 30 (the surface colour) a weathered airless silicate lid's colour tends to the mature
+/// lunar colour as its npFe⁰ extinguishes its grains' interiors (`toward_mature_colour`): at m = 1
+/// every lid is red-sloped, R over V above 1.10 and B over V between Mercury's 0.739 (Mallama,
+/// Krobusek and Pavlov 2017, Table 7) and the Moon's bluest mare's 0.860 (Gehrels, Coffeen and
+/// Owings 1964, Table XIII), where the slab alone leaves `basalt_fe` at 0.956 and `basalt` at 0.930;
+/// its V bin, its first bin and its infrared bins are the slab's to the bit, and a fresh lid (m =
+/// 0) keeps its row's bins to the bit, so that fresh basalt stays grey.
+#[test]
+fn under_the_surface_colour_mature_airless_silicates_take_the_moon_s_red_slope() {
+    use crate::planetary::derive::photometry::with_surface_colour;
+
+    let bins = |row: SubstanceId, m: f64| {
+        let RegolithWeathering::Weathered { spherical_bins } =
+            Regolith::weathered_lid(row, SurfaceMaterial::Rock, airless_at(m)).weathering
+        else {
+            panic!("the lid weathers");
+        };
+        spherical_bins
+    };
+    let (v, b_bin, r_bin) = (
+        ColourBand::V.bin(),
+        ColourBand::B.bin(),
+        ColourBand::R.bin(),
+    );
+    for key in [
+        "basalt",
+        "basalt_fe",
+        "ultramafic",
+        "komatiite",
+        "feldspathic",
+    ] {
+        let row = id(key);
+        let fresh = row
+            .substance()
+            .condensed_optics()
+            .unwrap()
+            .spherical_albedo_bins();
+        let slab = bins(row, 1.0);
+        let (mature, unweathered) = with_surface_colour(SurfaceColourRules::Surface, || {
+            (bins(row, 1.0), bins(row, 0.0))
+        });
+        for (a, b) in unweathered.iter().zip(fresh) {
+            assert_same_bits(*a, b);
+        }
+        for bin in [0, v, 6, 7, 8, 9, 10, 11] {
+            assert_same_bits(mature[bin], slab[bin]);
+        }
+        let (b, r) = (mature[b_bin] / mature[v], mature[r_bin] / mature[v]);
+        assert!(
+            r > 1.10 && (0.739..=0.860).contains(&b),
+            "{key} at m = 1: B/V {b}, R/V {r}"
+        );
+        eprintln!(
+            "{key} at m = 1: B/V {b:.3}, R/V {r:.3} (the slab's {:.3}, {:.3})",
+            slab[b_bin] / slab[v],
+            slab[r_bin] / slab[v]
+        );
+    }
+}

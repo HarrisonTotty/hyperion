@@ -332,3 +332,99 @@ fn weathering_s_table_is_one_the_law_can_read() {
     assert_same_bits(table::IRON_Z_FIRST_NM, 300.0);
     assert_same_bits(table::IRON_Z_STEP_NM, 10.0);
 }
+
+/// The mature colour is held until the 30 → 31 bump: the rules in force are the slab's, and the
+/// tests' switch reaches 31's.
+#[test]
+fn the_mature_colour_is_held_only_until_the_31_bump() {
+    assert!(
+        GENERATOR_VERSION < MATURE_COLOUR_VERSION,
+        "the 30 → 31 bump draws a weathered entry's colour toward the mature lunar colour: delete \
+         `MATURE_COLOUR_VERSION`, `MatureColourRules` with its `Slab` arm and its match in \
+         `weathered_entry_bvr`, the tests' `with_mature_colour`, and this test; have \
+         `under_the_mature_colour_the_moon_s_terrains_take_its_colour` read the version's rules \
+         alone"
+    );
+    assert_eq!(MatureColourRules::in_force(), MatureColourRules::Slab);
+    assert_eq!(
+        with_mature_colour(MatureColourRules::Mature, MatureColourRules::in_force),
+        MatureColourRules::Mature
+    );
+}
+
+/// The mature colour keeps the slab's albedo to the bit at τ 0, outside the law's measured range
+/// and for an albedo of 0; a fully weathered grain (τ 60) takes the mature lunar colour on V; and
+/// it never passes the fresh albedo.
+#[test]
+fn toward_the_mature_colour_a_fresh_grain_keeps_its_own_and_a_saturated_one_takes_the_moon_s() {
+    let v = (0.05, 550.0);
+    for (weathered, wavelength, tau) in [
+        (0.04, 440.0, 0.0),
+        (0.04, 300.0, 3.0),
+        (0.04, 1_000.0, 3.0),
+        (0.0, 440.0, 3.0),
+    ] {
+        assert_same_bits(
+            toward_mature_colour(weathered, 0.4, wavelength, tau, v),
+            weathered,
+        );
+    }
+    for wavelength in [440.0, 640.0, 900.0] {
+        let mature = toward_mature_colour(0.03, 0.4, wavelength, 60.0, v);
+        let moon = 0.05 * hyperion_base::math::powf(wavelength / 550.0, MATURE_COLOUR_EXPONENT);
+        assert!((mature - moon).abs() < 1e-12, "{wavelength}: {mature}");
+    }
+    assert_same_bits(toward_mature_colour(0.03, 0.04, 640.0, 60.0, v), 0.04);
+    // Between the two, the slab's colour in e^(−τ) of the light.
+    let half = toward_mature_colour(0.03, 0.4, 440.0, core::f64::consts::LN_2, v);
+    let moon = 0.05 * hyperion_base::math::powf(0.8, MATURE_COLOUR_EXPONENT);
+    assert!((half - (0.03 * moon).sqrt()).abs() < 1e-12, "{half}");
+}
+
+/// The Moon's terrains under the mature colour, Λ's fit's anchor rows at their anchor soils'
+/// `FeO_T` (the table's acceptance: the fresh `feldspathic`, 0.613/0.667/0.698 at 0.055 and
+/// 2,900 kg m⁻³, and `basalt_fe`, 0.367/0.410/0.425 at 0.16 and 3,310 kg m⁻³) at m = 1: their V is
+/// the slab's to the bit; both are red-sloped, R over V above 1.10, and B over V between Mercury's
+/// 0.739 (Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7) and the bluest mare's 0.860
+/// (Gehrels, Coffeen and Owings 1964, Table XIII); the maria within 1% of the Moon's 0.831 and
+/// 1.134 (Dollfus and Bowell's eq. 11), where the slab's are 0.911 and 1.056; the highlands, 0.715
+/// under the slab, stated against the Moon's. A fresh entry (m = 0) keeps its albedos to the bit.
+#[test]
+fn under_the_mature_colour_the_moon_s_terrains_take_its_colour() {
+    let anchor = |fresh: [f64; 3], feo: f64, density: f64| PaletteEntry {
+        normal_albedo_bvr: fresh,
+        grain_density_kg_m3: density,
+        ..entry(0.2, 0, MechanicsFamily::Silicate, Some(feo))
+    };
+    let highland = anchor([0.613, 0.667, 0.698], 0.055, 2_900.0);
+    let mare = anchor([0.367, 0.410, 0.425], 0.16, 3_310.0);
+    let moon = |nm: f64| hyperion_base::math::powf(nm / 550.0, MATURE_COLOUR_EXPONENT);
+    let [b_nm, _, r_nm] = BVR_EFFECTIVE_WAVELENGTHS_NM;
+    for (name, terrain) in [("highland", highland), ("mare", mare)] {
+        let slab = weathered_entry_bvr(&terrain, 1.0);
+        let (mature, fresh) = with_mature_colour(MatureColourRules::Mature, || {
+            (
+                weathered_entry_bvr(&terrain, 1.0),
+                weathered_entry_bvr(&terrain, 0.0),
+            )
+        });
+        assert_same_bits(mature[1], slab[1]);
+        for (a, b) in fresh.into_iter().zip(terrain.normal_albedo_bvr) {
+            assert_same_bits(a, b);
+        }
+        let (b, r) = (mature[0] / mature[1], mature[2] / mature[1]);
+        assert!(r > 1.10 && (0.739..=0.860).contains(&b), "{name}: {b}, {r}");
+        if name == "mare" {
+            assert!((b / moon(b_nm) - 1.0).abs() < 0.01, "{b}");
+            assert!((r / moon(r_nm) - 1.0).abs() < 0.01, "{r}");
+        }
+        eprintln!(
+            "{name} at m = 1: B/V {b:.3}, R/V {r:.3} against the Moon's {:.3} and {:.3} (the slab's \
+             {:.3} and {:.3})",
+            moon(b_nm),
+            moon(r_nm),
+            slab[0] / slab[1],
+            slab[2] / slab[1]
+        );
+    }
+}

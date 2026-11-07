@@ -69,6 +69,10 @@
 //! Mercury's, and Venus's deck Venus's; a disc with none at all (a gas envelope, a melt) is its
 //! template's row, as below 31. So every Solar System analogue in its own state is still drawn with
 //! its row (ruling 9): Mercury's regolith is the stand-in's and Venus's disc its deck.
+//!
+//! Under the same hold a weathered lid's colour tends to the mature lunar colour as its npFe⁰
+//! extinguishes its grains' interiors (`area_mix`'s "The weathered area mix"), where the slab alone
+//! leaves a mature iron-rich lid grey (B/V 0.956 for `basalt_fe` against the Moon's 0.831).
 
 use core::f64::consts::PI;
 
@@ -86,15 +90,18 @@ pub(crate) mod area_mix;
 pub(crate) mod envelope_bond;
 
 /// The generator version from which a body's disc takes its B and R from its own surface (the
-/// [module documentation](self), "The colour from the body's own surface"): 31, held with the 31
-/// train (main's ruling of 2026-11-07: train 30's list froze first).
+/// [module documentation](self), "The colour from the body's own surface"), and a weathered
+/// regolith's colour tends to the mature lunar colour (`area_mix::Regolith::weathered_lid`;
+/// `hyperion_surface::material`'s "The mature colour"): 31, held with the 31 train (main's ruling
+/// of 2026-11-07: train 30's list froze first).
 ///
 /// Below it [`SurfaceColourRules::in_force`] is [`SurfaceColourRules::Template`]: the passes give
-/// no albedo by band and every geometric albedo is as it was, bit for bit. 31's bump deletes this
-/// hold, [`SurfaceColourRules`] with its `Template` arm and its matches (in
-/// [`BodyPhotometry::derive`] and the passes' `surface_mix::pass_bands`), the tests' switch, its
-/// line in the tests' `HeldRules` and in `with_every_31_hold`, and its tripwire
-/// (`the_surface_colour_is_held_only_until_the_31_bump`).
+/// no albedo by band, a weathered lid is the slab's alone, and every geometric and Bond albedo is
+/// as it was, bit for bit. 31's bump deletes this hold, [`SurfaceColourRules`] with its `Template`
+/// arm and its matches (in [`BodyPhotometry::derive`], the passes' `surface_mix::pass_bands` and
+/// `area_mix::Regolith::weathered_lid`), the tests' switch, its line in the tests' `HeldRules` and
+/// in `with_every_31_hold`, and its tripwire (`the_surface_colour_is_held_only_until_the_31_bump`),
+/// with the surface crate's own hold of the mature colour, `MATURE_COLOUR_VERSION`.
 pub(crate) const SURFACE_COLOUR_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 
 /// Where a body's disc takes its B and R from (its hold, [`SURFACE_COLOUR_VERSION`]).
@@ -1487,9 +1494,9 @@ mod tests {
             GENERATOR_VERSION < SURFACE_COLOUR_VERSION,
             "the 30 → 31 bump takes a disc's B and R from its own surface: delete \
              `SURFACE_COLOUR_VERSION`, `SurfaceColourRules` with its `Template` arm and its matches \
-             in `BodyPhotometry::derive` and `surface_mix::pass_bands`, the tests' \
-             `with_surface_colour`, its lines in `HeldRules` and `with_every_31_hold`, and this \
-             test; have \
+             in `BodyPhotometry::derive`, `surface_mix::pass_bands` and \
+             `area_mix::Regolith::weathered_lid`, the tests' `with_surface_colour`, its lines in \
+             `HeldRules` and `with_every_31_hold`, and this test; have \
              `under_the_surface_colour_the_solar_system_draws_itself`, \
              `the_surface_s_colour_gives_b_and_r_relative_to_v` and the viewer's colour census read \
              the version's rules alone"
