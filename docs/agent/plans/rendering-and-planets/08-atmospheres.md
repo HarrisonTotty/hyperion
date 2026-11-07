@@ -25177,8 +25177,12 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
 - **jupiter-envelope and saturn-envelope retraced on the hand giants' 30 media** (R08.T16.a.2,
   2026-11-05; lane `fix-p14-giant-chromophore`). Both references, `refusals.json` and
   `vectorGate.json`'s `jupiterEnvelope` re-recorded; `CHROMOPHORE_GATE_TALLIES`: 2 pass, 0
-  miss, 22 refused (the vector I at the earlier pilots' counts; a re-pilot is pending). By
-  `deckGatePasses` it passes; the envelope's range stays `giant-deck`'s, its widening not built.
+  miss, 22 refused (the vector I at the earlier pilots' counts; a re-pilot is pending). It opens
+  the cool giants' route (the bullet below).
   - Saturn's twin (not recorded): 10 pass, 2 miss (disc-p0 and disc-p60 blue, 1.10), 12 refused.
   - Smoke part 6 (lean): (S)'s twins leave out the hand Jupiter's NH₃ haze (`OBLATE_TWIN_MISSES`);
     with it the ray march from 400 km, the sun 3° down, missed at 2 of 4,070 channels (1.57 × 10⁻³).
+- **The cool giants' route on the 30 media** (R08.T16.a.2, 2026-11-06; research-leans-47's ruling).
+  `CHROMOPHORE_GATE_MISSES` and `CHROMOPHORE_GATE_EXCEPTIONS` are empty; `chromophoreGatePasses`
+  passes over an image refused throughout, as `deckGatePasses` does; `COOL_GIANT_ROUTE_RANGE` ω̄ from
+  0.96, ḡ to 0.772, τ ḡ to 7.55 and τ (1 − ω̄) to 0.491 (the hand Saturn's blue).

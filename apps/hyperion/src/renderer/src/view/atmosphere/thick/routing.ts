@@ -189,9 +189,12 @@ export const ENVELOPE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
  * - the refusals are the vector I's but for the limb's scalar at 0.3 H and 1 H: at the counts of
  *   the earlier pilots its σ passes T ÷ 8 almost everywhere (`refusals.json`).
  *
- * By `deckGatePasses`' rule it passes on its 2 judged values; the envelope's range stays
- * `giant-deck`'s ({@link ENVELOPE_ROUTE_RANGE}), its widening not built, and a pass on 2 values of
- * 24 wants the vector I re-piloted before it is read as one.
+ * It passes on its 2 judged values, its four images refused throughout passed over as
+ * {@link deckGatePasses} passes them ({@link chromophoreGatePasses}), and so opens a cool giant's
+ * range ({@link COOL_GIANT_ROUTE_RANGE}) on the `envelope` setting. The analytic path, the one a
+ * closed envelope is drawn by, reads 0.61–0.89 of the same reference, but for the disc's green at
+ * p85 (0.47, the reference's σ there 24% of it). A re-pilot of the vector I's counts (ruling 8) is
+ * pending.
  */
 export const CHROMOPHORE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
   { image: "disc-p0", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
@@ -206,50 +209,18 @@ export const CHROMOPHORE_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
  * `jupiter-envelope`'s misses through the envelope's route (R08.T16.a.2): `vectorGate.json`'s
  * `jupiterEnvelope.geometries`, every channel that misses, held to the file by the test.
  */
-export const CHROMOPHORE_GATE_MISSES: ReadonlyArray<GateMiss> = [
-  { image: "disc-p60", value: "disc-p60/b", ratio: 2.163649 },
-  { image: "disc-p75", value: "disc-p75/r", ratio: 1.544877 },
-  { image: "limb", value: "limb-0.3H/b", ratio: 1.332044 },
-  { image: "limb", value: "limb-1H/b", ratio: 2.319952 },
-];
+export const CHROMOPHORE_GATE_MISSES: ReadonlyArray<GateMiss> = [];
 
 /**
  * The chromophore gate's named exceptions (R08.T16.a.2; main's ruling on research-leans-43, item
- * 1, 2026-11-05): `jupiter-envelope`'s four misses, each held to its bound, as the haze gate's are
- * ({@link HAZE_GATE_EXCEPTIONS}). Each image reads farther from the reference through the analytic
- * path, the one a closed envelope is drawn by, than through the route, judged per image in the
- * gate's edge units over its values judged and refused alike, on the case's medium as traced at
- * generator version 26 (`reference/caseGate.ts`'s `caseTwin`; the lane's outbox, not on file): the
- * closed path's disc 2.8–11.8 of the edge and its limb 3.3, against the route's 0.6–2.9 and 2.3. A
- * new miss, or one of these past its bound, closes the cool giants' range
- * ({@link coolGiantRouteRangeOf}).
+ * 1, 2026-11-05), each held to its recorded miss's bound as the haze gate's are
+ * ({@link HAZE_GATE_EXCEPTIONS}): none, since the verdict retraced on generator version 30's media
+ * misses nowhere. `jupiter-envelope`'s four misses on its 26 medium (bounds 2.17, 1.55, 1.34 and
+ * 2.32) went with that medium. A miss to be named must read no closer to the reference through the
+ * analytic path than through the route. A new miss, or a named one past its bound, closes the cool
+ * giants' range ({@link coolGiantRouteRangeOf}).
  */
-export const CHROMOPHORE_GATE_EXCEPTIONS: ReadonlyArray<GateException> = [
-  {
-    value: "disc-p60/b",
-    bound: 2.17,
-    cause:
-      "the route's blue at 1.13 of the reference, Psi_ms's 1.73: the image's worst channel through the analytic path, its blue, at 11.8 of the edge",
-  },
-  {
-    value: "disc-p75/r",
-    bound: 1.55,
-    cause:
-      "the route's red at 1.11 of the reference, mode-free; the image's worst channel through the analytic path, its green at 1.47 of the reference, 6.25 of the edge",
-  },
-  {
-    value: "limb-0.3H/b",
-    bound: 1.34,
-    cause:
-      "the limb's blue at 0.91 of the reference, dark under every bake tried; the analytic path's limb 0.77–0.84 of it in every channel, its worst 3.31 of the edge",
-  },
-  {
-    value: "limb-1H/b",
-    bound: 2.32,
-    cause:
-      "the limb's blue at 0.85 of the reference, as limb-0.3H's; the analytic path's blue there 2.94 of the edge, its limb's worst 3.31",
-  },
-];
+export const CHROMOPHORE_GATE_EXCEPTIONS: ReadonlyArray<GateException> = [];
 
 /**
  * Whether a deck gate's recorded tallies pass (R08.T16.a.2; R08.T15.b.2, Titan's rule, main's ruling
@@ -467,9 +438,10 @@ export function hazeGatePasses(
 
 /**
  * Whether the chromophore gate's recorded verdict passes (R08.T16.a.2; main's ruling on
- * research-leans-43, 2026-11-05), as {@link hazeGatePasses} reads the haze's over every image:
- * every image passing somewhere, and every miss one of `exceptions` within its bound, `misses`
- * accounting for every image's tally of them.
+ * research-leans-43, 2026-11-05), as {@link hazeGatePasses} reads the haze's, but with an image
+ * refused throughout passed over, as {@link deckGatePasses} passes it: every other image passing
+ * somewhere, and every miss one of `exceptions` within its bound, `misses` accounting for every
+ * image's tally of them. A verdict refused throughout fails.
  *
  * @param misses - The verdict's misses ({@link CHROMOPHORE_GATE_MISSES}).
  * @param exceptions - The named exceptions: {@link CHROMOPHORE_GATE_EXCEPTIONS}, or a test's.
@@ -479,7 +451,10 @@ export function chromophoreGatePasses(
   misses: ReadonlyArray<GateMiss>,
   exceptions: ReadonlyArray<GateException> = CHROMOPHORE_GATE_EXCEPTIONS,
 ): boolean {
-  return passesWithExceptions(tallies, misses, exceptions, []);
+  const refusedThroughout = tallies
+    .filter((image) => image.refusals === image.comparisons)
+    .map((image) => image.image);
+  return passesWithExceptions(tallies, misses, exceptions, refusedThroughout);
 }
 
 /**
@@ -585,10 +560,11 @@ export function bakedAsHaze(
  * ω̄ is 1 and τ (1 − ω̄) 0, and an envelope's floor is black. A Jupiter-class envelope lies outside
  * it, its chromophore absorbing (the hand Jupiter's τ (1 − ω̄) 0.016–0.12, its blue τ 10.3 and red
  * ḡ 0.77 above its floor, under its NH₃ haze and chromophore of generator version 30's rules), and
- * stays `ATMOSPHERE: APPROXIMATE`: the gate covering it, `jupiter-envelope`'s, is refused at 22 of
- * its 24 values ({@link CHROMOPHORE_GATE_TALLIES}). Outside it too stand the hand Saturn, the sim's
- * own Saturn's gases and decks under the same haze (blue τ 12.3 above its floor, its chromophore's
- * τ (1 − ω̄) 0.065–0.49), and the hand ice giant (blue τ 10.29, red ḡ 0.7340; `routing.test.ts`).
+ * so do the hand Saturn, the sim's own Saturn's gases and decks under the same haze (blue τ 12.3
+ * above its floor, its chromophore's τ (1 − ω̄) 0.065–0.49), and the hand ice giant (blue τ 10.29,
+ * red ḡ 0.7340; `routing.test.ts`). On the `closed` giant route each stays
+ * `ATMOSPHERE: APPROXIMATE`, and on the `envelope` route each routes on
+ * {@link COOL_GIANT_ROUTE_RANGE}.
  */
 export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
   mostOpticalDepth: 10.1,
@@ -604,8 +580,10 @@ export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
  * research-leans-43's lean, kept by main, 2026-11-05), once the chromophore gate passes with its
  * named exceptions ({@link CHROMOPHORE_GATE_EXCEPTIONS}): the channels above their floors of the
  * served cool giants and the cases, a box over {@link ENVELOPE_ROUTE_RANGE}, so that the deck bake's
- * J takes Ψ_ms's place where the analytic path's disc runs green +14% and blue +35% over
- * `jupiter-envelope`'s reference at p0, +41% and +73% at p60 (the lane's evidence).
+ * J takes Ψ_ms's place. On `jupiter-envelope`'s 26 medium the analytic path's disc ran green +14%
+ * and blue +35% over the reference at p0. On its 30 medium it reads 0.61–0.89 of the reference and
+ * the route 0.95–1.10, but for the disc's green at p85 (0.47 and 0.76, the reference's σ there 24%
+ * of it).
  *
  * @remarks
  * Each bound is the extreme, rounded outward at its third figure (the test holds them), of
@@ -613,23 +591,26 @@ export const ENVELOPE_ROUTE_RANGE: ThickRouteRange = {
  * Saturn and ice giant, and the `Dev Fixture`'s 31 cool giants at generator version 28
  * (`fixtures/served-giants.json`, every giant with an `ok` envelope of 192 systems about the one
  * `41ffecb1ffc00013.0400` stands in): τ to 25.54 (a clear giant's blue, its floor the gas's
- * Rayleigh alone), ω̄ from 0.9778 and τ (1 − ω̄) to 0.2243 (a temperate giant's red and blue under
- * its haze), ḡ to 0.7709 (the generated Jupiter's red, its floor in its NH₃ deck's haze) and τ ḡ
- * to 7.518, over a black floor. Past `jupiter-envelope`'s own channels (`vectorGate.json`'s: τ to
- * 16.67, ω̄ from 0.9888, ḡ to 0.5756) and `giant-deck`'s (ḡ to 0.7323, τ ḡ to 7.331) it is main's
- * ruling, not a gate (lean, 2026-11-05): such a giant routed is drawn without `THICK_REASON`, though
- * both gates judge the disc and the limb alone; the hand Saturn's case, a later lane's, settles blue
- * τ 17–25. A served giant absorbing past it (ω̄ 0.81–0.92 and τ (1 − ω̄) 0.69–2.0, two giants at
+ * Rayleigh alone), ω̄ from 0.9602 and τ (1 − ω̄) to 0.4901 (the hand Saturn's blue under generator
+ * version 30's chromophore, at the Great Red Spot's column), and ḡ to 0.7712 and τ ḡ to 7.542 (the
+ * hand Jupiter's red under its NH₃ haze), over a black floor. Past `jupiter-envelope`'s own
+ * channels (`vectorGate.json`'s: τ to 10.31, ω̄ from 0.9885, ḡ to 0.7712) and `giant-deck`'s (ḡ
+ * to 0.7323, τ ḡ to 7.331) it is main's ruling, not a gate (lean, 2026-11-05): such a giant routed
+ * is drawn without `THICK_REASON`, though both gates judge the disc and the limb alone.
+ * `saturn-envelope`, retraced on generator version 30's media, covers τ (1 − ω̄) to 0.49: its
+ * route misses 2 of its 24 values, the disc's blue at p0 and p60 (1.39 and 1.58 of the edge), where
+ * the analytic path misses 10 and reads 3.2 and 3.7 of the edge on those images (not on file). A
+ * served giant absorbing past it (ω̄ 0.81–0.92 and τ (1 − ω̄) 0.69–2.0, two giants at
  * 983 and 1,115 K) lies outside it, and a self-luminous one is refused by name
  * ({@link giantDeckRouteRange}).
  */
 export const COOL_GIANT_ROUTE_RANGE: ThickRouteRange = {
   mostOpticalDepth: 25.6,
-  leastSingleScatteringAlbedo: 0.977,
-  mostAsymmetry: 0.771,
+  leastSingleScatteringAlbedo: 0.96,
+  mostAsymmetry: 0.772,
   mostGroundAlbedo: 0,
-  mostForwardDepth: 7.52,
-  mostAbsorbedDepth: 0.225,
+  mostForwardDepth: 7.55,
+  mostAbsorbedDepth: 0.491,
 };
 
 /**

@@ -716,31 +716,34 @@ describe("the cool giants' route (R08.T16.a.2; research-leans-43's lean, kept by
     );
   });
 
-  it("passes the chromophore gate with its named exceptions, and not without them", () => {
+  it("passes the chromophore gate on its judged values, its images refused throughout passed over as deckGatePasses passes them", () => {
     expect([
       deckGatePasses(CHROMOPHORE_GATE_TALLIES),
       chromophoreGatePasses(CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES),
-      chromophoreGatePasses(CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES, []),
-    ]).toEqual([false, true, false]);
+      chromophoreGatePasses(
+        CHROMOPHORE_GATE_TALLIES.map((image) => tallied(image, 0, 0, image.comparisons)),
+        [],
+      ),
+    ]).toEqual([true, true, false]);
   });
 
-  /** The chromophore gate's verdict with one miss more on the limb, in a pass's place. */
-  const unlisted: GateMiss = { image: "limb", value: "limb-3H/g", ratio: 1.01 };
-  const withUnlisted = CHROMOPHORE_GATE_TALLIES.map((image) =>
-    image.image === "limb" ? tallied(image, image.passes - 1, image.misses + 1, 4) : image,
+  /** A made-up verdict: one miss on the disc at p30 in a pass's place, and its exception. */
+  const madeUp: GateMiss = { image: "disc-p30", value: "disc-p30/b", ratio: 1.2 };
+  const withMiss = CHROMOPHORE_GATE_TALLIES.map((image) =>
+    image.image === "disc-p30" ? tallied(image, 1, 1, 1) : image,
   );
+  const excused: ReadonlyArray<GateException> = [
+    { value: "disc-p30/b", bound: 1.21, cause: "a test's" },
+  ];
+  it("passes a made-up miss with its named exception", () => {
+    expect(chromophoreGatePasses(withMiss, [madeUp], excused)).toBe(true);
+  });
   it.each([
-    ["an unlisted miss", withUnlisted, [...CHROMOPHORE_GATE_MISSES, unlisted]],
-    [
-      "a listed miss past its bound",
-      CHROMOPHORE_GATE_TALLIES,
-      CHROMOPHORE_GATE_MISSES.map((miss) =>
-        miss.value === "disc-p75/r" ? { ...miss, ratio: 1.551 } : miss,
-      ),
-    ],
-    ["a miss its list leaves out", CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES.slice(1)],
-  ] as const)("closes the chromophore gate on %s", (_, tallies, misses) => {
-    expect(chromophoreGatePasses(tallies, misses)).toBe(false);
+    ["an unlisted miss", withMiss, [madeUp], []],
+    ["a listed miss past its bound", withMiss, [{ ...madeUp, ratio: 1.211 }], excused],
+    ["a miss its list leaves out", withMiss, [], excused],
+  ] as const)("closes the chromophore gate on %s", (_, tallies, misses, exceptions) => {
+    expect(chromophoreGatePasses(tallies, misses, exceptions)).toBe(false);
   });
 
   /** A cool giant's split regime, and a self-luminous one's. */
@@ -767,7 +770,7 @@ describe("the cool giants' route (R08.T16.a.2; research-leans-43's lean, kept by
     ],
     [
       "where the chromophore gate's verdict does not pass",
-      () => coolGiantRouteRangeOf(CHROMOPHORE_GATE_TALLIES, CHROMOPHORE_GATE_MISSES.slice(1)),
+      () => coolGiantRouteRangeOf(withMiss, [madeUp]),
     ],
   ] as const)("keeps giant-deck's envelope range %s", (_, rangeOf) => {
     expect(rangeOf()).toBe(DECK_ROUTE_RANGE);
