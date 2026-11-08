@@ -28,10 +28,15 @@ import type {
 /** The lit cluster form's fragment stage's head, which the forward probe takes as a function. */
 const LIT_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {";
 
-/** The resolve's fragment stage's head and its shading's return, which its probe replaces. */
+/**
+ * The resolve's fragment stage's head, its shading, formed only where the pixel is kept, and its
+ * return after the discard, which its probe replaces: the place's bits returned where the shading
+ * stood, and 0 at the end, which a kept pixel never reaches.
+ */
 const RESOLVE_HEAD = "fn fragmentMain(@builtin(position) pixel : vec4f) -> @location(0) vec4f {";
-const RESOLVE_RETURN =
-  "return lit_fragment(in, at[1].fromCameraBf - at[0].fromCameraBf, at[2].fromCameraBf - at[0].fromCameraBf);";
+const RESOLVE_SHADING =
+  "colour = lit_fragment(in, at[1].fromCameraBf - at[0].fromCameraBf, at[2].fromCameraBf - at[0].fromCameraBf);";
+const RESOLVE_RETURN = "  return colour;\n}";
 
 /** `source` with `from` replaced by `to`, which it holds exactly once. */
 function once(source: string, from: string, to: string): string {
@@ -77,7 +82,11 @@ export function resolvePlaceProbe(resolve: WgslMaterialSpec, axis: number): Wgsl
   );
   return probeOf(
     resolve,
-    once(head, RESOLVE_RETURN, `return bitcast<u32>(in.fromCameraBf[${String(axis)}]);`),
+    once(
+      once(head, RESOLVE_SHADING, `return bitcast<u32>(in.fromCameraBf[${String(axis)}]);`),
+      RESOLVE_RETURN,
+      "  return 0u;\n}",
+    ),
     axis,
   );
 }

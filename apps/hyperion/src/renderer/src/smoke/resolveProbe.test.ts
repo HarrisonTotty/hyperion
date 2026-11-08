@@ -6,7 +6,8 @@
 import { describe, expect, it } from "vitest";
 
 import { ID_NONE } from "../view/engine/idTarget";
-import { placeAgreement, ulpOf } from "./resolveProbe";
+import { terrainResolveMaterialSpec } from "../view/terrain/terrainMaterial";
+import { placeAgreement, resolvePlaceProbe, ulpOf } from "./resolveProbe";
 
 /** The bits of `f32` `x`. */
 function bitsOf(x: number): number {
@@ -19,6 +20,16 @@ function axes(...places: ReadonlyArray<readonly [number, number, number]>): Uint
 }
 
 describe("the resolve's place probe (plan R14, R14.T2.d)", () => {
+  it.each(["baked-offsets", "face-differences"] as const)(
+    "writes the place's bits where the resolve's %s form shades a kept pixel, and no light",
+    (path) => {
+      const probe = resolvePlaceProbe(terrainResolveMaterialSpec(path, false), 1);
+      expect(probe.fragmentWgsl).toContain("-> @location(0) u32 {");
+      expect(probe.fragmentWgsl).toContain("return bitcast<u32>(in.fromCameraBf[1]);");
+      expect(probe.fragmentWgsl).not.toContain("colour = lit_fragment(");
+    },
+  );
+
   it("finds no unit apart where the two places are the same bits", () => {
     const same = axes([3, -4, 12], [100, 0.5, -7]);
     expect(placeAgreement(same, same)).toEqual({
