@@ -56,8 +56,10 @@ pub(crate) use held::{HeldRules, in_shares};
 /// ([`CHROMOPHORE_MIXING_VERSION`](super::chem::photochem::CHROMOPHORE_MIXING_VERSION)) and a
 /// disc's B and R from its own surface
 /// ([`SURFACE_COLOUR_VERSION`](super::derive::photometry::SURFACE_COLOUR_VERSION)), both held at 31
-/// as train 30's list froze before they landed (main's ruling of 2026-11-07). A 31 hold's bump
-/// deletes its line here.
+/// as train 30's list froze before they landed (main's ruling of 2026-11-07). A test that needs
+/// the galaxy's 31 holds as well (P15.T10.b's merger tables) builds its galaxy inside it with
+/// `GalaxyRules::every_31_hold()`, whose holds ride the galaxy. A 31 hold's bump deletes its line
+/// here.
 #[cfg(test)]
 pub(crate) fn with_every_31_hold<R>(run: impl FnOnce() -> R) -> R {
     use super::chem::photochem::{ChromophoreRules, with_chromophore_mixing};
