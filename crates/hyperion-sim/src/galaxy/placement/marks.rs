@@ -45,7 +45,7 @@
 //! by the bracket. Where it cannot, the exact fate is taken, as before. The record's age is then no
 //! longer its lifetime plus `s` to the bit, but at most the bracket's width more.
 //!
-//! From 31 (`CarveResidualsRules::Matched`, P09.T35's census C1) a table-read record whose time
+//! From 31 (P09.T35's census C1) a table-read record whose time
 //! since death may be under the core collapses' reach takes its exact fate after all, and draws
 //! its time since death after that death age ([`dead_age`]): the class lists deaths at their exact
 //! age, and the table's bracket left the grid no record dead less than the bracket's excess ago
@@ -82,7 +82,7 @@ use crate::galaxy::displaced::marks::{
     time_since_death,
 };
 use crate::galaxy::displaced::runaway::Ejected;
-use crate::galaxy::displaced::site::{CarveResidualsRules, recent_death_reach, table_bracket};
+use crate::galaxy::displaced::site::{recent_death_reach, table_bracket};
 use crate::galaxy::displaced::survivors::{DonorKind, SurvivorFlight, donor_progenitor_mass};
 use crate::galaxy::displaced::{
     BirthSource, DisplacedClassId, DisplacedFields, DisplacedKind, PlacementClass, SpeedBin,
@@ -699,7 +699,7 @@ pub(super) fn recent_disagreements() -> u64 {
 /// note 19 at the reference composition). A fate the table read has no lifetime: the time since
 /// death is drawn after the upper end of the table's bracket on it ([`FateRead::death_bound`]).
 ///
-/// From 31 ([`CarveResidualsRules::Matched`]; research-leans-49 §2) a table-read record whose time
+/// From 31 (research-leans-49 §2) a table-read record whose time
 /// since death so drawn is under [`recent_death_reach`] plus the bracket's width may have died
 /// within the core collapses' reach, where the class lists deaths by their exact age: it takes
 /// its exact fate and draws its time since death after that death age at the same rank `u`, so
@@ -717,8 +717,7 @@ fn dead_age(
     let (bound, life) = star.fate.death_bound();
     let ages = galaxy.fields().component(star.component).ages();
     let since = time_since_death(ages, bound, lo, hi, u);
-    if galaxy.rules().residuals == CarveResidualsRules::Matched
-        && let FateRead::Table { upper, lower, .. } = star.fate
+    if let FateRead::Table { upper, lower, .. } = star.fate
         && since.value() < recent_death_reach().value() + (upper.value() - lower.value())
     {
         if read.tracks == Tracks::Defer {
@@ -1423,17 +1422,6 @@ mod tests {
         deferred_marks_in(held());
     }
 
-    /// The same under every 31 hold's carve-out residuals, whose recently dead records stop
-    /// before the exact fate they take (P09.T35's census C1).
-    #[test]
-    fn deferred_marks_are_the_marks_or_bound_the_record_under_the_31_residuals() {
-        let rules = crate::galaxy::rules::GalaxyRules {
-            residuals: CarveResidualsRules::Matched,
-            ..held().rules()
-        };
-        deferred_marks_in(&held().clone().with_rules(rules));
-    }
-
     /// [`deferred_marks_are_the_marks_or_bound_the_record`] in `galaxy`.
     fn deferred_marks_in(galaxy: &Galaxy) {
         let displaced = galaxy
@@ -1579,26 +1567,18 @@ mod tests {
             .fold((0, 0, 0), |(a, b, c), (d, e, f)| (a + d, b + e, c + f))
     }
 
-    /// P09.T35's census C1 (research-leans-49 §2): under every 31 hold's carve-out residuals no
-    /// table-read dead record of layer E died less than the core collapses' reach ago, and some
-    /// took their exact fate for it; under the version's rules some did, the residual's cause.
+    /// P09.T35's census C1 (research-leans-49 §2): from 31 no table-read dead record of layer E
+    /// died less than the core collapses' reach ago but where the exact fate disagrees, and some
+    /// took their exact fate for it.
     #[test]
-    #[ignore = "slow: 512 ridge cells of layer E, twice"]
+    #[ignore = "slow: 512 ridge cells of layer E"]
     fn no_table_read_dead_record_died_within_the_reach() {
         let cells = ridge(held(), 128);
-        let (short_held, switched_held, _) = recent_table_reads(held(), &cells);
-        let rules = crate::galaxy::rules::GalaxyRules {
-            residuals: CarveResidualsRules::Matched,
-            ..held().rules()
-        };
-        let matched = held().clone().with_rules(rules);
-        let (short, switched, disagreed) = recent_table_reads(&matched, &cells);
+        let (short, switched, disagreed) = recent_table_reads(held(), &cells);
         eprintln!(
-            "held: {short_held} table reads dead within the reach, {switched_held} exact; \
-             matched: {short} and {switched}, {disagreed} kept on the table by a disagreement"
+            "{short} table reads dead within the reach, {switched} exact, {disagreed} kept on the \
+             table by a disagreement"
         );
-        assert_eq!(switched_held, 0);
-        assert!(short_held > 0, "the held arm shows the residual's cause");
         assert!(
             short <= disagreed,
             "{short} short table reads, {disagreed} disagreements"

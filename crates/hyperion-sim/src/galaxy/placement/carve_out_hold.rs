@@ -34,7 +34,7 @@ use crate::galaxy::catalogue_classes::{
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
 use crate::galaxy::displaced::hold::field_only_rules;
 use crate::galaxy::displaced::site::{
-    CarveOutRules, CarveResidualsRules, ExplosionSite, explosion_site, recent_death_claim,
+    CarveOutRules, ExplosionSite, explosion_site, recent_death_claim,
 };
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::params::GalaxyParams;
@@ -914,13 +914,11 @@ fn class_entries<P: ClassProcess + Sync>(galaxy: &Galaxy, process: &P, class: Cl
 }
 
 /// Every 26 hold at the budget, the field keeping its whole budget (`FieldShareRules::None`), with
-/// the carve-out `carve_out` and the carve-out's residuals `residuals` (the version's held arm, or
-/// 31's).
-fn budget_rules(carve_out: CarveOutRules, residuals: CarveResidualsRules) -> GalaxyRules {
+/// the carve-out `carve_out`.
+fn budget_rules(carve_out: CarveOutRules) -> GalaxyRules {
     GalaxyRules {
         field_share: FieldShareRules::None,
         carve_out,
-        residuals,
         ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
     }
 }
@@ -934,8 +932,8 @@ fn budget_rules(carve_out: CarveOutRules, residuals: CarveResidualsRules) -> Gal
 /// variance, both printed before either is asserted. On wasm32-wasip1, the Sun's columns alone and
 /// no comparison.
 ///
-/// Both arms take the 31 hold's carve-out residuals (`CarveResidualsRules::Matched`,
-/// research-leans-49), which closed the residuals the census measured under the version's rules
+/// Both arms take 31's carve-out residuals (research-leans-49), which closed the residuals the
+/// census measured under 30's rules
 /// (core collapses 16,228 against 16,888, z −3.63; luminous blue variables 279 against 168, z
 /// +5.25). The walk takes hours: under `HYPERION_CENSUS_CHECKPOINT` it records each finished chunk
 /// of columns and resumes past them ([`carved_galaxy`]).
@@ -955,9 +953,8 @@ fn census_of_the_carve_out() {
         "the walk's reach covers the remnants' {} ly",
         remnant_reach_ly()
     );
-    let residuals = CarveResidualsRules::Matched;
-    let off = milky_way(budget_rules(CarveOutRules::Unclaimed, residuals)).with_full_potential();
-    let on = milky_way(budget_rules(CarveOutRules::Claimed, residuals)).with_full_potential();
+    let off = milky_way(budget_rules(CarveOutRules::Unclaimed)).with_full_potential();
+    let on = milky_way(budget_rules(CarveOutRules::Claimed)).with_full_potential();
     let (carved, past) = carved_galaxy(&off, &on);
     let mut by_class: BTreeMap<Class, Vec<u64>> = BTreeMap::new();
     for &(id, class) in &carved {
@@ -1007,93 +1004,6 @@ fn census_of_the_carve_out() {
         assert_p_value(&format!("the {name}' carve against the class"), p, ALPHA);
     }
     assert!(grid(Class::CoreCollapse) > 0 && grid(Class::LuminousBlueVariable) > 0);
-}
-
-/// research-leans-49 §2's cause of the core collapses' residual, on the class side under the
-/// version's rules at the budget: the class's entries whose death lies less than `δ` before the
-/// epoch, `δ` the fate table's excess over the exact death age at the entry's mass, its source's
-/// reference composition and its draws (`upper − d`), where the table answers. The grid draws a
-/// table-read dead record's time since death after the bracket's upper end, so it has none of
-/// these: the count is the residual's size (16,888 − 16,228 = 660 ± 26 by the census).
-#[test]
-#[ignore = "slow: the core collapses' class over the galaxy, an exact fate per entry"]
-fn the_class_s_deaths_inside_the_table_s_excess() {
-    let galaxy = milky_way(budget_rules(
-        CarveOutRules::Claimed,
-        CarveResidualsRules::Held,
-    ))
-    .with_full_potential();
-    let process = CoreCollapseProcess::new(&galaxy);
-    let table = galaxy
-        .fields()
-        .displaced()
-        .expect("the classes are installed")
-        .class_table();
-    let class = ClassId::CORE_COLLAPSE;
-    let edge = 1_i32 << class.cell_log2_ly().expect("a gridded class");
-    let reach = 65_536 / edge;
-    let counts = in_shares(16, 16, |share| {
-        let (mut entries, mut inside, mut answered) = (0_usize, 0_usize, 0_usize);
-        for x in (-reach..reach).skip(share).step_by(16) {
-            for y in -reach..reach {
-                for side in [1, -1] {
-                    for k in 0.. {
-                        let z = if side > 0 { k } else { -1 - k };
-                        let Ok(key) = CatalogueCellKey::new(class, [x, y, z]) else {
-                            break;
-                        };
-                        if process.bound(&galaxy, &key).value() * key.volume_ly3() < 1e-9 {
-                            break;
-                        }
-                        for entry in CatalogueClassCell::generate(&galaxy, &process, key).entries()
-                        {
-                            entries += 1;
-                            let value = entry.value();
-                            let since = -years_after_epoch(value.site().death());
-                            if since < 0.0 {
-                                continue;
-                            }
-                            let record = value.record();
-                            let m = SolarMasses::new(
-                                record
-                                    .primary_initial_mass()
-                                    .value()
-                                    .min(crate::stellar::sse::MAX_INITIAL_MASS.value()),
-                            );
-                            let z_ref = table
-                                .reference_composition(table.component_source(value.component()));
-                            let draws = crate::stellar::system::primary_draws(&galaxy, record);
-                            let Some(super::marks::FateRead::Table { upper, .. }) =
-                                super::marks::table_fate(m, &z_ref, &draws)
-                            else {
-                                continue;
-                            };
-                            answered += 1;
-                            let exact = crate::stellar::sse::fate_of(
-                                m,
-                                &z_ref,
-                                &draws,
-                                crate::stellar::sse::TrackOptions::default()
-                                    .with_rules(galaxy.rules().stellar),
-                            );
-                            if since < upper.value() - exact.death.age().value() {
-                                inside += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        (entries, inside, answered)
-    });
-    let (entries, inside, answered) = counts
-        .into_iter()
-        .fold((0, 0, 0), |(a, b, c), (d, e, f)| (a + d, b + e, c + f));
-    eprintln!(
-        "core collapses: {entries} entries, {answered} dead at the epoch with a table fate, \
-         {inside} inside the table's excess"
-    );
-    assert!(inside > 0);
 }
 
 /// The class's band: a claim is asked of layer E alone.

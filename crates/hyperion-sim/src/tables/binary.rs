@@ -1545,7 +1545,7 @@ const MERGER_MARKS_31: [SamplerMark; 10] = {
 /// attempt: [`MergerMark`]'s marks, the marks the class draws after the layer conditional on it,
 /// the layer choice at its fixed point and the channels' weights the covered mergers' (task
 /// `binary_merger`'s block says which marks keep [`MERGER_SAMPLER`]'s law). A galaxy's class reads
-/// it from 31 (`MergerTableRules::Fitted`).
+/// it from 31.
 pub const MERGER_SAMPLER_31: ClassSamplerTable<MergerMark, MergerPick> = ClassSamplerTable::new(
     &MERGER_MARKS_31,
     &[
@@ -1573,7 +1573,7 @@ const NSM_MARKS_31: [SamplerMark; 5] = {
 
 /// The neutron-star mergers' sampler fitted against the engine at generator version 31, as
 /// [`MERGER_SAMPLER_31`] is the stellar mergers' (task `binary_nsm`'s block says which marks keep
-/// [`NSM_SAMPLER`]'s law). A galaxy's class reads it from 31 (`MergerTableRules::Fitted`).
+/// [`NSM_SAMPLER`]'s law). A galaxy's class reads it from 31.
 pub const NSM_SAMPLER_31: ClassSamplerTable<NsmMark, NsmPick> = ClassSamplerTable::new(
     &NSM_MARKS_31,
     &[SamplerPick::new("pair_kind", &NSM_PAIR_KINDS_31)],

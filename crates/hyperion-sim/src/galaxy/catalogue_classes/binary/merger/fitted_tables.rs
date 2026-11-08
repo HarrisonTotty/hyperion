@@ -17,7 +17,6 @@ use super::*;
 use crate::galaxy::catalogue_classes::binary::NeutronStarMergers;
 use crate::galaxy::catalogue_classes::grid::ClassProcess;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::rules::GalaxyRules;
 use crate::math;
 use crate::planetary::testing::in_shares;
 use crate::rng::Seed;
@@ -51,17 +50,12 @@ fn census_galaxy() -> &'static Galaxy {
     })
 }
 
-/// The Milky Way fixture of `seed` under every 31 hold.
+/// The Milky Way fixture of `seed` under the version's rules, the fitted tables its own from 31.
 fn at_31(seed: Seed) -> Galaxy {
-    Galaxy::from_params_with_rules(
-        seed,
-        GalaxyParams::milky_way_like(),
-        GalaxyRules::every_31_hold(),
-    )
-    .expect("the Milky Way fixture builds")
+    Galaxy::from_params(seed, GalaxyParams::milky_way_like()).expect("the Milky Way fixture builds")
 }
 
-/// The fixture under every 31 hold, the fitted tables its own.
+/// The fixture under the version's rules, the fitted tables its own.
 fn fitted() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| at_31(Seed::new(SEED)))
@@ -547,7 +541,7 @@ fn the_neutron_star_merger_sampler_against_the_engine() {
 /// (0.075 against 0.086).
 const NSM_MISSES: [(usize, f64); 1] = [(2, 0.728_585_729_481_149)];
 
-/// The classes at Milky Way parameters under every 31 hold (slow): over ten Milky Way seeds, the
+/// The classes at Milky Way parameters from 31 (slow): over ten Milky Way seeds, the
 /// stellar mergers' red novae, the mergers in the source horizon over its span, inside the
 /// brainstorm's 0.2–0.5 a year, and the neutron-star mergers' entries about ten, inside 5–20.
 #[test]

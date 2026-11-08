@@ -46,7 +46,7 @@
 //! the grid's alive-stay odds `q_c(m) = 1 − ejected ÷ alive` of 0.3–0.6 above 32 M☉, so it listed
 //! some 0.6 of the hosts the grid carved (research-leans-49 §1, the census's 168 against 279).
 //!
-//! From 31 (`CarveResidualsRules::Matched`) the class follows the grid's law. A component's share
+//! From 31 the class follows the grid's law. A component's share
 //! is the field's share × the alive category's odds, the share the grid places alive; and a host
 //! the test keeps is thinned on `AliveLaw::odds` at its mass, `ρ̂_c(m) ÷ (p_E(m) F_c(τ_ref(m)))`
 //! with ρ̂ the alive density normalised over band E (the grid's own sampler), `p_E` the mass
@@ -130,7 +130,6 @@ use super::system::{CatalogueMotion, CatalogueSystem};
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::bounds::{BOUND_MARGIN, CellBox};
 use crate::galaxy::displaced::marks::{LifetimeBracket, StayCategory};
-use crate::galaxy::displaced::site::CarveResidualsRules;
 use crate::galaxy::displaced::{ExplosionSite, PlacementClass, death_in_interval_under};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
@@ -523,7 +522,7 @@ pub struct LbvProcess {
     /// The nodes' weights summed in order.
     weight: Years,
     /// From 31, per component in order, the grid's law of its living field stars, which the test
-    /// thins on ([`AliveLaw`]); empty under the held arm.
+    /// thins on ([`AliveLaw`]).
     alive: Vec<Option<AliveLaw>>,
 }
 
@@ -631,7 +630,6 @@ impl LbvProcess {
         let latest = nodes
             .iter()
             .fold(f64::NEG_INFINITY, |a, node| a.max(node.ages.1.value()));
-        let matched = galaxy.rules().residuals == CarveResidualsRules::Matched;
         let shared: [f64; NODES] = core::array::from_fn(|k| nodes[k].weight.value());
         let mut alive = Vec::new();
         let components = fields
@@ -644,11 +642,7 @@ impl LbvProcess {
                     .max_pdf_between(Years::new(earliest), Years::new(latest));
                 // From 31, the share the grid places alive, and the node weights times their
                 // bounds on the alive law's thinning.
-                let law = if matched {
-                    AliveLaw::of(galaxy, id, &nodes, band)
-                } else {
-                    None
-                };
+                let law = AliveLaw::of(galaxy, id, &nodes, band);
                 let (share, node_weights, total) = match &law {
                     None => (stay, shared, weight.value()),
                     Some(law) => {
@@ -662,21 +656,18 @@ impl LbvProcess {
                         (stay * odds, weights, total)
                     }
                 };
-                (share > 0.0 && rate > 0.0 && (!matched || (total.is_finite() && total > 0.0)))
-                    .then(|| {
-                        let rate = rate * (1.0 + BOUND_MARGIN);
-                        if matched {
-                            alive.push(law);
-                        }
-                        LbvComponent {
-                            id,
-                            share,
-                            rate_per_year: rate,
-                            candidates_per_system: rate * total,
-                            node_weights,
-                            weight: total,
-                        }
-                    })
+                (share > 0.0 && rate > 0.0 && total.is_finite() && total > 0.0).then(|| {
+                    let rate = rate * (1.0 + BOUND_MARGIN);
+                    alive.push(law);
+                    LbvComponent {
+                        id,
+                        share,
+                        rate_per_year: rate,
+                        candidates_per_system: rate * total,
+                        node_weights,
+                        weight: total,
+                    }
+                })
             })
             .collect();
         Self {
@@ -688,7 +679,8 @@ impl LbvProcess {
     }
 
     /// The grid's law of the living field stars of the component at `slot` of
-    /// [`components`](Self::components), from 31 (`None` under the held arm).
+    /// [`components`](Self::components), from 31 (`None` where the galaxy has no displaced
+    /// classes).
     #[must_use]
     pub(crate) fn alive_law(&self, slot: usize) -> Option<&AliveLaw> {
         self.alive.get(slot).and_then(Option::as_ref)
@@ -697,7 +689,7 @@ impl LbvProcess {
     /// Whether a host the test keeps is kept by the alive law's thinning, from 31: its mark
     /// (`class.lbv.alive`) below the law's odds at its mass and its lifetime at the reference composition with its own
     /// draws, as the grid's alive record takes its own, against its node's bound (module
-    /// documentation, "The living hosts, from 31"). Always under the held arm. Only a host pays
+    /// documentation, "The living hosts, from 31"). Always where it has no law. Only a host pays
     /// the lifetime, since the thinning is independent of the test.
     fn lives_on_the_grid(&self, galaxy: &Galaxy, candidate: &LbvCandidate) -> bool {
         let Some((slot, k)) = candidate.alive else {
@@ -1052,6 +1044,6 @@ pub(crate) fn alive_over_bound() -> usize {
 }
 
 #[cfg(test)]
-mod residuals_hold;
+mod alive_law_tests;
 #[cfg(test)]
 mod tests;

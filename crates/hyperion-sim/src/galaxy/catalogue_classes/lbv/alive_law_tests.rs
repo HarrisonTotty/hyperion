@@ -1,15 +1,13 @@
-//! The tests of the luminous blue variables' half of the carve-out's residuals,
-//! [`CARVE_RESIDUALS_VERSION`] (P09.T35's census C1, P09.T43; research-leans-49 §1): from 31 the
-//! class's living hosts follow the grid's alive law, `StayMarks`' alive density over the share
-//! born within the reference lifetime.
+//! The tests of the luminous blue variables' half of the carve-out's residuals (P09.T35's census
+//! C1, P09.T43; research-leans-49 §1; on the record from 31): the class's living hosts follow the
+//! grid's alive law, `StayMarks`' alive density over the share born within the reference lifetime.
 //!
-//! - The tripwire: the version's rules keep the held arm, and the hold stands only until the bump.
 //! - Analytic, per young component and sampler node: the class's expected hosts per layer-E system,
 //!   read from its own weights, bounds and odds, equal the grid's alive density integrated over the
-//!   node's masses and host ages, and the odds never pass their node's bound; the held arm's ratio
-//!   to the grid is printed (the cause: about 0.6).
+//!   node's masses and host ages, and the odds never pass their node's bound (to 30 the class
+//!   held about 0.6 of the grid's).
 //! - Slow: over 2,048 ridge cells of layer E, the grid's living records that pass `may_host`
-//!   against the class's living candidates there, thinned on the alive law, under both arms.
+//!   against the class's living candidates there, thinned on the alive law.
 
 use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
 
@@ -18,7 +16,7 @@ use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::catalogue_classes::grid::candidate_count;
-use crate::galaxy::displaced::site::{CARVE_RESIDUALS_VERSION, CarveOutRules};
+use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::{CandidateOutcome, CellKey, evaluate_candidate};
 use crate::galaxy::rules::GalaxyRules;
@@ -28,63 +26,36 @@ use crate::stellar::draws::StarDraws;
 /// The carve-out census's fixture seed.
 const SEED: u64 = 0x0935_0000_0000_0001;
 
-/// The census's fixture at the budget without the carve-out, under the residuals' arm `residuals`.
-fn budget(residuals: CarveResidualsRules) -> Galaxy {
+/// The census's fixture at the budget without the carve-out.
+fn budget() -> Galaxy {
     Galaxy::from_params_with_rules(
         Seed::new(SEED),
         GalaxyParams::milky_way_like(),
         GalaxyRules {
             field_share: FieldShareRules::None,
             carve_out: CarveOutRules::Unclaimed,
-            residuals,
             ..GalaxyRules::of_version(GENERATOR_VERSION)
         },
     )
     .expect("the Milky Way fixture builds")
 }
 
-/// The version's rules keep the held arm, every version from 24 to 30 does, and 31 closes the
-/// residuals. The tripwire: the bump to 31 deletes this hold.
-#[test]
-fn the_carve_residuals_are_held_only_until_the_31_bump() {
-    assert!(
-        GENERATOR_VERSION < CARVE_RESIDUALS_VERSION,
-        "the bump to 31 deletes the carve-out residuals' hold, not its rule: \
-         `CARVE_RESIDUALS_VERSION`, `CarveResidualsRules` with its `Held` arm, \
-         `GalaxyRules::residuals` and its reads in `LbvProcess::new` and \
-         `placement::marks::dead_age`, and this module; it keeps both fixes applied always"
-    );
-    let at = |v: u32| GalaxyRules::of_version(crate::GeneratorVersion::new(v)).residuals;
-    for v in [24, 25, 26, 27, 28, 29, 30] {
-        assert_eq!(at(v), CarveResidualsRules::Held, "version {v}");
-    }
-    assert_eq!(at(31), CarveResidualsRules::Matched);
-    assert_eq!(
-        GalaxyRules::every_31_hold().residuals,
-        CarveResidualsRules::Matched
-    );
-}
-
-/// Per young component and sampler node, the class's expected hosts per layer-E system under the
-/// 31 arm equal the grid's alive law's, to rounding: the class's from its node weights, its
+/// Per young component and sampler node, the class's expected hosts per layer-E system equal the grid's alive law's, to rounding: the class's from its node weights, its
 /// node's bound and the alive odds at each mass, `Σ_k w_k ÷ (span_k b_k) ∫ p(m) ÷ P_k × odds ×
 /// A(m) dm`, the grid's from `StayMarks` directly, `share × odds_alive × ∫ ρ̂(m) ÷ F(τ_ref) ×
 /// A(m) dm`, with `A(m)` the share of the component's ages in the node's host ages and below
 /// `τ_ref(m)` (the median star's lifetime at the reference composition), 48 log-spaced masses per
-/// node. The odds stay under their node's bound at every mass. The held arm's ratio is printed.
+/// node. The odds stay under their node's bound at every mass.
 #[test]
 fn living_hosts_follow_the_grid_s_alive_law_node_by_node() {
-    let galaxy = budget(CarveResidualsRules::Matched);
-    let held = budget(CarveResidualsRules::Held);
+    let galaxy = budget();
     let process = LbvProcess::new(&galaxy);
-    let held_process = LbvProcess::new(&held);
     let table = galaxy
         .fields()
         .displaced()
         .expect("the classes are installed")
         .class_table();
     let mass_function = galaxy.mass_function();
-    let band = mass_function.integral(MassBand::E.lo(), MassBand::E.hi());
     let draws = StarDraws::median();
     assert_eq!(
         process.components().len(),
@@ -96,8 +67,6 @@ fn living_hosts_follow_the_grid_s_alive_law_node_by_node() {
         let law = process
             .alive_law(slot)
             .expect("a young component's alive law");
-        let held_young = held_process.components()[slot];
-        assert_eq!(held_young.id(), id);
         let marks = table.stay_marks(id);
         let rho = marks
             .mass_density(StayCategory::Alive)
@@ -105,14 +74,14 @@ fn living_hosts_follow_the_grid_s_alive_law_node_by_node() {
         let grid_share = galaxy.field_component_share(MassBand::E, id) * marks.odds()[0];
         let ages = galaxy.fields().component(id).ages();
         let z_ref = table.reference_composition(table.component_source(id));
-        let (mut class_all, mut grid_all, mut held_all) = (0.0, 0.0, 0.0);
+        let (mut class_all, mut grid_all) = (0.0, 0.0);
         for (k, node) in process.nodes().iter().enumerate() {
             let (lo, hi) = (node.masses().0.value(), node.masses().1.value());
             let (h0, h1) = (node.ages().0.value(), node.ages().1.value());
             let span = h1 - h0;
             let in_node = mass_function.integral(lo, hi);
             let steps = 48;
-            let (mut class, mut grid, mut held_sum) = (0.0, 0.0, 0.0);
+            let (mut class, mut grid) = (0.0, 0.0);
             for i in 0..steps {
                 let t = (f64::from(i) + 0.5) / f64::from(steps);
                 let m = lo * crate::math::powf(hi / lo, t);
@@ -141,31 +110,23 @@ fn living_hosts_follow_the_grid_s_alive_law_node_by_node() {
                 if born > 0.0 {
                     grid += rho.pdf(m) / born * a * dm;
                 }
-                held_sum += mass_function.pdf(m) / band * a * dm;
             }
-            let (class, grid, held_sum) = (
-                class * young.share(),
-                grid * grid_share,
-                held_sum * held_young.share(),
-            );
+            let (class, grid) = (class * young.share(), grid * grid_share);
             assert!(
                 (class - grid).abs() <= 1e-9 * grid.abs().max(f64::MIN_POSITIVE),
                 "{id:?} node {k}: the class's {class:e} against the grid's {grid:e}"
             );
             eprintln!(
-                "{:?} node {k}: grid {grid:.4e} per layer-E system, held class {:.3} of it",
-                galaxy.fields().component(id).population(),
-                held_sum / grid
+                "{:?} node {k}: grid {grid:.4e} per layer-E system",
+                galaxy.fields().component(id).population()
             );
             class_all += class;
             grid_all += grid;
-            held_all += held_sum;
         }
         eprintln!(
-            "{:?}: matched {:.6}, held {:.3} of the grid's {grid_all:.4e}",
+            "{:?}: the class {:.6} of the grid's {grid_all:.4e}",
             galaxy.fields().component(id).population(),
-            class_all / grid_all,
-            held_all / grid_all
+            class_all / grid_all
         );
     }
 }
@@ -197,8 +158,8 @@ fn ridge_cells(galaxy: &Galaxy, radii: &[f64], count: i32) -> Vec<CellKey> {
 
 /// The grid's living layer-E field records in `cells` that pass `may_host`, and the class's
 /// candidates there that are alive at the epoch (their age under their lifetime at their own
-/// composition and draws) and pass the alive law's thinning: two Poisson counts of one intensity
-/// under the 31 arm; and the thinnings whose odds passed their node's bound.
+/// composition and draws) and pass the alive law's thinning: two Poisson counts of one intensity;
+/// and the thinnings whose odds passed their node's bound.
 fn ridge_counts(galaxy: &Galaxy, cells: &[CellKey]) -> (u64, u64, usize) {
     let process = LbvProcess::new(galaxy);
     let grid: u64 = in_shares(16, 16, |share| {
@@ -265,30 +226,26 @@ fn ridge_counts(galaxy: &Galaxy, cells: &[CellKey]) -> (u64, u64, usize) {
     (grid, class, over)
 }
 
-/// The ridge cells' living hosts, the grid's against the class's, under both arms: one intensity
-/// under the 31 arm (asserted at α); the held arm's printed, about 0.6 of the grid's.
+/// The ridge cells' living hosts, the grid's against the class's: one intensity (asserted at α;
+/// to 30 the class held about 0.6 of the grid's).
 #[test]
-#[ignore = "slow: 2,048 ridge cells of layer E and the class's cells about them, twice"]
+#[ignore = "slow: 2,048 ridge cells of layer E and the class's cells about them"]
 fn ridge_cells_living_hosts_match_the_grid() {
-    for residuals in [CarveResidualsRules::Held, CarveResidualsRules::Matched] {
-        let galaxy = budget(residuals);
-        let cells = ridge_cells(&galaxy, &[20_000.0, 24_000.0, 26_000.0, 28_000.0], 128);
-        let (grid, class, over) = ridge_counts(&galaxy, &cells);
-        assert_eq!(over, 0, "alive odds over their node's bound");
-        let (a, b) = (
-            f64::from(u32::try_from(grid).unwrap()),
-            f64::from(u32::try_from(class).unwrap()),
-        );
-        let z = (a - b) / (a + b).max(1.0).sqrt();
-        let p = 2.0 * normal_cdf(-z.abs());
-        eprintln!(
-            "{residuals:?}: {} cells, the grid's {grid} living may-host records, the class's \
-             {class}, z = {z:.2}, p = {p:.2e}",
-            cells.len()
-        );
-        if residuals == CarveResidualsRules::Matched {
-            assert!(grid > 0);
-            assert_p_value("the ridge cells' living hosts", p, ALPHA);
-        }
-    }
+    let galaxy = budget();
+    let cells = ridge_cells(&galaxy, &[20_000.0, 24_000.0, 26_000.0, 28_000.0], 128);
+    let (grid, class, over) = ridge_counts(&galaxy, &cells);
+    assert_eq!(over, 0, "alive odds over their node's bound");
+    let (a, b) = (
+        f64::from(u32::try_from(grid).unwrap()),
+        f64::from(u32::try_from(class).unwrap()),
+    );
+    let z = (a - b) / (a + b).max(1.0).sqrt();
+    let p = 2.0 * normal_cdf(-z.abs());
+    eprintln!(
+        "{} cells, the grid's {grid} living may-host records, the class's \
+         {class}, z = {z:.2}, p = {p:.2e}",
+        cells.len()
+    );
+    assert!(grid > 0);
+    assert_p_value("the ridge cells' living hosts", p, ALPHA);
 }

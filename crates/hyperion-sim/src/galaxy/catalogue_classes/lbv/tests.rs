@@ -209,16 +209,32 @@ fn the_young_field_is_the_young_disc_and_the_nuclear_disc() {
     }
     // Some 0.23 Myr of ages per layer-E system, the nodes' placement's figure.
     assert!((2.0e5..2.6e5).contains(&weight), "{weight}");
-    // The field's share and ages, which from 27 give most young stars to the features (P09.T2.c).
-    for young in process.components() {
+    // The field's share and ages, which from 27 give most young stars to the features (P09.T2.c),
+    // and from 31 the share the grid places alive, its nodes' weights each times its bound on the
+    // alive law's thinning (P09.T43's residual).
+    for (slot, young) in process.components().iter().enumerate() {
         let ages = galaxy.field_ages(young.id());
+        let odds = galaxy
+            .fields()
+            .displaced()
+            .map_or(1.0, |d| d.class_table().stay_marks(young.id()).odds()[0]);
         assert_same_bits(
             young.share(),
-            galaxy.field_component_share(MassBand::E, young.id()),
+            galaxy.field_component_share(MassBand::E, young.id()) * odds,
         );
+        let law = process
+            .alive_law(slot)
+            .expect("a young component's alive law");
+        let thinned = process
+            .nodes()
+            .iter()
+            .enumerate()
+            .fold(0.0, |sum, (k, node)| {
+                sum + node.weight().value() * law.bound(k)
+            });
         assert_same_bits(
             young.candidates_per_system(),
-            young.rate_per_year() * weight,
+            young.rate_per_year() * thinned,
         );
         for k in 0..=20_000 {
             let age = earliest + (latest - earliest) * f64::from(k) / 20_000.0;
@@ -947,7 +963,8 @@ fn fixture_census() -> &'static Census {
 
 /// The census's candidates are the young field's layer-E systems of the nodes' masses and ages: in
 /// each component, as many as its systems × its layer-E share × Σ over the nodes of the node's
-/// share × the age distribution's mass over its span, at α = 10⁻³. The young disc's are exact; the
+/// share × its bound on the alive law's thinning (from 31) × the age distribution's mass over its
+/// span, at α = 10⁻³. The young disc's are exact; the
 /// nuclear disc's two components are pooled.
 #[test]
 fn candidates_follow_the_young_field_s_systems() {
@@ -958,15 +975,24 @@ fn candidates_follow_the_young_field_s_systems() {
     let expected: Vec<f64> = process
         .components()
         .iter()
-        .map(|young| {
+        .enumerate()
+        .map(|(slot, young)| {
             let laws = fields.component(young.id());
             // The field's ages, which from 27 give most young stars to the features (P09.T2.c),
-            // as its share does.
+            // as its share does; from 31 each node's candidates raised by its bound on the alive
+            // law's thinning (P09.T43's residual).
             let ages = galaxy.field_ages(young.id());
-            let share = process.nodes().iter().fold(0.0, |sum, node| {
-                let (lo, hi) = node.ages();
-                sum + node.share() * (ages.cdf(hi) - ages.cdf(lo))
-            });
+            let law = process
+                .alive_law(slot)
+                .expect("a young component's alive law");
+            let share = process
+                .nodes()
+                .iter()
+                .enumerate()
+                .fold(0.0, |sum, (k, node)| {
+                    let (lo, hi) = node.ages();
+                    sum + node.share() * law.bound(k) * (ages.cdf(hi) - ages.cdf(lo))
+                });
             laws.count_with_unborn() * young.share() * share
         })
         .collect();

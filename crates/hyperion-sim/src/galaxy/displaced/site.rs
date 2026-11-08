@@ -77,7 +77,6 @@
 use std::cell::LazyCell;
 
 use crate::GENERATOR_VERSION;
-use crate::GeneratorVersion;
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::catalogue_classes::core_collapse::recent_death_claims;
@@ -459,50 +458,10 @@ pub(crate) enum CarveOutRules {
     Claimed,
 }
 
-/// The generator version from which the carve-out's two residuals are closed (plan 09, P09.T35's
-/// census C1 and P09.T43; research-leans-49): the luminous blue variables' class follows the
-/// grid's living field stars, and a grid record that died within [`recent_death_reach`] of the
-/// epoch takes its exact fate ([`CarveResidualsRules::Matched`]).
-///
-/// Below it every galaxy takes the held arm, [`CarveResidualsRules::Held`], the code of version 29
-/// verbatim, so every generated value keeps its bits; the tests reach the new arm through
-/// `GalaxyRules::every_31_hold()`. The bump to 31 deletes the hold, not the rule: this constant,
-/// [`CarveResidualsRules`] with its `Held` arm, `GalaxyRules::residuals` and its reads in
-/// `LbvProcess::new` and the test, and in `placement::marks::dead_age`, and the tripwire
-/// (`the_carve_residuals_are_held_only_until_the_31_bump`).
-pub(crate) const CARVE_RESIDUALS_VERSION: GeneratorVersion = GeneratorVersion::new(31);
-
-/// Whether the carve-out's two residuals are closed (the galaxy rules' `residuals` field, the hold
-/// of [`CARVE_RESIDUALS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum CarveResidualsRules {
-    /// Version 30's and before: the luminous blue variables' class thins its living hosts by the
-    /// field's stay share of band E, and a dead record whose fate the table read draws its time
-    /// since death after the table's bracket whatever it is.
-    Held,
-    /// Version 31's: the class takes the budget taken to the field thinned by the grid's
-    /// alive-stay odds at the mass, and a table-read dead record that may have died within
-    /// [`recent_death_reach`] takes its exact fate and draws its time since death after it.
-    Matched,
-}
-
-impl CarveResidualsRules {
-    /// The arm at `version`: [`CarveResidualsRules::Matched`] from [`CARVE_RESIDUALS_VERSION`],
-    /// [`CarveResidualsRules::Held`] below it.
-    #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
-        if version.get() >= CARVE_RESIDUALS_VERSION.get() {
-            Self::Matched
-        } else {
-            Self::Held
-        }
-    }
-}
-
 /// The longest time before the epoch, plus the interval's own +H, that a death the core-collapse
 /// class can list lies: `W_cap` + L + 2H, 4,264,144 Julian years, the interval's start
 /// ([`interval_start`]) and its end. A grid record that died less than this before the epoch
-/// is one the class's window can reach, so under [`CarveResidualsRules::Matched`] its age follows
+/// is one the class's window can reach, so from 31 its age follows
 /// its exact death age, not the fate table's bracket on it (research-leans-49 §2).
 pub(crate) fn recent_death_reach() -> Years {
     Years::new(

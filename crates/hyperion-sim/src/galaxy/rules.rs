@@ -14,8 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`residuals`](GalaxyRules::residuals), at `CARVE_RESIDUALS_VERSION` (31): the carve-out's
-//!   two residuals closed (P09.T35's census C1, P09.T43);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -26,7 +24,7 @@
 use crate::GeneratorVersion;
 use crate::galaxy::ages::FieldShareRules;
 use crate::galaxy::displaced::DisplacedRules;
-use crate::galaxy::displaced::site::{CarveOutRules, CarveResidualsRules};
+use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::members::recent::FeatureClassesRules;
 use crate::stellar::rules::StellarRules;
 
@@ -51,11 +49,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
-    /// Whether the carve-out's two residuals are closed, the hold of
-    /// [`CARVE_RESIDUALS_VERSION`](crate::galaxy::displaced::site::CARVE_RESIDUALS_VERSION):
-    /// the luminous blue variables' class following the grid's living field stars, and a recently
-    /// dead grid record's age following its exact death (P09.T35's census C1, P09.T43).
-    pub(crate) residuals: CarveResidualsRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -70,18 +63,8 @@ impl GalaxyRules {
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
-            residuals: CarveResidualsRules::of_version(version),
             stellar: StellarRules::of_version(version),
         }
-    }
-
-    /// Every galaxy and stellar hold at 31 in force, for a test that asserts a 31 figure: the
-    /// carve-out's residuals (P09.T35, P09.T43, [`CarveResidualsRules::Matched`]). The 31 bump
-    /// deletes it with them.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_31_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(31))
     }
 }
 
