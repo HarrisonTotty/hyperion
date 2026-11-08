@@ -31,10 +31,11 @@
 #
 # --world served flies a generated body this script's server serves (plan R10, R10.T15.b). The
 # script builds the server and waits for it, then places the ship with `just place-ship` (its
-# `--json` placement): at --body (place-ship's default without it, the first planet of the nearest
-# system with one) in --universe (place-ship's dev universe without it), at --distance au if given
-# (half the body's Hill radius at pericentre without it), surveying every cell of the body's coarse
-# field (--survey, orbital at 50 m by default), and hands the client the placement's universe and
+# `--json` placement): at --body (place-ship's default without it, since it surveys: the first
+# planet with a solid surface of the nearest system with one, found at the server's version) in
+# --universe (place-ship's dev universe without it), at --distance au if given (half the body's
+# Hill radius at pericentre without it), surveying every cell of the body's coarse field
+# (--survey, orbital at 50 m by default), and hands the client the placement's universe and
 # body as its own --universe and --body. Its run is given 21 minutes more: the field's 10-minute
 # hold, since the server computes the body's coarse field before its first answer, one site's 10
 # minutes of bakes, and a minute. Behind the serve gate (`GENERATED_SURFACES_FROM`, generator

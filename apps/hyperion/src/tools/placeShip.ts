@@ -14,7 +14,8 @@
  * ship's velocity in the system frame, or, at rest, the galactic axes, which put the nose along
  * galactic −z. Hence the two placements:
  *
- * - a body, by default the system's first planet: at rest in the body's own non-rotating frame,
+ * - a body, by default the system's first planet (with `--survey`, its first with a solid surface
+ *   to survey, {@link firstPlanetToSurvey}): at rest in the body's own non-rotating frame,
  *   `distance` behind it along its orbital velocity. The ship then moves with the body, its
  *   velocity in the system frame is the body's, and the nose looks along that velocity at the
  *   body. The body's direction of motion turns as it orbits, a degree in a day for an Earth-like
@@ -49,6 +50,7 @@
  */
 
 import {
+  type BodyRecordDto,
   type BodySummaryDto,
   decodeServerMessage,
   encodeClientMessage,
@@ -572,6 +574,46 @@ export function firstPlanet(bodies: readonly BodySummaryDto[]): BodySummaryDto |
   return bodies.find((body) => body.kind.type === "planet" && isPlacedWorld(body));
 }
 
+/**
+ * Whether a body's full record, from `body_detail`, holds what a survey of it reads: a solid
+ * surface (`surface` `ok`; a giant's, or a solid body's under a supercritical envelope, is
+ * `not_applicable`, and the server refuses its survey as having no solid surface) and a figure to
+ * give its coarse field's level ({@link fieldLevel}).
+ */
+export function canBeSurveyed(record: Pick<BodyRecordDto, "surface" | "figure">): boolean {
+  return record.surface.state === "ok" && record.figure?.state === "ok";
+}
+
+/**
+ * The first planet of `bodies`, in index order, present and with a solid surface to survey
+ * ({@link canBeSurveyed}), asked of the server one at a time; `undefined` for none. Which of a
+ * system's planets are giants moves with the generator version, so the default target of a
+ * survey (the descent spike's served world, the Mac batch's height-worker sweep) is found, not
+ * pinned.
+ */
+export async function firstPlanetToSurvey(
+  ask: Ask,
+  universe: string,
+  bodies: readonly BodySummaryDto[],
+  time: UniverseTime,
+): Promise<BodySummaryDto | undefined> {
+  for (const body of bodies.filter((each) => each.kind.type === "planet" && isPlacedWorld(each))) {
+    // One planet at a time, stopping at the first: a full record of each costs the server a draw.
+    // oxlint-disable-next-line no-await-in-loop
+    const { record } = await ask({
+      kind: "body_detail",
+      universe,
+      body: body.id,
+      time,
+      detail: "full",
+    });
+    if (canBeSurveyed(record)) {
+      return body;
+    }
+  }
+  return undefined;
+}
+
 /** The systems of a search, nearest to `nearLy` first. */
 export function nearestFirst(
   systems: readonly SystemRecord[],
@@ -689,6 +731,7 @@ async function chooseSystem(
   if (options.system === null && options.lookAt.kind === "body") {
     return { id: parseBodyId(options.lookAt.body).system, designation: null };
   }
+  const surveyed = options.survey !== null;
   const range = await ask({
     kind: "systems_in_range",
     universe,
@@ -711,17 +754,23 @@ async function chooseSystem(
     return { id: named.id, designation: named.designation };
   }
   for (const system of systems.slice(0, SYSTEMS_EXAMINED)) {
-    // One system at a time, nearest first, stopping at the first with a planet: asking for all
-    // sixty at once would generate systems that are never used.
+    // One system at a time, nearest first, stopping at the first with a planet (with a solid
+    // surface, for a survey): asking for all sixty at once would generate systems that are never
+    // used.
     // oxlint-disable-next-line no-await-in-loop
     const bodies = await bodiesAt(ask, universe, system.id, time);
-    if (firstPlanet(bodies) !== undefined) {
+    const planet = surveyed
+      ? // oxlint-disable-next-line no-await-in-loop
+        await firstPlanetToSurvey(ask, universe, bodies, time)
+      : firstPlanet(bodies);
+    if (planet !== undefined) {
       return { id: system.id, designation: system.designation };
     }
   }
   throw new Error(
     `none of the ${String(Math.min(systems.length, SYSTEMS_EXAMINED))} systems nearest ` +
-      `${options.nearLy.join(",")} ly has a planet; try another --near or a larger --radius`,
+      `${options.nearLy.join(",")} ly has a planet${surveyed ? " with a solid surface to survey" : ""}; ` +
+      "try another --near or a larger --radius",
   );
 }
 
@@ -735,20 +784,24 @@ async function bodyTarget(
   system: string,
   lookAt: Exclude<LookAt, { kind: "barycentre" }>,
   time: UniverseTime,
+  surveyed: boolean,
 ): Promise<{
   readonly summary: BodySummaryDto;
   readonly velocityMS: readonly [number, number, number];
 }> {
   const before = await bodiesAt(ask, universe, system, time, "bulk");
   const body =
-    lookAt.kind === "planet"
-      ? firstPlanet(before)
-      : before.find((candidate) => candidate.id === lookAt.body);
+    lookAt.kind === "body"
+      ? before.find((candidate) => candidate.id === lookAt.body)
+      : surveyed
+        ? await firstPlanetToSurvey(ask, universe, before, time)
+        : firstPlanet(before);
   if (body === undefined) {
     throw new Error(
-      lookAt.kind === "planet"
-        ? `system ${system} has no planet present at ${String(time.seconds)} s`
-        : `system ${system} has no body ${lookAt.body}`,
+      lookAt.kind === "body"
+        ? `system ${system} has no body ${lookAt.body}`
+        : `system ${system} has no planet ${surveyed ? "with a solid surface to survey " : ""}` +
+            `present at ${String(time.seconds)} s`,
     );
   }
   if (!isPlacedWorld(body)) {
@@ -794,7 +847,14 @@ export async function placeShip(ask: Ask, options: PlaceShipOptions): Promise<Pl
     distanceM = (options.distanceAu ?? DEFAULT_BARYCENTRE_DISTANCE_AU) * AU_M;
     ship = barycentreKinematics(system.id, distanceM, time);
   } else {
-    const target = await bodyTarget(ask, info.id, system.id, options.lookAt, time);
+    const target = await bodyTarget(
+      ask,
+      info.id,
+      system.id,
+      options.lookAt,
+      time,
+      options.survey !== null,
+    );
     body = target.summary.id;
     hillRadiusM = pericentreHillRadiusM(target.summary);
     distanceM =

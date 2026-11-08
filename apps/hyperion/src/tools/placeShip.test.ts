@@ -2,8 +2,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
+  type BodyFigureDto,
+  type BodyRecordDto,
   type BodySummaryDto,
   type ClientMessage,
+  decodeServerMessage,
   type DetailLevelDto,
   galacticPositionFromLy,
   type RequestBody,
@@ -22,6 +25,7 @@ import {
   AU_M,
   askThrough,
   bodyKinematics,
+  canBeSurveyed,
   DEFAULT_BODY_DISTANCE_AU,
   DEFAULT_HILL_FRACTION,
   DEFAULT_NEAR_LY,
@@ -143,28 +147,66 @@ const EARTH_HILL_M = EARTH.aM * (1 - EARTH.e) * Math.cbrt(EARTH.massKg / (3 * EA
  */
 const PLANET_FIGURE_M = { a: 1_738_100, c: 1_736_000 } as const;
 
-/** The planet's record at the `full` level: its figure `ok`, its other sections not modelled. */
-function planetDetail(body: Extract<RequestBody, { kind: "body_detail" }>): ResponseBody {
+/** The planet's figure, {@link PLANET_FIGURE_M}'s. */
+function figureOk(): BodyFigureDto {
+  return {
+    equatorial_radius_m: PLANET_FIGURE_M.a,
+    polar_radius_m: PLANET_FIGURE_M.c,
+    flattening: 1 - PLANET_FIGURE_M.c / PLANET_FIGURE_M.a,
+    pole: [0, 0, 1],
+    moment_of_inertia_factor: 0.393,
+    law: "rotational",
+    datum: "solid_surface",
+  };
+}
+
+/**
+ * A solid surface, `ok`: the shared wire fixture's Earth's (`packages/protocol/fixtures/
+ * planetary.json`'s `body_detail_response`, illustrative values), decoded as the client decodes it.
+ */
+function solidSurface(): BodyRecordDto["surface"] {
+  const fixture: unknown = JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL("../../../../packages/protocol/fixtures/planetary.json", import.meta.url),
+      ),
+      "utf8",
+    ),
+  );
+  const named =
+    typeof fixture === "object" && fixture !== null && "body_detail_response" in fixture
+      ? fixture.body_detail_response
+      : null;
+  const message = decodeServerMessage(JSON.stringify(named));
+  if (
+    message.type !== "response" ||
+    message.body.kind !== "body_detail" ||
+    message.body.record.surface.state !== "ok"
+  ) {
+    throw new Error("the fixture's body_detail_response holds no solid surface");
+  }
+  return message.body.record.surface;
+}
+
+/**
+ * The record at the `full` level of the planet `body` asks for, at its position at the time: its
+ * figure `ok`, its surface `ok` but for a giant's, `not_applicable`, its other sections not
+ * modelled.
+ */
+function planetDetail(
+  body: Extract<RequestBody, { kind: "body_detail" }>,
+  summary: BodySummaryDto,
+  giant: boolean,
+): ResponseBody {
   return {
     kind: "body_detail",
     universe: body.universe,
     time: body.time,
     granted: body.detail,
     record: {
-      ...planetAt(body.time.seconds),
-      figure: {
-        state: "ok",
-        value: {
-          equatorial_radius_m: PLANET_FIGURE_M.a,
-          polar_radius_m: PLANET_FIGURE_M.c,
-          flattening: 1 - PLANET_FIGURE_M.c / PLANET_FIGURE_M.a,
-          pole: [0, 0, 1],
-          moment_of_inertia_factor: 0.393,
-          law: "rotational",
-          datum: "solid_surface",
-        },
-      },
-      surface: { state: "not_modelled" },
+      ...summary,
+      figure: { state: "ok", value: figureOk() },
+      surface: giant ? { state: "not_applicable" } : solidSurface(),
       hooks: { state: "not_modelled" },
     },
   };
@@ -182,6 +224,12 @@ class FakeServer {
   readonly requests: RequestBody[] = [];
   /** The planet `NEAR` lists at a time, s: {@link planetAt}, with no mass or orbit, by default. */
   planetOf: (seconds: number) => BodySummaryDto = planetAt;
+  /**
+   * Whether that first planet is a giant, whose surface is not applicable, with a second planet,
+   * `.0200` 2 au out with a solid surface, listed after it (a giant at v29 and v30: the owner's Mac
+   * batch, 2026-11-07).
+   */
+  giantFirst = false;
 
   answer(body: RequestBody): ResponseBody | RequestError {
     this.requests.push(body);
@@ -238,11 +286,15 @@ class FakeServer {
           kind: "scene_ship",
           clock: { time: body.ship.time, time_rate: body.time_rate, state: "running" },
         };
-      case "body_detail":
-        if (body.body === `${NEAR}.0100`) {
-          return planetDetail(body);
+      case "body_detail": {
+        const planet = this.#bodies(body.time.seconds, "bulk").find(
+          (each) => each.id === body.body && each.kind.type === "planet",
+        );
+        if (planet !== undefined) {
+          return planetDetail(body, planet, this.giantFirst && body.body === `${NEAR}.0100`);
         }
         return { code: "unknown_body", message: `no body ${body.body}`, field: "body" };
+      }
       case "survey_pass":
         return { kind: "survey_pass", revision: 1 };
       case "open_universe":
@@ -281,6 +333,9 @@ class FakeServer {
       aBody(`${NEAR}.0001`, "ring", [0, 0, 0]),
       this.planetOf(seconds),
       aBody(`${NEAR}.0101`, "moon", null),
+      ...(this.giantFirst
+        ? [aBody(`${NEAR}.0200`, "planet", [2 * AU_M, 21_000 * seconds, 0])]
+        : []),
     ];
     if (detail === "contact") {
       for (const listed of bodies) {
@@ -606,10 +661,64 @@ describe("placing the ship", () => {
     await expect(
       placeShip(
         askThrough(server.client()),
-        options(["-u", "Survey", "--survey", "landed", "0.5"]),
+        options(["-u", "Survey", "--look-at", `${NEAR}.0100`, "--survey", "landed", "0.5"]),
       ),
     ).rejects.toThrow(`body ${NEAR}.0100 has no figure to give its coarse field's level`);
     expect(server.surveyPasses()).toEqual([]);
+  });
+
+  it("surveys the first planet with a solid surface by default, passing over a giant (the Mac batch's sweep)", async () => {
+    const server = new FakeServer();
+    server.giantFirst = true;
+    const placement = await placeShip(
+      askThrough(server.client()),
+      options(["-u", "Survey", "--survey", "orbital", "50"]),
+    );
+    expect([placement.body, server.surveyPasses().map((pass) => pass.body)]).toEqual([
+      `${NEAR}.0200`,
+      [`${NEAR}.0200`],
+    ]);
+  });
+
+  it("looks at the first planet, a giant or not, with no survey", async () => {
+    const server = new FakeServer();
+    server.giantFirst = true;
+    const placement = await placeShip(askThrough(server.client()), options(["-u", "Survey"]));
+    expect(placement.body).toBe(`${NEAR}.0100`);
+  });
+
+  it("passes over a system with no planet to survey, saying so where none has one", async () => {
+    const server = new FakeServer();
+    const answer = server.answer.bind(server);
+    vi.spyOn(server, "answer").mockImplementation((body) => {
+      const given = answer(body);
+      return body.kind === "body_detail" && "kind" in given && given.kind === "body_detail"
+        ? { ...given, record: { ...given.record, surface: { state: "not_applicable" } } }
+        : given;
+    });
+    await expect(
+      placeShip(
+        askThrough(server.client()),
+        options(["-u", "Survey", "--survey", "orbital", "50"]),
+      ),
+    ).rejects.toThrow(/has a planet with a solid surface to survey; try another --near/u);
+    expect(server.surveyPasses()).toEqual([]);
+  });
+
+  it("can survey a record whose surface and figure are both ok, and no other", () => {
+    const figure = { state: "not_modelled" } as const;
+    expect([
+      canBeSurveyed({ surface: solidSurface(), figure: { state: "ok", value: figureOk() } }),
+      canBeSurveyed({ surface: solidSurface(), figure }),
+      canBeSurveyed({
+        surface: { state: "not_applicable" },
+        figure: { state: "ok", value: figureOk() },
+      }),
+      canBeSurveyed({
+        surface: { state: "not_modelled" },
+        figure: { state: "ok", value: figureOk() },
+      }),
+    ]).toEqual([true, false, false, false]);
   });
 });
 
