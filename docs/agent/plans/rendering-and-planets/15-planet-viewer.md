@@ -280,3 +280,6 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
 - R15.T5 (lean, 2026-11-07): with a moon shown, the groups and `SEED` keep their last values, muted
   and still editable, under `NO INPUTS: a moon has none, enter one to GENERATE or SHARE`; an input entered (or a planet shown) ends the hold, and
   `RANDOMIZE` and `OPEN BODY` stay offered. `SUN` `HELD` turns the stars about the moon alone.
+- R15.T5 (landing round 4's UX review, 2026-11-08): the muted fields stay editable, each described by
+  the `NO INPUTS` line (`InputRow`'s `noteId`). `LOAD` stays held as built; the review's lean that it
+  be offered is in the outbox's findings.

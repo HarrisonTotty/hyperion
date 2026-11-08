@@ -711,6 +711,15 @@ describe("nextDrawSeed", () => {
       expect(screen.getByRole("textbox", { name: "SMA" })).toHaveProperty("value", "1");
     });
 
+    it("describes each muted field by its NO INPUTS line, and none once an input is entered", async () => {
+      const { user } = await handOverMoon();
+      const sma = screen.getByRole("textbox", { name: "SMA" });
+      expect(sma).toHaveAccessibleDescription(/^NO INPUTS: ?a moon has none/u);
+      await user.clear(sma);
+      await user.type(sma, "2{Enter}");
+      expect(sma).not.toHaveAccessibleDescription(/NO INPUTS/u);
+    });
+
     it("holds GENERATE back, saying why", async () => {
       const { socket, user } = await handOverMoon();
       const generate = screen.getByRole("button", { name: "G GENERATE" });

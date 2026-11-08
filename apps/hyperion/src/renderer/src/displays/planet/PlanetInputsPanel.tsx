@@ -366,6 +366,7 @@ export function PlanetInputsPanel({
       onEnter={(wire) => {
         viewer.setInput(name, wire);
       }}
+      noteId={noInputs ? noInputsId : null}
     />
   );
   const statusOf = (kind: ViewerCommand["kind"]) =>
@@ -596,10 +597,12 @@ interface InputRowProps {
   readonly folded: boolean;
   /** Enters a wire value, or `null` to leave it to its draw. */
   readonly onEnter: (wire: number | null) => void;
+  /** The panel's `NO INPUTS` note, which says why its value is muted, or `null` (R15.T5). */
+  readonly noteId: string | null;
 }
 
 /** One input's row: its label, field, unit, and its provenance where it may be drawn. */
-function InputRow({ spec, wire, drawn, serverRefusal, folded, onEnter }: InputRowProps) {
+function InputRow({ spec, wire, drawn, serverRefusal, folded, onEnter, noteId }: InputRowProps) {
   const fieldId = useId();
   const hintId = useId();
   const errorId = useId();
@@ -651,7 +654,7 @@ function InputRow({ spec, wire, drawn, serverRefusal, folded, onEnter }: InputRo
         spellCheck={false}
         value={draft ?? (isDrawn && drawn === null ? "—" : text)}
         aria-invalid={shownRefusal === null ? undefined : "true"}
-        aria-describedby={shownRefusal === null ? hintId : `${hintId} ${errorId}`}
+        aria-describedby={describedBy([noteId, hintId, shownRefusal === null ? null : errorId])}
         onChange={(event) => {
           type(event.target.value);
         }}
