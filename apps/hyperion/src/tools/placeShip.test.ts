@@ -21,6 +21,8 @@ import {
 import { CommanderError } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import planetaryFixture from "../../../../packages/protocol/fixtures/planetary.json" with { type: "json" };
+
 import {
   AU_M,
   askThrough,
@@ -165,19 +167,7 @@ function figureOk(): BodyFigureDto {
  * planetary.json`'s `body_detail_response`, illustrative values), decoded as the client decodes it.
  */
 function solidSurface(): BodyRecordDto["surface"] {
-  const fixture: unknown = JSON.parse(
-    readFileSync(
-      fileURLToPath(
-        new URL("../../../../packages/protocol/fixtures/planetary.json", import.meta.url),
-      ),
-      "utf8",
-    ),
-  );
-  const named =
-    typeof fixture === "object" && fixture !== null && "body_detail_response" in fixture
-      ? fixture.body_detail_response
-      : null;
-  const message = decodeServerMessage(JSON.stringify(named));
+  const message = decodeServerMessage(JSON.stringify(planetaryFixture.body_detail_response));
   if (
     message.type !== "response" ||
     message.body.kind !== "body_detail" ||

@@ -500,18 +500,23 @@ const NO_BODIES: ReadonlySet<BodyIdHex> = new Set();
 const INSIDE_MARGIN = 1e-9;
 
 /**
- * Whether the camera, `centreM` from the body's centre (the camera at the origin), stands within
- * the body's figure, the spheroid of equatorial radius `a` and polar radius `c` about `pole`, to
+ * Whether the camera stands within a body's figure, `centreM` the body's centre from the camera,
+ * m: the spheroid of `figure`'s equatorial radius a and polar radius c, m, about the unit `pole`, to
  * {@link INSIDE_MARGIN}: ρ²/a² + z²/c² ≤ (1 + margin)², z along the pole and ρ across it. Not its
  * equatorial sphere: over an oblate body's high latitudes the ground lies inside that sphere, by
  * about (a − c) sin²φ, some 19 km at 69° for the Earth (WGS 84's a − c, 21.4 km), so that a camera
  * low over it stands within the sphere and still outside the figure (fix-mac-batch-tools: a
  * decked world's low window, 4 km up at 69°, drew no body at all).
  */
-export function insideFigure(centreM: Vec3, a: number, c: number, pole: Vec3): boolean {
-  const z = -dot(centreM, pole);
-  const rho2 = Math.max(0, dot(centreM, centreM) - z * z);
-  return !(rho2 / (a * a) + (z * z) / (c * c) > (1 + INSIDE_MARGIN) ** 2);
+export function insideFigure(
+  centreM: Vec3,
+  figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">,
+  pole: Vec3,
+): boolean {
+  const { equatorialRadiusM: a, polarRadiusM: c } = figure;
+  const zM = -dot(centreM, pole);
+  const rho2M2 = Math.max(0, dot(centreM, centreM) - zM * zM);
+  return !(rho2M2 / (a * a) + (zM * zM) / (c * c) > (1 + INSIDE_MARGIN) ** 2);
 }
 
 /**
@@ -809,7 +814,7 @@ function discRecordOf(
       : figurePole(body.figure);
   // Seen from inside its figure, which the camera may be within its equatorial sphere and outside
   // of, low over an oblate body's high latitudes, where its terrain draws it.
-  if (insideFigure(body.centreM, a, c, pole)) {
+  if (insideFigure(body.centreM, body.figure, pole)) {
     return null;
   }
   // A body wholly off the view draws no pixel. Behind the camera or across its plane its rectangle

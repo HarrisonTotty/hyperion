@@ -1109,24 +1109,33 @@ describe("the plan", () => {
     expect(plan.discs).toHaveLength(0);
   });
 
-  it("draws an oblate body from over its pole within its equatorial sphere, and none from within its figure (fix-mac-batch-tools)", () => {
-    // A Saturn-like f = 0.098, the camera 4 km over its pole, 5,900 km within its equatorial
-    // sphere; then 4 km beneath its pole's ground.
-    const a = 6.0268e7;
-    const c = a * (1 - 0.098);
-    const figure = { equatorialRadiusM: a, polarRadiusM: c, pole: vec3(0, 0, 1) };
-    const over = scene(c + 4_000, 0, { figure });
-    const under = scene(c - 4_000, 0, { figure });
+  /** A Saturn-like f = 0.098 figure about +z, m. */
+  const SATURN_LIKE = {
+    equatorialRadiusM: 6.0268e7,
+    polarRadiusM: 6.0268e7 * (1 - 0.098),
+    pole: vec3(0, 0, 1),
+  };
+
+  it("draws an oblate body from 4 km over its pole, within its equatorial sphere, and none from 4 km beneath it (fix-mac-batch-tools)", () => {
+    // 4 km over the pole stands 5,900 km within the equatorial sphere.
+    const discsAt = (distanceM: number): number => {
+      const { body, hosts } = scene(distanceM, 0, { figure: SATURN_LIKE });
+      return planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]])).discs.length;
+    };
     expect([
-      planLitBodies([over.body], over.hosts, OPTIONS, new Map([[over.body.id, "disc"]])).discs
-        .length,
-      planLitBodies([under.body], under.hosts, OPTIONS, new Map([[under.body.id, "disc"]])).discs
-        .length,
-      insideFigure(over.body.centreM, a, c, figure.pole),
-      insideFigure(under.body.centreM, a, c, figure.pole),
-      // Over the equator, 4 km up, outside both.
-      insideFigure(vec3(-(a + 4_000), 0, 0), a, c, figure.pole),
-    ]).toEqual([1, 0, false, true, false]);
+      discsAt(SATURN_LIKE.polarRadiusM + 4_000),
+      discsAt(SATURN_LIKE.polarRadiusM - 4_000),
+    ]).toEqual([1, 0]);
+  });
+
+  it("finds the camera within a figure by its spheroid, not its equatorial sphere", () => {
+    const { polarRadiusM: c, equatorialRadiusM: a, pole } = SATURN_LIKE;
+    expect([
+      insideFigure(vec3(0, 0, -(c + 4_000)), SATURN_LIKE, pole),
+      insideFigure(vec3(0, 0, -(c - 4_000)), SATURN_LIKE, pole),
+      insideFigure(vec3(-(a + 4_000), 0, 0), SATURN_LIKE, pole),
+      insideFigure(vec3(-(a - 4_000), 0, 0), SATURN_LIKE, pole),
+    ]).toEqual([false, true, false, true]);
   });
 
   it("draws no disc wholly off the view, beside the camera or behind it, and keeps its regime", () => {
