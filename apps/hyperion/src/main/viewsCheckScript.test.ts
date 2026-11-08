@@ -7,18 +7,21 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 /**
  * `scripts/viewsCheck.sh`'s launches (plan R10, R10.T16.d; decision-r10-t16-contracts §6), run
  * with a stand-in for Electron (`HYPERION_VIEWS_CHECK_ELECTRON`) that records its arguments and
- * exits as the test asks. The script needs `setsid` and GNU `timeout`, which only Linux has
- * (R07.T20's pre-existing limit), so the test runs there alone.
+ * exits as the test asks. The test runs on Linux alone (R07.T20's pre-existing limit); one of its
+ * runs takes away `setsid` and `timeout`, as macOS lacks them, and the script then finds
+ * `tools/portable`'s.
  */
 
 /** The script, from this file. */
@@ -67,6 +70,26 @@ interface ScriptSetting {
   readonly env?: Readonly<Record<string, string>>;
   /** What a stand-in `uname -s` answers; absent, the machine's own answers. */
   readonly uname?: string;
+  /** Commands the script's PATH lacks, as macOS lacks setsid(1) and timeout(1). */
+  readonly without?: ReadonlyArray<string>;
+}
+
+/**
+ * A PATH as a machine without `tools` has it, macOS's without setsid(1) and timeout(1): a
+ * directory under `dir` linking every other command on this PATH, the first of each name.
+ */
+function pathWithout(dir: string, tools: ReadonlyArray<string>): string {
+  const linked = join(dir, "path");
+  mkdirSync(linked);
+  for (const each of (process.env["PATH"] ?? "/usr/bin:/bin").split(delimiter)) {
+    const names = existsSync(each) && statSync(each).isDirectory() ? readdirSync(each) : [];
+    for (const name of names.filter((one) => !tools.includes(one))) {
+      if (!existsSync(join(linked, name))) {
+        symlinkSync(join(each, name), join(linked, name));
+      }
+    }
+  }
+  return linked;
 }
 
 /**
@@ -129,7 +152,11 @@ function runScriptWith(args: ReadonlyArray<string>, given: ScriptSetting): Scrip
   chmodSync(stub, 0o755);
   const env: Record<string, string> = {
     ...given.env,
-    PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
+    PATH: `${bin}${delimiter}${
+      given.without === undefined
+        ? (process.env["PATH"] ?? "/usr/bin:/bin")
+        : pathWithout(dir, given.without)
+    }`,
     HOME: dir,
     TMPDIR: profiles,
     STUB_LOG: log,
@@ -337,6 +364,21 @@ describe.runIf(process.platform === "linux")("the views check's script", () => {
   it("makes no second launch once it is terminated during the first, and exits 143", () => {
     const run = runScript(["--terrain"], {}, "high");
     expect([run.launches.length, run.status, readdirSync(run.profiles)]).toEqual([1, 143, []]);
+  });
+
+  it("launches, and stops its launch's group, on a PATH without setsid and timeout, as macOS's is", () => {
+    const without = ["setsid", "timeout"];
+    const run = runScriptWith(["--terrain", "--setting", "low"], { without });
+    expect([run.status, run.launches.map((launch) => valueOf(launch, "--setting"))]).toEqual([
+      0,
+      ["low"],
+    ]);
+    const stopped = runScriptWith(["--terrain"], { without, terminateAt: "high" });
+    expect([stopped.launches.length, stopped.status, readdirSync(stopped.profiles)]).toEqual([
+      1,
+      143,
+      [],
+    ]);
   });
 
   it("holds its SwiftShader switches equal to testRender.sh's (R01.T16)", () => {

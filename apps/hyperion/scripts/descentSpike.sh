@@ -78,13 +78,22 @@
 # protobuf stream to a temporary file before the client reads it over CDP (R05.T14.i). The server,
 # the companion load and Electron run in process groups of their own under `timeout`, each group
 # killed when the script ends for any reason. The exit status is the client's: 0 pass, 1 fail, 3
-# the watchdog. `setsid` and `timeout` are util-linux's and coreutils', or on macOS the justfile's
-# `tools/portable` stand-ins. It runs on bash 3.2 (macOS's): an array that may be empty is expanded
+# the watchdog. `setsid` and `timeout` are util-linux's and coreutils', or on macOS
+# `tools/portable`'s stand-ins, which the script puts on PATH where they are missing. It runs on bash 3.2 (macOS's): an array that may be empty is expanded
 # as `${a[@]+"${a[@]}"}`.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
+# macOS has neither setsid(1) nor timeout(1). The justfile puts `tools/portable`'s stand-ins on
+# PATH, after the system's own; a call from outside it (the Mac batch's, `macProfile.mjs`) takes
+# them here, the same way, so that each launch still starts a process group of its own.
+for tool in setsid timeout; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        PATH="$PATH:$repo/tools/portable"
+        break
+    fi
+done
 # The client's Electron; a test of this script gives a stand-in that records its arguments.
 electron="${HYPERION_SPIKE_ELECTRON:-$here/node_modules/.bin/electron}"
 # Where the runs' profiles and kept shader caches go; a test of this script gives its own.

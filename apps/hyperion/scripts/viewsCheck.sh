@@ -210,6 +210,15 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
+# macOS has neither setsid(1) nor timeout(1). The justfile puts `tools/portable`'s stand-ins on
+# PATH, after the system's own; a call from outside it (the Mac batch's, `macProfile.mjs`) takes
+# them here, the same way, so that each launch still starts a process group of its own.
+for tool in setsid timeout; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        PATH="$PATH:$repo/tools/portable"
+        break
+    fi
+done
 # The client's Electron; a test of this script gives a stand-in that records its arguments.
 electron="${HYPERION_VIEWS_CHECK_ELECTRON:-$here/node_modules/.bin/electron}"
 

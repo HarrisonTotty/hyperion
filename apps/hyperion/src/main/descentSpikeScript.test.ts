@@ -7,10 +7,12 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -18,8 +20,9 @@ import { afterEach, describe, expect, it } from "vitest";
  * `scripts/descentSpike.sh`'s launch in the check-only software mode (plan R01, R01.T16; main's
  * ruling of 2026-11-01 for the spike), run with a stand-in for Electron (`HYPERION_SPIKE_ELECTRON`)
  * that records its arguments and environment, a stand-in `cargo` for the server the script starts,
- * and the runs' directory its own (`HYPERION_SPIKE_RUNS`). The script needs `setsid` and GNU
- * `timeout`, which only Linux has, so the test runs there alone.
+ * and the runs' directory its own (`HYPERION_SPIKE_RUNS`). The test runs on Linux alone; one of
+ * its runs takes away `setsid` and `timeout`, as macOS lacks them, and the script then finds
+ * `tools/portable`'s.
  */
 
 /** The script, from this file. */
@@ -79,6 +82,26 @@ interface ScriptSetting {
   readonly env?: Readonly<Record<string, string>>;
   /** What a stand-in `uname -s` answers; absent, the machine's own answers. */
   readonly uname?: string;
+  /** Commands the script's PATH lacks, as macOS lacks setsid(1) and timeout(1). */
+  readonly without?: ReadonlyArray<string>;
+}
+
+/**
+ * A PATH as a machine without `tools` has it, macOS's without setsid(1) and timeout(1): a
+ * directory under `dir` linking every other command on this PATH, the first of each name.
+ */
+function pathWithout(dir: string, tools: ReadonlyArray<string>): string {
+  const linked = join(dir, "path");
+  mkdirSync(linked);
+  for (const each of (process.env["PATH"] ?? "/usr/bin:/bin").split(delimiter)) {
+    const names = existsSync(each) && statSync(each).isDirectory() ? readdirSync(each) : [];
+    for (const name of names.filter((one) => !tools.includes(one))) {
+      if (!existsSync(join(linked, name))) {
+        symlinkSync(join(each, name), join(linked, name));
+      }
+    }
+  }
+  return linked;
 }
 
 /** Writes an executable stand-in at `path`. */
@@ -113,7 +136,11 @@ function runScript(args: ReadonlyArray<string>, given: ScriptSetting = {}): Scri
   ]);
   const env: Record<string, string> = {
     ...given.env,
-    PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
+    PATH: `${bin}${delimiter}${
+      given.without === undefined
+        ? (process.env["PATH"] ?? "/usr/bin:/bin")
+        : pathWithout(dir, given.without)
+    }`,
     HOME: dir,
     STUB_LOG: log,
     STUB_ENV_LOG: envLog,
@@ -200,6 +227,11 @@ describe.runIf(process.platform === "linux")("the descent spike's script", () =>
     expect(run.status).toBe(0);
     expect(readdirSync(join(run.runs, "gpu-cache-software"))).toEqual(["GPUCache"]);
     expect(existsSync(join(run.runs, "gpu-cache"))).toBe(false);
+  });
+
+  it("starts the server and the client on a PATH without setsid and timeout, as macOS's is", () => {
+    const run = runScript(["--smoke"], { without: ["setsid", "timeout"] });
+    expect([run.status, run.launch?.includes("--descent-spike")]).toEqual([0, true]);
   });
 
   it("refuses --software off Linux, launching nothing", () => {
