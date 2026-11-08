@@ -17,7 +17,7 @@
 //! - [`merger_tables`](GalaxyRules::merger_tables), the merger classes' step from 31 (P15.T10.b,
 //!   [`MergerTableRules`]): their census of the generator's own pairs;
 //! - [`residuals`](GalaxyRules::residuals), at `CARVE_RESIDUALS_VERSION` (31): the carve-out's
-//!   two residuals closed (P09.T35's census C1, P09.T43).
+//!   two residuals closed (P09.T35's census C1, P09.T43);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!

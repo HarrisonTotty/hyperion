@@ -82,34 +82,37 @@ fn the_galaxy_total_over_ten_seeds() {
 }
 
 /// The catalogue's expected high-mass hosts at Milky Way parameters, the same at every seed, pinned
-/// as measured: 2.85 of its 9,976 at generator version 29, on the tables refitted on the
+/// as measured: 3.03 of its 9,976 at generator version 30, on v30's refit of `binary_xrb` (landing
+/// round 4); 2.85 of its 9,976 at generator version 29, on the tables refitted on the
 /// generator's own pairs (P15.T10.b), whose sampler leaves most of the high-mass side to the young
 /// features' lists (the library's `the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals`
 /// pins that share), against Fortin et al.'s 152 catalogued, a finding; 4.10 of 9,974 at 27 and
 /// 28, on the refit at 27, and the scratch table's share, 0.16, before it.
-const HIGH_MASS_HOSTS: f64 = 2.854_041_965_168_350_6;
+const HIGH_MASS_HOSTS: f64 = 3.026_043_732_450_046_4;
 
 /// The family of the Milky Way seeds the totals are read over: this with k < 10 in its low bits.
 const MILKY_WAY_SEEDS: u64 = 0x0b17_08b0_0000_0100;
 
-/// The hosts the disc's scan finds, pinned as measured at generator version 29, on the tables
-/// refitted on the generator's own pairs (P15.T10.b): 8,620, 3 of them high-mass, 0.864 of the
-/// 9,976 expected, against 0.93–1.02 of them on the scratch table's rows: the slab leaves out some
+/// The hosts the disc's scan finds, pinned as measured at generator version 30, on v30's refit of
+/// `binary_xrb` (landing round 4): 8,843, 3 of them high-mass, 0.886 of the 9,976 expected. At 29,
+/// on the tables refitted on the generator's own pairs (P15.T10.b): 8,620, 3 of them high-mass,
+/// 0.864 of the 9,976 expected, against 0.93–1.02 of them on the scratch table's rows: the slab leaves out some
 /// 14% of the hosts, a finding. At 27 and 28, on the refit at 27, 8,517, 3 of them high-mass,
 /// 0.854 of 9,974.
-const SCANNED_HOSTS: usize = 8_620;
+const SCANNED_HOSTS: usize = 8_843;
 
 /// The kinds of the disc's scan's hosts, the low-mass side's then the high-mass side's, pinned as
-/// measured at 29: the scan holds fewer ultracompacts and more neutron-star transients than the
-/// galaxy's mix gives the side (176 against 456.3 expected, −13.5 σ, and 6,971 against 6,757.9,
-/// +5.6 σ), the rest within 2 σ. At 27 and 28 220 and 6,874 (−15.0 σ and +7.1 σ); to 26, on the
+/// measured at 30, on v30's refit of `binary_xrb` (landing round 4): the scan holds fewer
+/// ultracompacts than the galaxy's mix gives the side (47 against 116.6 expected, −6.5 σ), the rest
+/// within 2 σ. At 29 it held fewer ultracompacts and more neutron-star transients (176 against
+/// 456.3 expected, −13.5 σ, and 6,971 against 6,757.9, +5.6 σ), the rest within 2 σ. At 27 and 28 220 and 6,874 (−15.0 σ and +7.1 σ); to 26, on the
 /// scratch table's rows, every kind within 5 σ.
 const SCANNED_KINDS: [(XrbHostKind, usize); 9] = [
-    (XrbHostKind::NeutronStarPersistent, 308),
-    (XrbHostKind::NeutronStarTransient, 6_971),
-    (XrbHostKind::BlackHolePersistent, 6),
-    (XrbHostKind::BlackHoleTransient, 1_153),
-    (XrbHostKind::Ultracompact, 176),
+    (XrbHostKind::NeutronStarPersistent, 320),
+    (XrbHostKind::NeutronStarTransient, 7_251),
+    (XrbHostKind::BlackHolePersistent, 8),
+    (XrbHostKind::BlackHoleTransient, 1_211),
+    (XrbHostKind::Ultracompact, 47),
     (XrbHostKind::Symbiotic, 3),
     (XrbHostKind::BeX, 3),
     (XrbHostKind::Supergiant, 0),

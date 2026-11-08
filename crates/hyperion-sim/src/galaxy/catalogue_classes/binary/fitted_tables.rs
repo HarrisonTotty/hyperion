@@ -684,9 +684,10 @@ const CATALOGUED_HIGH_MASS: f64 = 152.0;
 /// (P15.T10.b), as measured (the same at every seed): 2.85, a finding, under Fortin et al.'s 152
 /// catalogued (main's ruling of 2026-11-01 took the high-mass hosts for research). Under the 29
 /// blocks fitted before P11.T12's wind reach the class held 2.89, under train 27's refit on its
-/// engine, which 28 kept, 4.10, and under 27's first refit 27.6.
-/// The merger step at 31 moves no X-ray binary's row, so it is beyond that step's fits.
-const PINNED_HIGH_MASS_HOSTS: f64 = 2.854_041_965_168_350_6;
+/// engine, which 28 kept, 4.10, and under 27's first refit 27.6. Re-pinned at 30 on v30's refit of
+/// `binary_xrb`: 3.03 (2.85 at 29; landing round 4). The merger step at 31 moves no X-ray binary's
+/// row, so it is beyond that step's fits.
+const PINNED_HIGH_MASS_HOSTS: f64 = 3.026_043_732_450_046_4;
 
 /// Corral-Santana et al.'s (2016, A&A 587, A61) black-hole transients, as P11.T8.b takes them:
 /// 1,300, ± 400 its tolerance (theirs 1,280 ± 120, a lower limit; recalled).

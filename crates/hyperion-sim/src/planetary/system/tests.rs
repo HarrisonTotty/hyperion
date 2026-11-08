@@ -9403,10 +9403,11 @@ fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor()
 /// are counted, with their argon ices; and so are the airs whose `T_eq` lies under their floor,
 /// which rise with their greenhouse's base (the follow-up's D1.3).
 ///
-/// Re-measured at generator version 28, on 28's sample, whose folds move or remove some of its
-/// bodies: the unlit records are 2, both airless members of `0x8200_b2df_f000_0002`, neither
-/// holding an argon ice; 1,100 lit airless records stand at their floor, 985 with an argon ice;
-/// and 8 airs rise from under their floor. At 27, on 27's sample, they were 2, 1,110, 996 and 8;
+/// Re-measured at generator version 30, on 30's sample (landing round 4): the unlit records are 2,
+/// both airless members of `0x8200_b2df_f000_0002`, neither holding an argon ice; 1,157 lit
+/// airless records stand at their floor, 1,038 with an argon ice; and 9 airs rise from under their
+/// floor. At 28, on 28's sample, whose folds move or remove some of its bodies, they were 2, 1,100,
+/// 985 and 8. At 27, on 27's sample, they were 2, 1,110, 996 and 8;
 /// to 26 18 (bless-note-23's), 1,359, 1,202 and 13; B3 counted 1,365, 1,121 and 7 on
 /// P14.T54.b.k's tree, every 24 hold lifted at 23, before P14.T53.a's thick CO₂ closure landed
 /// (restated at 24, P14.T54.b.l).
@@ -9431,8 +9432,8 @@ fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
         "{:#?}",
         census.unlit
     );
-    assert_eq!((census.raised, census.raised_argon), (1_100, 985));
-    assert_eq!(census.raised_airs.len(), 8, "{:#?}", census.raised_airs);
+    assert_eq!((census.raised, census.raised_argon), (1_157, 1_038));
+    assert_eq!(census.raised_airs.len(), 9, "{:#?}", census.raised_airs);
     eprintln!(
         "raised {}, argon ices {} (means {:?}); airs raised {}",
         census.raised,

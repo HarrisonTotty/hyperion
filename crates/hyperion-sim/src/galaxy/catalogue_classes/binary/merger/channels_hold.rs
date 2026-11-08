@@ -391,9 +391,11 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
 /// version's engine), re-pinned at generator versions 25 (14.23, 12.14 and 16.02 at 24), 26
 /// (14.46, 12.04 and 16.41 at 25) and 27 (14.56, 9.75 and 16.18 at 26), on 27's engine, whose
 /// raised segment cap moves none of it (the same bits at 64): the masses' over P15.T10.b's 3.1, a
-/// finding, and from 27 the mass ratio's under it.
+/// finding, and from 27 the mass ratio's under it; and at 30 (16.46, 3.12 and 16.69; 16.19, 3.09
+/// and 16.42 at 29) on v30's refitted binary rows, the mass ratio's now just over it (landing round
+/// 4), a finding.
 const PINNED_CHI_SQUARE: [f64; 3] = [
-    16.188_401_940_934_37,
-    3.089_558_924_320_248_6,
-    16.423_065_448_923_655,
+    16.457_539_474_400_352,
+    3.117_521_416_572_119_5,
+    16.691_595_914_205_166,
 ];

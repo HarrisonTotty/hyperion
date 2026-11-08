@@ -615,9 +615,10 @@ fn the_engine_channels_against_the_engine_under_every_27_hold() {
 /// 73: the dynamical channel takes the mass ratio's from 153 to 62 (167 to 68 at 25, 170 to 61 at
 /// 24); the masses' stay high, the engine holding 13% of its primaries in layers D and E against
 /// the class's 1.3% and (at 24) its giant-branch donors heavier (median 1.69 M☉) than the class's
-/// at the turn-off.
+/// at the turn-off. Re-pinned at 30 on v30's refitted binary rows (landing round 4): 211.96, 62.83
+/// and 311.25 (211.75, 62.80 and 310.99 at 29).
 const PINNED_CHI_SQUARE: [f64; 3] = [
-    211.748_025_500_419_57,
-    62.800_411_434_748_2,
-    310.989_488_700_644_87,
+    211.959_925_991_593_1,
+    62.832_942_918_403_08,
+    311.248_889_764_339_37,
 ];

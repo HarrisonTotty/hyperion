@@ -117,7 +117,9 @@ const CITED_BLACK_HOLE_SHARE: f64 = 0.01;
 const PINNED_HIGH_MASS: [usize; 3] = [280, 1, 0];
 
 /// The census's members of each kind under the version's rules, in [`XrbHostKind::ALL`]'s order,
-/// in the slab and in the young disc, as measured at 29: 1,132 and 689 members, under 29's rules
+/// in the slab and in the young disc, as measured at 30 on v30's refitted binary rows (landing round
+/// 4): 1,043 and 678 members, the slab's neutron-star transients 995 → 986 and ultracompacts
+/// 90 → 10, the young disc's ultracompacts 38 → 27. At 29: 1,132 and 689 members, under 29's rules
 /// on the record (not split by fold; the slab's neutron-star transients 975 → 995 and
 /// ultracompacts 89 → 90, the young disc's ultracompacts 41 → 38). At 28 on the census
 /// at the generator's first attempt, `[49, 975, 0, 5, 0, 0, 89, 1, 0]` and
@@ -144,8 +146,8 @@ const PINNED_HIGH_MASS: [usize; 3] = [280, 1, 0];
 /// times the pin's, as `ns_accretion_hold`'s census rose from 413 to 1,738 members (a finding, for
 /// research).
 const PINNED_KINDS: [[usize; 9]; 2] = [
-    [41, 995, 0, 5, 0, 0, 90, 1, 0],
-    [166, 105, 37, 62, 280, 1, 38, 0, 0],
+    [41, 986, 0, 5, 0, 0, 10, 1, 0],
+    [166, 105, 37, 62, 280, 1, 27, 0, 0],
 ];
 
 /// The longest period of an ultracompact member under every 27 hold: 80 minutes, the
