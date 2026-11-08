@@ -4484,6 +4484,13 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   color: var(--text-muted);
 }
 
+/* Why that string is held, and a copy of it refused, under the field's row. */
+.planet-viewer__share-note {
+  display: block;
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .planet-viewer__empty {
   margin-top: 1rem;
 }

@@ -10,6 +10,12 @@ import { describedBy } from "./describedBy";
 import { SeedField } from "./SeedField";
 import type { ViewerCommand } from "./usePlanetViewer";
 
+/** What `SHARE` says beside its string while it is another planet's, a moon on show. */
+export const SHARE_HELD_NOTE = "NO INPUTS: this string is another planet's, paste one to LOAD";
+
+/** What `SHARE` says once a copy or a cut of that string is refused. */
+export const SHARE_NOT_COPIED = "NOT COPIED: this string is another planet's, paste one to LOAD";
+
 /** The key that draws a real planet's inputs from anywhere on the display but a text field. */
 export const RANDOMIZE_KEY = "n";
 
@@ -52,7 +58,7 @@ export interface PlanetViewerBarProps {
  *   generator version: selected whole as it takes the focus, to copy; or paste one and `LOAD` it
  *   (`Enter`), which puts its inputs on the panel, refusing a string it cannot read with what is
  *   valid. While the viewer holds no inputs, a moon on show, its last string, another planet's, is
- *   held back with the panel's reason: muted, and refused to a copy. `LOAD` stays offered, since a
+ *   held back with the panel's reason: muted, said so under it, and refused to a copy or a cut. `LOAD` stays offered, since a
  *   pasted string is one way to enter one (the guide's Controls: a held control's reason says what
  *   to do), and its inputs on the panel offer `SHARE` again; so does `RANDOMIZE`.
  */
@@ -134,18 +140,27 @@ interface ShareFieldProps {
 
 /**
  * The inputs' string, to copy, or a pasted one to `LOAD`. Held back with `heldId`, the string
- * shown is muted and refused to a copy or a cut until another is typed or pasted over it, and
- * `LOAD` still takes a pasted one.
+ * shown is muted, with {@link SHARE_HELD_NOTE} under it, and a copy or a cut of it is refused,
+ * saying so ({@link SHARE_NOT_COPIED}), until another is typed or pasted over it; `LOAD` still
+ * takes a pasted one.
  */
 function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
   const fieldId = useId();
   const errorId = useId();
+  const noteId = useId();
   const field = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [copyRefused, setCopyRefused] = useState(false);
   const text = formatInputsString(inputs);
   // The string shown is another planet's while held, until one is typed or pasted over it.
   const stale = heldId !== null && draft === null;
+  const refuseCopy = (event: { preventDefault: () => void }): void => {
+    if (stale) {
+      event.preventDefault();
+      setCopyRefused(true);
+    }
+  };
   const load = (): void => {
     if (draft === null || isEmptyEntry(draft)) {
       setDraft(null);
@@ -175,24 +190,21 @@ function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
         spellCheck={false}
         value={draft ?? text}
         aria-invalid={refusal === null ? undefined : "true"}
-        aria-describedby={describedBy([heldId, refusal === null ? null : errorId])}
+        aria-describedby={describedBy([
+          heldId,
+          stale ? noteId : null,
+          refusal === null ? null : errorId,
+        ])}
         onChange={(event) => {
           setDraft(event.target.value);
           setRefusal(null);
+          setCopyRefused(false);
         }}
         onFocus={(event) => {
           event.currentTarget.select();
         }}
-        onCopy={(event) => {
-          if (stale) {
-            event.preventDefault();
-          }
-        }}
-        onCut={(event) => {
-          if (stale) {
-            event.preventDefault();
-          }
-        }}
+        onCopy={refuseCopy}
+        onCut={refuseCopy}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -201,6 +213,7 @@ function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
             event.preventDefault();
             setDraft(null);
             setRefusal(null);
+            setCopyRefused(false);
             showSelected(event.currentTarget, text);
           }
         }}
@@ -215,6 +228,11 @@ function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
       >
         LOAD
       </button>
+      {stale ? (
+        <output className="planet-viewer__share-note" id={noteId}>
+          <StatusText text={copyRefused ? SHARE_NOT_COPIED : SHARE_HELD_NOTE} />
+        </output>
+      ) : null}
       {refusal === null ? null : (
         <p className="form-field__error planet-inputs__error" id={errorId}>
           <StatusText text={refusal} />

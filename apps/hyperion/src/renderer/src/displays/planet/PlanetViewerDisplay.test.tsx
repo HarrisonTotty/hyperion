@@ -3,7 +3,7 @@
  * its planet opened in `VIEW`'s display of its own.
  */
 import type { ResponseFor } from "@hyperion/protocol";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -40,6 +40,7 @@ import {
 import { REQUEST_TIMEOUT_MS } from "../../lib/useServerRequest";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { stubViewLayout } from "../../test/viewDisplayHarness";
+import { SHARE_HELD_NOTE, SHARE_NOT_COPIED } from "./PlanetViewerBar";
 import { PlanetViewerDisplay } from "./PlanetViewerDisplay";
 import { nextDrawSeed, type PlanetViewerOpening } from "./usePlanetViewer";
 import { formatInputsString, DEFAULT_INPUTS, toInputsDto } from "./planetInputs";
@@ -732,18 +733,26 @@ describe("nextDrawSeed", () => {
       expect(generate).toHaveAccessibleDescription(NO_INPUTS_DESCRIPTION);
     });
 
-    it("holds SHARE's string back, muted and refused to a copy, saying why, and offers LOAD", async () => {
-      await handOverMoon();
+    it("holds SHARE's string back, saying so under it and on a refused copy or cut, and offers LOAD", async () => {
+      const { user } = await handOverMoon();
       const share = screen.getByRole("textbox", { name: "SHARE" });
-      const load = screen.getByRole("button", { name: "LOAD" });
       expect([
-        share.classList.contains("planet-viewer__string--held"),
-        // A copy or a cut whose default is prevented: the string is another planet's.
-        fireEvent.copy(share),
-        fireEvent.cut(share),
-        load.getAttribute("aria-disabled"),
-      ]).toEqual([true, false, false, null]);
-      expect(share).toHaveAccessibleDescription(NO_INPUTS_DESCRIPTION);
+        screen.getByRole("button", { name: "LOAD" }).getAttribute("aria-disabled"),
+        wholeText(SHARE_HELD_NOTE).length,
+      ]).toEqual([null, 1]);
+      expect(share).toHaveAccessibleDescription(
+        /this string is another planet's, paste one to LOAD$/u,
+      );
+      const shown = share.getAttribute("value");
+      await navigator.clipboard.writeText("before");
+      await user.click(share);
+      await user.copy();
+      await user.cut();
+      expect([
+        await navigator.clipboard.readText(),
+        share.getAttribute("value"),
+        wholeText(SHARE_NOT_COPIED).length,
+      ]).toEqual(["before", shown, 1]);
     });
 
     it("still offers RANDOMIZE", async () => {
@@ -801,13 +810,12 @@ describe("nextDrawSeed", () => {
       });
       await user.click(share);
       await user.paste(pasted);
-      expect(share.classList.contains("planet-viewer__string--held")).toBe(false);
+      expect(wholeText(SHARE_HELD_NOTE)).toHaveLength(0);
       await user.click(screen.getByRole("button", { name: "LOAD" }));
       expect([
         screen.getByRole("textbox", { name: "OBLIQUITY" }),
         screen.queryByText(/NO INPUTS/u),
-        fireEvent.copy(screen.getByRole("textbox", { name: "SHARE" })),
-      ]).toEqual([expect.objectContaining({ value: "60" }), null, true]);
+      ]).toEqual([expect.objectContaining({ value: "60" }), null]);
       await user.click(screen.getByRole("button", { name: "G GENERATE" }));
       expect(socket.requestsOfKind("viewer_planet")).toHaveLength(1);
     });
@@ -818,10 +826,12 @@ describe("nextDrawSeed", () => {
       await user.clear(sma);
       await user.type(sma, "2{Enter}");
       const share = screen.getByRole("textbox", { name: "SHARE" });
-      expect([
-        share.classList.contains("planet-viewer__string--held"),
-        fireEvent.copy(share),
-      ]).toEqual([false, true]);
+      await user.click(share);
+      await user.copy();
+      expect([await navigator.clipboard.readText(), wholeText(SHARE_HELD_NOTE).length]).toEqual([
+        share.getAttribute("value"),
+        0,
+      ]);
       expect(share).not.toHaveAccessibleDescription(/NO INPUTS/u);
     });
 

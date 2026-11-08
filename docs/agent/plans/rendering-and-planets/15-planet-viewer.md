@@ -283,6 +283,7 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
 - R15.T5 (landing round 4's UX review, 2026-11-08): the muted fields stay editable, each described by
   the `NO INPUTS` line (`InputRow`'s `noteId`). `LOAD` stays held as built; the review's lean that it
   be offered is in the outbox's findings.
-- R15.T5 (fix-mac-batch-tools, 2026-11-08): `LOAD` is offered while a moon is shown; `SHARE`'s
-  last string stays shown, muted (`planet-viewer__string--held`) and refused to a copy or a cut,
-  until a string is pasted over it; a string loaded ends the hold (`setInputs`).
+- R15.T5 (main's brief on landing round 4's UX review, 2026-11-08; needs the owner's
+  confirmation): `LOAD` is offered while a moon is shown; `SHARE`'s last string stays shown, muted
+  over `SHARE_HELD_NOTE`, and a copy or a cut of it is refused (`SHARE_NOT_COPIED`) until a string
+  is pasted over it; a string loaded ends the hold (`setInputs`).
