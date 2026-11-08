@@ -292,6 +292,7 @@ describe("the server's skies, from its log", () => {
   it("reads each sky line's event and leaves every other line", () => {
     expect(skyEventOf(line("a sky started universe=8160ee7f2970b1b5"))).toBe("started");
     expect(skyEventOf(line("a sky is answered with its kept final reply"))).toBe("kept");
+    expect(skyEventOf(line("a sky is answered with its final reply kept on disk"))).toBe("kept");
     expect(skyEventOf(line("a sky's final reply is made listed=7089"))).toBe("final");
     expect(skyEventOf(line("a sky ended without its final reply code=Busy"))).toBe("unfinished");
     expect(skyEventOf(line("a sky was given up before its final reply"))).toBe("unfinished");

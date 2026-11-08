@@ -383,6 +383,8 @@ export type SkyEvent = "started" | "kept" | "final" | "unfinished";
 const SKY_MESSAGES: ReadonlyArray<readonly [string, SkyEvent]> = [
   ["a sky started", "started"],
   ["a sky is answered with its kept final reply", "kept"],
+  // A final reply kept on disk by an earlier server (R06.T11.n), as a resumed batch's warm-up finds.
+  ["a sky is answered with its final reply kept on disk", "kept"],
   ["a sky's final reply is made", "final"],
   ["a sky ended without its final reply", "unfinished"],
   ["a sky was given up before its final reply", "unfinished"],
