@@ -270,6 +270,20 @@ export const MAC_PROFILE_DEFAULTS: MacProfileMatrixOptions = {
   counted: true,
 };
 
+/**
+ * The pairs `--levers` names: {@link MAC_PROFILE_DEFAULTS}' with none given (`""`), every pair
+ * of {@link MAC_PROFILE_LEVERS} for `all`, none for `none`, else the comma-separated names.
+ */
+export function leversOf(text: string): ReadonlyArray<string> {
+  if (text === "") {
+    return MAC_PROFILE_DEFAULTS.levers;
+  }
+  if (text === "all") {
+    return MAC_PROFILE_LEVERS.map((lever) => lever.name);
+  }
+  return text === "none" ? [] : text.split(",").filter((each) => each.length > 0);
+}
+
 /** The views check's argument for a ratio: none at 1, which is its default. */
 function ratioArgs(ratio: MacProfileRatio): ReadonlyArray<string> {
   return ratio === 1 ? [] : ["--device-pixel-ratio", String(ratio)];

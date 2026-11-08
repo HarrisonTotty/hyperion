@@ -14,6 +14,7 @@ import {
   isCounted,
   type KeptRun,
   keptRunsIn,
+  leversOf,
   MAC_PROFILE_BODY_LEVERS,
   MAC_PROFILE_DEFAULTS,
   MAC_PROFILE_LEVERS,
@@ -143,6 +144,17 @@ describe("the Mac batch's matrix", () => {
         (run) => run.place.kind === "pair" && run.place.lever === "decked-air-surface",
       ),
     ).toBe(false);
+    expect([
+      leversOf(""),
+      leversOf("all"),
+      leversOf("none"),
+      leversOf("decked-air-surface,limb-rays"),
+    ]).toEqual([
+      MAC_PROFILE_DEFAULTS.levers,
+      MAC_PROFILE_LEVERS.map((lever) => lever.name),
+      [],
+      ["decked-air-surface", "limb-rays"],
+    ]);
     const named = macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["decked-air-surface"] });
     expect(named.filter((run) => run.place.kind === "pair").map((run) => run.id)).toEqual([
       "decked-air-surface-high-dpr1-a1",

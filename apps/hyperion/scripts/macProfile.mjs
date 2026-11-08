@@ -383,17 +383,10 @@ function optionsOf(args, profile) {
   if (!ratios.every((each) => each === 1 || each === 2)) {
     return { problem: "--dprs takes 1 and 2" };
   }
-  const every = profile.MAC_PROFILE_LEVERS.map((lever) => lever.name);
-  const leverText = option(args, "levers", "");
-  const levers =
-    leverText === ""
-      ? profile.MAC_PROFILE_DEFAULTS.levers
-      : leverText === "all"
-        ? every
-        : listOf(leverText);
+  const levers = profile.leversOf(option(args, "levers", ""));
   const unknown = levers.filter((name) => profile.leverNamed(name) === undefined);
   if (unknown.length > 0) {
-    const known = every.join(", ");
+    const known = profile.leversOf("all").join(", ");
     return { problem: `no lever is named ${unknown.join(", ")}: the levers are ${known}` };
   }
   const body = option(args, "body", DEFAULT_BODY);
