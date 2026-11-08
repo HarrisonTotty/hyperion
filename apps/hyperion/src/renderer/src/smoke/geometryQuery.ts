@@ -50,6 +50,9 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
   const figureText = parameters.get("geometry-figureShading");
   const figureShading =
     figureText === "forward" || figureText === "screen" ? figureText : undefined;
+  const planetshineText = parameters.get("geometry-terrainPlanetshine");
+  const terrainPlanetshine =
+    planetshineText === "record" || planetshineText === "brightest" ? planetshineText : undefined;
   const rate = parameters.get("geometry-farCascadeRate");
   const farCascadeRate = rate === "1" ? 1 : rate === "2" ? 2 : rate === "4" ? 4 : undefined;
   const toleranceText = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(
@@ -83,5 +86,6 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(edgeStandIns === undefined ? {} : { edgeStandIns }),
     ...(discCells === undefined ? {} : { discCells }),
     ...(figureShading === undefined ? {} : { figureShading }),
+    ...(terrainPlanetshine === undefined ? {} : { terrainPlanetshine }),
   };
 }

@@ -281,6 +281,10 @@ describe("a probed engine's lit probe (R08.T9.b's measurement)", () => {
     ["planetshine-centre", "2"],
     ["no-annuli", "3"],
     ["per-fragment", "4"],
+    ["terrain-unshaded", "5"],
+    ["terrain-no-cascades", "6"],
+    ["terrain-no-horizon", "7"],
+    ["terrain-no-maturity", "8"],
   ] as const)("makes every lit material and kernel under %s", async (probe, value) => {
     expect(await madeWith(probe)).toEqual([
       ["bodies:disc", value, value],

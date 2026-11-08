@@ -532,7 +532,8 @@ fn terrain_albedos(
     var gathered = false;
     for (var k = 0u; k < TERRAIN_CLASSES; k = k + 1u) {
       if (!(shares[k + 1u] > 0.0)) { continue; }
-      if (class_drawn_from_nodes(slot, k)) {
+      // Every slot's A its law's under the lit probe's `terrain-no-maturity` form (`LIT_PROBE`).
+      if (LIT_PROBE != 8u && class_drawn_from_nodes(slot, k)) {
         if (!gathered) {
           maturity = texel_maturity(slot, patch_uv, morph);
           gathered = true;
@@ -780,7 +781,8 @@ fn shade_terrain(
     // (R10.T15.b.2).
     let phi = angle_between(normal, towards);
     var local_horizon = 0.0;
-    if (!reference) {
+    // Not under the lit probe's `terrain-no-horizon` form (`surfaceLighting.wgsl`'s `LIT_PROBE`).
+    if (!reference && LIT_PROBE != 7u) {
       local_horizon = terrain_horizon(
         in.slot, in.parent, in.horizonFace, in.horizonSt, in.patchUv, in.morph, nu, towards, phi,
         misc.z

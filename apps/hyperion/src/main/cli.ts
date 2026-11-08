@@ -124,7 +124,10 @@
  * R08.T9.b's measurement) that profile makes the lit materials and kernels under the probe, every
  * source's transmittance through the air 1, a planetshine source's at its centre node alone, the
  * eclipse term with no annuli, or each source's transmittance per fragment whatever the setting's
- * sources' table (its way back), for an A/B of the lit fragment's cost; it is refused without
+ * sources' table (its way back), for an A/B of the lit fragment's cost; or, the lit terrain's alone
+ * (`terrain-unshaded|terrain-no-cascades|terrain-no-horizon|terrain-no-maturity`;
+ * perf-bodies-near-ground), its fragment's light not formed, or no cascade, horizon-map or
+ * maturity-node read; it is refused without
  * `--timing`.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
@@ -590,7 +593,7 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--lit-probe <PROBE>",
-        "the frame profile's lit-pass probe (R08.T9.b): every source's transmittance 1, planetshine at its centre node, no eclipse annuli, or the sources' transmittance per fragment",
+        "the frame profile's lit-pass probe (R08.T9.b): every source's transmittance 1, planetshine at its centre node, no eclipse annuli, the sources' transmittance per fragment, or the lit terrain unshaded or without its cascades, horizon map or maturity nodes",
       ).choices(LIT_PROBE_NAMES),
     )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))

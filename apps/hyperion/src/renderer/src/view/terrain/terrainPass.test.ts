@@ -1,3 +1,4 @@
+import type { DiscSecondary } from "../bodies/discShading";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
@@ -1541,6 +1542,16 @@ function writtenParents(engine: CountingRenderEngine): Array<readonly [number, n
   return parents;
 }
 
+/** A planetshine source at x along the galactic x axis from the body, lx face-on in each channel. */
+function planetshineSource(x: number, lx: number): DiscSecondary {
+  return {
+    direction: { x, y: 0, z: Math.sqrt(1 - x * x) },
+    distance: 60,
+    radius: 3,
+    illuminance: [lx, lx, lx],
+  };
+}
+
 describe("the lit terrain of a body (R10.T10.b)", () => {
   const BODY = {
     kind: "body",
@@ -1648,6 +1659,34 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     const packed = new Float32Array(laws?.data.slice().buffer ?? new ArrayBuffer(0));
     expect([...packed.subarray(0, 5)]).toEqual([0.14, 0.12, 0.1, 1, 1].map(Math.fround));
     expect(packed[8 + 4]).toBe(-1);
+  });
+
+  it("lights its terrain by every planetshine source its record carries, or by the brightest alone where the geometry asks it (perf-bodies-near-ground)", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    // Brightest first, as `planetshineSources` gives them.
+    const lighting = {
+      ...LIGHTING,
+      secondaries: [planetshineSource(0.6, 0.2), planetshineSource(-0.8, 0.05)],
+    };
+    const written = (): Uint8Array | undefined =>
+      engine.writes.findLast((w) => w.buffer === "terrain lights")?.data;
+    const packed = (each: TerrainLighting): Uint8Array =>
+      new Uint8Array(
+        packTerrainLighting(each, PLANET.figure.polarRadiusM / PLANET.figure.equatorialRadiusM)
+          .buffer,
+      );
+    pass.frame({ ...inputAt(view), lighting });
+    pool().bakeDemand(pass);
+    pass.frame({ ...inputAt(view), lighting });
+    const record = written();
+    pass.setGeometry({ ...SETTINGS.low.geometry, terrainPlanetshine: "brightest" });
+    pass.frame({ ...inputAt(view), lighting });
+    expect([record, written()]).toEqual([
+      packed(lighting),
+      packed({ ...lighting, secondaries: lighting.secondaries.slice(0, 1) }),
+    ]);
   });
 
   it("draws nothing lit until a frame gives its lights, and binds the frame's atmosphere where given", async () => {

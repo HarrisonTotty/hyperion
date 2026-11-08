@@ -19,7 +19,9 @@
 #                              [--march-probe centre|depth-zero|one-source|no-lobes]
 #                              [--march-cover area|tiles] [--limb-rays per-texel|packed]
 #                              [--march-sources table|per-step]
-#                              [--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment]]]
+#                              [--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment
+#                                           |terrain-unshaded|terrain-no-cascades|terrain-no-horizon
+#                                           |terrain-no-maturity]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --geometry, passed to the client, draws VIEW's terrain with those fields of its geometry over the
@@ -167,8 +169,11 @@
 # with every source's transmittance through the air 1 (transmittance-one), with a planetshine
 # source's at its disc's centre node alone (planetshine-centre), with the eclipse term's annuli
 # none (no-annuli), or with each source's transmittance per fragment whatever the setting's
-# sources' table, the lever's way back (per-fragment), the A/B of the lit fragment's cost; its
-# files end -lit-<probe>, and the first three's pictures are not a player's.
+# sources' table, the lever's way back (per-fragment), the A/B of the lit fragment's cost; or, the
+# lit terrain's material alone (perf-bodies-near-ground), with its fragment's light not formed
+# (terrain-unshaded), or with no cascade (terrain-no-cascades), horizon-map (terrain-no-horizon) or
+# maturity-node (terrain-no-maturity) read; its files end -lit-<probe>, and every picture but
+# per-fragment's is not a player's.
 #
 # --device-pixel-ratio <N> draws a hidden run's page at a device-pixel ratio of N, 1 to 3, as a HiDPI
 # display does (the owner's Retina report, 2026-11-01): its offscreen window N times the setting's

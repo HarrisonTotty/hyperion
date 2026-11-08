@@ -139,7 +139,7 @@ describe("the quality settings", () => {
 });
 
 describe("the geometry's settings (plan R14)", () => {
-  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, its camera strides measured, their acceptance passed, occlusion off until its acceptance (R14.T3.c, T3.d), the shading forward (R14.T2), the hidden marks culled (R10.T16.c), triangle budget on both (R14.T3.e), the stand-ins strided, as masks on high and on their own grids on low (R14.T3.c's stand-ins), and the edge bakes' stand-ins on the path, as masks on high and where exact on low (R14.T3.c's edge stand-ins), the disc cells packed and the figures forward until the owner's Mac pair (plan R07), and keeps the way back", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, its camera strides measured, their acceptance passed, occlusion off until its acceptance (R14.T3.c, T3.d), the shading forward (R14.T2), the hidden marks culled (R10.T16.c), triangle budget on both (R14.T3.e), the stand-ins strided, as masks on high and on their own grids on low (R14.T3.c's stand-ins), and the edge bakes' stand-ins on the path, as masks on high and where exact on low (R14.T3.c's edge stand-ins), the disc cells packed and the figures forward until the owner's Mac pair (plan R07), the terrain lit by every planetshine source until its own pair, and keeps the way back", () => {
     for (const setting of QUALITY_SETTINGS) {
       const {
         pageBytes: _pageBytes,
@@ -166,6 +166,7 @@ describe("the geometry's settings (plan R14)", () => {
         edgeStandIns: setting === "high" ? "masks" : "surveyed",
         discCells: "packed",
         figureShading: "forward",
+        terrainPlanetshine: "record",
       });
     }
     expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
@@ -193,6 +194,7 @@ describe("the geometry's settings (plan R14)", () => {
       edgeStandIns: "off",
       discCells: "per-cell",
       figureShading: "forward",
+      terrainPlanetshine: "record",
     });
   });
 

@@ -45,17 +45,30 @@ export const SURFACE_LIGHTING_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${oblat
  * `no-annuli`, the eclipse term with no annuli, every star unhidden; or `per-fragment`, each
  * source's transmittance per fragment whatever the setting's `AtmosphereSettings.sourceTransmittance`
  * (the sources' table built and bound all the same), the lever's way back, so that one build's
- * profiles tell the table's saving apart. It is check-only: an inspection profile's `--lit-probe`,
- * never drawn on a player's launch.
+ * profiles tell the table's saving apart; and four of the lit terrain's material alone
+ * (perf-bodies-near-ground, the owner's Mac): `terrain-unshaded`, its fragment's light not formed,
+ * its shading normal and cascades' lit fraction alone; `terrain-no-cascades`, the cascades not
+ * read; `terrain-no-horizon`, the horizon map not read; and `terrain-no-maturity`, each class's
+ * albedo its law's, its maturity nodes not read. It is check-only: an inspection profile's
+ * `--lit-probe`, never drawn on a player's launch.
  */
-export type LitProbe = "transmittance-one" | "planetshine-centre" | "no-annuli" | "per-fragment";
+export type LitProbe =
+  | "transmittance-one"
+  | "planetshine-centre"
+  | "no-annuli"
+  | "per-fragment"
+  | "terrain-unshaded"
+  | "terrain-no-cascades"
+  | "terrain-no-horizon"
+  | "terrain-no-maturity";
 
 /** The line of `surfaceLighting.wgsl` a probe's module replaces. */
 const LIT_PROBE_LINE = "const LIT_PROBE : u32 = 0u;";
 
 /**
  * `wgsl` under `probe`: `surfaceLighting.wgsl`'s `LIT_PROBE` set, 1 for `transmittance-one`, 2 for
- * `planetshine-centre`, 3 for `no-annuli` and 4 for `per-fragment`, where `wgsl` composes
+ * `planetshine-centre`, 3 for `no-annuli`, 4 for `per-fragment`, 5 for `terrain-unshaded`, 6 for
+ * `terrain-no-cascades`, 7 for `terrain-no-horizon` and 8 for `terrain-no-maturity`, where `wgsl` composes
  * {@link SURFACE_LIGHTING_WGSL}; any other module as it is.
  */
 export function litProbedWgsl(wgsl: string, probe: LitProbe): string {
@@ -72,6 +85,18 @@ export function litProbedWgsl(wgsl: string, probe: LitProbe): string {
       break;
     case "per-fragment":
       value = 4;
+      break;
+    case "terrain-unshaded":
+      value = 5;
+      break;
+    case "terrain-no-cascades":
+      value = 6;
+      break;
+    case "terrain-no-horizon":
+      value = 7;
+      break;
+    case "terrain-no-maturity":
+      value = 8;
       break;
   }
   return wgsl.replace(LIT_PROBE_LINE, `const LIT_PROBE : u32 = ${String(value)}u;`);

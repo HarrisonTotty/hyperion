@@ -296,6 +296,8 @@ export interface GeometryOverride {
   readonly discCells?: "per-cell" | "packed";
   /** Plan R07's mesh-regime figure: shaded forward, or once a pixel by its IDs and a resolve. */
   readonly figureShading?: "forward" | "screen";
+  /** The mesh-regime terrain's planetshine: every source its record carries, or the brightest. */
+  readonly terrainPlanetshine?: "record" | "brightest";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */
@@ -1269,10 +1271,21 @@ export interface AtmosphereLeversOverride {
  * no lookup; `planetshine-centre` takes a planetshine source's at its disc's centre node alone, one
  * lookup in place of three; `no-annuli` forms the eclipse term with no annuli, every star unhidden;
  * `per-fragment` takes each source's transmittance per fragment whatever the setting's sources'
- * table, the lever's way back. Each but the last is a measurement's picture, never a player's.
+ * table, the lever's way back; and the lit terrain's alone (perf-bodies-near-ground):
+ * `terrain-unshaded` forms its fragment's shading normal and cascades' lit fraction but not its
+ * light, `terrain-no-cascades` reads no cascade, `terrain-no-horizon` no horizon map and
+ * `terrain-no-maturity` no maturity node. Each but `per-fragment` is a measurement's picture, never
+ * a player's.
  */
 export type LitProbeName =
-  "transmittance-one" | "planetshine-centre" | "no-annuli" | "per-fragment";
+  | "transmittance-one"
+  | "planetshine-centre"
+  | "no-annuli"
+  | "per-fragment"
+  | "terrain-unshaded"
+  | "terrain-no-cascades"
+  | "terrain-no-horizon"
+  | "terrain-no-maturity";
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s

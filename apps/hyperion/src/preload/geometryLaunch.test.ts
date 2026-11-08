@@ -164,6 +164,28 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     ]);
   });
 
+  it("reads and writes the terrain's planetshine, last in the fields' order (perf-bodies-near-ground)", () => {
+    const override = parseGeometryOverride("terrainPlanetshine=brightest,figureShading=screen");
+    expect([
+      override,
+      geometryText(override),
+      parseGeometryOverride("terrainPlanetshine=record"),
+    ]).toEqual([
+      { terrainPlanetshine: "brightest", figureShading: "screen" },
+      "figureShading=screen,terrainPlanetshine=brightest",
+      { terrainPlanetshine: "record" },
+    ]);
+    for (const text of [
+      "terrainPlanetshine=one",
+      "terrainPlanetshine=all",
+      "terrainPlanetshine=",
+    ]) {
+      expect(() => parseGeometryOverride(text)).toThrow(
+        "terrainPlanetshine is record or brightest",
+      );
+    }
+  });
+
   it("refuses a figure's shading other than forward or screen (plan R07)", () => {
     for (const text of ["figureShading=visibility", "figureShading=deferred", "figureShading="]) {
       expect(() => parseGeometryOverride(text)).toThrow("figureShading is forward or screen");

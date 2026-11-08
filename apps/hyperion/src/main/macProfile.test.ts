@@ -127,10 +127,11 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, eleven pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
+    // Four own runs, sixteen pairs at DPR 1 (the terrain's four probes among them) and the two
+    // shading pairs at 1 and 2, four runs each;
     // then two counted settings and the occlusion's, figure-shading's and both shading pairs' two
     // counted sides each.
-    expect(matrix).toHaveLength(4 + 11 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
+    expect(matrix).toHaveLength(4 + 16 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -508,7 +509,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 74 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 94 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(

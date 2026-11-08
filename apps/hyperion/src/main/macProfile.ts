@@ -155,6 +155,30 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     ratios: [1],
     countSides: true,
   },
+  ...(
+    [
+      ["terrain-unshaded", "its fragment's light not formed"],
+      ["terrain-no-cascades", "no cascade read"],
+      ["terrain-no-horizon", "no horizon-map read"],
+      ["terrain-no-maturity", "no maturity node read"],
+    ] as const
+  ).map(([probe, what]): MacProfileLever => ({
+    name: probe,
+    decides: `perf-bodies-near-ground, a probe of the lit terrain's cost, not a lever: as drawn (A) against ${what} (B)`,
+    a: [],
+    b: ["--lit-probe", probe],
+    ratios: [1],
+    countSides: false,
+  })),
+  {
+    name: "terrain-planetshine",
+    decides:
+      "perf-bodies-near-ground, the terrain's planetshine: every source its record carries (A) against the brightest alone (B)",
+    a: [],
+    b: ["--geometry", "terrainPlanetshine=brightest"],
+    ratios: [1],
+    countSides: false,
+  },
   {
     name: "shading",
     decides:

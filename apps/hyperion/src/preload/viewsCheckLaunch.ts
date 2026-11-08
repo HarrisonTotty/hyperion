@@ -126,6 +126,10 @@ export const LIT_PROBE_NAMES = [
   "planetshine-centre",
   "no-annuli",
   "per-fragment",
+  "terrain-unshaded",
+  "terrain-no-cascades",
+  "terrain-no-horizon",
+  "terrain-no-maturity",
 ] as const satisfies ReadonlyArray<LitProbeName>;
 
 /** The hand-over check's looks, in the order a run takes them, which `--look` may name one of. */

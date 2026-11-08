@@ -61,7 +61,11 @@ const SOURCE_AT_ZENITH : f32 = 1e-6;
 // planetshine source's at its centre node alone; 3, the eclipse term with no annuli
 // (`bodyDisc.wgsl`'s and `terrainLit.wgsl`'s), every star unhidden; or 4, each source's
 // transmittance per fragment though the sources' table is bound (`atmosphereTabled`), the lever's
-// way back in the same build. Never a player's picture but under 4, the way back's.
+// way back in the same build; or, in the lit terrain's material alone (`terrainLit.wgsl`,
+// `terrainLitShade.wgsl`; perf-bodies-near-ground), 5, its fragment's shading not formed, its
+// normal and cascades' c′ alone; 6, no cascade lookup, c′ 1; 7, no horizon-map lookup; and 8, each
+// class's A its law's, no maturity node read. Never a player's picture but under 4, the way
+// back's.
 const LIT_PROBE : u32 = 0u;
 
 // Whether this module is a lit module's table-only twin (R08.T9.b's lever; `sourceTableEngine.ts`):

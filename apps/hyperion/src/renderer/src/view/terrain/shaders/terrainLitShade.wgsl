@@ -217,9 +217,17 @@ fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
     // fitted to (decision-r10-t9b-penumbra); not normalised again, so that a frame without a star,
     // whose row is zeros and whose weight is 0, forms no NaN.
     let sun = terrain_row(FIRST_TERRAIN_LIGHT_ROW).xyz;
-    cascade_lit = cascade_lit_fraction(rotation * place, rotation * receiver_normal, rotation * sun);
+    // No lookup under the lit probe's `terrain-no-cascades` form (`surfaceLighting.wgsl`'s `LIT_PROBE`).
+    if (LIT_PROBE != 6u) {
+      cascade_lit = cascade_lit_fraction(rotation * place, rotation * receiver_normal, rotation * sun);
+    }
   }
-  let shaded = shade_terrain(in, normal, reference, cascade_lit, at);
+  // Under the lit probe's `terrain-unshaded` form (`LIT_PROBE`) the shading's inputs alone, its
+  // normal and c′, stand in for its light, so that the profile's time is the shading's less.
+  var shaded = TerrainShaded(1e-3 * (normal + vec3f(cascade_lit)), false);
+  if (LIT_PROBE != 5u) {
+    shaded = shade_terrain(in, normal, reference, cascade_lit, at);
+  }
   var meter = METER_OTHER;
   if (u32(terrain_row(0u).x) > 0u) {
     meter = select(METER_UNLIT_BODY, METER_LIT_BODY, shaded.lit);

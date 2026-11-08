@@ -5438,7 +5438,14 @@ export class TerrainPass {
     }
     const lighting = input.lighting;
     if (lighting !== undefined) {
-      resources.setLighting(lighting, state.id);
+      // The brightest planetshine source alone where the geometry asks it (`terrainPlanetshine`):
+      // the record's sources stand brightest first (`planetshineSources`).
+      resources.setLighting(
+        this.#geometry.terrainPlanetshine === "brightest" && lighting.secondaries.length > 1
+          ? { ...lighting, secondaries: lighting.secondaries.slice(0, 1) }
+          : lighting,
+        state.id,
+      );
     }
     const camera = rotateToBodyFixed(input.view.rotation, input.view.cameraM);
     const c = state.litUniforms.cameraBodyFixedM;

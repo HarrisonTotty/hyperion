@@ -279,6 +279,17 @@ export interface GeometrySettings {
    * closed in at high (perf-body-shading's inspection timing).
    */
   readonly figureShading: "forward" | "screen";
+  /**
+   * The mesh-regime terrain's planetshine (perf-bodies-near-ground, the owner's Mac): `record`, as
+   * before, lights each texel by every planetshine source its body's disc record carries
+   * (`PhotorealSettings.planetshineSources`: two on high, one on low); `brightest` by the
+   * brightest of them alone, the low setting's count, so that on high each lit texel forms one
+   * source's sky term, direct term and three-node transmittance fewer, near the ground where the
+   * terrain shades most of the view. The disc, the figure and the sky keep the record's sources.
+   * `record` on both settings until the owner's Mac pair (a lean, 2026-11-08): on the pod's
+   * SwiftShader high's low window drew `bodies` some 10% faster with one source.
+   */
+  readonly terrainPlanetshine: "record" | "brightest";
 }
 
 /**
@@ -312,6 +323,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   edgeStandIns: "off",
   discCells: "per-cell",
   figureShading: "forward",
+  terrainPlanetshine: "record",
 };
 
 /**
@@ -496,6 +508,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       edgeStandIns: "masks",
       discCells: "packed",
       figureShading: "forward",
+      terrainPlanetshine: "record",
     },
     decoration: true,
     scatterDensity: 1,
@@ -551,6 +564,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       edgeStandIns: "surveyed",
       discCells: "packed",
       figureShading: "forward",
+      terrainPlanetshine: "record",
     },
     decoration: false,
     scatterDensity: 0,
