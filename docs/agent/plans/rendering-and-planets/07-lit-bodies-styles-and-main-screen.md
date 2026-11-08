@@ -10232,3 +10232,6 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - As built: P is `vsyncPeriodOf` over each phase's or window's recorded intervals, in main; T's k
     reads the reported `displayHz`. The spike draws every callback; its pacing sets only its T.
   - Pending: the owner's runs, the Mac's `pacing-120` pairs and the shown runs (advice §4).
+- (fix-mac-batch-tools, 2026-11-08) `discRecordOf` gives no record only for a camera within the
+  body's figure (`insideFigure`, the spheroid about its pole), not within its equatorial sphere,
+  so a camera low over an oblate world's high latitudes still draws its disc, mesh and terrain.

@@ -2853,3 +2853,11 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   window's passes and `gpuMs` are always over the same frames.
 - `readInspectionTimingRecord` drops a window whose passes' times are not as many as its `gpuMs`
   alone, with a `console.warn` naming it and both counts; the record's other windows are written.
+- (fix-mac-batch-tools, 2026-11-08) `MAC_PROFILE_DEFAULTS.levers` leaves out
+  `MAC_PROFILE_BODY_LEVERS` (`decked-air-surface`); `--levers all` (`leversOf`) runs every pair. A
+  relative `--out` is made absolute once (`batchOut`); `sweepIn(dir, flown)` says "Not run
+  (--no-sweep)." in the summary.
+- (fix-mac-batch-tools) `viewsCheck.sh` and `descentSpike.sh` put `tools/portable` on PATH where
+  `setsid` or `timeout` is missing. place-ship with `--survey` and no body takes the first planet
+  whose `surface` and `figure` are `ok` (`firstPlanetToSurvey`): at v30 the sweep's served world is
+  42002cb1ffc00004.0100.
