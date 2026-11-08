@@ -117,8 +117,8 @@ export class ResourceRegistry {
    * Makes a registry on `device`.
    *
    * @param emit - Called once for every creation, destruction and upload.
-   * @param stagingPartBytes - The most bytes one staging buffer of a staged scope holds
-   *   (`stagedWrites.ts`' `STAGING_PART_BYTES` but in a test).
+   * @param stagingPartBytes - The most bytes staged before they are submitted (`stagedWrites.ts`'
+   *   `STAGING_PART_BYTES` but in a test).
    */
   constructor(
     device: GPUDevice,

@@ -14,9 +14,10 @@
  * copies are commands of a few bytes, and a staged write never waits.
  *
  * The bytes are copied as each write is made, straight into a mapped staging buffer, so that a
- * caller may reuse its array at once, as it may after a queue write. The copies are encoded in the order the writes were made and submitted
- * in one command buffer with the engine's next submission, which goes after them, or before the
- * engine's next destruction or queue write outside a scope, or as a part fills
+ * caller may reuse its array at once, as it may after a queue write. The copies are encoded in the
+ * order the writes were made and submitted in one command buffer with the engine's next
+ * submission, which goes after them, or before the engine's next destruction or queue write
+ * outside a scope, or as a part fills
  * ({@link StagedWrites.flush}): nothing on the GPU reads a resource but in a submission, so every
  * staged write takes effect before anything that could read it, as a queue write does, and the
  * buffers and textures hold the same bytes for every command that reads them. A texture's rows are

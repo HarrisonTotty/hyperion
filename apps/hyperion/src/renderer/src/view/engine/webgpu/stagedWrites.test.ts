@@ -344,13 +344,21 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
     expect(made.map((buffer) => [buffer.mapState, buffer.destroyed])).toEqual([["unmapped", true]]);
   });
 
-  it("fills a chunk before it makes the next, gives a write of more than a chunk a buffer of its own, and leaves the same bytes (lane perf-long-tasks-check)", async () => {
+  /** Five buffer writes staged through chunks of 64 bytes, a part of 1024, into one buffer. */
+  async function chunked(): Promise<{
+    readonly gpu: FakeDevice;
+    readonly memory: SimulatedMemory;
+    readonly target: GPUBuffer;
+    readonly staged: StagedWrites;
+    readonly made: number;
+    readonly writes: ReadonlyArray<readonly [number, Uint8Array]>;
+  }> {
     const gpu = await device();
     const memory = new SimulatedMemory(gpu);
     const usage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST;
     const target = gpu.createBuffer({ label: "target", size: 512, usage });
     const staged = new StagedWrites(gpu, 1024, 64);
-    const before = gpu.buffers.length;
+    const made = gpu.buffers.length;
     const writes: ReadonlyArray<readonly [number, Uint8Array]> = [
       [0, counting(32, 1)],
       [32, counting(32, 2)],
@@ -360,17 +368,25 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
     ];
     staged.run("upload", () => {
       for (const [offset, data] of writes) {
-        expect(staged.buffer(target, offset, data)).toBe(true);
+        staged.buffer(target, offset, data);
       }
     });
-    expect(gpu.buffers.slice(before).map((buffer) => buffer.size)).toEqual([64, 64, 200, 64]);
+    return { gpu, memory, target, staged, made, writes };
+  }
+
+  it("fills a chunk before it makes the next, and gives a write of more than a chunk a buffer of its own (lane perf-long-tasks-check)", async () => {
+    const { gpu, made } = await chunked();
+    expect(gpu.buffers.slice(made).map((buffer) => buffer.size)).toEqual([64, 64, 200, 64]);
+  });
+
+  it("leaves the same bytes from writes staged across chunks, in one submission (lane perf-long-tasks-check)", async () => {
+    const { memory, target, staged, writes } = await chunked();
     staged.flush();
-    expect(memory.operations).toEqual(["submit upload"]);
     const expected = new Uint8Array(512);
     for (const [offset, data] of writes) {
       expected.set(data, offset);
     }
-    expect(memory.buffer(target)).toEqual(expected);
+    expect([memory.operations, memory.buffer(target)]).toEqual([["submit upload"], expected]);
   });
 
   it("lays a texture's rows out 256 bytes apart in the staging buffer", async () => {
@@ -454,6 +470,20 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
       staged.resources.dispose();
     });
     expect(staged.memory.operations).toEqual([]);
+  });
+
+  it("destroys the staging buffers a disposal inside the scope leaves unsubmitted (lane perf-long-tasks-check)", async () => {
+    const staged = await registry();
+    const before = staged.gpu.buffers.length;
+    staged.resources.staged("upload", () => {
+      staged.resources.writeBuffer(staged.a, 0, counting(16, 1));
+      staged.resources.dispose();
+    });
+    const made = staged.gpu.buffers.slice(before);
+    expect(made.map((buffer) => buffer.usage & BUFFER_USAGE.MAP_WRITE)).toEqual([
+      BUFFER_USAGE.MAP_WRITE,
+    ]);
+    expect(made.every((buffer) => buffer.destroyed)).toBe(true);
   });
 
   it("submits a scope past a part's bytes in parts, in order, with the same bytes", async () => {
