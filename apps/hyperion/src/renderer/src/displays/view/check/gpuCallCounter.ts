@@ -235,8 +235,9 @@ const MAP_WRITE = 0x2;
 
 /**
  * The bytes a buffer made mapped for writing at its creation uploads, its size: the engine's staged
- * writes' staging buffer (lane perf-page-long-tasks), whose bytes no queue write carries; 0 for
- * any other buffer.
+ * writes' staging buffer (lane perf-page-long-tasks), whose bytes no queue write carries, and of
+ * which a staging chunk's unfilled end, at most its 4 MiB, is counted too (lane
+ * perf-long-tasks-check); 0 for any other buffer.
  */
 export function stagedUploadBytes(descriptor: unknown): number {
   if (typeof descriptor !== "object" || descriptor === null) {

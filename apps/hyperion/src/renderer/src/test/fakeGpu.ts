@@ -128,6 +128,9 @@ export class FakeBuffer implements GPUBuffer {
     this.usage = descriptor.usage;
     this.label = descriptor.label ?? "";
     this.#maps = maps;
+    if (descriptor.mappedAtCreation === true) {
+      this.mapState = "mapped";
+    }
   }
 
   mapAsync(): Promise<undefined> {

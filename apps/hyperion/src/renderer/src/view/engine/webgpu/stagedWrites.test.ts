@@ -331,6 +331,48 @@ describe("the engine's staged writes (lane perf-page-long-tasks)", () => {
     ]);
   });
 
+  it("makes its staging buffers mapped as the writes are staged, and none as it submits (lane perf-long-tasks-check)", async () => {
+    const staged = await registry();
+    const before = staged.gpu.buffers.length;
+    staged.resources.staged("upload", () => {
+      writeAll(staged);
+    });
+    const made = staged.gpu.buffers.slice(before);
+    expect(made.map((buffer) => [buffer.mapState, buffer.destroyed])).toEqual([["mapped", false]]);
+    staged.resources.flushStaged();
+    expect(staged.gpu.buffers.length).toBe(before + 1);
+    expect(made.map((buffer) => [buffer.mapState, buffer.destroyed])).toEqual([["unmapped", true]]);
+  });
+
+  it("fills a chunk before it makes the next, gives a write of more than a chunk a buffer of its own, and leaves the same bytes (lane perf-long-tasks-check)", async () => {
+    const gpu = await device();
+    const memory = new SimulatedMemory(gpu);
+    const usage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST;
+    const target = gpu.createBuffer({ label: "target", size: 512, usage });
+    const staged = new StagedWrites(gpu, 1024, 64);
+    const before = gpu.buffers.length;
+    const writes: ReadonlyArray<readonly [number, Uint8Array]> = [
+      [0, counting(32, 1)],
+      [32, counting(32, 2)],
+      [64, counting(32, 3)],
+      [96, counting(200, 4)],
+      [296, counting(16, 5)],
+    ];
+    staged.run("upload", () => {
+      for (const [offset, data] of writes) {
+        expect(staged.buffer(target, offset, data)).toBe(true);
+      }
+    });
+    expect(gpu.buffers.slice(before).map((buffer) => buffer.size)).toEqual([64, 64, 200, 64]);
+    staged.flush();
+    expect(memory.operations).toEqual(["submit upload"]);
+    const expected = new Uint8Array(512);
+    for (const [offset, data] of writes) {
+      expected.set(data, offset);
+    }
+    expect(memory.buffer(target)).toEqual(expected);
+  });
+
   it("lays a texture's rows out 256 bytes apart in the staging buffer", async () => {
     const staged = await registry();
     staged.resources.staged("mask", () => {

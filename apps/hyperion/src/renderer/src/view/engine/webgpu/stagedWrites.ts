@@ -13,8 +13,8 @@
  * at its creation holds its bytes in memory shared with the GPU process, so its unmapping and its
  * copies are commands of a few bytes, and a staged write never waits.
  *
- * The bytes are copied as each write is made, so that a caller may reuse its array at once, as it
- * may after a queue write. The copies are encoded in the order the writes were made and submitted
+ * The bytes are copied as each write is made, straight into a mapped staging buffer, so that a
+ * caller may reuse its array at once, as it may after a queue write. The copies are encoded in the order the writes were made and submitted
  * in one command buffer with the engine's next submission, which goes after them, or before the
  * engine's next destruction or queue write outside a scope, or as a part fills
  * ({@link StagedWrites.flush}): nothing on the GPU reads a resource but in a submission, so every
@@ -29,13 +29,22 @@
  * perf-page-long-tasks, part 2). The engine's next submission is its frame's, drawn once the GPU
  * process has finished the frame before, so they are made when it is free.
  *
+ * The staging buffers are made, mapped, as the writes are staged, each of a chunk's bytes or a
+ * write's own, rather than as one buffer of everything staged when the copies go: the copies wait
+ * for the frame, a frame on SwiftShader comes every 5 to 20 s, and one buffer made and filled with
+ * the uploads of those seconds in the frame's callback took 50 to 153 ms of it, in about 20 long
+ * tasks of a run at high (lane perf-long-tasks-check). A chunk's buffer is made in the task that
+ * stages into it, in a few milliseconds, and its bytes are copied once, not gathered first and
+ * copied again.
+ *
  * A write the copies cannot make (unaligned, out of bounds, to a resource without `COPY_DST`, of a
  * depth or stencil format) is not staged: the registry submits what is staged and hands it to the
  * queue, which writes it, or refuses it alone, as before, rather than in a copy that would void the
  * submission.
  *
- * The staging buffer is transient, made and destroyed by each submission, and is not GPU memory a
- * view keeps, so it raises no allocation event, as a readback's staging buffer raises none.
+ * The staging buffers are transient, made as writes are staged and destroyed by the submission
+ * that copies from them, and are not GPU memory a view keeps, so they raise no allocation event, as
+ * a readback's staging buffer raises none.
  */
 
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
@@ -48,22 +57,30 @@ const ROW_ALIGNMENT = 256;
 const COPY_ALIGNMENT = 4;
 
 /**
- * The most bytes one staging buffer holds before the writes after it go into the next, 64 MiB: a
- * scope of larger uploads is submitted in parts, in order, each within the device's least
- * `maxBufferSize` (256 MiB).
+ * The most bytes staged before what is staged is submitted, and the writes after it go into the
+ * next part, 64 MiB: a scope of larger uploads is submitted in parts, in order, each within the
+ * device's least `maxBufferSize` (256 MiB).
  */
 export const STAGING_PART_BYTES = 64 * 1024 * 1024;
 
-/** The scratch the bytes are gathered in, kept between submissions up to this size, 4 MiB. */
-const KEPT_SCRATCH_BYTES = 4 * 1024 * 1024;
+/**
+ * The bytes of one staging buffer, made mapped as a write first needs it, 4 MiB (or the part's,
+ * where that is less); a write of more has a buffer of its own bytes.
+ */
+export const STAGING_CHUNK_BYTES = 4 * 1024 * 1024;
 
-/** The scratch's least size, 64 KiB. */
-const LEAST_SCRATCH_BYTES = 64 * 1024;
+/** One staging buffer, mapped at its creation, and the bytes of it staged so far. */
+interface StagingChunk {
+  readonly buffer: GPUBuffer;
+  readonly bytes: Uint8Array;
+  used: number;
+}
 
-/** One staged write: where its bytes lie in the staging buffer, and where they go. */
+/** One staged write: where its bytes lie in a staging buffer, and where they go. */
 type StagedCopy =
   | {
       readonly kind: "buffer";
+      readonly from: GPUBuffer;
       readonly fromBytes: number;
       readonly buffer: GPUBuffer;
       readonly offsetBytes: number;
@@ -71,6 +88,7 @@ type StagedCopy =
     }
   | {
       readonly kind: "texture";
+      readonly from: GPUBuffer;
       readonly fromBytes: number;
       readonly texture: GPUTexture;
       readonly origin: GPUOrigin3DDict;
@@ -123,22 +141,32 @@ function bytesOf(data: ArrayBufferView): Uint8Array {
 export class StagedWrites {
   readonly #device: GPUDevice;
   readonly #partBytes: number;
+  readonly #chunkBytes: number;
   #depth = 0;
   /** The outermost open scope's label. */
   #scopeLabel = "";
   /** The staging's label: the scope's whose write was staged first since the last submission. */
   #label = "";
-  #scratch = new Uint8Array(0);
+  /** The staging buffers of the copies staged so far, the last the one being filled. */
+  #chunks: StagingChunk[] = [];
+  /** The bytes staged so far, against the part's. */
   #used = 0;
   #copies: StagedCopy[] = [];
 
   /**
-   * @param partBytes - The most bytes one staging buffer holds, {@link STAGING_PART_BYTES} but in
-   *   a test.
+   * @param partBytes - The most bytes staged before they are submitted, {@link STAGING_PART_BYTES}
+   *   but in a test.
+   * @param chunkBytes - One staging buffer's bytes, {@link STAGING_CHUNK_BYTES} but in a test; at
+   *   most the part's.
    */
-  constructor(device: GPUDevice, partBytes: number = STAGING_PART_BYTES) {
+  constructor(
+    device: GPUDevice,
+    partBytes: number = STAGING_PART_BYTES,
+    chunkBytes: number = STAGING_CHUNK_BYTES,
+  ) {
     this.#device = device;
     this.#partBytes = partBytes;
+    this.#chunkBytes = Math.min(chunkBytes, partBytes);
   }
 
   /** Whether a scope is open, so that the registry's writes are staged. */
@@ -187,9 +215,9 @@ export class StagedWrites {
     ) {
       return false;
     }
-    const fromBytes = this.#reserve(bytes, COPY_ALIGNMENT);
-    this.#scratch.set(bytesOf(data), fromBytes);
-    this.#stage({ kind: "buffer", fromBytes, buffer, offsetBytes, bytes });
+    const { chunk, fromBytes } = this.#reserve(bytes, COPY_ALIGNMENT);
+    chunk.bytes.set(bytesOf(data), fromBytes);
+    this.#stage({ kind: "buffer", from: chunk.buffer, fromBytes, buffer, offsetBytes, bytes });
     return true;
   }
 
@@ -226,13 +254,13 @@ export class StagedWrites {
       return false;
     }
     const bytesPerRow = aligned(rowBytes, ROW_ALIGNMENT);
-    const fromBytes = this.#reserve(bytesPerRow * rows, ROW_ALIGNMENT);
+    const { chunk, fromBytes } = this.#reserve(bytesPerRow * rows, ROW_ALIGNMENT);
     const source = bytesOf(data);
     if (bytesPerRow === rowBytes) {
-      this.#scratch.set(source.subarray(0, rows * rowBytes), fromBytes);
+      chunk.bytes.set(source.subarray(0, rows * rowBytes), fromBytes);
     } else {
       for (let row = 0; row < rows; row += 1) {
-        this.#scratch.set(
+        chunk.bytes.set(
           source.subarray(row * rowBytes, (row + 1) * rowBytes),
           fromBytes + row * bytesPerRow,
         );
@@ -240,6 +268,7 @@ export class StagedWrites {
     }
     this.#stage({
       kind: "texture",
+      from: chunk.buffer,
       fromBytes,
       texture,
       origin: at,
@@ -256,27 +285,23 @@ export class StagedWrites {
    */
   flush(): void {
     const copies = this.#copies;
-    if (copies.length === 0) {
-      return;
-    }
-    const bytes = aligned(this.#used, COPY_ALIGNMENT);
+    const chunks = this.#chunks;
     this.#copies = [];
+    this.#chunks = [];
     this.#used = 0;
     try {
-      const staging = this.#device.createBuffer({
-        label: `${this.#label} staging`,
-        size: bytes,
-        usage: BUFFER_USAGE.MAP_WRITE | BUFFER_USAGE.COPY_SRC,
-        mappedAtCreation: true,
-      });
-      new Uint8Array(staging.getMappedRange()).set(this.#scratch.subarray(0, bytes));
-      staging.unmap();
+      for (const chunk of chunks) {
+        chunk.buffer.unmap();
+      }
+      if (copies.length === 0) {
+        return;
+      }
       const encoder = this.#device.createCommandEncoder({ label: this.#label });
       for (const copy of copies) {
         switch (copy.kind) {
           case "buffer":
             encoder.copyBufferToBuffer(
-              staging,
+              copy.from,
               copy.fromBytes,
               copy.buffer,
               copy.offsetBytes,
@@ -286,7 +311,7 @@ export class StagedWrites {
           case "texture":
             encoder.copyBufferToTexture(
               {
-                buffer: staging,
+                buffer: copy.from,
                 offset: copy.fromBytes,
                 bytesPerRow: copy.bytesPerRow,
                 rowsPerImage: copy.extent.height,
@@ -298,11 +323,10 @@ export class StagedWrites {
         }
       }
       this.#device.queue.submit([encoder.finish()]);
-      // Freed once the copies that read it have run.
-      staging.destroy();
     } finally {
-      if (this.#scratch.byteLength > KEPT_SCRATCH_BYTES) {
-        this.#scratch = new Uint8Array(0);
+      // Freed once the copies that read them have run.
+      for (const chunk of chunks) {
+        chunk.buffer.destroy();
       }
     }
   }
@@ -317,28 +341,46 @@ export class StagedWrites {
 
   /** Drops the writes staged so far unsubmitted: their buffers and textures are being destroyed. */
   discard(): void {
+    for (const chunk of this.#chunks) {
+      chunk.buffer.destroy();
+    }
+    this.#chunks = [];
     this.#copies = [];
     this.#used = 0;
   }
 
   /**
-   * Reserves `bytes` of the scratch at an offset aligned to `alignment`, submitting what is staged
-   * first where it would pass the part's bytes.
+   * Reserves `bytes` of a staging buffer at an offset aligned to `alignment`: the last one's, where
+   * they fit, else a new one's, made mapped, of a chunk's bytes or of `bytes` where they are more;
+   * submitting what is staged first where they would pass the part's bytes.
    */
-  #reserve(bytes: number, alignment: number): number {
-    if (this.#used > 0 && aligned(this.#used, alignment) + bytes > this.#partBytes) {
+  #reserve(bytes: number, alignment: number): { chunk: StagingChunk; fromBytes: number } {
+    if (this.#used > 0 && this.#used + bytes > this.#partBytes) {
       this.flush();
     }
-    const fromBytes = aligned(this.#used, alignment);
-    const needed = fromBytes + bytes;
-    if (needed > this.#scratch.byteLength) {
-      const grown = new Uint8Array(
-        Math.max(needed, 2 * this.#scratch.byteLength, LEAST_SCRATCH_BYTES),
-      );
-      grown.set(this.#scratch.subarray(0, this.#used));
-      this.#scratch = grown;
+    const last = this.#chunks.at(-1);
+    if (last !== undefined) {
+      const fromBytes = aligned(last.used, alignment);
+      if (fromBytes + bytes <= last.bytes.byteLength) {
+        last.used = fromBytes + bytes;
+        this.#used += bytes;
+        return { chunk: last, fromBytes };
+      }
     }
-    this.#used = needed;
-    return fromBytes;
+    const size = Math.max(this.#chunkBytes, aligned(bytes, COPY_ALIGNMENT));
+    const buffer = this.#device.createBuffer({
+      label: `${this.#scopeLabel} staging`,
+      size,
+      usage: BUFFER_USAGE.MAP_WRITE | BUFFER_USAGE.COPY_SRC,
+      mappedAtCreation: true,
+    });
+    const chunk: StagingChunk = {
+      buffer,
+      bytes: new Uint8Array(buffer.getMappedRange()),
+      used: bytes,
+    };
+    this.#chunks.push(chunk);
+    this.#used += bytes;
+    return { chunk, fromBytes: 0 };
   }
 }
