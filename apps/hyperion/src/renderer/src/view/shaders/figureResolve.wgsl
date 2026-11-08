@@ -32,8 +32,19 @@ fn figure_colour(position : vec2f) -> vec4f {
 
 @fragment
 fn fragmentMain(v : DiscVarying) -> @location(0) vec4f {
-  if (textureLoad(figure_ids, vec2i(v.position.xy), 0).r != draw.disc) {
+  // WGSL's `discard` demotes the invocation to a helper, which runs on to the stage's end (Tint
+  // emulates it so on Metal and Direct3D, with a flag that discards at the end): a discarded
+  // fragment would shade in full. So the light is formed only where the fragment is kept, in a loop
+  // of at most one pass, not an `if`, as the composite's reads are (`composite.wgsl`): SwiftShader,
+  // the checks' adapter, runs both sides of a branch under its lanes' mask, and a loop only while a
+  // lane is in it. The pixels kept draw what they drew, bit for bit.
+  let own = textureLoad(figure_ids, vec2i(v.position.xy), 0).r == draw.disc;
+  var colour = vec4f(0.0);
+  for (var shade = own; shade; shade = false) {
+    colour = figure_colour(v.position.xy);
+  }
+  if (!own) {
     discard;
   }
-  return figure_colour(v.position.xy);
+  return colour;
 }

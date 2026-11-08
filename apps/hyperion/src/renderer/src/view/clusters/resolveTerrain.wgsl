@@ -128,38 +128,49 @@ fn fragmentMain(@builtin(position) pixel : vec4f) -> @location(0) vec4f {
   let id = textureLoad(visibility_ids, vec2u(pixel.xy), 0).x;
   let visible = id >> VISIBILITY_TRIANGLE_BITS;
   let first = u32(draw.resolveLists.y);
-  if (id == VISIBILITY_NONE || visible < first || visible - first >= u32(draw.resolveLists.z)) {
+  let kept = !(id == VISIBILITY_NONE || visible < first || visible - first >= u32(draw.resolveLists.z));
+  // WGSL's `discard` demotes the invocation to a helper, which runs on to the stage's end (Tint
+  // emulates it so on Metal and Direct3D, with a flag that discards at the end): a pixel of no ID
+  // of these lists would refetch a triangle and shade in full. So it is shaded only where kept, in
+  // a loop of at most one pass, not an `if`, as the composite's reads are (`composite.wgsl`):
+  // SwiftShader, the checks' adapter, runs both sides of a branch under its lanes' mask, and a loop
+  // only while a lane is in it. The pixels kept draw what they drew, bit for bit.
+  var colour = vec4f(0.0);
+  for (var shade = kept; shade; shade = false) {
+    let local = visible - first;
+    let item = cluster_lists[local];
+    let instance = item >> 8u;
+    let cluster = item & 0xffu;
+    let sub = instances[instance].sub.x;
+    // A `var`, so that the loop below may index it at run time.
+    var corners = resolve_corners(resolve_template(local), id & ((1u << VISIBILITY_TRIANGLE_BITS) - 1u));
+    // One call of the vertex function in a loop, so that a compiler that inlines every call (SwiftShader's)
+    // takes one copy of it.
+    var at : array<LitVertexOut, 3>;
+    for (var k = 0u; k < 3u; k += 1u) {
+      at[k] = lit_vertex(terrain_cluster_grid(cluster, corners[k], sub), instance);
+    }
+    let size = vec2f(textureDimensions(visibility_ids));
+    let ndc = vec2f(2.0 * pixel.x / size.x - 1.0, 1.0 - 2.0 * pixel.y / size.y);
+    // The corners snapped as the rasteriser snapped them, so that the weights are its own.
+    let b = resolve_barycentrics(
+      resolve_snapped(at[0].clip, size), resolve_snapped(at[1].clip, size), resolve_snapped(at[2].clip, size), ndc
+    );
+    // The flat varyings the first corner's, the provoking vertex's; the rest interpolated.
+    var in = at[0];
+    in.clip = pixel;
+    in.patchUv = b.x * at[0].patchUv + b.y * at[1].patchUv + b.z * at[2].patchUv;
+    in.fromCameraBf = b.x * at[0].fromCameraBf + b.y * at[1].fromCameraBf + b.z * at[2].fromCameraBf;
+    in.datumNormal = b.x * at[0].datumNormal + b.y * at[1].datumNormal + b.z * at[2].datumNormal;
+    in.heightM = b.x * at[0].heightM + b.y * at[1].heightM + b.z * at[2].heightM;
+    in.horizonSt = b.x * at[0].horizonSt + b.y * at[1].horizonSt + b.z * at[2].horizonSt;
+    in.morph = b.x * at[0].morph + b.y * at[1].morph + b.z * at[2].morph;
+    in.gridHeightM = b.x * at[0].gridHeightM + b.y * at[1].gridHeightM + b.z * at[2].gridHeightM;
+    // The geometric normal is the face's, from its edges (`cascade_geometric_normal` orients it).
+    colour = lit_fragment(in, at[1].fromCameraBf - at[0].fromCameraBf, at[2].fromCameraBf - at[0].fromCameraBf);
+  }
+  if (!kept) {
     discard;
   }
-  let local = visible - first;
-  let item = cluster_lists[local];
-  let instance = item >> 8u;
-  let cluster = item & 0xffu;
-  let sub = instances[instance].sub.x;
-  // A `var`, so that the loop below may index it at run time.
-  var corners = resolve_corners(resolve_template(local), id & ((1u << VISIBILITY_TRIANGLE_BITS) - 1u));
-  // One call of the vertex function in a loop, so that a compiler that inlines every call (SwiftShader's)
-  // takes one copy of it.
-  var at : array<LitVertexOut, 3>;
-  for (var k = 0u; k < 3u; k += 1u) {
-    at[k] = lit_vertex(terrain_cluster_grid(cluster, corners[k], sub), instance);
-  }
-  let size = vec2f(textureDimensions(visibility_ids));
-  let ndc = vec2f(2.0 * pixel.x / size.x - 1.0, 1.0 - 2.0 * pixel.y / size.y);
-  // The corners snapped as the rasteriser snapped them, so that the weights are its own.
-  let b = resolve_barycentrics(
-    resolve_snapped(at[0].clip, size), resolve_snapped(at[1].clip, size), resolve_snapped(at[2].clip, size), ndc
-  );
-  // The flat varyings the first corner's, the provoking vertex's; the rest interpolated.
-  var in = at[0];
-  in.clip = pixel;
-  in.patchUv = b.x * at[0].patchUv + b.y * at[1].patchUv + b.z * at[2].patchUv;
-  in.fromCameraBf = b.x * at[0].fromCameraBf + b.y * at[1].fromCameraBf + b.z * at[2].fromCameraBf;
-  in.datumNormal = b.x * at[0].datumNormal + b.y * at[1].datumNormal + b.z * at[2].datumNormal;
-  in.heightM = b.x * at[0].heightM + b.y * at[1].heightM + b.z * at[2].heightM;
-  in.horizonSt = b.x * at[0].horizonSt + b.y * at[1].horizonSt + b.z * at[2].horizonSt;
-  in.morph = b.x * at[0].morph + b.y * at[1].morph + b.z * at[2].morph;
-  in.gridHeightM = b.x * at[0].gridHeightM + b.y * at[1].gridHeightM + b.z * at[2].gridHeightM;
-  // The geometric normal is the face's, from its edges (`cascade_geometric_normal` orients it).
-  return lit_fragment(in, at[1].fromCameraBf - at[0].fromCameraBf, at[2].fromCameraBf - at[0].fromCameraBf);
+  return colour;
 }

@@ -189,9 +189,9 @@ function digestOf(source: string): string {
  * and the stride morph's bands from them, which an instance with no scale skips.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "e29de864d360e7a5"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "e29de864d360e7a5"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "29660aa49f4d291a"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "50f3e0e3366cef3f"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "50f3e0e3366cef3f"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "e0b3efcd83c9f247"],
   ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "68aabfba513c8d28"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.

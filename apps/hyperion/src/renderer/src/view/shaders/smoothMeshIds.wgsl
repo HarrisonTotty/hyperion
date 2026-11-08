@@ -32,10 +32,14 @@ fn figure_covers(position : vec2f) -> bool {
 
 @fragment
 fn fragmentMain(v : MeshVarying) -> @location(0) u32 {
-  if (surveyed_beneath(v.position.xy)) {
-    discard;
+  // WGSL's `discard` demotes the invocation to a helper, which runs on to the stage's end (Tint
+  // emulates it so on Metal and Direct3D): the cover's test is taken only where the pixel is not
+  // surveyed beneath, in a loop of at most one pass, not an `if` (`smoothMesh.wgsl`'s note).
+  var covers = false;
+  for (var test = !surveyed_beneath(v.position.xy); test; test = false) {
+    covers = figure_covers(v.position.xy);
   }
-  if (!figure_covers(v.position.xy)) {
+  if (!covers) {
     discard;
   }
   return draw.disc;

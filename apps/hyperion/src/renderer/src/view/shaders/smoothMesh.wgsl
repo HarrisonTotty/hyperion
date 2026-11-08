@@ -155,10 +155,17 @@ fn surveyed_beneath(position : vec2f) -> bool {
 
 @fragment
 fn fragmentMain(v : MeshVarying) -> @location(0) vec4f {
-  if (surveyed_beneath(v.position.xy)) {
-    discard;
+  // WGSL's `discard` demotes the invocation to a helper, which runs on to the stage's end (Tint
+  // emulates it so on Metal and Direct3D, with a flag that discards at the end): a discarded
+  // fragment would shade in full. So the light is formed only where the fragment is kept, in a loop
+  // of at most one pass, not an `if`, as the composite's reads are (`composite.wgsl`): SwiftShader,
+  // the checks' adapter, runs both sides of a branch under its lanes' mask, and a loop only while a
+  // lane is in it. The pixels kept draw what they drew, bit for bit.
+  // A pixel surveyed beneath keeps `pixel`'s zeros, not drawn.
+  var pixel : DiscPixel;
+  for (var shade = !surveyed_beneath(v.position.xy); shade; shade = false) {
+    pixel = disc_pixel(v.position.xy, 0u);
   }
-  let pixel = disc_pixel(v.position.xy, 0u);
   if (!pixel.drawn) {
     discard;
   }
