@@ -236,8 +236,8 @@ mod tests {
 
         /// The surface crate's own holds, whose switches are that crate's `cfg(test)` alone, set by
         /// its own tests: no sim test can set one, so a pool here carries none, and the sim's reads
-        /// the version's rules (the mature colour, `material::weathering::MATURE_COLOUR_VERSION`).
-        const SURFACE_HOLDS: [&str; 1] = ["MatureColourRules"];
+        /// the version's rules. None now (31 folded the mature colour's).
+        const SURFACE_HOLDS: [&str; 0] = [];
 
         /// Every `Cell<Option<…>>` in the sim's sources and the surface crate's (not a `RefCell` or
         /// a `OnceCell`) is a hold with its line in [`HeldRules`], once, a surface crate's hold

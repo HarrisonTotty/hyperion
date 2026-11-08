@@ -245,9 +245,10 @@ fn weathering_an_entry_without_iron_keeps_its_albedo_to_the_bit() {
             }
         }
     }
-    // An iron-bearing silicate under the family's Regolith law darkens in every band.
+    // An iron-bearing silicate under the family's Regolith law darkens in every band, the slab's
+    // law alone (the version's then draws B and R toward the mature colour).
     let rock = entry(0.2, 0, MechanicsFamily::Silicate, Some(0.16));
-    let weathered = weathered_entry_bvr(&rock, 1.0);
+    let weathered = weathered_entry_bvr_of(&rock, 1.0, false);
     for (band, wavelength) in BVR_EFFECTIVE_WAVELENGTHS_NM.into_iter().enumerate() {
         let fresh = rock.normal_albedo_bvr[band];
         assert_same_bits(
@@ -333,26 +334,6 @@ fn weathering_s_table_is_one_the_law_can_read() {
     assert_same_bits(table::IRON_Z_STEP_NM, 10.0);
 }
 
-/// The mature colour is held until the 30 → 31 bump: the rules in force are the slab's, and the
-/// tests' switch reaches 31's.
-#[test]
-fn the_mature_colour_is_held_only_until_the_31_bump() {
-    assert!(
-        GENERATOR_VERSION < MATURE_COLOUR_VERSION,
-        "the 30 → 31 bump draws a weathered entry's colour toward the mature lunar colour: delete \
-         `MATURE_COLOUR_VERSION`, `MatureColourRules` with its `Slab` arm and its match in \
-         `weathered_entry_bvr`, the tests' `with_mature_colour`, the sim's cell audit's \
-         `SURFACE_HOLDS` line (`planetary/testing/held.rs`), and this test; have \
-         `under_the_mature_colour_the_moon_s_terrains_take_its_colour` read the version's rules \
-         alone"
-    );
-    assert_eq!(MatureColourRules::in_force(), MatureColourRules::Slab);
-    assert_eq!(
-        with_mature_colour(MatureColourRules::Mature, MatureColourRules::in_force),
-        MatureColourRules::Mature
-    );
-}
-
 /// The mature colour keeps the slab's albedo to the bit at τ 0, beyond the law's measured range, for
 /// an albedo of 0 and for an input that is not finite; a fully weathered grain (τ 60) takes the
 /// mature lunar colour on V where its fresh row is greyer than the Moon, and its own fresh colour
@@ -406,7 +387,7 @@ fn toward_the_mature_colour_a_fresh_grain_keeps_its_own_and_a_saturated_one_take
 /// 1.134 (Dollfus and Bowell's eq. 11), where the slab's are 0.911 and 1.056; the highlands, 0.715
 /// under the slab, stated against the Moon's. A fresh entry (m = 0) keeps its albedos to the bit.
 #[test]
-fn under_the_mature_colour_the_moon_s_terrains_take_its_colour() {
+fn the_moon_s_terrains_take_its_colour() {
     let anchor = |fresh: [f64; 3], feo: f64, density: f64| PaletteEntry {
         normal_albedo_bvr: fresh,
         grain_density_kg_m3: density,
@@ -417,13 +398,11 @@ fn under_the_mature_colour_the_moon_s_terrains_take_its_colour() {
     let moon = |nm: f64| hyperion_base::math::powf(nm / 550.0, MATURE_COLOUR_EXPONENT);
     let [b_nm, _, r_nm] = BVR_EFFECTIVE_WAVELENGTHS_NM;
     for (name, terrain) in [("highland", highland), ("mare", mare)] {
-        let slab = weathered_entry_bvr(&terrain, 1.0);
-        let (mature, fresh) = with_mature_colour(MatureColourRules::Mature, || {
-            (
-                weathered_entry_bvr(&terrain, 1.0),
-                weathered_entry_bvr(&terrain, 0.0),
-            )
-        });
+        let slab = weathered_entry_bvr_of(&terrain, 1.0, false);
+        let (mature, fresh) = (
+            weathered_entry_bvr(&terrain, 1.0),
+            weathered_entry_bvr(&terrain, 0.0),
+        );
         assert_same_bits(mature[1], slab[1]);
         for (a, b) in fresh.into_iter().zip(terrain.normal_albedo_bvr) {
             assert_same_bits(a, b);

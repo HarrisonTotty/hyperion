@@ -80,7 +80,7 @@
 //! R(`λ_V`) = (λ ÷ `λ_V`)^0.83 ([`MATURE_COLOUR_EXPONENT`]), whose R/V of 1.134 is its
 //! interpolation (Gehrels measured no R).
 //!
-//! So from 31 (`MATURE_COLOUR_VERSION`) an empirical colour closure, not part of Hapke's slab,
+//! So from 31 an empirical colour closure, not part of Hapke's slab,
 //! stands in for D1 and D2 on the regolith form (the lane's lean, 2026-11-07;
 //! [`toward_mature_colour`]): in each band of the law's measured range
 //! ([`MATURE_COLOUR_RANGE_NM`]) the weathered albedo is the log-linear blend a^x [`a_V` r(λ)]^(1 −
@@ -95,7 +95,7 @@
 //! albedo. A band below the law's range takes the colour at its shortest wavelength; one beyond it
 //! keeps the slab's (the infrared, D2's still).
 
-use hyperion_base::{GENERATOR_VERSION, GeneratorVersion, math};
+use hyperion_base::math;
 
 use super::PhaseLaw;
 use crate::field::{BVR_EFFECTIVE_WAVELENGTHS_NM, PaletteEntry};
@@ -547,7 +547,7 @@ pub fn weathered_hemispherical_albedos(
 /// albedos to the bit, so that nothing darkens twice (decision-p14-t51d-weathering §1.5), as does
 /// one of `FeO_T` 0 (an ice, an iron-free solid). From generator version 31 an entry under the
 /// regolith's law has its B and R drawn toward the mature lunar colour on its V
-/// ([`toward_mature_colour`], `MATURE_COLOUR_VERSION`).
+/// ([`toward_mature_colour`]).
 ///
 /// # Panics
 ///
@@ -555,6 +555,12 @@ pub fn weathered_hemispherical_albedos(
 /// [`MaterialPalette`](crate::field::MaterialPalette) would refuse.
 #[must_use]
 pub fn weathered_entry_bvr(entry: &PaletteEntry, maturity: f64) -> [f64; 3] {
+    weathered_entry_bvr_of(entry, maturity, true)
+}
+
+/// [`weathered_entry_bvr`], drawn toward the mature lunar colour where `mature` (the version's), or
+/// the slab's alone (a test's comparison).
+fn weathered_entry_bvr_of(entry: &PaletteEntry, maturity: f64, mature: bool) -> [f64; 3] {
     check_unit("a maturity", maturity);
     let Some(feo_mass_fraction) = entry.feo_mass_fraction else {
         return entry.normal_albedo_bvr;
@@ -572,10 +578,9 @@ pub fn weathered_entry_bvr(entry: &PaletteEntry, maturity: f64) -> [f64; 3] {
             maturity,
         );
     }
-    match (MatureColourRules::in_force(), law) {
-        (MatureColourRules::Slab, _)
-        | (MatureColourRules::Mature, PhaseLaw::Ice | PhaseLaw::Lambert) => out,
-        (MatureColourRules::Mature, PhaseLaw::Regolith) => {
+    match (mature, law) {
+        (false, _) | (true, PhaseLaw::Ice | PhaseLaw::Lambert) => out,
+        (true, PhaseLaw::Regolith) => {
             let v = VBand {
                 fresh: entry.normal_albedo_bvr[1],
                 weathered: out[1],
@@ -618,70 +623,6 @@ pub const MATURE_COLOUR_EXPONENT: f64 = 0.83;
 /// them keeps the slab's weathered albedo, one below them takes the colour at 360 nm
 /// ([`toward_mature_colour`]).
 pub const MATURE_COLOUR_RANGE_NM: [f64; 2] = [360.0, 940.0];
-
-/// The generator version from which a weathered entry's colour tends to the mature lunar colour
-/// (this module's documentation, "The mature colour"): 31, held with the 31 train (main's ruling
-/// of 2026-11-07: train 30's list froze first).
-///
-/// Below it `MatureColourRules::in_force` is `MatureColourRules::Slab`, and
-/// [`weathered_entry_bvr`] is the slab's alone, bit for bit. 31's bump deletes this hold,
-/// `MatureColourRules` with its `Slab` arm and its match in [`weathered_entry_bvr`], the tests'
-/// switch and its tripwire (`the_mature_colour_is_held_only_until_the_31_bump`), and the sim's
-/// cell audit's `SURFACE_HOLDS` line (`planetary/testing/held.rs`). The sim's area mix takes
-/// [`toward_mature_colour`] from 31 on the record (the surface colour, folded first); public,
-/// hidden, as it was for the sim's check.
-#[doc(hidden)]
-pub const MATURE_COLOUR_VERSION: GeneratorVersion = GeneratorVersion::new(31);
-
-/// Which colour a weathered palette entry takes (its hold, [`MATURE_COLOUR_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum MatureColourRules {
-    /// Version 30's and before: the slab's in every band.
-    Slab,
-    /// Version 31's: the slab's drawn toward the mature lunar colour ([`toward_mature_colour`]).
-    Mature,
-}
-
-impl MatureColourRules {
-    /// The rules this generator version gives: the mature colour from [`MATURE_COLOUR_VERSION`],
-    /// the slab's below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_mature_colour`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = MATURE_COLOUR_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= MATURE_COLOUR_VERSION {
-            Self::Mature
-        } else {
-            Self::Slab
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The mature colour's rules a test sets on its thread, `None` for the version's.
-    static MATURE_COLOUR_RULES: core::cell::Cell<Option<MatureColourRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the mature colour's rules `rules` on this thread, for the tests to reach
-/// 31's colours ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. 31's bump deletes it with the hold.
-#[cfg(test)]
-pub(crate) fn with_mature_colour<R>(rules: MatureColourRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<MatureColourRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            MATURE_COLOUR_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(MATURE_COLOUR_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// A band V's albedos, the reference of [`toward_mature_colour`]: its fresh and weathered
 /// albedos, dimensionless, and its wavelength, nm.
