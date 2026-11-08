@@ -8,7 +8,6 @@ use crate::planetary::derive::atmosphere::AtmosphereInputs;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::hooks::EnvelopeAtmosphere;
 use crate::planetary::hooks::aerosols::AerosolDeck;
-use crate::planetary::testing::with_every_31_hold;
 use crate::substance::aloft::law_aloft;
 use crate::substance::by_key;
 use crate::units::{Kelvin, Pascals};
@@ -176,17 +175,20 @@ pub(crate) fn hot_jupiter_inputs() -> AtmosphereInputs {
 /// (from part 5's 0.2859) and Saturn to 0.4017 (from 0.1899), within Wang et al.'s (2024) 0.41 ±
 /// 0.02, and part 7's methane layer Uranus and Neptune within theirs (from 0.4829 and 0.5255);
 /// part 8's cold-opacity law moves Saturn to 0.3882, Uranus to 0.3084 and Neptune to 0.3238, each
-/// still within its measurement (Saturn's Wang et al.'s).
+/// still within its measurement (Saturn's Wang et al.'s); from 31 the chromophore mixed in its
+/// haze's gas moves Jupiter to 0.5013 and Saturn to 0.3077, under Wang et al.'s 0.41 ± 0.02 (a
+/// finding) and within Hanel et al.'s 0.342 ± 0.030 by 1.1 sigma.
 const GIANTS: [(&str, (f64, f64), f64); 4] = [
     ("Jupiter", (0.503, 0.012), JUPITER),
-    ("Saturn", (0.342, 0.030), 0.3882),
+    ("Saturn", (0.342, 0.030), 0.3077),
     ("Uranus", (0.300, 0.049), 0.3084),
     ("Neptune", (0.290, 0.067), 0.3238),
 ];
 
-/// Jupiter's own Bond albedo under every 27 hold, pinned: 0.5003, the ammonia haze's fit
-/// (`photochem::AMMONIA_HAZE_OPTICAL_DEPTH`).
-const JUPITER: f64 = 0.5003;
+/// Jupiter's own Bond albedo, pinned: 0.5013 from 31, the ammonia haze's and the chromophore's
+/// mixing's fit (`photochem::AMMONIA_HAZE_OPTICAL_DEPTH`, `photochem::CHROMOPHORE_MIXING_RATIO`;
+/// 0.5003 to 30).
+const JUPITER: f64 = 0.5013;
 
 /// The hot fixture's own Bond albedo about a Sun, pinned: 0.1323, near HD 209458 b's dark dayside
 /// (its geometric albedo 0.038 ± 0.045 over 400–700 nm, Rowe et al. 2008, ApJ 689, 1345, and
@@ -338,14 +340,7 @@ fn the_giants_own_albedos_are_pinned_against_their_measurements() {
 /// ([`record_column`]); their differences are the closed form's departures, stated.
 #[test]
 fn the_closed_form_follows_the_record_s_own_envelope() {
-    closed_form_follows_the_record("at 28");
-}
-
-/// [`the_closed_form_follows_the_record_s_own_envelope`] under every 31 hold, the cold giants'
-/// chromophore mixed in their haze's gas (`photochem::CHROMOPHORE_MIXING_VERSION`).
-#[test]
-fn under_every_31_hold_the_closed_form_follows_the_record_s_own_envelope() {
-    with_every_31_hold(|| closed_form_follows_the_record("under every 31 hold"));
+    closed_form_follows_the_record("at 31");
 }
 
 /// The closed form within 0.04 of the record's own envelope read alike, on the table's four giants
@@ -381,35 +376,31 @@ fn closed_form_follows_the_record(label: &str) {
 
 /// Mallama, Krobusek and Pavlov's (2017, Icarus 282, 19) Table 7 geometric albedos of Jupiter and
 /// Saturn in B, V and R (`photometry.rs`'s templates): `p_B` ÷ `p_V` and `p_R` ÷ `p_V`, the
-/// colours the cold giants' own bins are held to under every 31 hold.
+/// colours the cold giants' own bins are held to from 31.
 const TABLE_7_COLOURS: [(&str, f64, f64); 2] = [
     ("Jupiter", 0.443 / 0.538, 0.495 / 0.538),
     ("Saturn", 0.339 / 0.499, 0.568 / 0.499),
 ];
 
-/// Under every 31 hold (the cold giants' chromophore mixed in their haze's gas,
-/// `photochem::CHROMOPHORE_MIXING_RATIO`, its haze at `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`) the
+/// From 31 (the cold giants' chromophore mixed in their haze's gas,
+/// `photochem::CHROMOPHORE_MIXING_RATIO`, its haze at `AMMONIA_HAZE_OPTICAL_DEPTH`) the
 /// table's Jupiter, the fit, takes its own Bond albedo within its measured 0.503 ± 0.012 (Li et
 /// al. 2018) and its 390–495 nm bin over its 495–595 nm bin within 10% of Table 7's `p_B` ÷
 /// `p_V`; Saturn, the check, its two bins over the 495–595 nm one within 15% of Table 7's `p_B` ÷
 /// `p_V` and `p_R` ÷ `p_V`, and its Bond albedo is stated against Wang et al.'s (2024) 0.41 ± 0.02
-/// (a miss, the lane's finding). Each figure is pinned; Uranus and Neptune, a CH₄ deck above any
-/// NH₃, do not move.
+/// (a miss, the lane's finding). Each figure is pinned.
 #[test]
-fn under_every_31_hold_the_cold_giants_colours_are_their_measured_ones() {
+fn the_cold_giants_colours_are_their_measured_ones() {
     use crate::planetary::derive::solar::{found, solar_system};
     // The pinned figures: name, Bond albedo, bin 1 ÷ bin 2 and bin 3 ÷ bin 2.
     const PINNED: [(&str, f64, f64, f64); 2] = [
         ("Jupiter", 0.5013, 0.8794, 1.0384),
         ("Saturn", 0.3077, 0.7006, 1.0648),
     ];
-    let version = solar_system();
-    let held = with_every_31_hold(solar_system);
+    let own_system = solar_system();
     for (name, bond, blue, red) in PINNED {
-        let body = found(&held, name);
-        let bins = with_every_31_hold(|| {
-            bin_albedos(&column::snapshot_column(&giant_inputs(body)).expect("a column"))
-        });
+        let body = found(&own_system, name);
+        let bins = bin_albedos(&column::snapshot_column(&giant_inputs(body)).expect("a column"));
         let (b, r) = (bins[1] / bins[2], bins[3] / bins[2]);
         let own = body.albedo().value();
         let &(_, want_b, want_r) = TABLE_7_COLOURS
@@ -417,9 +408,8 @@ fn under_every_31_hold_the_cold_giants_colours_are_their_measured_ones() {
             .find(|(n, ..)| *n == name)
             .expect("a measured colour");
         eprintln!(
-            "{name} under every 31 hold: own Bond albedo {own:.4} (at 28 {:.4}), bins B/V \
-             {b:.4} against {want_b:.4} and R/V {r:.4} against {want_r:.4}, T_eq {:.2} K",
-            found(&version, name).albedo().value(),
+            "{name}: own Bond albedo {own:.4}, bins B/V {b:.4} against {want_b:.4} and R/V \
+             {r:.4} against {want_r:.4}, T_eq {:.2} K",
             body.equilibrium_temperature().value()
         );
         assert!((own - bond).abs() < 0.003, "{name}: {own} against {bond}");
@@ -432,13 +422,6 @@ fn under_every_31_hold_the_cold_giants_colours_are_their_measured_ones() {
             assert!((b / want_b - 1.0).abs() <= 0.15, "{b}");
             assert!((r / want_r - 1.0).abs() <= 0.15, "{r}");
         }
-    }
-    for name in ["Uranus", "Neptune"] {
-        assert_eq!(
-            format!("{:?}", found(&held, name)),
-            format!("{:?}", found(&version, name)),
-            "{name} moves"
-        );
     }
 }
 

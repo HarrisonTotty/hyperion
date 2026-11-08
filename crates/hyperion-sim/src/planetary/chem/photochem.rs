@@ -60,9 +60,8 @@
 //!   bars in the Great Red Spot and 0.7 ± 0.1 bars elsewhere on Jupiter", a Gaussian layer in ln p
 //!   above the ammonia cloud. Braude et al. retrieve it on Jupiter alone; the rule takes any giant
 //!   with an ammonia layer for a cold giant like it, with the Great Red Spot's depth (the plan's
-//!   "no deeper than about 0.2 bar"), and the disc's typical column (P14.T24.h.b part 6,
-//!   [`CHROMOPHORE_DISC_COLUMN`]), the one a whole-disc albedo reads, where to 26 it took Jupiter's
-//!   reddest ([`CHROMOPHORE_COLUMN`]).
+//!   "no deeper than about 0.2 bar"), its column mixed in the gas of the ammonia cloud's haze
+//!   ([`CHROMOPHORE_MIXING_RATIO`]), at most Jupiter's reddest ([`CHROMOPHORE_COLUMN`]).
 //! - **The ammonia cloud's haze** (P14.T24.h.b part 6): small NH₃-ice particles from
 //!   a cold giant's ammonia cloud to its tropopause, of Braude et al.'s 1 µm "cloud radius", whose
 //!   τ(550) is fitted on Jupiter's measured Bond albedo ([`AMMONIA_HAZE_OPTICAL_DEPTH`]). It is the
@@ -99,7 +98,6 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::GeneratorVersion;
 use crate::math;
 use crate::substance::{CondensedPhase, Element, SizeDistribution, SubstanceId, by_key};
 use crate::units::{
@@ -873,90 +871,17 @@ pub const CHROMOPHORE_WIDTH: f64 = 0.25;
 /// disc-typical alternative.
 pub const CHROMOPHORE_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetre::new(6.3e-4);
 
-/// The chromophore's column (P14.T24.h.b part 6), kg m⁻²: 24 µg cm⁻²,
-/// the middle of Sromovsky et al.'s (2017, Icarus 291, 232) 18–30 µg cm⁻² for most of Jupiter's
-/// features, the column a whole-disc albedo reads where [`CHROMOPHORE_COLUMN`] is its reddest
-/// spot's.
-pub const CHROMOPHORE_DISC_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetre::new(2.4e-4);
-
 /// The chromophore's particles: Braude et al.'s selected `r_c` = 0.05 µm, a gamma distribution of
 /// "fixed variance of 0.05" (their §4.1; their Table 2 prints 0.1).
 pub const CHROMOPHORE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.05), 0.05);
 
-/// The generator version from which a cold giant's chromophore is mixed in the gas of its ammonia
-/// cloud's haze, and that haze's τ(550) refitted with it (`ChromophoreRules::HazeMixing`;
-/// fix-p14-giant-chromophore, P14.T24.h.b part 6's follow-up): 31, main's rulings of 2026-11-05
-/// and 2026-11-07 (train 29's list froze first, then train 30's).
-///
-/// Below it `ChromophoreRules::in_force` is `ChromophoreRules::DiscColumn`, and every figure
-/// is the version's bit for bit. 31's bump deletes this hold, `ChromophoreRules` with its
-/// `DiscColumn` arm, [`CHROMOPHORE_DISC_COLUMN`], `with_chromophore_mixing` with its line in
-/// `planetary/testing/held.rs`'s `held_rules!` and in `with_every_31_hold`, and the tripwire
-/// `the_chromophore_mixing_is_held_only_until_the_31_bump`; [`AMMONIA_HAZE_OPTICAL_DEPTH`] takes
-/// [`AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`]'s value and the twin goes.
-pub const CHROMOPHORE_MIXING_VERSION: GeneratorVersion = GeneratorVersion::new(31);
-
-/// How a cold giant's chromophore column is set (its hold, [`CHROMOPHORE_MIXING_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum ChromophoreRules {
-    /// Version 29's and before: every cold giant's chromophore at Jupiter's disc-typical
-    /// [`CHROMOPHORE_DISC_COLUMN`], its ammonia haze at τ(550) [`AMMONIA_HAZE_OPTICAL_DEPTH`].
-    DiscColumn,
-    /// Version 31's: the chromophore [`CHROMOPHORE_MIXING_RATIO`] of the gas its ammonia haze
-    /// spans, that haze at τ(550) [`AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`].
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "held at 31: only a test's switch sets the arm until the bump makes it the \
-                      version's"
-        )
-    )]
-    HazeMixing,
-}
-
-impl ChromophoreRules {
-    /// The rules in force: the version's, [`DiscColumn`](Self::DiscColumn); in the tests, the rules
-    /// a test's switch sets on its thread (`with_chromophore_mixing`).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        Self::DiscColumn
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The chromophore's rules a test sets on its thread, `None` for the version's.
-    static RULES: core::cell::Cell<Option<ChromophoreRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the chromophore's rules `rules` on this thread, the held arm 31's; the
-/// version's are set back after, a panic in `run` included.
-#[cfg(test)]
-pub(crate) fn with_chromophore_mixing<R>(rules: ChromophoreRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<ChromophoreRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
-
-/// The chromophore's mass mixing ratio in the gas its ammonia haze spans from
-/// [`CHROMOPHORE_MIXING_VERSION`], kg per kg of gas: 7 × 10⁻⁸, fitted with
-/// [`AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`] on the Solar System table's Jupiter (a lean of 2026-11-05).
+/// The chromophore's mass mixing ratio in the gas its ammonia haze spans (fix-p14-giant-chromophore,
+/// P14.T24.h.b part 6's follow-up, from generator version 31), kg per kg of gas: 7 × 10⁻⁸, fitted
+/// with [`AMMONIA_HAZE_OPTICAL_DEPTH`] on the Solar System table's Jupiter (a lean of 2026-11-05).
 ///
 /// - **The rule** (lean): the chromophore is mixed with the haze it tints, so a giant's column
-///   follows that haze's gas, (`p_NH₃` − [`AMMONIA_HAZE_TOP`]) ÷ g, where to 28 every cold giant
-///   took Jupiter's [`CHROMOPHORE_DISC_COLUMN`]. Jupiter's haze spans about 2,550 kg m⁻² of gas, a
+///   follows that haze's gas, (`p_NH₃` − [`AMMONIA_HAZE_TOP`]) ÷ g, where to 30 every cold giant
+///   took Jupiter's disc-typical 24 µg cm⁻² (Sromovsky et al.'s middle). Jupiter's haze spans about 2,550 kg m⁻² of gas, a
 ///   column of 1.8 × 10⁻⁴ kg m⁻², 18 µg cm⁻², the low end of Sromovsky et al.'s (2017, Icarus 291,
 ///   232) 18–30 µg cm⁻² for most of Jupiter's features.
 /// - **The bound** (lean, 2026-11-05): at most [`CHROMOPHORE_COLUMN`], Braude et al.'s Great
@@ -981,15 +906,14 @@ pub const CHROMOPHORE_MIXING_RATIO: f64 = 7.0e-8;
 /// `ammonia_layer` under gravity `gravity`, its peak at that layer or at [`CHROMOPHORE_DEEPEST`],
 /// whichever is higher (Braude et al. 2020), or `None` where its column is none.
 ///
-/// Its column is the rules' in force (`ChromophoreRules`): to 28 [`CHROMOPHORE_DISC_COLUMN`]
-/// on every such giant; from [`CHROMOPHORE_MIXING_VERSION`] [`CHROMOPHORE_MIXING_RATIO`] of the
-/// gas its ammonia haze spans, (`ammonia_layer` − [`AMMONIA_HAZE_TOP`]) ÷ `gravity`, at most the
-/// Great Red Spot's [`CHROMOPHORE_COLUMN`], and none where [`ammonia_haze`] gives none.
+/// Its column is [`CHROMOPHORE_MIXING_RATIO`] of the gas its ammonia haze spans, (`ammonia_layer`
+/// − [`AMMONIA_HAZE_TOP`]) ÷ `gravity`, at most the Great Red Spot's [`CHROMOPHORE_COLUMN`], and
+/// none where [`ammonia_haze`] gives none.
 ///
 /// # Errors
 ///
-/// [`EvaluateRuleError::Pressure`] unless `ammonia_layer` is finite and positive, and from
-/// [`CHROMOPHORE_MIXING_VERSION`] [`EvaluateRuleError::Gravity`] unless `gravity` is.
+/// [`EvaluateRuleError::Pressure`] unless `ammonia_layer` is finite and positive, and
+/// [`EvaluateRuleError::Gravity`] unless `gravity` is.
 ///
 /// # Examples
 ///
@@ -1013,22 +937,17 @@ pub fn chromophore(
     gravity: MetresPerSecondSquared,
 ) -> Result<Option<Haze>, EvaluateRuleError> {
     let layer = check_pressure(ammonia_layer)?;
-    let column = match ChromophoreRules::in_force() {
-        ChromophoreRules::DiscColumn => CHROMOPHORE_DISC_COLUMN,
-        ChromophoreRules::HazeMixing => {
-            let g = gravity.value();
-            if !(g.is_finite() && g > 0.0) {
-                return Err(EvaluateRuleError::Gravity(gravity));
-            }
-            let gas = layer - AMMONIA_HAZE_TOP.value();
-            if gas <= 0.0 {
-                return Ok(None);
-            }
-            let mixed = CHROMOPHORE_MIXING_RATIO * gas / g;
-            let most = CHROMOPHORE_COLUMN.value();
-            KilogramsPerSquareMetre::new(if mixed <= most { mixed } else { most })
-        }
-    };
+    let g = gravity.value();
+    if !(g.is_finite() && g > 0.0) {
+        return Err(EvaluateRuleError::Gravity(gravity));
+    }
+    let gas = layer - AMMONIA_HAZE_TOP.value();
+    if gas <= 0.0 {
+        return Ok(None);
+    }
+    let mixed = CHROMOPHORE_MIXING_RATIO * gas / g;
+    let most = CHROMOPHORE_COLUMN.value();
+    let column = KilogramsPerSquareMetre::new(if mixed <= most { mixed } else { most });
     let peak = if layer < CHROMOPHORE_DEEPEST.value() {
         ammonia_layer
     } else {
@@ -1056,22 +975,8 @@ pub const AMMONIA_HAZE_TOP: Pascals = Pascals::new(1.0e4);
 /// arXiv:1912.00918v1), a gamma distribution of their fixed variance 0.05.
 pub const AMMONIA_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(1.0), 0.05);
 
-/// The ammonia cloud's haze's τ(550) where its layer spans an e-fold of pressure or more: 10,
-/// fitted (P14.T24.h.b part 6) so that the Solar System table's Jupiter, its chromophore at
-/// [`CHROMOPHORE_DISC_COLUMN`], takes its own column's Bond albedo within its measured 0.503 ±
-/// 0.012 (Li et al. 2018, Nature Communications 9, 3709): 10 gives 0.500 and 10.5 0.503, and 10
-/// keeps κ₁'s refit on Jupiter ([`GreyProfile::ADOPTED`](crate::planetary::hooks::structure::envelope::GreyProfile::ADOPTED)) mid-way in its third figure. It stands
-/// for the bright cloud the column reads above its floor, where the decks' large particles,
-/// forward-scattering, leave Jupiter dark.
-///
-/// Saturn under the same rule is its check: its own Bond albedo, 0.402 (0.388 on part 8's
-/// cold-opacity law), against Wang et al.'s (2024) 0.41 ± 0.02 and Hanel et al.'s (1983) 0.342 ±
-/// 0.030, and the haze's τ against the plan's ~10 for its tropospheric haze (Karkoschka and
-/// Tomasko 2005).
-pub const AMMONIA_HAZE_OPTICAL_DEPTH: f64 = 10.0;
-
-/// The ammonia cloud's haze's τ(550) from [`CHROMOPHORE_MIXING_VERSION`]
-/// (`ChromophoreRules::HazeMixing`): 7, refitted with [`CHROMOPHORE_MIXING_RATIO`] so that the
+/// The ammonia cloud's haze's τ(550) where its layer spans an e-fold of pressure or more: 7, from
+/// generator version 31 refitted with [`CHROMOPHORE_MIXING_RATIO`] (10 to 30) so that the
 /// Solar System table's Jupiter takes its own column's Bond albedo within its measured 0.503 ±
 /// 0.012 (Li et al. 2018, Nature Communications 9, 3709): 0.501, which keeps κ₁'s refit on
 /// Jupiter
@@ -1083,12 +988,12 @@ pub const AMMONIA_HAZE_OPTICAL_DEPTH: f64 = 10.0;
 /// under Wang et al.'s (2024) 0.41 ± 0.02 and just under Hanel et al.'s (1983, Icarus 53, 262)
 /// 0.342 ± 0.030 (a finding); the τ against the plan's ~10 for its tropospheric haze (Karkoschka
 /// and Tomasko 2005).
-pub const AMMONIA_HAZE_OPTICAL_DEPTH_MIXED: f64 = 7.0;
+pub const AMMONIA_HAZE_OPTICAL_DEPTH: f64 = 7.0;
 
 /// The haze above a cold giant's ammonia cloud, whose base (P14.T52.c's NH₃ deck's) lies at
 /// `ammonia_layer` (P14.T24.h.b part 6, held at 27): NH₃-ice particles ([`AMMONIA_HAZE_PARTICLES`])
-/// well mixed from the layer to [`AMMONIA_HAZE_TOP`], of τ(550) [`AMMONIA_HAZE_OPTICAL_DEPTH`]
-/// ([`AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`] from [`CHROMOPHORE_MIXING_VERSION`]), tapered linearly in
+/// well mixed from the layer to [`AMMONIA_HAZE_TOP`], of τ(550) [`AMMONIA_HAZE_OPTICAL_DEPTH`],
+/// tapered linearly in
 /// ln p where the layer spans less than an e-fold of pressure (the builder's choice, so that the
 /// haze thins as the cloud nears the tropopause), or `None` where the layer is no deeper than the
 /// top.
@@ -1112,7 +1017,7 @@ pub const AMMONIA_HAZE_OPTICAL_DEPTH_MIXED: f64 = 7.0;
 /// let haze = ammonia_haze(Pascals::new(7e4))?.ok_or("a haze")?;
 /// assert!(matches!(
 ///     haze.amount(),
-///     HazeAmount::OpticalDepth { optical_depth, .. } if (optical_depth - 10.0).abs() < 1e-12
+///     HazeAmount::OpticalDepth { optical_depth, .. } if (optical_depth - 7.0).abs() < 1e-12
 /// ));
 /// # Ok(())
 /// # }
@@ -1124,10 +1029,7 @@ pub fn ammonia_haze(ammonia_layer: Pascals) -> Result<Option<Haze>, EvaluateRule
         return Ok(None);
     }
     let share = if span >= 1.0 { 1.0 } else { span };
-    let depth = match ChromophoreRules::in_force() {
-        ChromophoreRules::DiscColumn => AMMONIA_HAZE_OPTICAL_DEPTH,
-        ChromophoreRules::HazeMixing => AMMONIA_HAZE_OPTICAL_DEPTH_MIXED,
-    };
+    let depth = AMMONIA_HAZE_OPTICAL_DEPTH;
     let (radius, variance) = AMMONIA_HAZE_PARTICLES;
     Ok(Some(Haze {
         rule: HazeRule::Ammonia,

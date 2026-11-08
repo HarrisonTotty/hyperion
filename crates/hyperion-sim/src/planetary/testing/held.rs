@@ -13,7 +13,6 @@
 //! switch.
 
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
-use crate::planetary::chem::photochem::{ChromophoreRules, with_chromophore_mixing};
 use crate::planetary::derive::atmosphere::{
     LineSwitchRules, MeltOxygenRules, with_line_switch, with_melt_oxygen,
 };
@@ -82,7 +81,6 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
-    chromophore_mixing: ChromophoreRules = ChromophoreRules::in_force => with_chromophore_mixing,
     surface_colour: SurfaceColourRules = SurfaceColourRules::in_force => with_surface_colour,
 }
 
@@ -158,21 +156,15 @@ mod tests {
     }
 
     /// Every planetary hold of version 31 is in force under the tests' `with_every_31_hold`, each
-    /// at its 31 arm, and the version's rules outside it: a cold giant's chromophore mixed in its
-    /// haze's gas and a disc's B and R from its own surface. A 31 hold's bump deletes its line here
+    /// at its 31 arm, and the version's rules outside it: a disc's B and R from its own surface. A
+    /// 31 hold's bump deletes its line here
     /// with its line in `with_every_31_hold`.
     #[test]
     fn every_31_hold_is_in_force_under_with_every_31_hold() {
         use crate::planetary::testing::with_every_31_hold;
-        let rules = || (ChromophoreRules::in_force(), SurfaceColourRules::in_force());
-        assert_eq!(
-            with_every_31_hold(rules),
-            (ChromophoreRules::HazeMixing, SurfaceColourRules::Surface)
-        );
-        assert_eq!(
-            rules(),
-            (ChromophoreRules::DiscColumn, SurfaceColourRules::Template)
-        );
+        let rules = SurfaceColourRules::in_force;
+        assert_eq!(with_every_31_hold(rules), SurfaceColourRules::Surface);
+        assert_eq!(rules(), SurfaceColourRules::Template);
     }
 
     /// The tests that run threads, catch a panic or read the sources, none of which a wasm32-wasip1

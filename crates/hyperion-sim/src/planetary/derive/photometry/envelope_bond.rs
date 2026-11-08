@@ -4,8 +4,8 @@
 //! snapshot path ([`gas_envelope_bond`]).
 //!
 //! With it come part 6, the cold giants' clouds the albedo reads, on the record and in the closed
-//! form alike: the chromophore at the disc's typical column
-//! (`photochem::CHROMOPHORE_DISC_COLUMN`), the haze above a Jupiter-like ammonia cloud
+//! form alike: the chromophore (at the disc's typical column to 30, from 31 mixed in its haze's
+//! gas, `photochem::CHROMOPHORE_MIXING_RATIO`), the haze above a Jupiter-like ammonia cloud
 //! (`photochem::ammonia_haze`), whose τ(550) is fitted on Jupiter's measured Bond albedo, and κ₁
 //! refitted to the Galileo probe at that albedo (`GreyProfile::ADOPTED`). Part 7 draws an ice
 //! giant's CH₄ deck as its methane layer, Irwin et al.'s (2022) Aerosol-2 of haze cores

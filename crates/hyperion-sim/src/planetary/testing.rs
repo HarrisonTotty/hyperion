@@ -51,9 +51,7 @@ mod held;
 #[cfg(test)]
 pub(crate) use held::{HeldRules, in_shares};
 
-/// `run`'s result with every planetary hold of version 31 in force on this thread (train 31): the
-/// cold giants' chromophore mixed in its haze's gas
-/// ([`CHROMOPHORE_MIXING_VERSION`](super::chem::photochem::CHROMOPHORE_MIXING_VERSION)) and a
+/// `run`'s result with every planetary hold of version 31 in force on this thread (train 31): a
 /// disc's B and R from its own surface
 /// ([`SURFACE_COLOUR_VERSION`](super::derive::photometry::SURFACE_COLOUR_VERSION)), both held at 31
 /// as train 30's list froze before they landed (main's ruling of 2026-11-07). A test that needs
@@ -62,11 +60,8 @@ pub(crate) use held::{HeldRules, in_shares};
 /// here.
 #[cfg(test)]
 pub(crate) fn with_every_31_hold<R>(run: impl FnOnce() -> R) -> R {
-    use super::chem::photochem::{ChromophoreRules, with_chromophore_mixing};
     use super::derive::photometry::{SurfaceColourRules, with_surface_colour};
-    with_chromophore_mixing(ChromophoreRules::HazeMixing, || {
-        with_surface_colour(SurfaceColourRules::Surface, run)
-    })
+    with_surface_colour(SurfaceColourRules::Surface, run)
 }
 
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,

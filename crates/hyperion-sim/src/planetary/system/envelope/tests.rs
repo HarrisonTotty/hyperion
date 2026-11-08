@@ -1727,168 +1727,6 @@ fn under_every_26_hold_the_dayside_moves_only_hot_envelopes_deep_decks() {
     assert!(!moved.is_empty(), "the census moves an envelope");
 }
 
-/// One body's record of a census walk: where, the index of the planet it orbits (a moon's), and
-/// its record.
-type CensusRecord = (String, Option<u32>, BodyRecord);
-
-/// Every planet's, member's and moon's record of each system of `sets` at the epoch, generated
-/// afresh under the planetary rules in force on this thread.
-fn census_records(sets: &[(&'static str, Seed, SystemContext)]) -> Vec<CensusRecord> {
-    use crate::planetary::placement::OrbitHost;
-    let mut out = Vec::new();
-    for (set, seed, ctx) in sets {
-        let system = generate(*seed, ctx);
-        walk(ctx, &system, UniverseTime::EPOCH, &mut |_, visit| {
-            let parent = match visit.body.host {
-                OrbitHost::Body(parent) if matches!(visit.body.part, Part::Moon(_)) => {
-                    Some(u32::from(parent.get()))
-                }
-                _ => None,
-            };
-            let at = format!("{set} {} {:04x}", ctx.id(), visit.body.index.get());
-            out.push((at, parent, visit.record));
-        });
-    }
-    out
-}
-
-/// A cold giant's figures the chromophore's mixing moves: its chromophore's column (kg m⁻²) and
-/// τ(550), and its own Bond albedo; `None` for a record with no envelope, no NH₃ deck, or a CH₄
-/// deck above its NH₃ deck.
-fn chromophore_figures(record: &BodyRecord) -> Option<(f64, f64, f64)> {
-    let Section::Ok(envelope) = record.envelope() else {
-        return None;
-    };
-    let atmosphere = envelope.atmosphere();
-    let base = |key: &str| {
-        atmosphere
-            .decks()
-            .iter()
-            .find(|d| d.condensate() == row(key))
-            .map(|d| d.base().value())
-    };
-    let ammonia = base("NH3")?;
-    if base("CH4").is_some_and(|methane| methane < ammonia) {
-        return None;
-    }
-    let mode = atmosphere
-        .modes()
-        .iter()
-        .find(|m| m.material() == row("chromophore"));
-    let column = mode
-        .and_then(AerosolMode::column_mass)
-        .map_or(0.0, crate::units::KilogramsPerSquareMetre::value);
-    let tau = mode
-        .and_then(|m| m.optical_depth().ok())
-        .map_or(0.0, |d| d.value());
-    let bond = match record.photometry() {
-        Section::Ok(photometry) => photometry.bond_albedo().value(),
-        _ => f64::NAN,
-    };
-    Some((column, tau, bond))
-}
-
-/// The chromophore's mixing's census (fix-p14-giant-chromophore) over `thin_air_sets` (the
-/// sample's 400, the golden systems and LOOK72's) at the epoch: every 31 hold against every 31 hold
-/// with the chromophore's rules set back to `DiscColumn`, the census's galaxy at its own
-/// rules in both. Only envelopes move, each a cold giant on its record (an NH₃ deck and no CH₄ deck
-/// above it) or in its own Bond albedo's closed form, with any moons of moved envelopes, and every
-/// cold giant moves (asserted). Printed: each cold giant's chromophore column and τ(550) and its
-/// own Bond albedo, 28's against 31's, how many take the bound, the other envelopes' largest
-/// moves, and the moons moved (2026-11-05: 87 cold giants, 66 at the bound, 22 others, no moon).
-#[test]
-#[ignore = "slow: the thin-air census's 442 systems twice under every 31 hold"]
-fn under_every_31_hold_the_chromophore_census_moves_only_cold_giants_and_their_moons() {
-    use crate::planetary::chem::photochem::{
-        CHROMOPHORE_COLUMN, ChromophoreRules, with_chromophore_mixing,
-    };
-    use crate::planetary::testing::with_every_31_hold;
-    use std::fmt::Write as _;
-    let sets = thin_air_sets();
-    let (version, held) = with_every_31_hold(|| {
-        (
-            with_chromophore_mixing(ChromophoreRules::DiscColumn, || census_records(&sets)),
-            census_records(&sets),
-        )
-    });
-    assert_eq!(version.len(), held.len(), "one walk's bodies, both rules");
-    let bond = |record: &BodyRecord| match record.photometry() {
-        Section::Ok(photometry) => photometry.bond_albedo().value(),
-        _ => f64::NAN,
-    };
-    let mut giants = Vec::new();
-    let mut others = Vec::new();
-    let mut moved = std::collections::BTreeSet::new();
-    // A moon is walked before its planet, so the envelopes are found first.
-    for ((at, _, a), (other, _, b)) in version.iter().zip(&held) {
-        assert_eq!(at, other, "one body each, in order");
-        let same = format!("{a:?}") == format!("{b:?}");
-        if let Some(now) = chromophore_figures(b) {
-            assert!(!same, "{at}: a cold giant does not move");
-            let none = (f64::NAN, f64::NAN, f64::NAN);
-            giants.push((at.clone(), chromophore_figures(a).unwrap_or(none), now));
-        } else if !same {
-            assert_ne!(
-                a.envelope().state(),
-                SectionState::NotApplicable,
-                "{at}: a record moves that has no envelope"
-            );
-            others.push((bond(b) - bond(a), at.clone(), bond(a), bond(b)));
-        }
-        if !same && a.envelope().state() != SectionState::NotApplicable {
-            moved.insert(at.clone());
-        }
-    }
-    let mut moons = Vec::new();
-    for ((at, parent, a), (_, _, b)) in version.iter().zip(&held) {
-        if moved.contains(at) || format!("{a:?}") == format!("{b:?}") {
-            continue;
-        }
-        let of = parent.map(|p| {
-            let system = at.rsplit_once(' ').map_or(at.as_str(), |(head, _)| head);
-            format!("{system} {p:04x}")
-        });
-        assert!(
-            of.as_ref().is_some_and(|p| moved.contains(p)),
-            "{at}: a record moves that is neither an envelope nor a moved envelope's moon"
-        );
-        moons.push(at.clone());
-    }
-    others.sort_by(|x, y| y.0.abs().total_cmp(&x.0.abs()));
-    let mut lines = String::new();
-    for (at, (c0, t0, a0), (c1, t1, a1)) in &giants {
-        writeln!(
-            lines,
-            "  {at}: chromophore {c0:.3e} → {c1:.3e} kg/m², τ {t0:.4} → {t1:.4}, own Bond \
-             {a0:.4} → {a1:.4}"
-        )
-        .expect("a string takes a line");
-    }
-    writeln!(
-        lines,
-        "{} other envelopes moved (their own Bond albedos' closed form, an NH₃ deck and no CH₄ \
-         deck above it), the largest ten:",
-        others.len()
-    )
-    .expect("a string takes a line");
-    for (_, at, a0, a1) in others.iter().take(10) {
-        writeln!(lines, "  {at}: own Bond {a0:.4} → {a1:.4}").expect("a string takes a line");
-    }
-    let at_bound = giants
-        .iter()
-        .filter(|(_, _, (column, ..))| *column >= CHROMOPHORE_COLUMN.value())
-        .count();
-    eprintln!(
-        "the chromophore's census over {} systems, {} bodies: {} cold giants moved, {at_bound} of \
-         them at the bound\n{lines}{} moons moved",
-        sets.len(),
-        version.len(),
-        giants.len(),
-        moons.len()
-    );
-    assert!(!giants.is_empty(), "the census holds a cold giant");
-}
-
 /// One record's envelope figures for P14.T50.d's movers: its E, its C/O and its modes' decks with
 /// their column masses, where its envelope section is modelled with abundances.
 fn formation_figures(record: &BodyRecord) -> Option<(f64, f64, Vec<String>)> {
@@ -2079,12 +1917,15 @@ fn under_every_27_hold_a_soot_shrouded_envelope_keeps_the_class_table_s_albedo()
 
 /// P14.T24.h.b part 6: under every 27 hold the table's Jupiter and Saturn carry their ammonia
 /// cloud's haze as the NH₃ deck's second mode, NH₃ ice of 1 µm well mixed from the deck's base to
-/// 0.1 bar at τ(550) 10, after the decks' modes and before the hazes', counted in the deck's τ and
-/// not in the hazes'; their chromophore takes the disc's typical column. Uranus and Neptune, a CH₄
+/// 0.1 bar at τ(550) 7 (10 to 30), after the decks' modes and before the hazes', counted in the
+/// deck's τ and not in the hazes'; their chromophore is mixed in that haze's gas (from 31; the
+/// disc's typical column to 30). Uranus and Neptune, a CH₄
 /// deck above any NH₃, carry no such haze.
 #[test]
 fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
-    use crate::planetary::chem::photochem::CHROMOPHORE_DISC_COLUMN;
+    use crate::planetary::chem::photochem::{
+        AMMONIA_HAZE_OPTICAL_DEPTH, AMMONIA_HAZE_TOP, CHROMOPHORE_COLUMN, CHROMOPHORE_MIXING_RATIO,
+    };
     use crate::planetary::hooks::EnvelopeAtmosphere;
     use crate::units::KilogramsPerSquareMetre;
     let ammonia = by_key("NH3").expect("a row");
@@ -2096,7 +1937,7 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
             .collect()
     };
     for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
-        let (_, own) = table_envelope(name);
+        let (of, own) = table_envelope(name);
         let own = own.atmosphere();
         let column = |atmosphere: &EnvelopeAtmosphere| {
             atmosphere
@@ -2111,10 +1952,6 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
             assert_eq!(column(own), None, "{name}");
             continue;
         }
-        assert_same_bits(
-            column(own).expect("a column"),
-            CHROMOPHORE_DISC_COLUMN.value(),
-        );
         let found = haze(own);
         assert_eq!(found.len(), 1, "{name}: {found:?}");
         let k = found[0];
@@ -2128,8 +1965,17 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
         assert_eq!(mode.deck(), ammonia);
         assert_same_bits(mode.profile().base().value(), deck.base().value());
         assert_same_bits(mode.profile().top().value(), 1.0e4);
+        let mixed = CHROMOPHORE_MIXING_RATIO * (deck.base().value() - AMMONIA_HAZE_TOP.value())
+            / of.gravity.value();
+        assert_same_bits(
+            column(own).expect("a column"),
+            mixed.min(CHROMOPHORE_COLUMN.value()),
+        );
         let tau = mode.optical_depth().expect("a τ").value();
-        assert!((tau - 10.0).abs() < 1e-9, "{name}: {tau}");
+        assert!(
+            (tau - AMMONIA_HAZE_OPTICAL_DEPTH).abs() < 1e-9,
+            "{name}: {tau}"
+        );
         let names_a_deck = |m: &AerosolMode| own.decks().iter().any(|d| d.condensate() == m.deck());
         assert!(modes[..k].iter().all(names_a_deck), "{name}");
         assert!(!modes[k + 1..].iter().any(names_a_deck), "{name}");
@@ -2144,71 +1990,6 @@ fn under_every_27_hold_a_jupiter_like_cloud_carries_its_haze() {
         eprintln!(
             "{name} at 27: NH₃ deck τ {deck_tau:.3} with its haze's {tau:.3}, the hazes' {:.3}",
             own.haze_optical_depth()
-        );
-    }
-}
-
-/// Under every 31 hold (`photochem::CHROMOPHORE_MIXING_VERSION`) the table's Jupiter and Saturn
-/// take a chromophore of `CHROMOPHORE_MIXING_RATIO` of the gas their ammonia haze spans,
-/// (`p_NH₃` − 0.1 bar) ÷ g, at most `CHROMOPHORE_COLUMN`, at its peak and width as before, and
-/// their haze τ(550) `AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`, with the version's modes in the version's
-/// order (their figures move with the giants' own albedos); Uranus's and Neptune's envelopes do
-/// not move. Each giant's two modes are printed whole.
-#[test]
-fn under_every_31_hold_a_cold_giant_s_chromophore_is_its_haze_s_gas() {
-    use crate::planetary::chem::photochem::{
-        AMMONIA_HAZE_OPTICAL_DEPTH_MIXED, AMMONIA_HAZE_TOP, CHROMOPHORE_COLUMN,
-        CHROMOPHORE_MIXING_RATIO,
-    };
-    use crate::planetary::hooks::EnvelopeAtmosphere;
-    use crate::planetary::testing::with_every_31_hold;
-    let ammonia = by_key("NH3").expect("a row");
-    let chromophore = by_key("chromophore").expect("a row");
-    let is_haze = |m: &AerosolMode| m.material() == ammonia && m.profile().exponent() <= 0.0;
-    for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
-        let (_, version) = table_envelope(name);
-        let (of, held) = with_every_31_hold(|| table_envelope(name));
-        let (was, now) = (version.atmosphere(), held.atmosphere());
-        if matches!(name, "Uranus" | "Neptune") {
-            assert_eq!(format!("{version:?}"), format!("{held:?}"), "{name} moves");
-            continue;
-        }
-        let deck = now
-            .decks()
-            .iter()
-            .find(|d| d.condensate() == ammonia)
-            .expect("an NH₃ deck");
-        let span = deck.base().value() - AMMONIA_HAZE_TOP.value();
-        let gas = span / of.gravity.value();
-        let mode = now
-            .modes()
-            .iter()
-            .find(|m| m.material() == chromophore)
-            .expect("a chromophore");
-        let column = mode.column_mass().expect("a column").value();
-        let mixed = CHROMOPHORE_MIXING_RATIO * span / of.gravity.value();
-        assert_same_bits(column, mixed.min(CHROMOPHORE_COLUMN.value()));
-        let old = was
-            .modes()
-            .iter()
-            .find(|m| m.material() == chromophore)
-            .expect("a chromophore");
-        assert_eq!(mode.profile(), old.profile(), "{name}");
-        let haze = now.modes().iter().find(|m| is_haze(m)).expect("a haze");
-        let tau = haze.optical_depth().expect("a τ").value();
-        assert!(
-            (tau - AMMONIA_HAZE_OPTICAL_DEPTH_MIXED).abs() < 1e-9,
-            "{name}: {tau}"
-        );
-        let materials = |a: &EnvelopeAtmosphere| -> Vec<_> {
-            a.modes().iter().map(|m| (m.material(), m.deck())).collect()
-        };
-        assert_eq!(materials(was), materials(now), "{name}");
-        eprintln!(
-            "{name} under every 31 hold: its haze's gas {gas:.1} kg/m², the chromophore \
-             {column:.4e} kg/m² of τ {:.6} (at 28 {:.6})\n  {mode:?}\n  {haze:?}",
-            mode.optical_depth().expect("a τ").value(),
-            old.optical_depth().expect("a τ").value()
         );
     }
 }

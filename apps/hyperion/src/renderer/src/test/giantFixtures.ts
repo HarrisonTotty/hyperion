@@ -11,7 +11,7 @@
  * - **The cold giants' haze and chromophore** (fix-p14-giant-chromophore): the hand Jupiter and
  *   Saturn carry the generator's NH₃-ice haze, their NH₃ deck's second mode, and its chromophore,
  *   each the fixture's Jupiter's mode under the rules the sim holds for generator version 30
- *   (`photochem::CHROMOPHORE_MIXING_VERSION`) on the hand giant's own NH₃ deck: the haze from the
+ *   (`photochem::CHROMOPHORE_MIXING_RATIO`, from generator version 31) on the hand giant's own NH₃ deck: the haze from the
  *   deck's base to 0.1 bar at τ(550) {@link AMMONIA_HAZE_TAU_550}, and the chromophore
  *   {@link CHROMOPHORE_MIXING_RATIO} of the gas the haze spans, at most
  *   {@link CHROMOPHORE_MOST_KG_M2} ({@link coldGiantHazes}).
@@ -200,7 +200,7 @@ const AMMONIA_HAZE_TOP_PA = 1e4;
 
 /**
  * The NH₃-ice haze's τ(550) under 30's rules, its layer spanning an e-fold of pressure or more: the
- * sim's `photochem::AMMONIA_HAZE_OPTICAL_DEPTH_MIXED`, 7, fitted with the chromophore's mixing on
+ * sim's `photochem::AMMONIA_HAZE_OPTICAL_DEPTH`, 7, fitted with the chromophore's mixing on
  * Jupiter's measured Bond albedo.
  */
 export const AMMONIA_HAZE_TAU_550 = 7;
