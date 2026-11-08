@@ -34464,4 +34464,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     round 4); its V and infrared bins are the slab's.
   - _Retargeted to 31 (landing round 3, 2026-11-07; train 30's list froze):_
     `SURFACE_COLOUR_VERSION` 31, a line in `with_every_31_hold`.
-  - _For 31's bump:_ delete what `the_surface_colour_is_held_only_until_the_31_bump` lists.
+  - _Folded at 31 (train 31):_ `SurfaceColourRules`, the switch and `with_every_31_hold` deleted;
+    `pass_bands` returns `DiscBands`; `Regolith::weathered_lid_of(…, mature)` keeps the slab alone
+    for the tests. The colour census reads one draw two ways (the version's, and its template's row
+    at the same Bond albedo, labelled the version before), renamed
+    `randomize_s_discs_take_their_own_colours`.

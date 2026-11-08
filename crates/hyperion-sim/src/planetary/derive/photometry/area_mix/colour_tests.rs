@@ -248,7 +248,7 @@ fn space_weathering_reddens_the_airless_silicate_lids() {
     }
 }
 
-/// From 30 (the surface colour) a weathered airless silicate lid's colour tends to the mature
+/// From 31 (the surface colour) a weathered airless silicate lid's colour tends to the mature
 /// lunar colour, never bluer than its fresh row's, as its npFe⁰ attenuates its grains' internal
 /// transmission (`toward_mature_colour`, an empirical closure for the slab's grey floor): at m = 1
 /// every lid is red-sloped, R over V above 1.10 and B over V at most the Moon's bluest mare's 0.860
@@ -259,17 +259,17 @@ fn space_weathering_reddens_the_airless_silicate_lids() {
 /// upturn into the ultraviolet; its V and infrared bins are the slab's to the bit; and a fresh lid
 /// (m = 0) keeps its row's bins to the bit, so that fresh basalt stays grey.
 #[test]
-fn under_the_surface_colour_mature_airless_silicates_take_the_moon_s_red_slope() {
-    use crate::planetary::derive::photometry::with_surface_colour;
-
-    let bins = |row: SubstanceId, m: f64| {
+fn mature_airless_silicates_take_the_moon_s_red_slope() {
+    let bins_of = |row: SubstanceId, m: f64, mature: bool| {
         let RegolithWeathering::Weathered { spherical_bins } =
-            Regolith::weathered_lid(row, SurfaceMaterial::Rock, airless_at(m)).weathering
+            Regolith::weathered_lid_of(row, SurfaceMaterial::Rock, airless_at(m), mature)
+                .weathering
         else {
             panic!("the lid weathers");
         };
         spherical_bins
     };
+    let bins = |row: SubstanceId, m: f64| bins_of(row, m, true);
     let (v, b_bin, r_bin) = (
         ColourBand::V.bin(),
         ColourBand::B.bin(),
@@ -290,11 +290,8 @@ fn under_the_surface_colour_mature_airless_silicates_take_the_moon_s_red_slope()
             .unwrap()
             .spherical_albedo_bins();
         let (fresh_b, fresh_r) = colour(&fresh);
-        let slab = bins(row, 1.0);
-        let (mature, middling, unweathered) =
-            with_surface_colour(SurfaceColourRules::Surface, || {
-                (bins(row, 1.0), bins(row, 0.3), bins(row, 0.0))
-            });
+        let slab = bins_of(row, 1.0, false);
+        let (mature, middling, unweathered) = (bins(row, 1.0), bins(row, 0.3), bins(row, 0.0));
         for (a, b) in unweathered.iter().zip(fresh) {
             assert_same_bits(*a, b);
         }

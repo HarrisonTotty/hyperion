@@ -628,8 +628,8 @@ pub const MATURE_COLOUR_RANGE_NM: [f64; 2] = [360.0, 940.0];
 /// `MatureColourRules` with its `Slab` arm and its match in [`weathered_entry_bvr`], the tests'
 /// switch and its tripwire (`the_mature_colour_is_held_only_until_the_31_bump`), and the sim's
 /// cell audit's `SURFACE_HOLDS` line (`planetary/testing/held.rs`). The sim's area mix takes
-/// [`toward_mature_colour`] under its own hold at 31 (`photometry::SURFACE_COLOUR_VERSION`), whose
-/// tripwire holds the two equal; public, hidden, for that check alone.
+/// [`toward_mature_colour`] from 31 on the record (the surface colour, folded first); public,
+/// hidden, as it was for the sim's check.
 #[doc(hidden)]
 pub const MATURE_COLOUR_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 

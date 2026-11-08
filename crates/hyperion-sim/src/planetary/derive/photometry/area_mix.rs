@@ -98,7 +98,7 @@
 //! whose maturity is not modelled its stand-in, each labelled. `ferric`'s weathering deposit joins
 //! the area mix at its row's optics ([`surface_bond`]).
 //!
-//! From generator version 31 (`photometry::SURFACE_COLOUR_VERSION`) a weathered lid under the
+//! From generator version 31 (the surface colour) a weathered lid under the
 //! regolith's law has its bins to the 780–1,000 nm one drawn toward the mature lunar colour, never
 //! bluer than its fresh row's, as each bin's npFe⁰ attenuates its grains' internal transmission
 //! ([`toward_mature_colour`], on the V bin's weathered albedo, which is unchanged): an empirical
@@ -149,7 +149,7 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::atmosphere::{
     Gas, PartialPressures, RunawayDeck, SurfaceMaterial, SurfaceState,
 };
-use crate::planetary::derive::photometry::{PhaseTemplate, SurfaceColourRules};
+use crate::planetary::derive::photometry::PhaseTemplate;
 use crate::planetary::hooks::surface::regime::climate_condensable;
 use crate::substance::optics::{
     BVR_BINS, CondensedOptics, ReferenceForm, SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS,
@@ -1494,6 +1494,18 @@ impl Regolith {
         material: SurfaceMaterial,
         at: LidWeathering,
     ) -> Self {
+        Self::weathered_lid_of(row, material, at, true)
+    }
+
+    /// [`weathered_lid`](Self::weathered_lid), its weathered bins drawn toward the mature lunar
+    /// colour where `mature` (the version's), or the slab's alone (a test's comparison).
+    #[must_use]
+    fn weathered_lid_of(
+        row: SubstanceId,
+        material: SurfaceMaterial,
+        at: LidWeathering,
+        mature: bool,
+    ) -> Self {
         if row == water() && IcyRegolithRules::in_force() == IcyRegolithRules::Mixture {
             return Self::with_lid(row, material);
         }
@@ -1544,15 +1556,12 @@ impl Regolith {
                 maturity,
             );
         }
-        match SurfaceColourRules::in_force() {
-            SurfaceColourRules::Template => {}
-            SurfaceColourRules::Surface => {
-                mature_colour(
-                    &mut spherical_bins,
-                    &fresh,
-                    (law, density.value(), feo, maturity),
-                );
-            }
+        if mature {
+            mature_colour(
+                &mut spherical_bins,
+                &fresh,
+                (law, density.value(), feo, maturity),
+            );
         }
         Self::weathered(material, spherical_bins)
     }

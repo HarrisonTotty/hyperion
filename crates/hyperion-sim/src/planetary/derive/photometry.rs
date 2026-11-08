@@ -50,8 +50,7 @@
 //! # The colour from the body's own surface (from generator version 31)
 //!
 //! Below 31 a body's B and R are its template's row scaled by the one Bond factor, so that every
-//! airless rock is Mercury's colour and every snowball the Moon's grey. From 30
-//! (`SURFACE_COLOUR_VERSION`) `p_V` is as above, and `p_B` and `p_R` are `p_V` times the disc's
+//! airless rock is Mercury's colour and every snowball the Moon's grey. From 31 `p_V` is as above, and `p_B` and `p_R` are `p_V` times the disc's
 //! own albedo in the B and R bins over its albedo in the V bin, `a_B` ÷ `a_V` and `a_R` ÷ `a_V`
 //! ([`DiscColour`]): its area mix taken in each bin alone, its crust, condensates,
 //! deposits and sediment under its cloud, its air's Rayleigh layer and its haze, as the Bond
@@ -70,7 +69,7 @@
 //! template's row, as below 31. So every Solar System analogue in its own state is still drawn with
 //! its row (ruling 9): Mercury's regolith is the stand-in's and Venus's disc its deck.
 //!
-//! Under the same hold a weathered lid's colour tends to the mature lunar colour as its npFe⁰
+//! From 31 too a weathered lid's colour tends to the mature lunar colour as its npFe⁰
 //! extinguishes its grains' interiors (`area_mix`'s "The weathered area mix"), where the slab alone
 //! leaves a mature iron-rich lid grey (B/V 0.956 for `basalt_fe` against the Moon's 0.831).
 
@@ -84,76 +83,9 @@ use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{JUPITER_HEAVY_ELEMENT_FRACTION, SATURN_HEAVY_ELEMENT_FRACTION};
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 use crate::units::{Kelvin, MetresPerSecondSquared, Pascals, Radians};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 pub(crate) mod area_mix;
 pub(crate) mod envelope_bond;
-
-/// The generator version from which a body's disc takes its B and R from its own surface (the
-/// [module documentation](self), "The colour from the body's own surface"), and a weathered
-/// regolith's colour tends to the mature lunar colour (`area_mix::Regolith::weathered_lid`;
-/// `hyperion_surface::material`'s "The mature colour"): 31, held with the 31 train (main's ruling
-/// of 2026-11-07: train 30's list froze first).
-///
-/// Below it [`SurfaceColourRules::in_force`] is [`SurfaceColourRules::Template`]: the passes give
-/// no albedo by band, a weathered lid is the slab's alone, and every geometric and Bond albedo is
-/// as it was, bit for bit. 31's bump deletes this hold, [`SurfaceColourRules`] with its `Template`
-/// arm and its matches (in [`BodyPhotometry::derive`], the passes' `surface_mix::pass_bands` and
-/// `area_mix::Regolith::weathered_lid`), the tests' switch, its line in the tests' `HeldRules` and
-/// in `with_every_31_hold`, and its tripwire (`the_surface_colour_is_held_only_until_the_31_bump`),
-/// with the surface crate's own hold of the mature colour, `MATURE_COLOUR_VERSION`.
-pub(crate) const SURFACE_COLOUR_VERSION: GeneratorVersion = GeneratorVersion::new(31);
-
-/// Where a body's disc takes its B and R from (its hold, [`SURFACE_COLOUR_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum SurfaceColourRules {
-    /// Version 29's and before: its template's row, scaled by the one Bond factor.
-    Template,
-    /// Version 31's: `p_V` times the disc's own albedo in the band over its albedo in V.
-    Surface,
-}
-
-impl SurfaceColourRules {
-    /// The rules this generator version gives: the surface's from [`SURFACE_COLOUR_VERSION`], the
-    /// template's below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_surface_colour`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = SURFACE_COLOUR_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= SURFACE_COLOUR_VERSION {
-            Self::Surface
-        } else {
-            Self::Template
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The surface colour's rules a test sets on its thread, `None` for the version's.
-    static SURFACE_COLOUR_RULES: core::cell::Cell<Option<SurfaceColourRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the surface colour's rules `rules` on this thread, for the tests to reach
-/// 31's colours ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. 31's bump deletes it
-/// with the hold.
-#[cfg(test)]
-pub(crate) fn with_surface_colour<R>(rules: SurfaceColourRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SurfaceColourRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            SURFACE_COLOUR_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(SURFACE_COLOUR_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The ceiling on the phase factor f: 4, R07's `PHASE_F_CLAMP` (a Lambert crescent vanishes faster
 /// than a cloudy one: Venus's f would reach 61 at 170°).
@@ -861,12 +793,12 @@ pub struct PhotometryInputs {
     pub fractions: MassFractions,
     /// The Bond albedo of the state on the material (P14.T13.c).
     pub bond: BondAlbedo,
-    /// The disc's own colour, from generator version 31 (`SURFACE_COLOUR_VERSION`).
+    /// The disc's own colour (from generator version 31).
     ///
     /// It is its albedo in the B, V and R bins
     /// ([`Atmosphere::band_albedo`](crate::planetary::derive::Atmosphere::band_albedo)), whose
-    /// ratios to V give `p_B` and `p_R`. `None` below 31 and for a disc with no albedos by band (a
-    /// gas envelope, a melt), which keep their template's row.
+    /// ratios to V give `p_B` and `p_R`. `None` for a disc with no albedos by band (a gas envelope,
+    /// a melt), which keeps its template's row.
     pub band_albedo: Option<DiscColour>,
 }
 
@@ -893,10 +825,7 @@ impl BodyPhotometry {
         let row = template.row();
         let scale = inputs.bond.value() / row.reference_bond().value();
         let q = row.phase_integral;
-        let colour = match SurfaceColourRules::in_force() {
-            SurfaceColourRules::Template => None,
-            SurfaceColourRules::Surface => inputs.band_albedo.map(DiscColour::over_v),
-        };
+        let colour = inputs.band_albedo.map(DiscColour::over_v);
         let p = match colour {
             None => Bands {
                 b: (row.albedo.b * scale).min(1.0 / q.b),
@@ -1486,41 +1415,9 @@ mod tests {
         assert!(photometry.provisional());
     }
 
-    /// The surface colour is held until the 30 → 31 bump: the rules in force are the template's,
-    /// and the tests' switch reaches 31's.
-    #[test]
-    fn the_surface_colour_is_held_only_until_the_31_bump() {
-        assert!(
-            GENERATOR_VERSION < SURFACE_COLOUR_VERSION,
-            "the 30 → 31 bump takes a disc's B and R from its own surface: delete \
-             `SURFACE_COLOUR_VERSION`, `SurfaceColourRules` with its `Template` arm and its matches \
-             in `BodyPhotometry::derive`, `surface_mix::pass_bands` and \
-             `area_mix::Regolith::weathered_lid`, the tests' `with_surface_colour`, its lines in \
-             `HeldRules` and `with_every_31_hold`, and this test; have \
-             `under_the_surface_colour_the_solar_system_draws_itself`, \
-             `the_surface_s_colour_gives_b_and_r_relative_to_v` and the viewer's colour census read \
-             the version's rules alone"
-        );
-        assert_eq!(SURFACE_COLOUR_VERSION, crate::GeneratorVersion::new(31));
-        assert_eq!(SurfaceColourRules::in_force(), SurfaceColourRules::Template);
-        // The surface crate's mature colour flips with it, at the same version.
-        assert_eq!(
-            SURFACE_COLOUR_VERSION,
-            hyperion_surface::material::MATURE_COLOUR_VERSION
-        );
-        assert_eq!(
-            with_surface_colour(SurfaceColourRules::Surface, SurfaceColourRules::in_force),
-            SurfaceColourRules::Surface
-        );
-        assert_eq!(
-            with_surface_colour(SurfaceColourRules::Template, SurfaceColourRules::in_force),
-            SurfaceColourRules::Template
-        );
-    }
-
     /// From 31 `p_V` is the template's scale and `p_B` and `p_R` are `p_V` times the disc's own
-    /// albedo in the band over V, each capped so that p q ≤ 1; with no colour, or under 29's rules,
-    /// every band is the row's scaled, to the bit. Albedos that are not a colour (`a_V` 0, a NaN, a
+    /// albedo in the band over V, each capped so that p q ≤ 1; with no colour every band is the
+    /// row's scaled, to the bit. Albedos that are not a colour (`a_V` 0, a NaN, a
     /// negative, an infinite ratio) make none.
     #[test]
     fn the_surface_s_colour_gives_b_and_r_relative_to_v() {
@@ -1537,11 +1434,11 @@ mod tests {
         };
         let row = PhaseTemplate::Mercury.row();
         let scale = 0.11 / row.reference_bond().value();
-        let held = BodyPhotometry::derive(&rock(Some(colour))).geometric_albedo();
+        let scaled = BodyPhotometry::derive(&rock(None)).geometric_albedo();
         for (got, want) in [
-            (held.b, row.albedo.b * scale),
-            (held.v, row.albedo.v * scale),
-            (held.r, row.albedo.r * scale),
+            (scaled.b, row.albedo.b * scale),
+            (scaled.v, row.albedo.v * scale),
+            (scaled.r, row.albedo.r * scale),
         ] {
             assert_same_bits(got, want);
         }
@@ -1566,28 +1463,22 @@ mod tests {
         ] {
             assert_eq!(DiscColour::new(broken), None, "{broken:?}");
         }
-        with_surface_colour(SurfaceColourRules::Surface, || {
-            let p = BodyPhotometry::derive(&rock(Some(colour))).geometric_albedo();
-            assert_same_bits(p.v, held.v);
-            assert_same_bits(p.b, held.v * (weathered.b / weathered.v));
-            assert_same_bits(p.r, held.v * (weathered.r / weathered.v));
-            let none = BodyPhotometry::derive(&rock(None)).geometric_albedo();
-            for (a, b) in [(none.b, held.b), (none.v, held.v), (none.r, held.r)] {
-                assert_same_bits(a, b);
-            }
-            // A bright snowball whose ground is redder than its V: R capped at 1 ÷ q.
-            let snow = BodyPhotometry::derive(&PhotometryInputs {
-                band_albedo: DiscColour::new(Bands {
-                    b: 0.5,
-                    v: 0.6,
-                    r: 1.0,
-                }),
-                ..airless(SurfaceMaterial::Ice, SurfaceState::Snowball, 0.68)
-            });
-            let q = PhaseTemplate::Snowball.row().phase_integral;
-            assert_same_bits(snow.geometric_albedo().r, 1.0 / q.r);
-            assert!(snow.geometric_albedo().b < snow.geometric_albedo().v);
+        let p = BodyPhotometry::derive(&rock(Some(colour))).geometric_albedo();
+        assert_same_bits(p.v, scaled.v);
+        assert_same_bits(p.b, scaled.v * (weathered.b / weathered.v));
+        assert_same_bits(p.r, scaled.v * (weathered.r / weathered.v));
+        // A bright snowball whose ground is redder than its V: R capped at 1 ÷ q.
+        let snow = BodyPhotometry::derive(&PhotometryInputs {
+            band_albedo: DiscColour::new(Bands {
+                b: 0.5,
+                v: 0.6,
+                r: 1.0,
+            }),
+            ..airless(SurfaceMaterial::Ice, SurfaceState::Snowball, 0.68)
         });
+        let q = PhaseTemplate::Snowball.row().phase_integral;
+        assert_same_bits(snow.geometric_albedo().r, 1.0 / q.r);
+        assert!(snow.geometric_albedo().b < snow.geometric_albedo().v);
     }
 
     /// From 31 the Solar System still draws itself (ruling 9): Mercury, whose regolith is the
@@ -1596,79 +1487,72 @@ mod tests {
     /// colour to the bit. Earth, off its reference, keeps the template's `p_V` and takes its own
     /// surface's colour, blue under its Rayleigh layer (B over V above 1, R over V below it); Mars,
     /// the passes' stand-in's (22 kPa of CO₂ over basalt, no `ferric` deposit), takes its own too,
-    /// printed against its row's (a finding). Two derivations agree to the bit; under 29's rules no
-    /// pass gives a colour.
+    /// printed against its row's (a finding). Two derivations agree to the bit.
     #[test]
-    fn under_the_surface_colour_the_solar_system_draws_itself() {
-        let planets = solar_system();
-        for d in &planets {
-            assert_eq!(d.1.atmosphere().band_albedo(), None, "{}", d.0);
-        }
-        with_surface_colour(SurfaceColourRules::Surface, || {
-            let (planets, again) = (solar_system(), solar_system());
-            for (name, template) in [
-                ("Mercury", PhaseTemplate::Mercury),
-                ("Venus", PhaseTemplate::Venus),
-                ("Earth", PhaseTemplate::Earth),
-                ("Mars", PhaseTemplate::Mars),
-                ("Jupiter", PhaseTemplate::Jupiter),
-                ("Saturn", PhaseTemplate::Saturn),
-                ("Uranus", PhaseTemplate::Neptune),
-                ("Neptune", PhaseTemplate::Neptune),
+    fn the_solar_system_draws_itself_in_its_surfaces_colours() {
+        let (planets, again) = (solar_system(), solar_system());
+        for (name, template) in [
+            ("Mercury", PhaseTemplate::Mercury),
+            ("Venus", PhaseTemplate::Venus),
+            ("Earth", PhaseTemplate::Earth),
+            ("Mars", PhaseTemplate::Mars),
+            ("Jupiter", PhaseTemplate::Jupiter),
+            ("Saturn", PhaseTemplate::Saturn),
+            ("Uranus", PhaseTemplate::Neptune),
+            ("Neptune", PhaseTemplate::Neptune),
+        ] {
+            let body = found(&planets, name);
+            let photometry = BodyPhotometry::derive(&inputs_of(body));
+            assert_eq!(photometry.template(), template, "{name}");
+            let (p, row) = (photometry.geometric_albedo(), template.row().albedo);
+            let twice = BodyPhotometry::derive(&inputs_of(found(&again, name)));
+            for (a, b) in [
+                (p.b, twice.geometric_albedo().b),
+                (p.v, twice.geometric_albedo().v),
+                (p.r, twice.geometric_albedo().r),
             ] {
-                let body = found(&planets, name);
-                let photometry = BodyPhotometry::derive(&inputs_of(body));
-                assert_eq!(photometry.template(), template, "{name}");
-                let (p, row) = (photometry.geometric_albedo(), template.row().albedo);
-                let twice = BodyPhotometry::derive(&inputs_of(found(&again, name)));
-                for (a, b) in [
-                    (p.b, twice.geometric_albedo().b),
-                    (p.v, twice.geometric_albedo().v),
-                    (p.r, twice.geometric_albedo().r),
-                ] {
-                    assert_same_bits(a, b);
+                assert_same_bits(a, b);
+            }
+            let colour = body.atmosphere().band_albedo();
+            match name {
+                "Mercury" | "Venus" => {
+                    assert!(colour.is_some(), "{name}");
+                    for (got, want) in [(p.b, row.b), (p.v, row.v), (p.r, row.r)] {
+                        assert!((got - want).abs() < 1e-12, "{name}: {got} against {want}");
+                    }
                 }
-                let colour = body.atmosphere().band_albedo();
-                match name {
-                    "Mercury" | "Venus" => {
-                        assert!(colour.is_some(), "{name}");
-                        for (got, want) in [(p.b, row.b), (p.v, row.v), (p.r, row.r)] {
-                            assert!((got - want).abs() < 1e-12, "{name}: {got} against {want}");
-                        }
+                "Jupiter" | "Saturn" | "Uranus" | "Neptune" => {
+                    assert_eq!(colour, None, "{name}");
+                    let scale = body.albedo().value() / template.row().reference_bond().value();
+                    let q = template.row().phase_integral;
+                    assert_same_bits(p.b, (row.b * scale).min(1.0 / q.b));
+                    assert_same_bits(p.r, (row.r * scale).min(1.0 / q.r));
+                }
+                _ => {
+                    let a = colour.expect("a surface's disc has a colour").albedo();
+                    let held =
+                        row.v * (body.albedo().value() / template.row().reference_bond().value());
+                    assert_same_bits(p.v, held.min(1.0 / template.row().phase_integral.v));
+                    if name == "Earth" {
+                        assert!(p.b > p.v && p.r < p.v, "Earth: {p:?}");
                     }
-                    "Jupiter" | "Saturn" | "Uranus" | "Neptune" => {
-                        assert_eq!(colour, None, "{name}");
-                        let scale = body.albedo().value() / template.row().reference_bond().value();
-                        let q = template.row().phase_integral;
-                        assert_same_bits(p.b, (row.b * scale).min(1.0 / q.b));
-                        assert_same_bits(p.r, (row.r * scale).min(1.0 / q.r));
-                    }
-                    _ => {
-                        let a = colour.expect("a surface's disc has a colour").albedo();
-                        let held = row.v
-                            * (body.albedo().value() / template.row().reference_bond().value());
-                        assert_same_bits(p.v, held.min(1.0 / template.row().phase_integral.v));
-                        if name == "Earth" {
-                            assert!(p.b > p.v && p.r < p.v, "Earth: {p:?}");
-                        }
-                        eprintln!(
-                            "{name}: its disc's albedos B, V, R {:.4}, {:.4}, {:.4}; p {:.4}, \
-                             {:.4}, {:.4} (B/V {:.3}, R/V {:.3}) against its row's B/V {:.3}, \
-                             R/V {:.3}",
-                            a.b,
-                            a.v,
-                            a.r,
-                            p.b,
-                            p.v,
-                            p.r,
-                            p.b / p.v,
-                            p.r / p.v,
-                            row.b / row.v,
-                            row.r / row.v
-                        );
-                    }
+                    eprintln!(
+                        "{name}: its disc's albedos B, V, R {:.4}, {:.4}, {:.4}; p {:.4}, \
+                         {:.4}, {:.4} (B/V {:.3}, R/V {:.3}) against its row's B/V {:.3}, \
+                         R/V {:.3}",
+                        a.b,
+                        a.v,
+                        a.r,
+                        p.b,
+                        p.v,
+                        p.r,
+                        p.b / p.v,
+                        p.r / p.v,
+                        row.b / row.v,
+                        row.r / row.v
+                    );
                 }
             }
-        });
+        }
     }
 }

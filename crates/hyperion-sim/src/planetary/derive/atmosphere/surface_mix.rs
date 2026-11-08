@@ -67,7 +67,7 @@ use crate::planetary::derive::photometry::area_mix::{
     self, ColourBand, HostShade, IcyResurfacing, LidWeathering, Regolith, VolatileFrost,
 };
 use crate::planetary::derive::photometry::envelope_bond;
-use crate::planetary::derive::photometry::{Bands, DiscColour, SurfaceColourRules};
+use crate::planetary::derive::photometry::{Bands, DiscColour};
 use crate::planetary::hooks::cold_traps::{
     self, ColdTrapBody, ColdTrapSky, FieldInputs, FieldSlot, NoColdTraps, PassColdTraps, PassTraps,
     is_collisional, qualifies_by,
@@ -1679,7 +1679,7 @@ fn surface_and_cloud(
     };
     SurfaceMix {
         disc,
-        bands,
+        bands: Some(bands),
         lid,
         liquid_water,
         deck_water,
@@ -1693,26 +1693,23 @@ fn surface_and_cloud(
 /// 31): [`surface_and_cloud`]'s ground, its published condensates `published` over its partition
 /// `solved`, its regolith `regolith` on the rest and its deposits `deposits`, each in a band's
 /// light alone, under its sediment of the haze's τ(550) `haze`, and its cloud in the state `state`
-/// and `deck`, under the light `shade`. `None` below 31 ([`SurfaceColourRules::Template`]).
+/// and `deck`, under the light `shade`.
 #[must_use]
 fn pass_bands(
     (state, deck): (SurfaceState, RunawayDeck),
     (published, solved): (&Condensates, &Partition),
     (regolith, deposits): (&Regolith, &[(SubstanceId, f64)]),
     (shade, haze): (&HostShade, f64),
-) -> Option<DiscBands> {
-    match SurfaceColourRules::in_force() {
-        SurfaceColourRules::Template => None,
-        SurfaceColourRules::Surface => Some(DiscBands::of((state, deck), shade, |band, alone| {
-            area_mix::sedimented_surface_bond(
-                published,
-                solved,
-                (regolith.band_albedo(state, shade, band), deposits),
-                alone,
-                haze,
-            )
-        })),
-    }
+) -> DiscBands {
+    DiscBands::of((state, deck), shade, |band, alone| {
+        area_mix::sedimented_surface_bond(
+            published,
+            solved,
+            (regolith.band_albedo(state, shade, band), deposits),
+            alone,
+            haze,
+        )
+    })
 }
 
 /// The open water a pass under the climate `climate`, its partition `solved`, holds under a locked

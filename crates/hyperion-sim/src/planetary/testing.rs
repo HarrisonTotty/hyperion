@@ -51,19 +51,6 @@ mod held;
 #[cfg(test)]
 pub(crate) use held::{HeldRules, in_shares};
 
-/// `run`'s result with every planetary hold of version 31 in force on this thread (train 31): a
-/// disc's B and R from its own surface
-/// ([`SURFACE_COLOUR_VERSION`](super::derive::photometry::SURFACE_COLOUR_VERSION)), both held at 31
-/// as train 30's list froze before they landed (main's ruling of 2026-11-07). A test that needs
-/// the galaxy's 31 holds as well (P15.T10.b's merger tables) builds its galaxy inside it with
-/// `GalaxyRules::every_31_hold()`, whose holds ride the galaxy. A 31 hold's bump deletes its line
-/// here.
-#[cfg(test)]
-pub(crate) fn with_every_31_hold<R>(run: impl FnOnce() -> R) -> R {
-    use super::derive::photometry::{SurfaceColourRules, with_surface_colour};
-    with_surface_colour(SurfaceColourRules::Surface, run)
-}
-
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,
 /// unvalidated, as the crate's own tests state one: for other crates' tests of what a derivation
 /// reads of an air, as the server's conversion of P14.T51.j's oxidised surface does (a caller's

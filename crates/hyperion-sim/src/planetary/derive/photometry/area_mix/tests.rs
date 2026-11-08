@@ -1548,8 +1548,14 @@ fn a_weathered_lid_is_the_law_s_by_bin_at_its_maturity() {
         let feo = palette_feo_mass_fraction(basalt_fe).unwrap();
         assert!((feo - 0.202).abs() < 1e-3, "{feo}");
         for m in [0.25, 0.5, 1.0] {
-            let regolith =
-                Regolith::weathered_lid(basalt_fe, SurfaceMaterial::Rock, airless_at(m, t));
+            // The slab's own law (from 31 the version's draws it toward the mature colour,
+            // `colour_tests`).
+            let regolith = Regolith::weathered_lid_of(
+                basalt_fe,
+                SurfaceMaterial::Rock,
+                airless_at(m, t),
+                false,
+            );
             assert!(regolith.is_weathered());
             let RegolithWeathering::Weathered { spherical_bins } = regolith.weathering else {
                 panic!("basalt_fe is weathered");

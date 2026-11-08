@@ -11,8 +11,10 @@
 //! linear sRGB taken to XYZ by IEC 61966-2-1's primaries at ASTM E308's D65 white (0.95047, 1,
 //! 1.08883), which CIELAB's white takes too, so that a grey is achromatic. A
 //! colour is grey at C* below 6 and orange-brown at C* of 15 or more at h 25–85°, the planet-variety
-//! census's thresholds. Each draw is generated twice, under version 30's rules (its template's
-//! row) and 31's (its own surface), and nothing else differs. A census of the native build alone:
+//! census's thresholds. Each draw is generated once, under the version's rules, and its disc read
+//! two ways: the version's own surface's colour, and the one before's, its template's row scaled
+//! by the same Bond albedo (`BodyPhotometry`'s path for a disc with no colour, the template's
+//! colour to 30). A census of the native build alone:
 //! its 200 draws on one WebAssembly thread would take the slow suite's time for no check of its
 //! bits that the golden systems do not make.
 
@@ -21,9 +23,7 @@ use std::collections::BTreeMap;
 use super::tests::{galaxy, grid};
 use super::*;
 use crate::math;
-use crate::planetary::derive::photometry::{
-    Bands, PhaseTemplate, SurfaceColourRules, with_surface_colour,
-};
+use crate::planetary::derive::photometry::{Bands, PhaseTemplate};
 use crate::planetary::record::{Modelled, Section};
 use crate::planetary::testing::in_shares;
 
@@ -118,62 +118,70 @@ fn colour(p: Bands) -> Colour {
     }
 }
 
-/// The disc of `inputs`' planet under the surface colour's rules `rules`, and its record's state,
-/// lid and maturity: `None` where it has no photometry.
+/// The disc of `inputs`' planet under the version's rules and under the one before's (its
+/// template's row at the same Bond albedo), and its record's state, lid and maturity: `None`
+/// where it has no photometry.
 ///
 /// # Panics
 ///
 /// If the drawn planet's system or record cannot be generated: a draw's inputs are a real
 /// planet's, which the viewer regenerates.
-fn disc_of(
-    inputs: PlanetInputs,
-    rules: SurfaceColourRules,
-) -> Option<(Disc, String, String, Option<f64>)> {
-    with_surface_colour(rules, || {
-        let system = ViewerSystem::generate(inputs).expect("a drawn planet's system");
-        let index = BodyIndex::try_from(system.planet().body_index()).expect("a planet's index");
-        let record = system
-            .planets()
-            .body_at(system.context(), index, UniverseTime::EPOCH)
-            .expect("the drawn planet's record");
-        let Section::Ok(photometry) = record.photometry() else {
-            return None;
-        };
-        let (state, lid, maturity) = match record.surface() {
-            Section::Ok(surface) => (
-                format!("{:?}", surface.published_state()),
-                match surface.crust() {
-                    Modelled::Ok(crust) => crust.lid_lithology().substance().key().to_string(),
-                    Modelled::NotModelled => "-".to_owned(),
-                },
-                match surface.modifiers() {
-                    Modelled::Ok(modifiers) => Some(modifiers.maturity()),
-                    Modelled::NotModelled => None,
-                },
-            ),
-            Section::NotModelled | Section::NotApplicable | Section::NotResolved => {
-                ("envelope".to_owned(), "-".to_owned(), None)
-            }
-        };
-        Some((
-            Disc {
-                template: photometry.template(),
-                p: photometry.geometric_albedo(),
+fn disc_of(inputs: PlanetInputs) -> Option<(Disc, Disc, String, String, Option<f64>)> {
+    let system = ViewerSystem::generate(inputs).expect("a drawn planet's system");
+    let index = BodyIndex::try_from(system.planet().body_index()).expect("a planet's index");
+    let record = system
+        .planets()
+        .body_at(system.context(), index, UniverseTime::EPOCH)
+        .expect("the drawn planet's record");
+    let Section::Ok(photometry) = record.photometry() else {
+        return None;
+    };
+    let (state, lid, maturity) = match record.surface() {
+        Section::Ok(surface) => (
+            format!("{:?}", surface.published_state()),
+            match surface.crust() {
+                Modelled::Ok(crust) => crust.lid_lithology().substance().key().to_string(),
+                Modelled::NotModelled => "-".to_owned(),
             },
-            state,
-            lid,
-            maturity,
-        ))
-    })
+            match surface.modifiers() {
+                Modelled::Ok(modifiers) => Some(modifiers.maturity()),
+                Modelled::NotModelled => None,
+            },
+        ),
+        Section::NotModelled | Section::NotApplicable | Section::NotResolved => {
+            ("envelope".to_owned(), "-".to_owned(), None)
+        }
+    };
+    let template = photometry.template();
+    let row = template.row();
+    let scale = photometry.bond_albedo().value() / row.reference_bond().value();
+    let q = row.phase_integral;
+    let before = Bands {
+        b: (row.albedo.b * scale).min(1.0 / q.b),
+        v: (row.albedo.v * scale).min(1.0 / q.v),
+        r: (row.albedo.r * scale).min(1.0 / q.r),
+    };
+    Some((
+        Disc {
+            template,
+            p: before,
+        },
+        Disc {
+            template,
+            p: photometry.geometric_albedo(),
+        },
+        state,
+        lid,
+        maturity,
+    ))
 }
 
-/// Draw `seed` under both rule sets; `None` where it finds no planet or its planet no photometry.
+/// Draw `seed`, its disc read both ways; `None` where it finds no planet or its planet no photometry.
 fn drawn(seed: u64) -> Option<Drawn> {
     // A draw that finds no planet in its tries is none of the census's.
     let drawn = draw_inputs(galaxy(), grid(), seed).ok()?;
     let raw = drawn.inputs.raw();
-    let (template, ..) = disc_of(drawn.inputs, SurfaceColourRules::Template)?;
-    let (surface, state, lid, maturity) = disc_of(drawn.inputs, SurfaceColourRules::Surface)?;
+    let (template, surface, state, lid, maturity) = disc_of(drawn.inputs)?;
     let system = ViewerSystem::generate(drawn.inputs).expect("a drawn planet's system");
     let host_k = system
         .summary_at(UniverseTime::EPOCH)
@@ -218,7 +226,14 @@ fn summary(colours: &[Colour]) -> String {
     )
 }
 
-/// The grey shares of the discs `draws` under 30's rules and 31's, their colours `colours` in that
+/// The arms' labels: the version before the version's (its template's row) and the version's.
+fn labels() -> (String, String) {
+    let now = crate::GENERATOR_VERSION.get();
+    ((now - 1).to_string(), now.to_string())
+}
+
+/// The grey shares of the discs `draws` under the one before's rules and the version's, their
+/// colours `colours` in that
 /// order, one line each: all the discs', the snowballs' and Venus decks' apart (grey in nature too),
 /// the rest's, and the mature airless `basalt` and `basalt_fe` lids'.
 fn grey_shares(draws: &[Drawn], colours: [&[Colour]; 2]) -> String {
@@ -236,7 +251,8 @@ fn grey_shares(draws: &[Drawn], colours: [&[Colour]; 2]) -> String {
     };
     let count = |k: usize| f64::from(u32::try_from(k).expect("a census's count fits"));
     let mut shares = String::new();
-    for (rules, colours) in [("30", colours[0]), ("31", colours[1])] {
+    let (was, now) = labels();
+    for (rules, colours) in [(&was, colours[0]), (&now, colours[1])] {
         let grey = |keep: &dyn Fn(&Drawn) -> bool| {
             draws
                 .iter()
@@ -263,17 +279,18 @@ fn grey_shares(draws: &[Drawn], colours: [&[Colour]; 2]) -> String {
     shares
 }
 
-/// The census: `RANDOMIZE`'s first 200 draws, each disc's colour under the Sun under version
-/// 30's rules and 31's, stated draw by draw and by template, with the same template under both
-/// (`p_V` moves by the Bond albedo alone, which a weathered lid's mature colour moves in its B, R
-/// and near-infrared bins). Under 31's the distinct colours are more than twice 30's (the lane's
-/// acceptance, "well above 18"). Its grey share is stated under both, all the discs', the
+/// The census: `RANDOMIZE`'s first 200 draws, each disc's colour under the Sun under the one
+/// before's rules (its template's row) and the version's, stated draw by draw and by template,
+/// with the same template and `p_V` under both (both read the version's Bond albedo, which a
+/// weathered lid's mature colour moves in its B, R and near-infrared bins). Under the version's
+/// the distinct colours are more than twice the one before's (the lane's acceptance, "well above
+/// 18"). Its grey share is stated under both, all the discs', the
 /// snowballs' and Venus decks' apart (grey in nature too), and the rest's, with the mature (m ≥
 /// 0.95) airless `basalt` and `basalt_fe` lids', which the slab alone returns near grey and the
 /// mature colour draws toward the Moon's (`toward_mature_colour`).
 #[test]
-#[ignore = "slow: 200 viewer draws generated twice, some minutes"]
-fn under_the_surface_colour_randomize_s_discs_take_their_own_colours() {
+#[ignore = "slow: 200 viewer draws generated, some minutes"]
+fn randomize_s_discs_take_their_own_colours() {
     let shares = in_shares(
         usize::try_from(DRAWS).expect("200 fits"),
         CENSUS_THREADS,
@@ -281,9 +298,10 @@ fn under_the_surface_colour_randomize_s_discs_take_their_own_colours() {
     );
     let draws: Vec<Drawn> = shares.into_iter().flatten().collect();
     let mut out = String::new();
+    let (was, now) = labels();
     writeln!(
         out,
-        "| draw | host K | a au | mass Me | state | lid | maturity | template | 30 p B/V/R | 30 colour | 31 p B/V/R | 31 colour |"
+        "| draw | host K | a au | mass Me | state | lid | maturity | template | {was} p B/V/R | {was} colour | {now} p B/V/R | {now} colour |"
     )
     .unwrap();
     writeln!(out, "|---|---|---|---|---|---|---|---|---|---|---|---|").unwrap();
@@ -323,12 +341,12 @@ fn under_the_surface_colour_randomize_s_discs_take_their_own_colours() {
         entry.0.push(old);
         entry.1.push(new);
     }
-    writeln!(out, "\n30 (template): {}", summary(&before)).unwrap();
-    writeln!(out, "31 (surface):  {}", summary(&after)).unwrap();
+    writeln!(out, "\n{was} (template): {}", summary(&before)).unwrap();
+    writeln!(out, "{now} (surface):  {}", summary(&after)).unwrap();
     for (template, (old, new)) in &by_template {
         writeln!(
             out,
-            "- {template}: 30 {}; 31 {}",
+            "- {template}: {was} {}; {now} {}",
             summary(old),
             summary(new)
         )

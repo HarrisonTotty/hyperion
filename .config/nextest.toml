@@ -139,7 +139,7 @@ priority = 50
 # The surface colour's census of the planet viewer's draws generates them on sixteen threads of its
 # own (`CENSUS_THREADS` in `planetary/viewer/colour_census.rs`).
 [[profile.default.overrides]]
-filter = "package(hyperion-sim) & test(=planetary::viewer::colour_census::under_the_surface_colour_randomize_s_discs_take_their_own_colours)"
+filter = "package(hyperion-sim) & test(=planetary::viewer::colour_census::randomize_s_discs_take_their_own_colours)"
 threads-required = 16
 test-group = "@global"
 priority = 50
