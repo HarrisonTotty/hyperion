@@ -16,14 +16,17 @@
 // body, such as a routed one's (a medium within the thick or the haze route's range) for the thick
 // read's limb-rays and march-sources pairs, takes an --out of its own. The second batch, after the
 // first, is the decked air's, the served world 42002cae00000004.0300 (plan R08,
-// fix-r08-decked-air-route), whose air alone the decked-air-surface pair's sides draw apart:
+// fix-r08-decked-air-route), whose air alone the decked-air-surface pair's sides draw apart. The
+// first batch leaves that pair out (`MAC_PROFILE_BODY_LEVERS`: the default body has no deck, so its
+// sides draw alike); this batch names it:
 //
 //   node --no-warnings scripts/macProfile.mjs --machine <text> --body 42002cae00000004.0300
 //       --out target/mac-profile-decked --settings none --no-sweep
 //       --levers surface-lobes,decked-air-surface,limb-rays,march-sources
 //
 // --out
-// (default target/mac-profile/) holds the batch: each kept run under runs/<id>/ (its timing file and
+// (default target/mac-profile/; a relative path is the shell's, made absolute once as the batch
+// starts, so the server's data and every launch's files land under the one directory) holds the batch: each kept run under runs/<id>/ (its timing file and
 // summary, its captures, the views check's output and run.json, its samples), a run that wrote no
 // timing file under failed/, the warm-ups under warm-up/, the server's log and data, the sweep under
 // worker-sweep/ and summary.md. A run is kept once its timing file is moved into place, its record
@@ -55,12 +58,20 @@
 // too, without the server, which is stopped first: each descent starts its own. --levers takes the
 // names of `MAC_PROFILE_LEVERS` (limb-rays, march-sources, surface-lobes, decked-air-surface,
 // lit-per-fragment, composite-per-pixel, occlusion, strides, far-cascades, shading,
-// shading-occlusion, pacing-120); --settings none and --levers none drop those runs. pacing-120
+// shading-occlusion, pacing-120); with none given it runs every pair but decked-air-surface, and
+// --levers all runs every pair; --settings none and --levers none drop those runs. pacing-120
 // (R07.T19) runs both sides on a 120 Hz offscreen frame clock (`--frame-rate 120`), frames counted
 // (`--frame-pacing display`) against each view at its own rate (`rate`), each window's callbacks,
 // draws and measured vsync in the windows' table.
-// --software (Linux only) runs every launch on SwiftShader, as a pod's dry run does; --port is the
-// batch's server's (7880 by default, apart from a developer's server and the descent spike's).
+// --software (Linux only) runs every launch on SwiftShader, as a pod's dry run does. In a pod the
+// 1-minute load is the node's, not the pod's, so give it --load-bound 10000; a dry run is one pair
+// at low, once (macProfile.test.ts's DRY_RUN):
+//
+//   node --no-warnings scripts/macProfile.mjs --machine pod --software --load-bound 10000
+//       --settings none --levers limb-rays --pair-setting low --rounds 1 --no-count --no-sweep
+//
+// --port is the batch's server's (7880 by default, apart from a developer's server and the
+// descent spike's).
 //
 // The counted runs (R14.T2.e) come after the pairs, apart from them so that the count costs their
 // times nothing: each setting of --settings its own way, and each side of the pairs that split a
@@ -372,11 +383,17 @@ function optionsOf(args, profile) {
   if (!ratios.every((each) => each === 1 || each === 2)) {
     return { problem: "--dprs takes 1 and 2" };
   }
-  const leverText = option(args, "levers", "all");
-  const levers = leverText === "all" ? profile.MAC_PROFILE_DEFAULTS.levers : listOf(leverText);
+  const every = profile.MAC_PROFILE_LEVERS.map((lever) => lever.name);
+  const leverText = option(args, "levers", "");
+  const levers =
+    leverText === ""
+      ? profile.MAC_PROFILE_DEFAULTS.levers
+      : leverText === "all"
+        ? every
+        : listOf(leverText);
   const unknown = levers.filter((name) => profile.leverNamed(name) === undefined);
   if (unknown.length > 0) {
-    const known = profile.MAC_PROFILE_DEFAULTS.levers.join(", ");
+    const known = every.join(", ");
     return { problem: `no lever is named ${unknown.join(", ")}: the levers are ${known}` };
   }
   const body = option(args, "body", DEFAULT_BODY);
@@ -398,7 +415,7 @@ function optionsOf(args, profile) {
   return {
     machine,
     body,
-    out: option(args, "out", join(repo, "target", "mac-profile")),
+    out: profile.batchOut(option(args, "out", join(repo, "target", "mac-profile")), process.cwd()),
     matrix: {
       settings,
       ratios,
@@ -545,7 +562,7 @@ function writeSummary(options, tree, profile) {
     body: options.body,
     options: options.matrix,
     kept,
-    sweep: profile.sweepIn(join(options.out, "worker-sweep")),
+    sweep: profile.sweepIn(join(options.out, "worker-sweep"), options.sweepWorkers.length > 0),
   });
   writeFileSync(join(options.out, "summary.md"), `${lines.join("\n")}\n`);
   return kept.length;
@@ -886,7 +903,7 @@ async function main(args) {
         app,
       );
       const after = sample(null, profile.cpuTimeSeconds);
-      const { runs: sampled } = profile.sweepIn(sweepDir);
+      const { runs: sampled } = profile.sweepIn(sweepDir, true);
       writeJson(samplesFile, [
         ...sampled.filter((each) => each.workers !== n),
         { workers: n, exit, before, after },

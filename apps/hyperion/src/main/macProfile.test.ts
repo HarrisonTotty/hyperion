@@ -8,12 +8,15 @@ import { INSPECTION_TIMING_SCHEMA } from "./inspectionTiming";
 import { measured, missing } from "./measured";
 import {
   batchIn,
+  batchOut,
   cargoExecutable,
   cpuTimeSeconds,
   isCounted,
   type KeptRun,
   keptRunsIn,
+  MAC_PROFILE_BODY_LEVERS,
   MAC_PROFILE_DEFAULTS,
+  MAC_PROFILE_LEVERS,
   MAC_PROFILE_RUN_SCHEMA,
   type MacProfileMatrixOptions,
   type MacProfileRun,
@@ -123,11 +126,30 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, twelve pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
+    // Four own runs, eleven pairs at DPR 1 and the two shading pairs at 1 and 2, four runs each;
     // then two counted settings and the occlusion's, figure-shading's and both shading pairs' two
     // counted sides each.
-    expect(matrix).toHaveLength(4 + 12 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
+    expect(matrix).toHaveLength(4 + 11 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
+  });
+
+  it("leaves the decked air's ground out of the defaults, whose body has no deck, and runs it when named (R08)", () => {
+    expect(MAC_PROFILE_BODY_LEVERS).toEqual(["decked-air-surface"]);
+    expect(MAC_PROFILE_DEFAULTS.levers).toEqual(
+      MAC_PROFILE_LEVERS.map((lever) => lever.name).filter((name) => name !== "decked-air-surface"),
+    );
+    expect(
+      macProfileMatrix(MAC_PROFILE_DEFAULTS).some(
+        (run) => run.place.kind === "pair" && run.place.lever === "decked-air-surface",
+      ),
+    ).toBe(false);
+    const named = macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["decked-air-surface"] });
+    expect(named.filter((run) => run.place.kind === "pair").map((run) => run.id)).toEqual([
+      "decked-air-surface-high-dpr1-a1",
+      "decked-air-surface-high-dpr1-b1",
+      "decked-air-surface-high-dpr1-a2",
+      "decked-air-surface-high-dpr1-b2",
+    ]);
   });
 
   it("gives each run its ratio and its side's switches", () => {
@@ -445,7 +467,7 @@ describe("a lever's pair", () => {
         compiled(a2, 5_000, 4_000),
         { ...b2, timing: { ...b2.timing } },
       ],
-      sweep: { table: null, runs: [] },
+      sweep: { table: null, runs: [], flown: true },
     });
     expect(lines).toContain(
       "| march-sources-high-dpr1-a1 | 3 | 4200 | atmosphere ray march, thick 4000 | 2.0 | 9.0 | 3000.0 | orbit 40.0, close 90.0 |",
@@ -470,11 +492,11 @@ describe("a lever's pair", () => {
       body: "41ffecb200000002.0400",
       options: MAC_PROFILE_DEFAULTS,
       kept,
-      sweep: { table: null, runs: [] },
+      sweep: { table: null, runs: [], flown: true },
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 78 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 74 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(
@@ -495,6 +517,19 @@ describe("a lever's pair", () => {
     // A timing file before version 7 holds no reads.
     expect(text).toContain("| orbit | not recorded | not recorded |");
     expect(text).toContain("## The height-worker sweep\n\nNot written yet.");
+  });
+
+  it("says the sweep was not run under --no-sweep, not that it is not written yet", () => {
+    const text = macProfileSummaryLines({
+      machine: "pod",
+      tree: "e9966e0",
+      body: "41ffecb200000002.0400",
+      options: MAC_PROFILE_DEFAULTS,
+      kept,
+      sweep: { table: null, runs: [], flown: false },
+    }).join("\n");
+    expect(text).toContain("## The height-worker sweep\n\nNot run (--no-sweep).");
+    expect(text).not.toContain("Not written yet.");
   });
 
   it("writes each window's callbacks, draws and measured vsync where its file holds them (R07.T19)", () => {
@@ -519,7 +554,7 @@ describe("a lever's pair", () => {
           window(20, 10, missing("fewer than 30 animation frames measured")),
         ]),
       ],
-      sweep: { table: null, runs: [] },
+      sweep: { table: null, runs: [], flown: true },
     }).join("\n");
     expect([
       text.includes(
@@ -589,7 +624,7 @@ describe("the counted runs (R14.T2.e)", () => {
     body: "41ffecb200000002.0400",
     options: MAC_PROFILE_DEFAULTS,
     kept,
-    sweep: { table: null, runs: [] },
+    sweep: { table: null, runs: [], flown: true },
   }).join("\n");
 
   it("reads a pair side's runs drawn alike as one read, whatever their frames", () => {
@@ -671,6 +706,15 @@ describe("the batch's files", () => {
       JSON.stringify({ tree: "24aef3e", body: "41ffecb200000002.0300" }),
     );
     expect(batchIn(out)).toEqual({ tree: "24aef3e", body: "41ffecb200000002.0300" });
+  });
+
+  it("makes a relative --out absolute against the shell's directory, once", () => {
+    const app = join(tmpdir(), "repo", "apps", "hyperion");
+    expect(batchOut(join("..", "..", "target", "mac-profile"), app)).toBe(
+      join(tmpdir(), "repo", "target", "mac-profile"),
+    );
+    const elsewhere = join(tmpdir(), "elsewhere", "batch");
+    expect(batchOut(elsewhere, app)).toBe(elsewhere);
   });
 
   it("finds the binary cargo built among its messages", () => {

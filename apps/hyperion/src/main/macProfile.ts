@@ -20,7 +20,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   atmosphereReadsText,
@@ -248,11 +248,23 @@ export interface MacProfileMatrixOptions {
   readonly counted: boolean;
 }
 
-/** The owner's batch: both settings at both ratios, every pair at high as A B A B. */
+/**
+ * The pairs the defaults leave out: decked-air-surface, whose sides draw apart only on a decked
+ * air's body, such as 42002cae00000004.0300, and alike on the default body, which has no deck.
+ * `--levers` names it, on such a body's batch.
+ */
+export const MAC_PROFILE_BODY_LEVERS: ReadonlyArray<string> = ["decked-air-surface"];
+
+/**
+ * The owner's batch: both settings at both ratios, every pair but {@link MAC_PROFILE_BODY_LEVERS}'
+ * at high as A B A B.
+ */
 export const MAC_PROFILE_DEFAULTS: MacProfileMatrixOptions = {
   settings: ["high", "low"],
   ratios: [1, 2],
-  levers: MAC_PROFILE_LEVERS.map((lever) => lever.name),
+  levers: MAC_PROFILE_LEVERS.map((lever) => lever.name).filter(
+    (name) => !MAC_PROFILE_BODY_LEVERS.includes(name),
+  ),
   pairSetting: "high",
   rounds: 2,
   counted: true,
@@ -1075,6 +1087,8 @@ export interface MacProfileSummaryInput {
   readonly sweep: {
     /** The sweep's table, `worker-sweep.md`'s lines, or `null` where it is not written yet. */
     readonly table: ReadonlyArray<string> | null;
+    /** Whether the batch flies the sweep: `false` under `--no-sweep`. */
+    readonly flown: boolean;
     /** The counts flown, as sampled. */
     readonly runs: ReadonlyArray<SweepRunRecord>;
   };
@@ -1084,7 +1098,7 @@ export interface MacProfileSummaryInput {
 function sweepSection(sweep: MacProfileSummaryInput["sweep"]): string[] {
   const runs = sweep.runs.toSorted((a, b) => a.workers - b.workers);
   return [
-    ...(sweep.table ?? ["Not written yet."]),
+    ...(sweep.table ?? [sweep.flown ? "Not written yet." : "Not run (--no-sweep)."]),
     ...(runs.length === 0
       ? []
       : [
@@ -1210,8 +1224,20 @@ export function keptRunsIn(
   });
 }
 
-/** The sweep's table and samples in its directory, as the summary reads them. */
-export function sweepIn(sweepDir: string): MacProfileSummaryInput["sweep"] {
+/**
+ * The batch's directory `out`, absolute: a relative `--out` is the shell's, `cwd`'s. Resolved once
+ * as the batch starts, since the server runs from the repository's root and the views check from
+ * the app's, and each would read a relative path against its own.
+ */
+export function batchOut(out: string, cwd: string): string {
+  return resolve(cwd, out);
+}
+
+/**
+ * The sweep's table and samples in its directory, as the summary reads them; `flown` is whether
+ * the batch flies the sweep.
+ */
+export function sweepIn(sweepDir: string, flown: boolean): MacProfileSummaryInput["sweep"] {
   let table: ReadonlyArray<string> | null = null;
   try {
     table = readFileSync(join(sweepDir, "worker-sweep.md"), "utf8").trimEnd().split("\n");
@@ -1222,7 +1248,7 @@ export function sweepIn(sweepDir: string): MacProfileSummaryInput["sweep"] {
   // The batch's own file, written whole by it: a list of its sweep's records.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   const runs = Array.isArray(samples) ? (samples as ReadonlyArray<SweepRunRecord>) : [];
-  return { table, runs };
+  return { table, runs, flown };
 }
 
 /** What a batch was started on, its `batch.json`: its commit and its body; `null` for none. */
