@@ -1,5 +1,5 @@
 //! The tests of the stellar and neutron-star mergers' tables fitted at 31 (P15.T10.b's merger step,
-//! under every 31 hold; `mergers_hold`): a galaxy reads them; the fitted tables' shapes; and,
+//! on the record from 31): a galaxy reads them; the fitted tables' shapes; and,
 //! slow, the classes' Milky Way counts over ten seeds and each class's entries against the
 //! engine's own mergers at 31 by a weighted two-sample Kolmogorov–Smirnov test at 1%, over the
 //! half of the merger census that `hyperion-fit`'s tasks `binary_merger` and `binary_nsm` were not
@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use hyperion_testkit::stats::{KolmogorovSmirnov, ks_critical_distance, ks_two_sample_weighted};
 
 use super::*;
-use crate::galaxy::catalogue_classes::binary::{MergerTableRules, NeutronStarMergers};
+use crate::galaxy::catalogue_classes::binary::NeutronStarMergers;
 use crate::galaxy::catalogue_classes::grid::ClassProcess;
 use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
@@ -67,30 +67,13 @@ fn fitted() -> &'static Galaxy {
     GALAXY.get_or_init(|| at_31(Seed::new(SEED)))
 }
 
-/// A galaxy reads its rules' merger tables: one of the version's the scratch samplers and rows,
-/// one under every 31 hold the fitted ones, the classes' hosts its rows'.
+/// From 31 a galaxy reads the fitted merger tables: their samplers differ from the scratch ones,
+/// their rows from `CLASS_SHARES`' merger rows and no other class's, and the classes' hosts are
+/// the rows'.
 #[test]
 fn from_31_a_galaxy_reads_the_fitted_merger_tables() {
-    let version = Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
-        .expect("the Milky Way fixture builds");
-    assert_eq!(version.rules().merger_tables, MergerTableRules::Scratch);
-    assert_eq!(fitted().rules().merger_tables, MergerTableRules::Fitted);
-    assert_eq!(
-        version.rules().merger_tables.merger_sampler(),
-        &MERGER_SAMPLER
-    );
-    assert_eq!(
-        fitted().rules().merger_tables.merger_sampler(),
-        &MERGER_SAMPLER_31
-    );
-    assert_eq!(version.rules().merger_tables.nsm_sampler(), &NSM_SAMPLER);
-    assert_eq!(
-        fitted().rules().merger_tables.nsm_sampler(),
-        &NSM_SAMPLER_31
-    );
     assert_ne!(MERGER_SAMPLER, MERGER_SAMPLER_31);
     assert_ne!(NSM_SAMPLER, NSM_SAMPLER_31);
-    assert_eq!(fitted().rules().class_shares(), &CLASS_SHARES_31);
     for class in [CarvedClass::StellarMerger, CarvedClass::NeutronStarMerger] {
         assert_ne!(CLASS_SHARES_31.row(class), CLASS_SHARES.row(class));
     }

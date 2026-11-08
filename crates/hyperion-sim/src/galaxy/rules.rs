@@ -14,8 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`merger_tables`](GalaxyRules::merger_tables), the merger classes' step from 31 (P15.T10.b,
-//!   [`MergerTableRules`]): their census of the generator's own pairs;
 //! - [`residuals`](GalaxyRules::residuals), at `CARVE_RESIDUALS_VERSION` (31): the carve-out's
 //!   two residuals closed (P09.T35's census C1, P09.T43);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
@@ -27,12 +25,10 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::FieldShareRules;
-use crate::galaxy::catalogue_classes::binary::MergerTableRules;
 use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::{CarveOutRules, CarveResidualsRules};
 use crate::galaxy::features::members::recent::FeatureClassesRules;
 use crate::stellar::rules::StellarRules;
-use crate::tables::binary::{CLASS_SHARES, CLASS_SHARES_31, ClassShareTable};
 
 /// The galaxy-side holds of the next galaxy train, carried by the `Galaxy` value
 /// (decision-galaxy-25-train §1).
@@ -55,11 +51,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
-    /// The merger classes' step (P15.T10.b's mergers, held at 31, [`MergerTableRules`]): their
-    /// samplers, their rows of the share matrix's class shares, read where the galaxy is built, so
-    /// that `Galaxy::with_rules` refuses to change it, and whether their census draws the
-    /// generator's own pairs.
-    pub(crate) merger_tables: MergerTableRules,
     /// Whether the carve-out's two residuals are closed, the hold of
     /// [`CARVE_RESIDUALS_VERSION`](crate::galaxy::displaced::site::CARVE_RESIDUALS_VERSION):
     /// the luminous blue variables' class following the grid's living field stars, and a recently
@@ -79,30 +70,18 @@ impl GalaxyRules {
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
-            merger_tables: MergerTableRules::of_version(version),
             residuals: CarveResidualsRules::of_version(version),
             stellar: StellarRules::of_version(version),
         }
     }
 
     /// Every galaxy and stellar hold at 31 in force, for a test that asserts a 31 figure: the
-    /// merger classes' step (P15.T10.b, [`MergerTableRules::Fitted`]) and the carve-out's residuals
-    /// (P09.T35, P09.T43, [`CarveResidualsRules::Matched`]). The 31 bump deletes it with them.
+    /// carve-out's residuals (P09.T35, P09.T43, [`CarveResidualsRules::Matched`]). The 31 bump
+    /// deletes it with them.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn every_31_hold() -> Self {
         Self::of_version(GeneratorVersion::new(31))
-    }
-
-    /// The share rows the galaxy reads: the version's [`CLASS_SHARES`], and from 31 its merger
-    /// classes' rows fitted on the generator's own pairs, [`CLASS_SHARES_31`]
-    /// ([`MergerTableRules::Fitted`]).
-    #[must_use]
-    pub(crate) const fn class_shares(self) -> &'static ClassShareTable {
-        match self.merger_tables {
-            MergerTableRules::Scratch => &CLASS_SHARES,
-            MergerTableRules::Fitted => &CLASS_SHARES_31,
-        }
     }
 }
 
@@ -186,18 +165,5 @@ mod tests {
                 StellarRules::of_version(GeneratorVersion::new(v))
             );
         }
-        for (v, merger_tables) in [
-            (30, MergerTableRules::Scratch),
-            (31, MergerTableRules::Fitted),
-        ] {
-            assert_eq!(
-                GalaxyRules::of_version(GeneratorVersion::new(v)).merger_tables,
-                merger_tables
-            );
-        }
-        assert_eq!(
-            GalaxyRules::every_31_hold().merger_tables,
-            MergerTableRules::Fitted
-        );
     }
 }

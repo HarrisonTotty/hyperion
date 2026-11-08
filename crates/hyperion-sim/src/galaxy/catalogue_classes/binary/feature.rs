@@ -394,9 +394,7 @@ pub(crate) fn hosts_per_formed_mass(
         CarvedClass::AccretingWdFast
         | CarvedClass::AccretingWdSlow
         | CarvedClass::StellarMerger
-        | CarvedClass::NeutronStarMerger => galaxy
-            .rules()
-            .class_shares()
+        | CarvedClass::NeutronStarMerger => crate::tables::binary::CLASS_SHARES_31
             .row(carved)
             .hosts_per_formed_mass(population),
     }
@@ -417,9 +415,7 @@ pub(crate) fn globular_hosts(
     population: Population,
     mass: SolarMasses,
 ) -> f64 {
-    let row = galaxy
-        .rules()
-        .class_shares()
+    let row = crate::tables::binary::CLASS_SHARES_31
         .row(carved_of(class).expect("a listed class is plan 11's"));
     let weights = galaxy.feature_shares().globular_band_weights();
     let band_weight = MassBand::ALL.iter().fold(0.0, |sum, &band| {

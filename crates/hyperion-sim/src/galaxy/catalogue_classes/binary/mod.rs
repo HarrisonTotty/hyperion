@@ -29,7 +29,6 @@ pub(crate) mod feature;
 mod fitted_tables;
 mod hosts;
 mod merger;
-mod mergers_hold;
 mod nsm;
 mod xrb;
 
@@ -41,7 +40,6 @@ pub use awd::{
 pub use feature::{BinaryHost, HostPlace, ListedBinary, ListedHost, is_listed_binary};
 pub use hosts::{ClassHosts, HostComponent};
 pub use merger::{MergerCandidate, MergerEntry, MergerPair, StellarMergers};
-pub(crate) use mergers_hold::MergerTableRules;
 pub use nsm::{Inspiral, NeutronStarMergers, NsmCandidate, NsmEntry};
 pub use xrb::{
     BE_DONOR_ATTEMPTS, DONOR_TURN_OFF_SHARE, EVOLVED_DONOR_LOBE_SHARE, EVOLVED_DONOR_MIN_CORE_MASS,

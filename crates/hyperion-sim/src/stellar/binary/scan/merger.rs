@@ -12,7 +12,7 @@
 //!    systems (`class.merger.time`);
 //! 3. its \[Fe/H\] from its component's law at the site and that age
 //!    (`class.merger.metallicity`);
-//! 4. its pair (`class.merger.mass`): the primary's layer by [`MERGER_SAMPLER`]'s weights,
+//! 4. its pair (`class.merger.mass`): the primary's layer by [`MERGER_SAMPLER_31`]'s weights,
 //!    restricted to the layers that hold main-sequence stars at the merger, its initial mass from
 //!    the galaxy's mass function in that band below the turn-off then
 //!    ([`turn_off_mass`](crate::stellar::sse::turn_off_mass)), and the mass ratio, held so that the
@@ -67,8 +67,7 @@ use crate::stellar::sse::{
 };
 use crate::stellar::system::track_mass_of;
 use crate::stellar::{Composition, Phase, StarState};
-#[cfg(doc)]
-use crate::tables::binary::MERGER_SAMPLER;
+use crate::tables::binary::MERGER_SAMPLER_31;
 use crate::tables::binary::{MergerChannel, MergerMark, MergerPick};
 use crate::time::{CLOCK_WINDOW_H, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::SOLAR_RADIUS_M;
@@ -327,7 +326,7 @@ pub(crate) fn merger_marks_at(galaxy: &Galaxy, host: BinaryHost) -> Option<Merge
     let seed = galaxy.seed();
     let system = host.system();
     let key = host.key();
-    let sampler = ClassSampler::new(galaxy.rules().merger_tables.merger_sampler());
+    let sampler = ClassSampler::new(&MERGER_SAMPLER_31);
     // 2. T and the age.
     let (merger_time, mut stream) = merger_time_stream(seed, system);
     let rank = sampler.draw(MergerMark::AgeRank, 0.0, &mut stream);
@@ -409,7 +408,7 @@ fn contact_pair(
     (merger_age, mass_ratio): (Years, MergerMark),
     stream: &mut Stream,
 ) -> Option<DrawnPair> {
-    let table = galaxy.rules().merger_tables.merger_sampler();
+    let table = &MERGER_SAMPLER_31;
     let sampler = ClassSampler::new(table);
     let turn_off = turn_off_mass(Years::new(merger_age.value().max(0.0)), composition).value();
     let floor = MIN_INITIAL_MASS.value();
@@ -493,7 +492,7 @@ fn evolved_pair(
     (age_at_epoch, merger_age): (Years, Years),
     stream: &mut Stream,
 ) -> Option<DrawnPair> {
-    let table = galaxy.rules().merger_tables.merger_sampler();
+    let table = &MERGER_SAMPLER_31;
     let sampler = ClassSampler::new(table);
     let rules = galaxy.rules().stellar;
     let options = TrackOptions::default().with_rules(rules);
@@ -613,7 +612,7 @@ fn dynamical_pair(
     (age_at_epoch, merger_age): (Years, Years),
     stream: &mut Stream,
 ) -> Option<DrawnPair> {
-    let sampler = ClassSampler::new(galaxy.rules().merger_tables.merger_sampler());
+    let sampler = ClassSampler::new(&MERGER_SAMPLER_31);
     let rules = galaxy.rules().stellar;
     if merger_age.value().is_nan() || merger_age.value() <= 0.0 {
         return None;

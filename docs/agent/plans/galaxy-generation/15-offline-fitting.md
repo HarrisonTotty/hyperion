@@ -3537,6 +3537,11 @@ basti_helium@339588b7dbb2` and inputs SHA-256 `797e4f51…`. The body is 1,917 b
     differed from the generator's first attempt: 13 displaced, 9 retained. From 31
     (`MergerTableRules`, `MERGER_TABLES_VERSION`, in `every_31_hold`) it draws the generator's
     first attempt; below 31 its held arm keeps every slow test's pins.
+    _Folded at 31 (train 31):_ `mergers_hold`, `MergerTableRules` and `GalaxyRules::merger_tables`
+    deleted; the census always draws the generator's first attempt; the classes read
+    `MERGER_SAMPLER_31`, `NSM_SAMPLER_31` and `CLASS_SHARES_31` directly (`class_shares()` gone).
+    _Lean:_ the `_31` names are kept, as train 30 kept `_29`'s, since the fitted samplers keep some
+    of the scratch tables' marks.
     `from_31_a_record_s_mergers_are_its_pairs_at_the_generator_s_first_attempt` pins four
     records.
   - _The reference._ `merger_census_in` runs a `MergerCensusPlan` over the class census's cell walk

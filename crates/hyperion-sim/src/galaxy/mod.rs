@@ -423,11 +423,6 @@ impl Galaxy {
              `Galaxy::from_params_with_rules`"
         );
         debug_assert_eq!(
-            rules.merger_tables, self.rules.merger_tables,
-            "the merger classes' shares are read when a galaxy is built: build it under the new \
-             rules with `Galaxy::from_params_with_rules`"
-        );
-        debug_assert_eq!(
             rules.displaced, self.rules.displaced,
             "the displaced classes' arm is read when a galaxy is built: build it under the new \
              rules with `Galaxy::from_params_with_rules`"
@@ -462,7 +457,7 @@ impl Galaxy {
         params: GalaxyParams,
         rules: GalaxyRules,
     ) -> Result<Self, BuildGalaxyError> {
-        Self::build_with_class_shares(seed, params, rules, rules.class_shares())
+        Self::build_with_class_shares(seed, params, rules, &crate::tables::binary::CLASS_SHARES_31)
     }
 
     /// [`build`](Self::build) with the share matrix's class shares from `class_shares`

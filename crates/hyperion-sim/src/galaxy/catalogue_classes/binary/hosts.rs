@@ -59,7 +59,7 @@ impl ClassHosts {
     /// ([`CLASS_SHARES`], and from 31 the merger classes' fitted rows).
     #[must_use]
     pub(crate) fn new(galaxy: &Galaxy, class: ClassId, carved: CarvedClass) -> Self {
-        let row = galaxy.rules().class_shares().row(carved);
+        let row = crate::tables::binary::CLASS_SHARES_31.row(carved);
         let formed = galaxy.mean_formed_mass().value();
         let fields = galaxy.fields();
         let components = fields

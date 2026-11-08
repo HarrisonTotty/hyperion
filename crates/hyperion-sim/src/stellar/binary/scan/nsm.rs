@@ -12,7 +12,7 @@
 //!    systems (`class.nsm.time`);
 //! 3. its \[Fe/H\] from its component's law at the site and that age (`class.nsm.metallicity`);
 //! 4. its pair (`class.nsm.mass`): two neutron stars, or a black hole and a neutron star, by
-//!    [`NSM_SAMPLER`]'s weights, each compact star's mass at the merger, and its progenitor's
+//!    [`NSM_SAMPLER_31`]'s weights, each compact star's mass at the merger, and its progenitor's
 //!    initial mass from the galaxy's mass function (the primary is the heavier progenitor);
 //! 5. its velocity at the site, plan 08's draw of its component's law (`class.nsm.velocity`).
 //!
@@ -50,8 +50,7 @@ use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
 use crate::stellar::remnant::structure::neutron_star_radius;
 use crate::stellar::system::track_mass_of;
 use crate::stellar::{Composition, Phase, lifetime};
-#[cfg(doc)]
-use crate::tables::binary::NSM_SAMPLER;
+use crate::tables::binary::NSM_SAMPLER_31;
 use crate::tables::binary::{
     NSM_BLACK_HOLE_PROGENITORS, NSM_NEUTRON_STAR_PROGENITORS, NsmMark, NsmPairKind, NsmPick,
 };
@@ -371,7 +370,7 @@ impl NsbhOutflow {
     /// The outflow of a black hole of `black_hole` merging with a neutron star of `neutron_star`.
     ///
     /// Both masses are positive and finite: the class draws holes of 3–20 M☉ and neutron stars of
-    /// 1.13–2.0 M☉ (`NSM_SAMPLER`). The fits were calibrated on Q of 1–7 and C of 0.13–0.182, and
+    /// 1.13–2.0 M☉ (`NSM_SAMPLER_31`). The fits were calibrated on Q of 1–7 and C of 0.13–0.182, and
     /// leave nothing outside the hole well before either limit is passed, so a pair beyond them,
     /// as many of the class's are, ejects nothing, as a hole that swallows its neutron star whole
     /// does.
@@ -472,7 +471,7 @@ pub(crate) fn nsm_marks_at(galaxy: &Galaxy, host: BinaryHost) -> Option<NsmScanM
     let seed = galaxy.seed();
     let system = host.system();
     let key = host.key();
-    let sampler = ClassSampler::new(galaxy.rules().merger_tables.nsm_sampler());
+    let sampler = ClassSampler::new(&NSM_SAMPLER_31);
     // 2. T and the age.
     let (merger_time, mut stream) = nsm_time_stream(seed, system);
     let rank = sampler.draw(NsmMark::AgeRank, 0.0, &mut stream);
