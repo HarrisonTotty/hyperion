@@ -22,7 +22,7 @@ use std::fmt;
 pub struct GeneratorVersion(u32);
 
 /// The version of the generator in this build. Starts at 1.
-pub const GENERATOR_VERSION: GeneratorVersion = GeneratorVersion::new(30);
+pub const GENERATOR_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 
 impl GeneratorVersion {
     /// Wraps a version number, for instance one read from a save.
