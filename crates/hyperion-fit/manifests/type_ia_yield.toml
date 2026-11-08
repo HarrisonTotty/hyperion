@@ -10,7 +10,7 @@ task = "type_ia_yield"
 
 [params]
 seed = 0x0b17_15a0_0000_0001
-generator_version = 30
+generator_version = 31
 records = 10_000_000
 parts = 32
 part_count = 64

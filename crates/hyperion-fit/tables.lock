@@ -6,7 +6,7 @@ name = "binary_awd"
 path = "binary.rs"
 task = "binary_awd"
 revision = 0
-inputs_sha256 = "05097b201a6558b687e2193318b21c8feb83639650a9d963d38e82b56575b15d"
+inputs_sha256 = "26e727e7545d08d00c8fb6bfbf11f559b88c3702aa98796f779c86166005a99b"
 body_sha256 = "87896b5ada0fad15ecba67b32979e534237870866fc41c40cf83bc6c41930e91"
 fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 1.0960630250705998, 21.0, 1.0, 0.6529028848978797, 0.0322439496270119, 0.000000000012255222349553427]
 since_generator_version = 29
@@ -31,11 +31,11 @@ path = "binary.rs"
 task = "binary_merger"
 revision = 0
 inputs_sha256 = "ab00c82f45a90665f044fca8c84efa29db5affa712bdfed13211022e15a2ae58"
-body_sha256 = "8dd1ee754c7bd934eb40c8c6545c3242caed9319d18a1c0a1529e40e0d4afe3f"
-fingerprint = [0.6709887138678556, 0.1185609499810464, 0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 32.0, 0.0, 660300442.9930085, 0.0, 132693060.07669601, 0.0, 684424073.1467187, 0.0, 203414168.6319185, 0.0, 321893691.6470565, 0.0, 48634296.22086901, 0.0, 6454135.8510592785, 0.0, 47746909.59213701, 0.0, 4069731.4356553066]
-since_generator_version = 29
+body_sha256 = "61752033667debf131af3bf95b5e0f9d82ecdcf508d2672ce6be5548d3be2bb2"
+fingerprint = [0.6709887138678556, 0.1185609499810464, 0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 32.0, 0.0, 660300442.9930085, 0.0, 132693060.07669601, 0.0, 684424073.1467187, 0.0, 203414168.6319185, 0.0, 321893691.6470565, 0.0, 48634296.22086901, 0.0, 6185247.925306689]
+since_generator_version = 31
 provisional = false
-acceptance = "7175 members, Kish 2245; of the weight, uncovered 0.435, contact 0.017, evolved donor 0.528, dynamical 0.020; channels 0.030/0.935/0.035; layers 0.000/0.000/0.006/0.003/0.991 (target 0.000/0.000/0.665/0.317/0.019, realised 0.000/0.000/0.665/0.317/0.019); layers 0.008/0.019/0.589/0.336/0.048 rates a system 3.90e-11/9.73e-13/2.68e-13/2.17e-13/3.12e-13/7.05e-13/2.37e-13; scratch marks: PrimaryRank, ContactMassRatio, HeliumBurningMassRatio; the K–S tests against the other half of the census are the sim's slow `merger_tables::the_stellar_merger_sampler_against_the_engine`"
+acceptance = "7165 members, Kish 2239; of the weight, uncovered 0.434, contact 0.017, evolved donor 0.529, dynamical 0.020; channels 0.030/0.935/0.035; layers 0.000/0.000/0.006/0.003/0.991 (target 0.000/0.000/0.665/0.317/0.019, realised 0.000/0.000/0.665/0.317/0.019); layers 0.008/0.019/0.589/0.336/0.048 rates a system 3.90e-11/9.73e-13/2.68e-13/2.17e-13/3.12e-13/7.05e-13/2.37e-13; scratch marks: PrimaryRank, ContactMassRatio, HeliumBurningMassRatio; the K–S tests against the other half of the census are the sim's slow `merger_tables::the_stellar_merger_sampler_against_the_engine`"
 
 [[table]]
 name = "binary_nsm"
@@ -43,9 +43,9 @@ path = "binary.rs"
 task = "binary_nsm"
 revision = 0
 inputs_sha256 = "dd4bf064d56f60bb7b3bcb1f22693b3d19b75551a6594ba2686063ec67ac85c9"
-body_sha256 = "0e016ab78d5f112475207625328ae29eeb9cae45f95d156cce7f058b0bc889a0"
+body_sha256 = "71e1c83c0cfb7890a2ddde749531a72c8e39407a224ae31d1d606e9369ba80d6"
 fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 29.0, 0.0, 153680261.30380228]
-since_generator_version = 29
+since_generator_version = 31
 provisional = false
 acceptance = "2910 members, Kish 579; pair kinds 0.537/0.463; of the weight, two black holes 0.000, a neutron star's progenitor outside 8–20 M☉ 0.640, a black hole's outside 25–60 M☉ 0.331; layers 0.000/0.000/0.000/0.073/0.927 rates a system 1.51e-12/1.95e-14/9.39e-16/2.72e-15/4.52e-15/1.61e-14/1.90e-15; scratch marks: none; the K–S tests against the other half of the census are the sim's slow `merger_tables::the_neutron_star_merger_sampler_against_the_engine`"
 
@@ -114,12 +114,12 @@ name = "binary_xrb"
 path = "binary.rs"
 task = "binary_xrb"
 revision = 0
-inputs_sha256 = "e801734a877e2f0e848c05d848d16ea678d511436554e17b960ae9855d530766"
-body_sha256 = "0655640123f24a9dc6a636ef28cdb14107618f6cd85085565eed0734e75686f7"
+inputs_sha256 = "8c5053e3736057c4ac25011a9ebd1da8156cb09ac2627f0029ea44f3cfd256f6"
+body_sha256 = "03ad34caa05d2ebc77a4982df897c4607030236cd88913ddddf00399f93dab8e"
 fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 25.0, 1.0, 1.55261502182327, 1.3396048261069489, -1.5866839897114011]
-since_generator_version = 30
+since_generator_version = 31
 provisional = false
-acceptance = "slab members by kind 388/9725/4/91/7/0/239/4/0; young members by kind 543/400/107/168/874/4/96/0/4; census kinds 0.0375/0.9385/0.0007/0.0070/0.0009/0.0000/0.0150/0.0003/0.0000; weights 0.0329/0.8223/0.0006/0.1300/0.0132/0.0002 and 0.0007/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 70); high-mass hosts 8; donor mass's own nodes 14; layers C 0.000 D 0.147 E 0.853; rates a system 1.54e-4/2.29e-4/1.67e-4/1.30e-4/1.98e-4/1.21e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
+acceptance = "slab members by kind 388/9725/4/91/7/0/239/4/0; young members by kind 543/400/108/169/873/4/97/0/5; census kinds 0.0375/0.9385/0.0007/0.0070/0.0009/0.0000/0.0150/0.0003/0.0000; weights 0.0329/0.8223/0.0006/0.1300/0.0132/0.0002 and 0.0007/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 70); high-mass hosts 8; donor mass's own nodes 14; layers C 0.000 D 0.147 E 0.853; rates a system 1.54e-4/2.29e-4/1.67e-4/1.30e-4/1.98e-4/1.21e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
 
 [[table]]
 name = "bowl_permanent_shadow"
@@ -732,12 +732,12 @@ name = "type_ia_yield"
 path = "binary.rs"
 task = "type_ia_yield"
 revision = 0
-inputs_sha256 = "0b5130f58884e9100b6eccb687a764380233a9e38bcb6917afd3ed1f1ffb448a"
+inputs_sha256 = "f7e157e1dc81cb8385ba1c14154891b93da35e860fdafb66ea8c6608dec492f1"
 body_sha256 = "b1c9ec5e1cde8f41acc5e366d483b653322d7840363838c94c7555998c9c8d3a"
 fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 1.0960630250705998, 0.00007045175165970433, 0.0000687768912141925, 0.0000671418474864471, 0.00006554567390744563, 0.00006398744641109867, 0.00006246626289928335, 0.00006098124271959729, 0.00005953152615552191, 0.00005811627392871585, 0.00005673466671313003, 0.00005538590466068287, 0.00005406920693820183, 0.00005278381127539033, 0.00005152897352351225, 0.00005030396722460306, 0.00004910808319089251, 0.00004794062909424209, 0.000046800929065338604, 0.00004568832330241403, 0.00004460216768927103, 0.00004354183342238668, 0.000042506706646881515, 0.00004149618810114428, 0.00004050969276990198, 120.0, 69.0, 2.0, 228623318.61134434, 1.0, 1.44, 1.0, 375197383.3958119, 1.0, 1.2730355319210962, 0.0]
 since_generator_version = 28
 provisional = false
-acceptance = "24 of 24 bins capped at η 1, every short bin among them (passes), the pool ÷ target by bin 0.005/0.110/0.431/0.390/0.510/0.648/0.761/0.587/0.135/0.012/0.025/0.110/0.225/0.423/0.079/0.094/0.098/0.106/0.104/0.108/0.105/0.094/0.093/0.099; the pool 3.1053e-4 per M☉ formed, 0.239 of the yield (mergers 0.056, accretions 0.183); exploded 3.1053e-4, min(pool, target) in every bin within 0.00 σ (passes); η of the even and odd parts within 0.00 σ (passes; both under 4.098 σ, α = 10⁻³ over the bins); 16173 detonatable candidates (mergers 3802, accretions 12371) of 41655; records C/D/E 7924768/1625728/449568, pairs 1709088/951507/301363; recorded, not asserted: the double white dwarfs' contacts over the last Gyr 4.092e-14 per M☉ formed a year, 0.567 × the delay-time distribution's 7.221e-14 at the same ages (Maoz, Hallakoun and Badenes 2018: 4.5–7)"
+acceptance = "24 of 24 bins capped at η 1, every short bin among them (passes), the pool ÷ target by bin 0.005/0.110/0.431/0.390/0.510/0.648/0.761/0.587/0.135/0.012/0.025/0.110/0.225/0.423/0.079/0.094/0.098/0.106/0.104/0.108/0.105/0.094/0.093/0.099; the pool 3.1053e-4 per M☉ formed, 0.239 of the yield (mergers 0.056, accretions 0.183); exploded 3.1053e-4, min(pool, target) in every bin within 0.00 σ (passes); η of the even and odd parts within 0.00 σ (passes; both under 4.098 σ, α = 10⁻³ over the bins); 16173 detonatable candidates (mergers 3802, accretions 12371) of 41655; records C/D/E 7924768/1625728/449568, pairs 1709086/951506/301363; recorded, not asserted: the double white dwarfs' contacts over the last Gyr 4.092e-14 per M☉ formed a year, 0.567 × the delay-time distribution's 7.221e-14 at the same ages (Maoz, Hallakoun and Badenes 2018: 4.5–7)"
 
 [[table]]
 name = "wd_cooling"

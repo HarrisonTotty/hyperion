@@ -71,7 +71,7 @@ const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 
 /// The generator version the fingerprint's galaxy is built at: the manifests' (a test holds both
 /// manifests to it).
-pub const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(30);
+pub const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 
 /// The fingerprint's census: the first 120 layer-D records of the solar circle's slab, part 0 of
 /// 64, so that a change to the engine's pool moves the probes.

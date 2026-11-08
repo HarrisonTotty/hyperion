@@ -128,7 +128,7 @@ const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 
 /// The generator version the fingerprints' galaxy is built at: the refit's, the manifests'
 /// (a test holds the four manifests to it).
-const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(30);
+const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 
 /// The fingerprints' galaxy: the Milky Way fixture of [`FINGERPRINT_SEED`] at
 /// [`FINGERPRINT_VERSION`], with the binary classes' scratch share rows, as a census galaxy is

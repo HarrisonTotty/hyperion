@@ -12,7 +12,7 @@ task = "binary_xrb"
 
 [params]
 seed = 0x0b17_15a0_0000_0001
-generator_version = 30
+generator_version = 31
 records = 10_000_000
 population_records = 300_000
 young_thin_disc_records = 3_000_000

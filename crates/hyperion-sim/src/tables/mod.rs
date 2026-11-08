@@ -154,13 +154,13 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_merger",
         revision: 0,
-        since_generator_version: 29,
+        since_generator_version: 31,
         provisional: false,
     },
     TableInfo {
         name: "binary_nsm",
         revision: 0,
-        since_generator_version: 29,
+        since_generator_version: 31,
         provisional: false,
     },
     TableInfo {
@@ -196,7 +196,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "binary_xrb",
         revision: 0,
-        since_generator_version: 30,
+        since_generator_version: 31,
         provisional: false,
     },
     TableInfo {
