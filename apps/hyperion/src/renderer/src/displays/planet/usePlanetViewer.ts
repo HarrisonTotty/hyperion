@@ -20,8 +20,8 @@
  * - **A moon** opens as the galaxy's own body too, from `SYSTEM`'s or `VIEW`'s hand-over or by its
  *   ID, but has none of the viewer's inputs: the hand-over asks no `viewer_inputs` of it, and by its
  *   ID the server's refusal of it is read as no inputs once its system's bodies say it is a moon.
- *   The panel then keeps its last inputs and holds `GENERATE` and `SHARE` back (`noInputs`) until
- *   an input is entered or another planet shown.
+ *   The panel then keeps its last inputs and holds `GENERATE` and `SHARE`'s string back
+ *   (`noInputs`) until an input is entered, a string loaded or another planet shown.
  * - **A command** shows `PENDING` and then its outcome, closed-loop as the guide asks: the planet
  *   shown, or the server's refusal, which names the input it is of, or its failure or time-out. A
  *   newer command cancels the one in flight, and so does leaving the display mounted no longer.

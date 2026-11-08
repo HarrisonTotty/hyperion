@@ -189,8 +189,9 @@ function outcomeUnder(
 export const GENERATE_KEY = "g";
 
 /**
- * Why `GENERATE` and `SHARE` are held back while a moon is shown: it has none of the viewer's
- * inputs, and the panel's are another planet's (plan R15, T5's follow-up).
+ * Why `GENERATE` and `SHARE`'s string are held back while a moon is shown: it has none of the
+ * viewer's inputs, and the panel's are another planet's (plan R15, T5's follow-up). `LOAD`, a
+ * pasted string's inputs, is one way to enter one, and stays offered.
  */
 export const NO_INPUTS_REASON = "NO INPUTS: a moon has none, enter one to GENERATE or SHARE";
 
@@ -274,9 +275,9 @@ function galaxyBodyShown(
  *   While the panel holds the inputs of a planet whose system has more stars than one, a note says
  *   that they hold its host alone.
  * - A moon on show (`SHOWN` `BODY` and its ID) has none of the inputs: the groups and `SEED` keep
- *   their last values, muted, under {@link NO_INPUTS_REASON}, which holds `GENERATE` and the bar's `SHARE` back
- *   while it stands; an input entered gives the panel its inputs again, and `RANDOMIZE` and
- *   `OPEN BODY` stay offered.
+ *   their last values, muted, under {@link NO_INPUTS_REASON}, which holds `GENERATE` and the bar's
+ *   `SHARE` string back while it stands; an input entered, or a string loaded, gives the panel its
+ *   inputs again, and `RANDOMIZE`, `LOAD` and `OPEN BODY` stay offered.
  * - In the `full` layout `STAR`, `ORBIT` and `PLANET` stand open, and the volatile ranks and
  *   `SHOWN` fold on their own, folded as the panel opens. In the `compact` one, a column too short
  *   for that, as at 1280×720 (`inputsLayout.ts`), exactly one of `SHOWN` and the four groups is open,

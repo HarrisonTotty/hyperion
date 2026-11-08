@@ -3,7 +3,7 @@
  * its planet opened in `VIEW`'s display of its own.
  */
 import type { ResponseFor } from "@hyperion/protocol";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -732,15 +732,18 @@ describe("nextDrawSeed", () => {
       expect(generate).toHaveAccessibleDescription(NO_INPUTS_DESCRIPTION);
     });
 
-    it("holds SHARE and its LOAD back, saying why", async () => {
+    it("holds SHARE's string back, muted and refused to a copy, saying why, and offers LOAD", async () => {
       await handOverMoon();
       const share = screen.getByRole("textbox", { name: "SHARE" });
       const load = screen.getByRole("button", { name: "LOAD" });
-      expect([share.getAttribute("aria-disabled"), load.getAttribute("aria-disabled")]).toEqual([
-        "true",
-        "true",
-      ]);
-      expect(load).toHaveAccessibleDescription(NO_INPUTS_DESCRIPTION);
+      expect([
+        share.classList.contains("planet-viewer__string--held"),
+        // A copy or a cut whose default is prevented: the string is another planet's.
+        fireEvent.copy(share),
+        fireEvent.cut(share),
+        load.getAttribute("aria-disabled"),
+      ]).toEqual([true, false, false, null]);
+      expect(share).toHaveAccessibleDescription(NO_INPUTS_DESCRIPTION);
     });
 
     it("still offers RANDOMIZE", async () => {
@@ -780,10 +783,33 @@ describe("nextDrawSeed", () => {
       ]).toEqual([null, 1]);
     });
 
-    it("refuses LOAD while SHARE is held back, the panel's inputs kept", async () => {
+    it("keeps the panel's inputs and its hold on a LOAD with nothing pasted", async () => {
       const { user } = await handOverMoon();
       await user.click(screen.getByRole("button", { name: "LOAD" }));
-      expect(screen.getByRole("textbox", { name: "SMA" })).toHaveProperty("value", "1");
+      expect([
+        screen.getByRole("textbox", { name: "SMA" }),
+        wholeText("NO INPUTS: a moon has none, enter one to GENERATE or SHARE").length,
+      ]).toEqual([expect.objectContaining({ value: "1" }), 1]);
+    });
+
+    it("loads a pasted string's inputs, which give the panel its inputs again (the guide's Controls)", async () => {
+      const { socket, user } = await handOverMoon();
+      const share = screen.getByRole("textbox", { name: "SHARE" });
+      const pasted = formatInputsString({
+        ...DEFAULT_INPUTS,
+        values: { ...DEFAULT_INPUTS.values, tiltDeg: 60 },
+      });
+      await user.click(share);
+      await user.paste(pasted);
+      expect(share.classList.contains("planet-viewer__string--held")).toBe(false);
+      await user.click(screen.getByRole("button", { name: "LOAD" }));
+      expect([
+        screen.getByRole("textbox", { name: "OBLIQUITY" }),
+        screen.queryByText(/NO INPUTS/u),
+        fireEvent.copy(screen.getByRole("textbox", { name: "SHARE" })),
+      ]).toEqual([expect.objectContaining({ value: "60" }), null, true]);
+      await user.click(screen.getByRole("button", { name: "G GENERATE" }));
+      expect(socket.requestsOfKind("viewer_planet")).toHaveLength(1);
     });
 
     it("offers SHARE again once an input is entered", async () => {
@@ -791,10 +817,12 @@ describe("nextDrawSeed", () => {
       const sma = screen.getByRole("textbox", { name: "SMA" });
       await user.clear(sma);
       await user.type(sma, "2{Enter}");
+      const share = screen.getByRole("textbox", { name: "SHARE" });
       expect([
-        screen.getByRole("textbox", { name: "SHARE" }).getAttribute("readonly"),
-        screen.getByRole("button", { name: "LOAD" }).getAttribute("aria-disabled"),
-      ]).toEqual([null, null]);
+        share.classList.contains("planet-viewer__string--held"),
+        fireEvent.copy(share),
+      ]).toEqual([false, true]);
+      expect(share).not.toHaveAccessibleDescription(/NO INPUTS/u);
     });
 
     it("gives the panel the drawn inputs of a RANDOMIZE whose planet is refused", async () => {

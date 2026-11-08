@@ -31,7 +31,7 @@ export interface PlanetViewerBarProps {
   readonly onRandomize: () => void;
   /** The viewer's last command, whose state stands here while it is a draw. */
   readonly command: ViewerCommand | null;
-  /** Whether the viewer holds no inputs (a moon on show), which holds `SHARE` back. */
+  /** Whether the viewer holds no inputs (a moon on show), which holds `SHARE`'s string back. */
   readonly noInputs: boolean;
   /** The ID of the panel's words saying so (`NO INPUTS: …`), which `SHARE` cites. */
   readonly noInputsId: string;
@@ -51,8 +51,10 @@ export interface PlanetViewerBarProps {
  * - `SHARE` holds the panel's inputs' string, which reproduces the planet in any universe of this
  *   generator version: selected whole as it takes the focus, to copy; or paste one and `LOAD` it
  *   (`Enter`), which puts its inputs on the panel, refusing a string it cannot read with what is
- *   valid. While the viewer holds no inputs, a moon on show, it is held back, its last string muted
- *   and `LOAD` refused, with the panel's reason; `RANDOMIZE` stays offered.
+ *   valid. While the viewer holds no inputs, a moon on show, its last string, another planet's, is
+ *   held back with the panel's reason: muted, and refused to a copy. `LOAD` stays offered, since a
+ *   pasted string is one way to enter one (the guide's Controls: a held control's reason says what
+ *   to do), and its inputs on the panel offer `SHARE` again; so does `RANDOMIZE`.
  */
 export function PlanetViewerBar({
   inputs,
@@ -126,11 +128,15 @@ export function PlanetViewerBar({
 interface ShareFieldProps {
   readonly inputs: PlanetInputs;
   readonly onLoad: (inputs: PlanetInputs) => void;
-  /** The ID of the reason it is held back, or `null` while it is offered. */
+  /** The ID of the reason its string is held back, or `null` while it is offered. */
   readonly heldId: string | null;
 }
 
-/** The inputs' string, to copy, or a pasted one to `LOAD`; held back, read only, with `heldId`. */
+/**
+ * The inputs' string, to copy, or a pasted one to `LOAD`. Held back with `heldId`, the string
+ * shown is muted and refused to a copy or a cut until another is typed or pasted over it, and
+ * `LOAD` still takes a pasted one.
+ */
 function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
   const fieldId = useId();
   const errorId = useId();
@@ -138,11 +144,9 @@ function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const text = formatInputsString(inputs);
-  const held = heldId !== null;
+  // The string shown is another planet's while held, until one is typed or pasted over it.
+  const stale = heldId !== null && draft === null;
   const load = (): void => {
-    if (held) {
-      return;
-    }
     if (draft === null || isEmptyEntry(draft)) {
       setDraft(null);
       setRefusal(null);
@@ -165,21 +169,29 @@ function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
       <input
         id={fieldId}
         ref={field}
-        className="form-field__input planet-viewer__string"
+        className={`form-field__input planet-viewer__string${stale ? " planet-viewer__string--held" : ""}`}
         type="text"
         autoComplete="off"
         spellCheck={false}
-        value={held ? text : (draft ?? text)}
-        readOnly={held}
-        aria-disabled={held ? "true" : undefined}
-        aria-invalid={refusal === null || held ? undefined : "true"}
-        aria-describedby={describedBy([heldId, refusal === null || held ? null : errorId])}
+        value={draft ?? text}
+        aria-invalid={refusal === null ? undefined : "true"}
+        aria-describedby={describedBy([heldId, refusal === null ? null : errorId])}
         onChange={(event) => {
           setDraft(event.target.value);
           setRefusal(null);
         }}
         onFocus={(event) => {
           event.currentTarget.select();
+        }}
+        onCopy={(event) => {
+          if (stale) {
+            event.preventDefault();
+          }
+        }}
+        onCut={(event) => {
+          if (stale) {
+            event.preventDefault();
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
@@ -196,8 +208,6 @@ function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
       <button
         type="button"
         className="command"
-        aria-disabled={held ? "true" : undefined}
-        aria-describedby={heldId ?? undefined}
         onClick={() => {
           load();
           field.current?.focus();
@@ -205,7 +215,7 @@ function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
       >
         LOAD
       </button>
-      {refusal === null || held ? null : (
+      {refusal === null ? null : (
         <p className="form-field__error planet-inputs__error" id={errorId}>
           <StatusText text={refusal} />
         </p>

@@ -4479,6 +4479,11 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   font-family: var(--font-mono);
 }
 
+/* A moon on show: the string shown is another planet's, muted until one is pasted over it. */
+.planet-viewer__string--held {
+  color: var(--text-muted);
+}
+
 .planet-viewer__empty {
   margin-top: 1rem;
 }
