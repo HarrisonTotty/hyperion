@@ -10235,3 +10235,15 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
 - (fix-mac-batch-tools, 2026-11-08) `discRecordOf` gives no record only for a camera within the
   body's figure (`insideFigure`, the spheroid about its pole), not within its equatorial sphere,
   so a camera low over an oblate world's high latitudes still draws its disc, mesh and terrain.
+- **The bodies pass near the ground** (2026-11-08, perf-bodies-near-ground, the owner's Mac).
+  - A discarded fragment forms no light: WGSL's `discard` demotes to a helper that runs on (Tint
+    emulates it so on Metal), so `smoothMesh.wgsl`, `smoothMeshIds.wgsl`, `figureResolve.wgsl`,
+    `bodyDiscDraw.wgsl` and `resolveTerrain.wgsl` shade only kept fragments, in a loop of at most
+    one pass; the same bits. Not done for `terrainLitShade.wgsl`'s survey discard, whose text
+    `withoutSurveyDiscard` splits on.
+  - `GeometrySettings.terrainPlanetshine`: `record` on both settings and the way back,
+    `brightest` the lever (a lean, 2026-11-08); `--geometry terrainPlanetshine=…`, the smoke's
+    `geometry-terrainPlanetshine`, the Mac pair `terrain-planetshine`.
+  - Check-only `--lit-probe` forms `terrain-unshaded|terrain-no-cascades|terrain-no-horizon|
+    terrain-no-maturity` (`LIT_PROBE` 5 to 8, read in `terrainLit.wgsl` and `terrainLitShade.wgsl`),
+    each a Mac pair of its own name, for the batch to split the terrain fragment's time.
