@@ -69,7 +69,7 @@
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
-import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { DiscNormalMap, DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
 import { lawFor } from "../appearance/phase";
@@ -500,6 +500,21 @@ const NO_BODIES: ReadonlySet<BodyIdHex> = new Set();
 const INSIDE_MARGIN = 1e-9;
 
 /**
+ * Whether the camera, `centreM` from the body's centre (the camera at the origin), stands within
+ * the body's figure, the spheroid of equatorial radius `a` and polar radius `c` about `pole`, to
+ * {@link INSIDE_MARGIN}: ρ²/a² + z²/c² ≤ (1 + margin)², z along the pole and ρ across it. Not its
+ * equatorial sphere: over an oblate body's high latitudes the ground lies inside that sphere, by
+ * about (a − c) sin²φ, some 19 km at 69° for the Earth (WGS 84's a − c, 21.4 km), so that a camera
+ * low over it stands within the sphere and still outside the figure (fix-mac-batch-tools: a
+ * decked world's low window, 4 km up at 69°, drew no body at all).
+ */
+export function insideFigure(centreM: Vec3, a: number, c: number, pole: Vec3): boolean {
+  const z = -dot(centreM, pole);
+  const rho2 = Math.max(0, dot(centreM, centreM) - z * z);
+  return !(rho2 / (a * a) + (z * z) / (c * c) > (1 + INSIDE_MARGIN) ** 2);
+}
+
+/**
  * The stars that light a body: past the cut, the brightest {@link MAX_DISC_LIGHTS}, from its
  * lighting frame where it has one.
  */
@@ -787,7 +802,14 @@ function discRecordOf(
 ): DiscRecord | null {
   const { equatorialRadiusM: a, polarRadiusM: c } = body.figure;
   const distanceM = norm(body.centreM);
-  if (!(distanceM > a * (1 + INSIDE_MARGIN))) {
+  // A class map is oriented by the rotation, whose z axis is then the pole the figure is drawn about.
+  const pole =
+    surface.kind === "class-map"
+      ? rotateToBody(surface.rotation, vec3(0, 0, 1))
+      : figurePole(body.figure);
+  // Seen from inside its figure, which the camera may be within its equatorial sphere and outside
+  // of, low over an oblate body's high latitudes, where its terrain draws it.
+  if (insideFigure(body.centreM, a, c, pole)) {
     return null;
   }
   // A body wholly off the view draws no pixel. Behind the camera or across its plane its rectangle
@@ -800,11 +822,6 @@ function discRecordOf(
     return null;
   }
   const direction = scale(body.centreM, 1 / distanceM);
-  // A class map is oriented by the rotation, whose z axis is then the pole the figure is drawn about.
-  const pole =
-    surface.kind === "class-map"
-      ? rotateToBody(surface.rotation, vec3(0, 0, 1))
-      : figurePole(body.figure);
   const aOverD = a / distanceM;
   const samples = discSamples(
     angularDiameterPx(body.centreM, a, options.camera, options.viewport),
