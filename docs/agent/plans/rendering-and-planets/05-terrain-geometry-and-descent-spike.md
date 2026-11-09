@@ -1238,6 +1238,11 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     16.67 ms, which the frame clock measured as 16.666 ms; the projector's 16.68 ms stands for
     R12's runs on it.
 
+    - _Ruled by the owner 2026-11-08:_ pacing stays `display` (R07.T19's `DEFAULT_FRAME_PACING`),
+      so the low setting paces to the display's refresh divided by a whole number (60 on a 120 Hz
+      Mac, 30 on the UHD 620's 60 Hz), not to a fixed 60 or 30; `--frame-pacing rate` stays the
+      opt-in for fixed 60/30.
+
 22. **Open question 2's rule, operationalised** (researched 2026-09-29). The verdict (T19) applies
     the brainstorm's rule in order. A failure on the UHD 620 alone redesigns the low setting and
     never triggers a native renderer. On the discrete machine:
