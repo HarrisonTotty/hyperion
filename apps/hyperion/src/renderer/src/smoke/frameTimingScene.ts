@@ -650,6 +650,20 @@ export function withoutOblateTwinMisses(routed: RoutedMedium): RoutedMedium {
       };
 }
 
+/**
+ * The one-sheet route's recorded march miss (plan R08, R08.T16.a.2; train 31's finding): from
+ * 400 km in each deck frame its march's transmittance in blue, some 3.9 × 10⁻⁵ at texel (57, 19),
+ * stands 1.75 × 10⁻³ off its twin at two channels of 4,844, since generator version 31's
+ * chromophore mixing moved the hand Jupiter's decks (its envelope floor 2.8 m higher), where it
+ * held to 10⁻³ at 30; rounded outward at its third figure, in units of R08.T6.b's 10⁻³. The fit's
+ * least rise, which the check guards, missed by 2.8% before it.
+ */
+const ONE_SHEET_MARCH_BOUNDS: Readonly<Record<string, number>> = {
+  "400 km, the sun 20° up ahead": 1.76,
+  "400 km, the sun 30° up behind": 1.76,
+  "400 km, the sun 3° down": 1.76,
+};
+
 /** The aerosol the one-sheet twins keep beside (S)'s gas: its NH₃ ice. */
 const ONE_SHEET_AEROSOL = "aerosol:NH3";
 
@@ -663,6 +677,7 @@ export function oneSheetOf(routed: RoutedMedium): RoutedMedium {
   return {
     ...routed,
     name: `${routed.name}, its gas and its NH₃ ice alone`,
+    marchBounds: ONE_SHEET_MARCH_BOUNDS,
     medium: {
       ...routed.medium,
       terms: routed.medium.terms.filter(
