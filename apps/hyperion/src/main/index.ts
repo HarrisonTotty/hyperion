@@ -686,7 +686,10 @@ async function main(): Promise<void> {
         : args.spike !== undefined
           ? "descent spike"
           : null,
-    out: (args.viewsCheck?.out ?? args.spike?.out ?? null) !== null,
+    out: args.viewsCheck?.out ?? args.spike?.out ?? null,
+    cwd: process.cwd(),
+    // The built main process is `apps/hyperion/out/main/index.js`.
+    repoRoot: resolve(__dirname, "../../../.."),
   });
   if (softwareRefusal !== null) {
     process.stderr.write(`${softwareRefusal}\n`);

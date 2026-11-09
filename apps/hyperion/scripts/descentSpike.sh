@@ -68,9 +68,10 @@
 # and --disable-gpu-watchdog, never --ozone-platform=x11; the client then forces no Vulkan switch,
 # draws both styles on the fallback adapter and records the launch mode `software`. Its frame times
 # are SwiftShader's and its figures never a GPU's: the results go under target/descent-spike/results/
-# (the client refuses --out with the switch), and its shader caches are kept in
-# target/descent-spike/gpu-cache-software, apart from a GPU run's. The client's watchdog and this
-# script's limit are five times as long. A GPU launch, without --software, is unchanged.
+# or an --out inside target/ (the client refuses any other with the switch), and its shader caches
+# are kept in target/descent-spike/gpu-cache-software, apart from a GPU run's. The client's
+# watchdog and this script's limit are five times as long. A GPU launch, without --software, is
+# unchanged.
 #
 # Each run gets a fresh `--user-data-dir` under target/descent-spike/, on disk and never under
 # TMPDIR, removed afterwards: the trace's window files wait there until the run ends, about 1 GB

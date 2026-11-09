@@ -177,7 +177,7 @@ export function spikeWatchdogMs(
  * Where a spike run's results go, from the repository's root unless `--out` names a directory:
  * `docs/measurements/descent-spike/`, or under `target/` in the software mode, whose figures are
  * SwiftShader's and never a GPU's, as a software views check's are (main's ruling, 2026-10-29: the
- * main process refuses `--out` with the switch).
+ * main process refuses an `--out` outside the repository's `target/` with the switch).
  */
 export function spikeResultsDir(out: string | null, mode: GraphicsLaunchMode): string {
   return out ?? (mode === "software" ? SOFTWARE_SPIKE_RESULTS_DIR : SPIKE_RESULTS_DIR);

@@ -13,6 +13,8 @@
  * its figures are SwiftShader's, never a GPU's.
  */
 
+import { isAbsolute, join, relative, resolve } from "node:path";
+
 import { SOFTWARE_MODE_SWITCH } from "./switches";
 
 /**
@@ -40,8 +42,12 @@ export interface SoftwareModeLaunch {
   readonly packaged: boolean;
   /** The run the launch makes (`--views-check`, `--descent-spike`), or `null` for neither. */
   readonly run: SoftwareModeRun | null;
-  /** Whether the run names its own results directory (`--out`). */
-  readonly out: boolean;
+  /** The results directory the run names (`--out`), or `null` for its default. */
+  readonly out: string | null;
+  /** The directory a relative `--out` resolves from: the process's working directory. */
+  readonly cwd: string;
+  /** The repository's root, under whose `target/` a software descent spike's `--out` may go. */
+  readonly repoRoot: string;
 }
 
 /**
@@ -49,8 +55,9 @@ export interface SoftwareModeLaunch {
  *
  * @returns The refusal in a packaged build, then without `--views-check` or `--descent-spike`, on
  * every platform, so that no player's launch takes the switch, then with `--out`, so that a
- * software run's records go under `target/` alone (main's ruling, 2026-10-29); `null` without the
- * switch.
+ * software run's records go under `target/` alone (main's ruling, 2026-10-29): a views check's
+ * `--out` always, a descent spike's unless it resolves strictly inside the repository's `target/`,
+ * as the Mac batch's sweep's does in a pod's dry run; `null` without the switch.
  */
 export function softwareModeRefusal(launch: SoftwareModeLaunch): string | null {
   if (!launch.software) {
@@ -62,8 +69,20 @@ export function softwareModeRefusal(launch: SoftwareModeLaunch): string | null {
   if (launch.run === null) {
     return `error: --${SOFTWARE_MODE_SWITCH} is an option of --views-check and --descent-spike, neither of which was given`;
   }
-  if (launch.out) {
+  if (
+    launch.out !== null &&
+    !(launch.run === "descent spike" && isUnderTarget(launch.out, launch.cwd, launch.repoRoot))
+  ) {
     return `error: --out is refused with --${SOFTWARE_MODE_SWITCH}, whose records go under target/ alone`;
   }
   return null;
+}
+
+/**
+ * Whether `out`, from `cwd`, names a directory strictly inside `repoRoot`'s `target/`, by its path
+ * alone (no link followed).
+ */
+function isUnderTarget(out: string, cwd: string, repoRoot: string): boolean {
+  const inside = relative(join(resolve(repoRoot), "target"), resolve(cwd, out));
+  return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside);
 }
