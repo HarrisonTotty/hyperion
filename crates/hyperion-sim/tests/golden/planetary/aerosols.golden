@@ -1,4 +1,4 @@
-# generator_version = 30
+# generator_version = 31
 # P14.T24.c's aerosol and absorber inventory, with P14.T24.g's sulphur
 # (hyperion_sim::planetary::hooks::aerosols): the Solar System table's Earth, Venus,
 # Mars and Titan at their own outgassing under a whole sky's coverage, and an Earth at

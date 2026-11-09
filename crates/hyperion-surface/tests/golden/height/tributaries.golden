@@ -1,4 +1,4 @@
-# generator_version = 30
+# generator_version = 31
 the synthetic Earth-like world under R09.T6.i's rules
 tributary of PatchKey { face: PosX, level: 10, i: 0, j: 1 } into PatchKey { face: PosX, level: 8, i: 0, j: 0 }
 phi = 0x4005d972b8c91e1c  # 2.7311758457542634

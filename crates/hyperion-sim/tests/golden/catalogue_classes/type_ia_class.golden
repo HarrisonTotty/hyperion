@@ -1,23 +1,23 @@
-# generator_version = 30
-component 0 explosions per system = 0x3ed4fc4e8c36ed03  # 5.00335062574996e-6
-component 1 explosions per system = 0x3ec28270db7785ec  # 2.2065084654832904e-6
-component 2 explosions per system = 0x3ea1eb11d16f4bf5  # 5.340051839559705e-7
-component 3 explosions per system = 0x3e90b4692e615409  # 2.489198734957907e-7
-component 4 explosions per system = 0x3e80dc1c9568cf75  # 1.2561538183382816e-7
-component 5 explosions per system = 0x3e74b0e4f9131aff  # 7.707995865460908e-8
-component 6 explosions per system = 0x3e6f238c29a45a68  # 5.800064180516756e-8
-component 7 explosions per system = 0x3e719a6e9982c1b9  # 6.557721688133366e-8
-component 8 explosions per system = 0x3e76b5c8223445bd  # 8.460165950112433e-8
-component 9 explosions per system = 0x3e8da2fadbd73b49  # 2.2081017718311652e-7
-component 10 explosions per system = 0x3e8da2fadbd73b49  # 2.2081017718311652e-7
-component 11 explosions per system = 0x3e6af1acbedb413d  # 5.0187189388369214e-8
-component 12 explosions per system = 0x3e6af1acbedb413d  # 5.0187189388369214e-8
-component 13 explosions per system = 0x3e6af1acbedb413d  # 5.0187189388369214e-8
-component 14 explosions per system = 0x3e6af1acbedb413d  # 5.0187189388369214e-8
-component 15 explosions per system = 0x3e6af1acbedb413d  # 5.0187189388369214e-8
-component 16 explosions per system = 0x3e6af1acbedb413d  # 5.0187189388369214e-8
+# generator_version = 31
+component 0 explosions per system = 0x3ed4f51dce8e0816  # 4.996654049517856e-6
+component 1 explosions per system = 0x3ec28265aff75c5b  # 2.2064881475092547e-6
+component 2 explosions per system = 0x3ea1eb073fefefe7  # 5.340003780269853e-7
+component 3 explosions per system = 0x3e90b45f68b5541b  # 2.4891765156481913e-7
+component 4 explosions per system = 0x3e80dc12bdcc4b00  # 1.2561426290159412e-7
+component 5 explosions per system = 0x3e74b0d8e508bd92  # 7.707927208370049e-8
+component 6 explosions per system = 0x3e6f238df3037f52  # 5.8000692583622005e-8
+component 7 explosions per system = 0x3e719a706b75be63  # 6.557732034283255e-8
+component 8 explosions per system = 0x3e76b5c888a53e3a  # 8.460168224766046e-8
+component 9 explosions per system = 0x3e8da2f0c76b11b9  # 2.2080903124532333e-7
+component 10 explosions per system = 0x3e8da2f0c76b11b9  # 2.2080903124532333e-7
+component 11 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 12 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 13 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 14 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 15 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 16 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
 interval (T-108446247424134.718750000 s, T+31557600000.000000000 s]
-cell [0, 0, 0] bound = 0x3f0303ad5ff1cf1a  # 3.6267021635531633e-5
+cell [0, 0, 0] bound = 0x3f0303a6e9441e89  # 3.6266833520368315e-5
 cell [0, 0, 0] candidates 4932 entries 3
 cell [0, 0, 0] fc18080800008650 component 9 explodes T-4768954408557.718750000 s as TypeIa(Iax), members 2
 cell [0, 0, 0] fc18080800008650 window = 0x40d794b143e326f2  # 24146.769768512757
@@ -111,7 +111,7 @@ cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity before 2 = 0x40
 cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity after 0 = 0xc11e5274a638e259  # -496797.1623263709
 cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity after 1 = 0xc10f05cd9149ca82  # -254137.6959415265
 cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity after 2 = 0xc1310d65748a0d0e  # -1117541.455231491
-cell [-1, -1, -1] bound = 0x3f0303ad5ff1cf1a  # 3.6267021635531633e-5
+cell [-1, -1, -1] bound = 0x3f0303a6e9441e89  # 3.6266833520368315e-5
 cell [-1, -1, -1] candidates 4989 entries 8
 cell [-1, -1, -1] fc17f7f7f00022f0 component 9 explodes T-3027585518676.718750000 s as TypeIa(DoubleDetonation), members 2
 cell [-1, -1, -1] fc17f7f7f00022f0 window = 0x40dc0e8ead0f4441  # 28730.229312721876
@@ -368,7 +368,7 @@ cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity before 2 = 0
 cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity after 0 = 0x40e0537da519d5d9  # 33435.926403920814
 cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity after 1 = 0x40c037a8b8a0e65e  # 8303.318134415134
 cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity after 2 = 0xc0ec1b11e16f0afc  # -57560.5587687697
-cell [0, 0, -1] bound = 0x3f0303ad5ff1cf1a  # 3.6267021635531633e-5
+cell [0, 0, -1] bound = 0x3f0303a6e9441e89  # 3.6266833520368315e-5
 cell [0, 0, -1] candidates 4820 entries 3
 cell [0, 0, -1] fc180807f0000be0 component 8 explodes T-1208205766421.718750000 s as TypeIa(HydrogenDonor), members 2
 cell [0, 0, -1] fc180807f0000be0 window = 0x40da0613f48a96d5  # 26648.311800620362
@@ -451,8 +451,8 @@ cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity before 2 = 0xc
 cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity after 0 = 0xc0ef403a7ea602da  # -64001.827960019655
 cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity after 1 = 0xc0f8e93d323d29e3  # -102035.82476536142
 cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity after 2 = 0xc0d4f21f85ca1e96  # -21448.49254086482
-cell [-1, 0, 0] bound = 0x3f0303ad5ff1cf1a  # 3.6267021635531633e-5
-cell [-1, 0, 0] candidates 4874 entries 3
+cell [-1, 0, 0] bound = 0x3f0303a6e9441e89  # 3.6266833520368315e-5
+cell [-1, 0, 0] candidates 4873 entries 3
 cell [-1, 0, 0] fc17f808000107e0 component 9 explodes T-3045583849619.718750000 s as TypeIa(Merger), members 1
 cell [-1, 0, 0] fc17f808000107e0 window = 0x40eb9ecb15164d91  # 56566.34632411146
 cell [-1, 0, 0] fc17f808000107e0 primary = 0x401ffe78dc9c1df9  # 7.998507926014548
@@ -522,7 +522,7 @@ cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity before 2 = 0x4
 cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity after 0 = 0xc0f0c612aa73c74d  # -68705.16661432125
 cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity after 1 = 0xc0fe66febd30d03a  # -124527.9211891302
 cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity after 2 = 0x40d54a19dd22fbfa  # 21800.404122110434
-cell [0, 1, 0] bound = 0x3ea64352f8e8c08a  # 6.634886505260125e-7
+cell [0, 1, 0] bound = 0x3ea6434ae8aca331  # 6.634849837083669e-7
 cell [0, 1, 0] candidates 101 entries 1
 cell [0, 1, 0] fc18081800000320 component 9 explodes T-30340473655893.718750000 s as TypeIa(Merger), members 1
 cell [0, 1, 0] fc18081800000320 window = 0x41274ff3fbc5f182  # 763897.9917445632
@@ -547,21 +547,21 @@ cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity before 2 = 0x40
 cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity after 0 = 0xc0fc4bc948cb6d56  # -115900.5802721282
 cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity after 1 = 0x40f963b6afcd1406  # 103995.4179201872
 cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity after 2 = 0x40d4f08fc19c15ce  # 21442.24619199876
-cell [0, 2, 0] bound = 0x3e81133e5d64e985  # 1.27219932985673e-7
+cell [0, 2, 0] bound = 0x3e811331ed961c75  # 1.2721851909097547e-7
 cell [0, 2, 0] candidates 22 entries 0
-cell [0, 3, 0] bound = 0x3e62aa32115d2d52  # 3.476594849382817e-8
+cell [0, 3, 0] bound = 0x3e62a9fe33882c58  # 3.476447435834269e-8
 cell [0, 3, 0] candidates 5 entries 0
-cell [0, 4, 0] bound = 0x3e53b7193f3c3e81  # 1.8361237821025652e-8
+cell [0, 4, 0] bound = 0x3e53b697fa768db0  # 1.8359400803141772e-8
 cell [0, 4, 0] candidates 0 entries 0
-cell [0, 5, 0] bound = 0x3e50321f321ff7ea  # 1.508350345318802e-8
+cell [0, 5, 0] bound = 0x3e5031879cd7b0e2  # 1.5081349327291814e-8
 cell [0, 5, 0] candidates 1 entries 0
-cell [0, 6, 0] bound = 0x3e4e6386bfb46872  # 1.4150876018323952e-8
+cell [0, 6, 0] bound = 0x3e4e6237e38820b5  # 1.4148496694559006e-8
 cell [0, 6, 0] candidates 3 entries 0
-cell [0, 7, 0] bound = 0x3e4d66efb5257000  # 1.369141747604275e-8
+cell [0, 7, 0] bound = 0x3e4d658cdd9e7731  # 1.3688896172675719e-8
 cell [0, 7, 0] candidates 2 entries 0
-cell [0, 8, 0] bound = 0x3e4ca9009fa1567c  # 1.3345929684444754e-8
+cell [0, 8, 0] bound = 0x3e4ca7932d2188dc  # 1.3343333025467157e-8
 cell [0, 8, 0] candidates 1 entries 0
-cell [0, 9, 0] bound = 0x3e4bf4a133d1cff6  # 1.301783358386098e-8
+cell [0, 9, 0] bound = 0x3e4bf3305d3acdb4  # 1.3015212830527791e-8
 cell [0, 9, 0] candidates 1 entries 1
 cell [0, 9, 0] fc18089800000000 component 2 explodes T-9973937102335.718750000 s as TypeIa(Merger), members 1
 cell [0, 9, 0] fc18089800000000 window = 0x4122fdcb12f142da  # 622309.5369969264
@@ -586,9 +586,9 @@ cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity before 2 = 0x40
 cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity after 0 = 0x40f18ffbb08c32a0  # 71935.730602453
 cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity after 1 = 0x40f7444a38cb92d2  # 95300.63886601783
 cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity after 2 = 0x40a65fcbe7d0bba9  # 2863.8982529858663
-cell [0, 10, 0] bound = 0x3e4b34c9a1d35648  # 1.2668874888753104e-8
+cell [0, 10, 0] bound = 0x3e4b335ad784cd52  # 1.2666268687199165e-8
 cell [0, 10, 0] candidates 1 entries 0
-cell [0, 11, 0] bound = 0x3e4a61894764bec7  # 1.2284610867261848e-8
+cell [0, 11, 0] bound = 0x3e4a60209249d414  # 1.22820478867356e-8
 cell [0, 11, 0] candidates 3 entries 1
 cell [0, 11, 0] fc1808b800000010 component 5 explodes T-21433077069348.718750000 s as TypeIa(DoubleDetonation), members 2
 cell [0, 11, 0] fc1808b800000010 window = 0x411d2e50536a08fc  # 478100.0814591793
@@ -625,17 +625,17 @@ cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity before 2 = 0xc
 cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity after 0 = 0xc12eacf84d33ce65  # -1005180.1507858752
 cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity after 1 = 0x411f12f3b09f0f75  # 509116.9224817672
 cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity after 2 = 0x413147ab0380d42b  # 1132459.0136845212
-cell [0, 12, 0] bound = 0x3e497a5eefba7cc7  # 1.1864123453899268e-8
+cell [0, 12, 0] bound = 0x3e4978ff4079fa67  # 1.1861624584676908e-8
 cell [0, 12, 0] candidates 1 entries 0
-cell [0, 13, 0] bound = 0x3e48828e81785d59  # 1.1413352082050698e-8
+cell [0, 13, 0] bound = 0x3e488139f0afe586  # 1.1410932218211434e-8
 cell [0, 13, 0] candidates 2 entries 0
-cell [0, 14, 0] bound = 0x3e477ed0e4ed84da  # 1.0940886555838259e-8
+cell [0, 14, 0] bound = 0x3e477d88e0ca4daf  # 1.093855586082459e-8
 cell [0, 14, 0] candidates 0 entries 0
-cell [0, 15, 0] bound = 0x3e4673d2e51a44a2  # 1.0455230600797942e-8
+cell [0, 15, 0] bound = 0x3e46729858ac2f3f  # 1.0452995598891788e-8
 cell [0, 15, 0] candidates 2 entries 0
-cell [0, 16, 0] bound = 0x3e4565a507792109  # 9.963777566156527e-9
+cell [0, 16, 0] bound = 0x3e4564787d03aa1b  # 9.961642094944277e-9
 cell [0, 16, 0] candidates 3 entries 0
-cell [0, 17, 0] bound = 0x3e445798ba8fa4e8  # 9.472563027332626e-9
+cell [0, 17, 0] bound = 0x3e44567a76c2a602  # 9.470528993259108e-9
 cell [0, 17, 0] candidates 1 entries 1
 cell [0, 17, 0] fc18091800000000 component 1 explodes T-23224004747364.718750000 s as TypeIa(Merger), members 1
 cell [0, 17, 0] fc18091800000000 window = 0x4125771b60164557  # 703373.6876699132
@@ -660,19 +660,19 @@ cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity before 2 = 0x4
 cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity after 0 = 0xc1033df34bbfa2e6  # -157630.41198661103
 cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity after 1 = 0x40e65ff85abd761f  # 45823.761076670366
 cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity after 2 = 0x40e11455235f1158  # 34978.66056779277
-cell [0, 18, 0] bound = 0x3e434c1157c11326  # 8.9859308814499e-9
+cell [0, 18, 0] bound = 0x3e434b017247c1d2  # 8.983998941455884e-9
 cell [0, 18, 0] candidates 1 entries 0
-cell [0, 19, 0] bound = 0x3e4245d87ab65b51  # 8.508951618644591e-9
+cell [0, 19, 0] bound = 0x3e4244d6c2b93a77  # 8.507120417099122e-9
 cell [0, 19, 0] candidates 0 entries 0
-cell [0, 20, 0] bound = 0x3e4147809a6341ce  # 8.046303911705212e-9
+cell [0, 20, 0] bound = 0x3e41468ca1649f81  # 8.04457038186709e-9
 cell [0, 20, 0] candidates 0 entries 0
-cell [0, 21, 0] bound = 0x3e4054d1cd78b91f  # 7.604866444121248e-9
+cell [0, 21, 0] bound = 0x3e4053ea2c8a725b  # 7.603220623675561e-9
 cell [0, 21, 0] candidates 0 entries 0
-cell [0, 22, 0] bound = 0x3e3ed6de4a57bd57  # 7.180340909944861e-9
+cell [0, 22, 0] bound = 0x3e3ed526a52c8588  # 7.178778976462026e-9
 cell [0, 22, 0] candidates 1 entries 0
-cell [0, 23, 0] bound = 0x3e3d1b9fb2634961  # 6.777212380013587e-9
+cell [0, 23, 0] bound = 0x3e3d19fdba8d1e4f  # 6.775727458985855e-9
 cell [0, 23, 0] candidates 0 entries 0
-cell [0, 24, 0] bound = 0x3e3b4b1e9d2a047c  # 6.354748243788274e-9
+cell [0, 24, 0] bound = 0x3e3b499d350263c0  # 6.353379003583772e-9
 cell [0, 24, 0] candidates 2 entries 1
 cell [0, 24, 0] fc18098800000010 component 2 explodes T-15097741490064.718750000 s as TypeIa(Merger), members 1
 cell [0, 24, 0] fc18098800000010 window = 0x412c15f3baafd770  # 920313.8646228146
@@ -697,11 +697,11 @@ cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity before 2 = 0xc
 cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity after 0 = 0xc107871fe5de99d6  # -192739.9872409838
 cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity after 1 = 0xc0f6ed7d3de7deb1  # -93911.82761370648
 cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity after 2 = 0xc0ca5655666cd379  # -13484.667188266047
-cell [0, 25, 0] bound = 0x3e398bc823d80483  # 5.94789689506185e-9
+cell [0, 25, 0] bound = 0x3e398a624eb16fee  # 5.9466256182182675e-9
 cell [0, 25, 0] candidates 0 entries 0
-cell [0, 26, 0] bound = 0x3e37d91476916752  # 5.552537854058609e-9
+cell [0, 26, 0] bound = 0x3e37d7c8c36d4c0c  # 5.551359419749569e-9
 cell [0, 26, 0] candidates 0 entries 0
-cell [0, 27, 0] bound = 0x3e36530e8d9d7ca5  # 5.1978139239292505e-9
+cell [0, 27, 0] bound = 0x3e3651ddc0ee1e6c  # 5.196731058395461e-9
 cell [0, 27, 0] candidates 2 entries 2
 cell [0, 27, 0] fc1809b800000000 component 0 explodes T-7458818928030.718750000 s as TypeIa(Merger), members 1
 cell [0, 27, 0] fc1809b800000000 window = 0x41104fc3abf799d1  # 267248.91793670977
@@ -749,5 +749,5 @@ cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity before 2 = 0xc
 cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity after 0 = 0xc10987b2a26204bd  # -209142.32928851797
 cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity after 1 = 0x40e0402cba9df173  # 33281.39778039129
 cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity after 2 = 0xc0c09c980711f218  # -8505.187715762338
-cell [0, 28, 0] bound = 0x3e3523f5f15afdab  # 4.9221495956241086e-9
+cell [0, 28, 0] bound = 0x3e3522dcf4c0a3b8  # 4.921151330224113e-9
 cell [0, 28, 0] candidates 1 entries 0

@@ -1723,8 +1723,8 @@
                   "effective_radius_m": 1e-6,
                   "effective_variance": 0.05
                 },
-                "column_mass_kg_m2": 0.004584068996292844,
-                "tau_550": 10.0,
+                "column_mass_kg_m2": 0.003208848297404991,
+                "tau_550": 7.0,
                 "tau_basis": "sphere_fallback",
                 "base_pa": 63482.5543618753,
                 "top_pa": 10000.0,
@@ -1744,8 +1744,8 @@
                   "effective_radius_m": 5e-8,
                   "effective_variance": 0.05
                 },
-                "column_mass_kg_m2": 0.00024,
-                "tau_550": 0.11693609541117891,
+                "column_mass_kg_m2": 0.00015100129244364848,
+                "tau_550": 0.07357292308500753,
                 "tau_basis": "sphere",
                 "base_pa": 25680.508333754828,
                 "top_pa": 15576.015661428097,
@@ -1754,7 +1754,7 @@
                 "temperature_k": 123.60225041499203
               }
             ],
-            "haze_tau_550": 0.11693609541117891,
+            "haze_tau_550": 0.07357292308500753,
             "condensate_decks": [
               {
                 "condensate": "Fe",
@@ -3192,9 +3192,9 @@
           "state": "ok",
           "value": {
             "geometric_albedo": {
-              "b": 0.330193108667819,
+              "b": 0.30008792728465483,
               "v": 0.26992972761817896,
-              "r": 0.26365229209217483
+              "r": 0.25239039300812377
             },
             "phase_template": "earth",
             "phase_exponent": {

@@ -1,4 +1,4 @@
-# generator_version = 30
+# generator_version = 31
 hierarchical_triple 0x42002cb200000003: OldThinDisc, 4 stars
 fe_h = 0x3fcf50f6852e97e3  # 0.24465829375293344
 age_at_epoch_yr = 0x41fed21adaa144bc  # 8273374634.079281
@@ -221,7 +221,7 @@ iron = 0x3f99d1103c595f0d  # 0.02521157615987506
 rock = 0x3fef31777e1d3508  # 0.974788423840125
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x408504a6ccfc8f0f  # 672.581445668331
+t_eq_k = 0x4085026444567e53  # 672.2989584691335
 moons: []
 rings: []
 population: NotApplicable
@@ -259,9 +259,9 @@ figure_pole_y = 0xbfd2a7923860a5b7  # -0.2914777327119639
 figure_pole_z = 0xbfb40e4b51b7307e  # -0.0783431124211251
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fb4d00047866c49  # 0.0812988447782327
-geometric_albedo_v = 0x3fbc257cb880272a  # 0.10994700912865754
-geometric_albedo_r = 0x3fc10be2f8c0fe7b  # 0.1331752504938669
+geometric_albedo_b = 0x3fb81d418d429b10  # 0.0941964120744212
+geometric_albedo_v = 0x3fbca76e60d91c56  # 0.1119297968335656
+geometric_albedo_r = 0x3fc075a2f548636b  # 0.12858998276422126
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -269,14 +269,14 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fb5cdb7265c0feb  # 0.08517021833910092
+bond_albedo = 0x3fb63260523c03ec  # 0.08670618064571983
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x408504a6ccfc8f0f  # 672.581445668331
-equator_pole_contrast_k = 0x40759152653feb5d  # 345.08261609047423
-day_night_contrast_k = 0x4089cf1152d481cf  # 825.8834587671389
+mean_surface_temperature_k = 0x4085026444567e53  # 672.2989584691335
+equator_pole_contrast_k = 0x40758f00bc97e334  # 344.93767985659656
+day_night_contrast_k = 0x4089cc2e0563a39f  # 825.5224712166126
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408d83fc6c0310f2  # 944.4982528914973
+sigma_h_m = 0x408d84fb1c1f91b0  # 944.6226122347198
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb19274e2f32a1d  # 0.06864100018280124
 surface_age_yr = 0x41a23f7b02c02e75  # 153075073.37535444
@@ -309,7 +309,7 @@ iron = 0x3fd4f6e06e876e6a  # 0.3275681571373982
 rock = 0x3fe5848fc8bc48cb  # 0.6724318428626018
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4081dd41fc8cc314  # 571.6572199818643
+t_eq_k = 0x4081db84b60319f5  # 571.4398002855584
 moons: []
 rings: []
 population: NotApplicable
@@ -347,9 +347,9 @@ figure_pole_y = 0xbfd0bf25fb01e652  # -0.261666770100054
 figure_pole_z = 0xbfc5112de2d33897  # -0.16458676886981458
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fa6954e7a3891a9  # 0.04410786859469635
-geometric_albedo_v = 0x3fae8a876375f350  # 0.05965064133758935
-geometric_albedo_r = 0x3fb27f2a5579e9e5  # 0.0722528895075026
+geometric_albedo_b = 0x3faaa8b5be1fa2a6  # 0.05206840463489941
+geometric_albedo_v = 0x3faf7fe800c6593e  # 0.0615227223344612
+geometric_albedo_r = 0x3fb1d0d3d9b27b35  # 0.06959270539162506
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -357,14 +357,14 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fa7a89b5b783713  # 0.04620824328968189
+bond_albedo = 0x3fa866b01d71fd05  # 0.04765844687880797
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4081dd41fc8cc314  # 571.6572199818643
-equator_pole_contrast_k = 0x407067b497c665f6  # 262.481590056413
-day_night_contrast_k = 0x4085c212db037724  # 696.2592067976698
+mean_surface_temperature_k = 0x4081db84b60319f5  # 571.4398002855584
+equator_pole_contrast_k = 0x4070661bb0330985  # 262.381759833683
+day_night_contrast_k = 0x4085bfd9d7325ca2  # 695.981367486431
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408d628c3f6823d4  # 940.318480313867
+sigma_h_m = 0x408d63020a01b98a  # 940.3759956488368
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb2fb0dcdd8cf48  # 0.0741432788425388
 surface_age_yr = 0x419d2a65bd5d3c57  # 122329455.34105049
@@ -492,7 +492,7 @@ iron = 0x3fb33595e43ac15d  # 0.07503640005120844
 rock = 0x3fed994d4378a7d4  # 0.9249635999487915
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x408927764c0c963a  # 804.9327622397752
+t_eq_k = 0x408924cc690d5a2d  # 804.5998097460885
 moons: [0b01]
 rings: []
 population: NotApplicable
@@ -530,9 +530,9 @@ figure_pole_y = 0x3fdac0d852646fe6  # 0.4180203251469251
 figure_pole_z = 0x3fe3db09d8f50c5a  # 0.6204880940862367
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fb2ab3e5f57d3dc  # 0.07292547061645344
-geometric_albedo_v = 0x3fb93f5baa634586  # 0.09862301740510845
-geometric_albedo_r = 0x3fbe94db3357cb32  # 0.11945886615266657
+geometric_albedo_b = 0x3fb5ac14d85590fa  # 0.08465700418088665
+geometric_albedo_v = 0x3fb9c08fb585c0d1  # 0.1005945032281972
+geometric_albedo_r = 0x3fbd95d4b4d28cbd  # 0.11556748785601463
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -540,14 +540,14 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fb38ed3a0d5ea24  # 0.0763981120743798
-bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
+bond_albedo = 0x3fb3f2e9ea5ccb74  # 0.0779253194021246
+bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x408927764c0c963a  # 804.9327622397752
-equator_pole_contrast_k = 0xc053131daf2ecf00  # -76.29868678637649
-day_night_contrast_k = 0x408eff84ac874b97  # 991.9397821969932
+mean_surface_temperature_k = 0x408924cc690d5a2d  # 804.5998097460885
+equator_pole_contrast_k = 0xc05311189a1d56a8  # -76.26712658753479
+day_night_contrast_k = 0x408efc1d4c6e65c5  # 991.5143059372718
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408c28f930e276e1  # 901.1216752712754
+sigma_h_m = 0x408c291099d211d5  # 901.1331058894817
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb8f0b30adaac9a  # 0.09742278113360428
 surface_age_yr = 0x418a5e455a48577a  # 55298219.2853231
@@ -597,7 +597,7 @@ iron = 0x3fcb068590ee431f  # 0.21113652779288203
 rock = 0x3fe93e5e9bc46f38  # 0.7888634722071179
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40832ed1e6ef162d  # 613.8524912527697
+t_eq_k = 0x40832cc9e2dbe779  # 613.5985772304549
 moons: []
 rings: []
 population: NotApplicable
@@ -635,9 +635,9 @@ figure_pole_y = 0xbfe49600ddcd601c  # -0.6433109600138809
 figure_pole_z = 0x3fe8596ed99dc937  # 0.7609171152419439
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fb2ab3e5d9cddcc  # 0.07292547021358259
-geometric_albedo_v = 0x3fb93f5ba80c3824  # 0.09862301686027358
-geometric_albedo_r = 0x3fbe94db30822e5e  # 0.11945886549272575
+geometric_albedo_b = 0x3fb5ac14d6492918  # 0.08465700370394236
+geometric_albedo_v = 0x3fb9c08fb3169f78  # 0.10059450266146353
+geometric_albedo_r = 0x3fbd95d4b206ab71  # 0.1155674872049255
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -645,14 +645,14 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fb38ed39f05dc2b  # 0.07639811165232462
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fb3f2e9e87a1694  # 0.07792531896310556
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x40832ed1e6ef162d  # 613.8524912527697
-equator_pole_contrast_k = 0x40716f875e326dc1  # 278.9705488176224
-day_night_contrast_k = 0x40875d7876db3dbe  # 747.6838204506128
+mean_surface_temperature_k = 0x40832cc9e2dbe779  # 613.5985772304549
+equator_pole_contrast_k = 0x40716daeb76ef0e9  # 278.85515540443754
+day_night_contrast_k = 0x40875adff069786d  # 747.3593452682377
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408c85c1f122f045  # 912.719698212583
+sigma_h_m = 0x408c85f535ba163f  # 912.744731382183
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb925f58530e3cf  # 0.09823545934422316
 surface_age_yr = 0x4189bd2c6c6dd453  # 53978509.55362763
@@ -916,7 +916,7 @@ iron = 0x3fd5714e0ab70601  # 0.3350405792844811
 rock = 0x3fe502ad2291587d  # 0.6565766978408331
 water = 0x0000000000000000  # 0.0
 envelope = 0x3f812af604c920b2  # 0.008382722874685864
-t_eq_k = 0x4063d770dac30ac1  # 158.73252618879454
+t_eq_k = 0x4063dcb6fcb15c32  # 158.89733729019787
 moons: [1001, 1002, 1003, 1004, 1005]
 rings: [1080]
 population: NotApplicable
@@ -954,9 +954,9 @@ figure_pole_y = 0xbfe84075ed026862  # -0.7578687314119288
 figure_pole_z = 0x3fe4b064a04996ec  # 0.6465323572744786
 moment_of_inertia_factor = 0x3fcd70a3d70a3d71  # 0.23
 photometry: Neptune, provisional true
-geometric_albedo_b = 0x3fe305fc497dd706  # 0.5944806514150691
-geometric_albedo_v = 0x3fddec430ad48454  # 0.46754528100615755
-geometric_albedo_r = 0x3fc881ca0565132e  # 0.1914608503667749
+geometric_albedo_b = 0x3fe2de67f902f7ba  # 0.5896491874225298
+geometric_albedo_v = 0x3fddae01616b9d59  # 0.4637454463358686
+geometric_albedo_r = 0x3fc84ecd0104bbf2  # 0.1899048094723806
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -964,8 +964,8 @@ phase_integral_b = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_v = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd5aab81114cfb7  # 0.33854486148924984
-bond_ratio = 0x3ffb71b9571a4b67  # 1.715264644856427
+bond_albedo = 0x3fd57da3c3e7ea46  # 0.33579343921124793
+bond_ratio = 0x3ffb71b9571a4b66  # 1.7152646448564268
 envelope: Ok
 body 1001 C g I: Moon(Regular) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3f0631d601f33bc7  # 4.233297681254622e-5
@@ -1116,9 +1116,9 @@ figure_pole_y = 0xbfde5c4a54152bab  # -0.4743829556579679
 figure_pole_z = 0xbfeb04f349ba7f7c  # -0.8443542900094907
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab4213b05fa9ad  # 0.05323850181578691
+geometric_albedo_b = 0x3fa6d379b6f29120  # 0.044582179624997886
 geometric_albedo_v = 0x3fab4213b05fa9ad  # 0.05323850181578691
-geometric_albedo_r = 0x3fab4213b05fa9ad  # 0.05323850181578691
+geometric_albedo_r = 0x3fb1d37c96aa0789  # 0.06963328054737707
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1204,9 +1204,9 @@ figure_pole_y = 0xbfe646b9354a0837  # -0.6961332360081148
 figure_pole_z = 0x3fc57189520a7bca  # 0.16752735620408848
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3cc2989424  # 0.38636702540890355
+geometric_albedo_b = 0x3fd883fc1efc8565  # 0.38305571580902714
 geometric_albedo_v = 0x3fd8ba3cc2989424  # 0.38636702540890355
-geometric_albedo_r = 0x3fd8ba3cc2989424  # 0.38636702540890355
+geometric_albedo_r = 0x3fd8f68d2df85a07  # 0.3900483082701673
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1292,9 +1292,9 @@ figure_pole_y = 0xbf9e35b697beecdc  # -0.029501774799183575
 figure_pole_z = 0xbfeff225d74a2c9c  # -0.9983090596082493
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3cc2989424  # 0.38636702540890355
+geometric_albedo_b = 0x3fd883fc1efc8565  # 0.38305571580902714
 geometric_albedo_v = 0x3fd8ba3cc2989424  # 0.38636702540890355
-geometric_albedo_r = 0x3fd8ba3cc2989424  # 0.38636702540890355
+geometric_albedo_r = 0x3fd8f68d2df85a07  # 0.3900483082701673
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1380,9 +1380,9 @@ figure_pole_y = 0x3fe9e69e00fd91fb  # 0.8094015139909624
 figure_pole_z = 0xbfc6ea362fc91550  # -0.17902257283473455
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3cc2989424  # 0.38636702540890355
+geometric_albedo_b = 0x3fd883fc1efc8565  # 0.38305571580902714
 geometric_albedo_v = 0x3fd8ba3cc2989424  # 0.38636702540890355
-geometric_albedo_r = 0x3fd8ba3cc2989424  # 0.38636702540890355
+geometric_albedo_r = 0x3fd8f68d2df85a07  # 0.3900483082701673
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1455,7 +1455,7 @@ iron = 0x3fc29bf1cfde3b33  # 0.1453840508442795
 rock = 0x3fd23bef3f7ce5ca  # 0.28490811538685235
 water = 0x3fe0140cc6eb09d3  # 0.5024474988097672
 envelope = 0x3fb137f92af7a3d7  # 0.06726033495910087
-t_eq_k = 0x405befdfa189f8cb  # 111.74802435373128
+t_eq_k = 0x405c4542467874d9  # 113.08217012179684
 moons: [1101, 1102, 1103, 1104, 1105, 1106]
 rings: [1180]
 population: NotApplicable
@@ -1493,9 +1493,9 @@ figure_pole_y = 0xbfddbde5c5702303  # -0.46471542626436263
 figure_pole_z = 0x3fe9b6a173cb5643  # 0.803543783341134
 moment_of_inertia_factor = 0x3fcd70a3d70a3d71  # 0.23
 photometry: Neptune, provisional false
-geometric_albedo_b = 0x3fd27a06f862cc59  # 0.288697950901399
-geometric_albedo_v = 0x3fcd101d2f3d9198  # 0.22705426031747034
-geometric_albedo_r = 0x3fb7cd7cae383788  # 0.09297923329742563
+geometric_albedo_b = 0x3fcbd283dfc90a92  # 0.2173619120313402
+geometric_albedo_v = 0x3fc5e1b182734bbb  # 0.17095011586806472
+geometric_albedo_r = 0x3fb1ebcfeee4cc80  # 0.07000445921294052
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -1503,7 +1503,7 @@ phase_integral_b = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_v = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fc50b4fe7d65796  # 0.16440771885089295
+bond_albedo = 0x3fbfb042a43c5716  # 0.12378326902065981
 bond_ratio = 0x3ffb71b9571a4b65  # 1.7152646448564266
 envelope: NotModelled
 body 1101 C h I: Moon(Regular) about Some(Body(BodyIndex(4352))), Present
@@ -1567,9 +1567,9 @@ figure_pole_y = 0xbfda5213579cd4a3  # -0.41125949436111336
 figure_pole_z = 0x3fea62dc22050b7b  # 0.8245678581664458
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3fe43c337b  # 0.3863677719935407
+geometric_albedo_b = 0x3fd883ff39c155b2  # 0.38305645599515536
 geometric_albedo_v = 0x3fd8ba3fe43c337b  # 0.3863677719935407
-geometric_albedo_r = 0x3fd8ba3fe43c337b  # 0.3863677719935407
+geometric_albedo_r = 0x3fd8f690573f4b7d  # 0.39004906196822003
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1659,9 +1659,9 @@ figure_pole_y = 0xbfe48267fc269068  # -0.6409187245194632
 figure_pole_z = 0x3fe5e87fa19ace47  # 0.684631171831321
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3fe43c337b  # 0.3863677719935407
+geometric_albedo_b = 0x3fd883ff39c155b2  # 0.38305645599515536
 geometric_albedo_v = 0x3fd8ba3fe43c337b  # 0.3863677719935407
-geometric_albedo_r = 0x3fd8ba3fe43c337b  # 0.3863677719935407
+geometric_albedo_r = 0x3fd8f690573f4b7d  # 0.39004906196822003
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1751,9 +1751,9 @@ figure_pole_y = 0xbfea46e46ea14c74  # -0.8211538468116388
 figure_pole_z = 0x3fe0656b960ed257  # 0.5123804026430417
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fbb84e9213e5867  # 0.10749680577859665
+geometric_albedo_b = 0x3fb6e082af0e39be  # 0.08936325811212151
 geometric_albedo_v = 0x3fbb84e9213e5867  # 0.10749680577859665
-geometric_albedo_r = 0x3fbb84e9213e5867  # 0.10749680577859665
+geometric_albedo_r = 0x3fbce53a438179de  # 0.11287273548212037
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1839,9 +1839,9 @@ figure_pole_y = 0x3fe5c9562fb254b7  # 0.6808272296499557
 figure_pole_z = 0xbfe50b0c6820fc53  # -0.6575986894384961
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab420e673911c3  # 0.053238344288306226
+geometric_albedo_b = 0x3fa6d37549d0016a  # 0.044582047710721565
 geometric_albedo_v = 0x3fab420e673911c3  # 0.053238344288306226
-geometric_albedo_r = 0x3fab420e673911c3  # 0.053238344288306226
+geometric_albedo_r = 0x3fb1d37921bcd5f4  # 0.06963307450936168
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -1927,9 +1927,9 @@ figure_pole_y = 0x3fe2ae122363aac5  # 0.5837488833616012
 figure_pole_z = 0xbfe4353fc2f14b7a  # -0.6315001304122767
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab420e673911c3  # 0.053238344288306226
+geometric_albedo_b = 0x3fa6d37549d0016a  # 0.044582047710721565
 geometric_albedo_v = 0x3fab420e673911c3  # 0.053238344288306226
-geometric_albedo_r = 0x3fab420e673911c3  # 0.053238344288306226
+geometric_albedo_r = 0x3fb1d37921bcd5f4  # 0.06963307450936168
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -2015,9 +2015,9 @@ figure_pole_y = 0xbfe3308dd2b6a4e1  # -0.5996770015236984
 figure_pole_z = 0x3fe65a9e94de41c4  # 0.6985619456846099
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab420e673911c3  # 0.053238344288306226
+geometric_albedo_b = 0x3fa6d37549d0016a  # 0.044582047710721565
 geometric_albedo_v = 0x3fab420e673911c3  # 0.053238344288306226
-geometric_albedo_r = 0x3fab420e673911c3  # 0.053238344288306226
+geometric_albedo_r = 0x3fb1d37921bcd5f4  # 0.06963307450936168
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -2199,9 +2199,9 @@ figure_pole_y = 0xbfe284516d112102  # -0.5786521082127651
 figure_pole_z = 0x3fe93c5f359e4ff4  # 0.7886196181520959
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba579e324355  # 0.3863734288107044
+geometric_albedo_b = 0x3fd88416bff2e063  # 0.3830620645999316
 geometric_albedo_v = 0x3fd8ba579e324355  # 0.3863734288107044
-geometric_albedo_r = 0x3fd8ba579e324355  # 0.3863734288107044
+geometric_albedo_r = 0x3fd8f6a84ac2739a  # 0.39005477238407027
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -2295,9 +2295,9 @@ figure_pole_y = 0xbfeb552082945e64  # -0.8541414785749564
 figure_pole_z = 0x3fe09ec526382bd6  # 0.5193811174843812
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba5789a4fc65  # 0.3863734096702898
+geometric_albedo_b = 0x3fd88416ab48db9f  # 0.38306204535495597
 geometric_albedo_v = 0x3fd8ba5789a4fc65  # 0.3863734096702898
-geometric_albedo_r = 0x3fd8ba5789a4fc65  # 0.3863734096702898
+geometric_albedo_r = 0x3fd8f6a836554260  # 0.39005475336037954
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -2391,9 +2391,9 @@ figure_pole_y = 0xbfe89ec4963da7e0  # -0.7693808493033849
 figure_pole_z = 0x3fe236da9e44aca7  # 0.569196042173094
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba5789a4266c  # 0.3863734096672491
+geometric_albedo_b = 0x3fd88416ab48047b  # 0.38306204535189864
 geometric_albedo_v = 0x3fd8ba5789a4266c  # 0.3863734096672491
-geometric_albedo_r = 0x3fd8ba5789a4266c  # 0.3863734096672491
+geometric_albedo_r = 0x3fd8f6a836546db4  # 0.3900547533573573
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -2487,9 +2487,9 @@ figure_pole_y = 0xbfd4ebb32c43cac5  # -0.32688597986922857
 figure_pole_z = 0x3fea63a43ee7c86c  # 0.8246632794018871
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab41e67d321620  # 0.05323715475337232
+geometric_albedo_b = 0x3fa6d353dd2fda2a  # 0.044581051588398715
 geometric_albedo_v = 0x3fab41e67d321620  # 0.05323715475337232
-geometric_albedo_r = 0x3fab41e67d321620  # 0.05323715475337232
+geometric_albedo_r = 0x3fb1d35f0767ac0e  # 0.06963151865754488
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -2575,9 +2575,9 @@ figure_pole_y = 0x3fe492a5548720fe  # 0.642901101201488
 figure_pole_z = 0xbfe3cf51d80bec5d  # -0.6190575809154201
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab41e67d321620  # 0.05323715475337232
+geometric_albedo_b = 0x3fa6d353dd2fda2a  # 0.044581051588398715
 geometric_albedo_v = 0x3fab41e67d321620  # 0.05323715475337232
-geometric_albedo_r = 0x3fab41e67d321620  # 0.05323715475337232
+geometric_albedo_r = 0x3fb1d35f0767ac0e  # 0.06963151865754488
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -2663,9 +2663,9 @@ figure_pole_y = 0x3feb30520c53e9fb  # 0.849648498609269
 figure_pole_z = 0xbfc4d6eb5ac40ebd  # -0.16280881816793694
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab41e67d321620  # 0.05323715475337232
+geometric_albedo_b = 0x3fa6d353dd2fda2a  # 0.044581051588398715
 geometric_albedo_v = 0x3fab41e67d321620  # 0.05323715475337232
-geometric_albedo_r = 0x3fab41e67d321620  # 0.05323715475337232
+geometric_albedo_r = 0x3fb1d35f0767ac0e  # 0.06963151865754488
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -2751,9 +2751,9 @@ figure_pole_y = 0xbfc3ee664a043866  # -0.15571287740789613
 figure_pole_z = 0xbfed8020efda41c7  # -0.9218907055492814
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab41e67d321620  # 0.05323715475337232
+geometric_albedo_b = 0x3fa6d353dd2fda2a  # 0.044581051588398715
 geometric_albedo_v = 0x3fab41e67d321620  # 0.05323715475337232
-geometric_albedo_r = 0x3fab41e67d321620  # 0.05323715475337232
+geometric_albedo_r = 0x3fb1d35f0767ac0e  # 0.06963151865754488
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -3022,7 +3022,7 @@ iron = 0x3f9b1e6f301ae3b4  # 0.026483285246942947
 rock = 0x3fef270c867f28e2  # 0.973516714753057
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x404a8dd523804cfe  # 53.10806697621045
+t_eq_k = 0x404a8dd520eeefbd  # 53.10806667010136
 moons: []
 rings: []
 population: NotApplicable
@@ -3060,9 +3060,9 @@ figure_pole_y = 0x3fec9d1961ce496d  # 0.8941771421689687
 figure_pole_z = 0x3fd16014cfd5b329  # 0.2714893369327905
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fd33ad220850d3c  # 0.30046513725047297
-geometric_albedo_v = 0x3fda018772af0f75  # 0.40634332847206817
-geometric_albedo_r = 0x3fdf800ca08beeab  # 0.4921905105436319
+geometric_albedo_b = 0x3fd5e2c1a35358bb  # 0.34196511220705944
+geometric_albedo_v = 0x3fda01878894f6f7  # 0.4063433488662293
+geometric_albedo_r = 0x3fdde0781810a0a8  # 0.4668255076417247
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3070,12 +3070,12 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fd4253da829dd1a  # 0.3147730009290669
+bond_albedo = 0x3fd4253db9207733  # 0.31477301672736074
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x404a8dd523804cfe  # 53.10806697621045
-equator_pole_contrast_k = 0x4022de8940fc3998  # 9.434640913762266
-day_night_contrast_k = 0x40433c0adfc83eeb  # 38.469081852699524
+mean_surface_temperature_k = 0x404a8dd520eeefbd  # 53.10806667010136
+equator_pole_contrast_k = 0x4022de893f291a34  # 9.434640859382036
+day_night_contrast_k = 0x40433c0adc5dff4c  # 38.46908144559583
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40b14f0698f2af26  # 4431.0257713010415
 continental_fraction = 0x0000000000000000  # 0.0
@@ -3113,7 +3113,7 @@ iron = 0x3fce885bfbe10daa  # 0.23853635596070194
 rock = 0x3fe85de90107bc96  # 0.7614636440392981
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40424616ecf969f4  # 36.54757463625347
+t_eq_k = 0x40424616ebb55f64  # 36.54757448536
 moons: []
 rings: []
 population: NotApplicable
@@ -3151,9 +3151,9 @@ figure_pole_y = 0x3feebc38368b6b7a  # 0.9604760232281102
 figure_pole_z = 0xbfccf7140ad39db3  # -0.22629023102420617
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fd4e97f3df61624  # 0.3267515282717304
-geometric_albedo_v = 0x3fdc47f7a920eabe  # 0.4418925429960544
-geometric_albedo_r = 0x3fe120c4dd6a7889  # 0.5352501225022631
+geometric_albedo_b = 0x3fd78c0b13be9977  # 0.3679225628678959
+geometric_albedo_v = 0x3fdc47f7b82f0f6b  # 0.4418925570173459
+geometric_albedo_r = 0x3fe4912c29cd7067  # 0.642721254010678
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3161,31 +3161,31 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fd5e86ceb941732  # 0.3423111248560985
+bond_albedo = 0x3fd5e86cf73db1ce  # 0.34231113571766236
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Tenuous, Rock; climate AirlessLike, Locked, N2, RadiativeEquilibrium
-mean_surface_temperature_k = 0x40424616ecf969f4  # 36.54757463625347
-equator_pole_contrast_k = 0x402ed7b0ec329bb4  # 15.421271687677155
-day_night_contrast_k = 0x4027669396e1cd70  # 11.700344767631321
-surface_pressure_pa = 0x3f83896e1c26c4ae  # 0.00953947089587567
-sigma_h_m = 0x40a0f452e1682212  # 2170.1618759671774
+mean_surface_temperature_k = 0x40424616ebb55f64  # 36.54757448536
+equator_pole_contrast_k = 0x402ed7b0ea0fb0ca  # 15.421271624007563
+day_night_contrast_k = 0x402766938e4a5622  # 11.700344511579775
+surface_pressure_pa = 0x3f83896e1ed10555  # 0.009539470973438805
+sigma_h_m = 0x40a0f452e1730c8e  # 2170.161876292498
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fa8c9d354adf8fd  # 0.04841480644880567
 surface_age_yr = 0x41b92d5ae63c8ef4  # 422402790.2365563
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3f90332c82a736c8  # 0.015820212816655382
+ice_fraction = 0x3f90332c82a73846  # 0.015820212816656708
 condensate: CO2, Solid, seasonal false
 reservoir_kg_m2 = 0x40e7a4b52c6a70b7  # 48421.66167184844
 reservoir_gel_m = 0x403cbb536bc631a4  # 28.731741653334794
 area_fraction = 0x3f8e7d079c0363a1  # 0.014886912773748597
 condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x409c829bc2251ffc  # 1824.6521077919742
-reservoir_gel_m = 0x3ffc8ce30af036d8  # 1.7843962123183044
-area_fraction = 0x3f4e4bc0607f906b  # 0.0009245576229628521
+reservoir_kg_m2 = 0x409c829bc225200d  # 1824.652107791978
+reservoir_gel_m = 0x3ffc8ce30af036e9  # 1.7843962123183081
+area_fraction = 0x3f4e4bc0607f907d  # 0.000924557622962854
 condensate: Ar, Solid, seasonal true
-reservoir_kg_m2 = 0x403d8024a699358a  # 29.500559246449065
-reservoir_gel_m = 0x3f91471f2bcebd43  # 0.01687287049179288
-area_fraction = 0x3ee2558d0c43a2e6  # 8.742419943934135e-6
+reservoir_kg_m2 = 0x403d8024a699266a  # 29.50055924643531
+reservoir_gel_m = 0x3f91471f2bd9fba5  # 0.016872870494349396
+area_fraction = 0x3ee2558d0c4f9143  # 8.742419945258753e-6
 crust: lid Secondary; primary ultramafic, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Oxidised, RockMelted(MagmaOcean)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k: none
@@ -3216,7 +3216,7 @@ iron = 0x3fdab81f943232d0  # 0.4174879977443142
 rock = 0x3fe2a3f035e6e698  # 0.5825120022556858
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403bee1cb1497a48  # 27.930125313223726
+t_eq_k = 0x403bee1caff0ede3  # 27.930125233002297
 moons: []
 rings: []
 population: NotApplicable
@@ -3254,9 +3254,9 @@ figure_pole_y = 0x3fee6b70ce5a3a28  # 0.9506153135606086
 figure_pole_z = 0xbfcdfb4dccc76292  # -0.2342316865822523
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fcc39de10af19cb  # 0.22051597418449229
-geometric_albedo_v = 0x3fd31610102861e6  # 0.2982216031828372
-geometric_albedo_r = 0x3fd71e545baf1c71  # 0.3612261672355493
+geometric_albedo_b = 0x3fd2f885aca6e03f  # 0.29641858921559455
+geometric_albedo_v = 0x3fd316101c6753c0  # 0.2982216145876997
+geometric_albedo_r = 0x3fd32f178853e47a  # 0.29974926293613857
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3264,7 +3264,7 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fcd91f4d486ad4f  # 0.2310167348599443
+bond_albedo = 0x3fcd91f4e77fa234  # 0.23101674369469694
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Tenuous, Rock; climate AirlessLike, Locked, N2, RadiativeEquilibrium
 mean_surface_temperature_k = 0x403e1305039ee60f  # 30.074295259755726
@@ -3354,9 +3354,9 @@ figure_pole_y = 0x3fed7f4ba732afdf  # 0.9217890039049016
 figure_pole_z = 0xbfc459c2a8f7ee03  # -0.15898926973737568
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd300991e6e2cf7  # 0.29691150638309644
+geometric_albedo_b = 0x3fd2ee60e02630b3  # 0.2957994641262857
 geometric_albedo_v = 0x3fd300991e6e2cf7  # 0.29691150638309644
-geometric_albedo_r = 0x3fd300991e6e2cf7  # 0.29691150638309644
+geometric_albedo_r = 0x3fd314da80696550  # 0.2981477979679612
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -3461,9 +3461,9 @@ figure_pole_y = 0x3feac907fc61056e  # 0.8370399407651072
 figure_pole_z = 0xbfb31d878d92dd94  # -0.07466933447255136
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fec216462f92ffe  # 0.8790761883806224
+geometric_albedo_b = 0x3ff305834537d025  # 1.1888458923176668
 geometric_albedo_v = 0x3ff30583455cead0  # 1.1888458928576036
-geometric_albedo_r = 0x3ff70a487812cd19  # 1.44001051810921
+geometric_albedo_r = 0x3ff30583454e10b1  # 1.188845892641478
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3564,9 +3564,9 @@ figure_pole_y = 0x3fecb810d8b0c878  # 0.8974689705121497
 figure_pole_z = 0xbfdbe92b20824f7f  # -0.4361064736815407
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fe175a33d5c53b9  # 0.5456100653124089
+geometric_albedo_b = 0x3fe16c393eb9e249  # 0.5444608903045004
 geometric_albedo_v = 0x3fe175a33d5c53b9  # 0.5456100653124089
-geometric_albedo_r = 0x3fe175a33d5c53b9  # 0.5456100653124089
+geometric_albedo_r = 0x3fe1801a80e6db75  # 0.5468876378644
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -3633,7 +3633,7 @@ iron = 0x3fe0eb34e6b87f2c  # 0.5287117487205015
 rock = 0x3fde2996328f01a8  # 0.47128825127949847
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x400efee4012088bc  # 3.8744583213857293
+t_eq_k = 0x400efee4011a578a  # 3.8744583212055135
 moons: []
 rings: []
 population: NotApplicable
@@ -3671,9 +3671,9 @@ figure_pole_y = 0x3fefc24dbebec26c  # 0.9924687123767177
 figure_pole_z = 0xbfb89260cf7ff754  # -0.09598355356135119
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fdce78a0997d717  # 0.4516320317919606
-geometric_albedo_v = 0x3fe38b7f7913c714  # 0.6107785572805562
-geometric_albedo_r = 0x3fe7ac93314e0a61  # 0.7398162806496879
+geometric_albedo_b = 0x3fe36fb2525d1def  # 0.6073848351160772
+geometric_albedo_v = 0x3fe38b7f79252b5e  # 0.6107785574070979
+geometric_albedo_r = 0x3fe39a6b1db16534  # 0.6125999050083579
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3681,7 +3681,7 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fde47e5f1ab42dc  # 0.47313831902014925
+bond_albedo = 0x3fde47e5f1c634c6  # 0.4731383191181745
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Tenuous, Rock; climate AirlessLike, Seasonal, N2, RadiativeEquilibrium
 mean_surface_temperature_k = 0x40403b94f9e28d08  # 32.46548389017158
@@ -3771,9 +3771,9 @@ figure_pole_y = 0x3feb36fb05edced0  # 0.8504614940452146
 figure_pole_z = 0xbf989ea279cf17a8  # -0.024042643246296486
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fec259572783341  # 0.8795878635151909
+geometric_albedo_b = 0x3ff30858dd1b1e15  # 1.1895378720236114
 geometric_albedo_v = 0x3ff30858dd403629  # 1.189537872563401
-geometric_albedo_r = 0x3ff70db75b51620e  # 1.4408486907105984
+geometric_albedo_r = 0x3ff30858dd315ccb  # 1.1895378723473182
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3891,7 +3891,7 @@ iron = 0x3fb5da2729dc5106  # 0.08536000034320432
 rock = 0x3fed44bb1ac475df  # 0.9146399996567957
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406a04b030b214aa  # 208.14650759488478
+t_eq_k = 0x406a01e443489cec  # 208.0591141145918
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -3929,9 +3929,9 @@ figure_pole_y = 0xbf915e3a3719004c  # -0.01696101151742395
 figure_pole_z = 0xbfc556c8e63f4bbb  # -0.16671096079389067
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fb4ceeb17739fc9  # 0.08128232309866158
-geometric_albedo_v = 0x3fbc2405db72eb98  # 0.10992466552390423
-geometric_albedo_r = 0x3fc10afff1131ee9  # 0.13314818640923612
+geometric_albedo_b = 0x3fb81bfd665097fd  # 0.09417709110184087
+geometric_albedo_v = 0x3fbca5ed1fc03f6d  # 0.11190683388872254
+geometric_albedo_r = 0x3fc074c5a0b5c5b6  # 0.12856359812898938
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -3939,23 +3939,23 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fb5cc94c33c2d7d  # 0.08515290991288356
-bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
+bond_albedo = 0x3fb63135e282e56b  # 0.08668839244901043
+bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Airless, Rock; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x406a04b030b214aa  # 208.14650759488478
-equator_pole_contrast_k = 0x405372481e2f6f30  # 77.78565172798403
-day_night_contrast_k = 0x406754272524c574  # 186.62977845365424
+mean_surface_temperature_k = 0x406a01e443489cec  # 208.0591141145918
+equator_pole_contrast_k = 0x40537031065adfe6  # 77.7529922378013
+day_night_contrast_k = 0x40675116fd9f21a8  # 186.53405648308149
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x40b28f35a58620ca  # 4751.209556944852
+sigma_h_m = 0x40b28f35a590e5c2  # 4751.209557586759
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f74fc4701961df1  # 0.005123402946430642
 surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3e3b08fabfd48e5c  # 6.294594176868524e-9
+ice_fraction = 0x3e3b1240dace8877  # 6.303028693515758e-9
 condensate: H2O, Solid, seasonal false
-reservoir_kg_m2 = 0x3ecbf5ff49f94fa1  # 3.333202201175363e-6
-reservoir_gel_m = 0x3e2eb2811c80eeb4  # 3.5736340310818676e-9
-area_fraction = 0x3e3b08fabfd48e5c  # 6.294594176868524e-9
+reservoir_kg_m2 = 0x3ecbff96b2d6e030  # 3.3376685652751684e-6
+reservoir_gel_m = 0x3e2ebd08d0ec9e28  # 3.5784225646837716e-9
+area_fraction = 0x3e3b1240dace8877  # 6.303028693515758e-9
 crust: lid Secondary; primary none, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Intermediate, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40b2cfdcf69ab514  # 4815.863137883385
@@ -4021,9 +4021,9 @@ figure_pole_y = 0xbfb8c16497204387  # -0.09670094194031097
 figure_pole_z = 0x3fe3d22640f20816  # 0.6194030064073128
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd7bb951fe2799f  # 0.3708241282819475
+geometric_albedo_b = 0x3fd7878333c5d4da  # 0.36764602714477024
 geometric_albedo_v = 0x3fd7bb951fe2799f  # 0.3708241282819475
-geometric_albedo_r = 0x3fd7bb951fe2799f  # 0.3708241282819475
+geometric_albedo_r = 0x3fd7f57866d2fa40  # 0.3743573192731766
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -4117,9 +4117,9 @@ figure_pole_y = 0xbfe73b312a0df6b9  # -0.725975591790948
 figure_pole_z = 0xbfd1c45f0239b18e  # -0.2776105424625478
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd7d9d4a91c13a0  # 0.37267033114067694
+geometric_albedo_b = 0x3fd7a5805f906fe5  # 0.36947640736047865
 geometric_albedo_v = 0x3fd7d9d4a91c13a0  # 0.37267033114067694
-geometric_albedo_r = 0x3fd7d9d4a91c13a0  # 0.37267033114067694
+geometric_albedo_r = 0x3fd81401b7b724a3  # 0.376221112641881
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -4301,9 +4301,9 @@ figure_pole_y = 0xbfd4cd45433dd011  # -0.325028720536694
 figure_pole_z = 0xbfe91a9844815956  # -0.7844964349740546
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd7b76ed25d298c  # 0.3705708555541143
+geometric_albedo_b = 0x3fd7836600ecb9d0  # 0.3673949250250219
 geometric_albedo_v = 0x3fd7b76ed25d298c  # 0.3705708555541143
-geometric_albedo_r = 0x3fd7b76ed25d298c  # 0.3705708555541143
+geometric_albedo_r = 0x3fd7f147fa396863  # 0.3741016334148581
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -4393,9 +4393,9 @@ figure_pole_y = 0x3f9ce568da21f89f  # 0.028218878091586515
 figure_pole_z = 0x3fbaf8c6214d4a7f  # 0.10535848916087252
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd7cb8b8ee32dfd  # 0.37179840997552543
+geometric_albedo_b = 0x3fd797569e1962eb  # 0.3686119598328747
 geometric_albedo_v = 0x3fd7cb8b8ee32dfd  # 0.37179840997552543
-geometric_albedo_r = 0x3fd7cb8b8ee32dfd  # 0.37179840997552543
+geometric_albedo_r = 0x3fd80595c4205e9b  # 0.3753408828065205
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -4687,9 +4687,9 @@ figure_pole_y = 0xbfe867b6c61b4e03  # -0.7626603955527006
 figure_pole_z = 0x3fdf48e34fc050d4  # 0.48882372654158
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba78d6bd6d24  # 0.38638134928415213
+geometric_albedo_b = 0x3fd88437af51180c  # 0.38306991692331915
 geometric_albedo_v = 0x3fd8ba78d6bd6d24  # 0.38638134928415213
-geometric_albedo_r = 0x3fd8ba78d6bd6d24  # 0.38638134928415213
+geometric_albedo_r = 0x3fd8f6c9d4a7ba7c  # 0.3900627686224778
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -4783,9 +4783,9 @@ figure_pole_y = 0xbfe2b19de8543b11  # -0.5841817414928717
 figure_pole_z = 0x3fe9e4c18fb09619  # 0.8091743284646241
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba8156886d20  # 0.3863833756492614
+geometric_albedo_b = 0x3fd884401d8abc68  # 0.38307192692713565
 geometric_albedo_v = 0x3fd8ba8156886d20  # 0.3863833756492614
-geometric_albedo_r = 0x3fd8ba8156886d20  # 0.3863833756492614
+geometric_albedo_r = 0x3fd8f6d267fa1539  # 0.3900648131751328
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -4879,9 +4879,9 @@ figure_pole_y = 0xbfe1e74b57516737  # -0.5594841676167793
 figure_pole_z = 0x3fea7f8462cc9298  # 0.8280660562200692
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ca9d7b9e92e4  # 0.3873666484089837
+geometric_albedo_b = 0x3fd89438e91c6876  # 0.38404677166693746
 geometric_albedo_v = 0x3fd8ca9d7b9e92e4  # 0.3873666484089837
-geometric_albedo_r = 0x3fd8ca9d7b9e92e4  # 0.3873666484089837
+geometric_albedo_r = 0x3fd90715d9afe900  # 0.39105745562086724
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -5114,7 +5114,7 @@ iron = 0x3f99d1103c595f0d  # 0.02521157615987506
 rock = 0x3fef31777e1d3508  # 0.974788423840125
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x408504a6cd21633a  # 672.5814459427268
+t_eq_k = 0x40850264447b4e80  # 672.2989587434131
 moons: []
 rings: []
 population: NotApplicable
@@ -5152,9 +5152,9 @@ figure_pole_y = 0xbfd2a7923860a5b7  # -0.2914777327119639
 figure_pole_z = 0xbfb40e4b51b7307e  # -0.0783431124211251
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fb4d0004784aec6  # 0.08129884477664992
-geometric_albedo_v = 0x3fbc257cb87dccaa  # 0.10994700912651703
-geometric_albedo_r = 0x3fc10be2f8bf9196  # 0.13317525049127416
+geometric_albedo_b = 0x3fb81d418d40a25d  # 0.09419641207262815
+geometric_albedo_v = 0x3fbca76e60d6c49f  # 0.11192979683143499
+geometric_albedo_r = 0x3fc075a2f5470aed  # 0.1285899827617735
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -5162,14 +5162,14 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fb5cdb7265a3d31  # 0.08517021833744277
+bond_albedo = 0x3fb63260523a335b  # 0.08670618064406936
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x408504a6cd21633a  # 672.5814459427268
-equator_pole_contrast_k = 0x407591526565b604  # 345.08261623125895
-day_night_contrast_k = 0x4089cf11537c8e48  # 825.8834600191994
+mean_surface_temperature_k = 0x40850264447b4e80  # 672.2989587434131
+equator_pole_contrast_k = 0x40758f00bcbda9c4  # 344.93767999732177
+day_night_contrast_k = 0x4089cc2e060baaff  # 825.5224724685248
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408d83fc70d6ca55  # 944.4982620983598
+sigma_h_m = 0x408d84fb20f6b242  # 944.6226214669371
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb19274c35043e8  # 0.06864099281689529
 surface_age_yr = 0x41a23f7b6247160c  # 153075121.13884008
@@ -5202,7 +5202,7 @@ iron = 0x3fd4f6e06e876e6a  # 0.3275681571373982
 rock = 0x3fe5848fc8bc48cb  # 0.6724318428626018
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x4081dd41fcac0adf  # 571.6572202149217
+t_eq_k = 0x4081db84b6225ea8  # 571.4398005185258
 moons: []
 rings: []
 population: NotApplicable
@@ -5240,9 +5240,9 @@ figure_pole_y = 0xbfd0bf25fb01e652  # -0.261666770100054
 figure_pole_z = 0xbfc5112de2d33897  # -0.16458676886981458
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fa6954e7a37cc2c  # 0.04410786859434554
-geometric_albedo_v = 0x3fae8a876374e83b  # 0.05965064133711492
-geometric_albedo_r = 0x3fb27f2a55794824  # 0.07225288950692793
+geometric_albedo_b = 0x3faaa8b5be1ec72b  # 0.052068404634509534
+geometric_albedo_v = 0x3faf7fe800c555e9  # 0.06152272233400053
+geometric_albedo_r = 0x3fb1d0d3d9b1e888  # 0.06959270539110396
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -5250,14 +5250,14 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fa7a89b5b77682f  # 0.04620824328931438
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fa866b01d713421  # 0.04765844687845112
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x4081dd41fcac0adf  # 571.6572202149217
-equator_pole_contrast_k = 0x407067b497e31fa9  # 262.4815901634234
-day_night_contrast_k = 0x4085c212dba6c9c7  # 696.2592080145195
+mean_surface_temperature_k = 0x4081db84b6225ea8  # 571.4398005185258
+equator_pole_contrast_k = 0x4070661bb04fc060  # 262.38175994065205
+day_night_contrast_k = 0x4085bfd9d7d5ab51  # 695.9813687031657
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408d628c43d07604  # 940.3184887205139
+sigma_h_m = 0x408d63020e6ba174  # 940.3760040672919
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb2fb0dabacb367  # 0.0741432708861801
 surface_age_yr = 0x419d2a66560b5a71  # 122329493.5110872
@@ -5385,7 +5385,7 @@ iron = 0x3fb33595e43ac15d  # 0.07503640005120844
 rock = 0x3fed994d4378a7d4  # 0.9249635999487915
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x408927764d183d54  # 804.9327642339435
+t_eq_k = 0x408924cc6a18eb76  # 804.5998117396218
 moons: [0b01]
 rings: []
 population: NotApplicable
@@ -5423,9 +5423,9 @@ figure_pole_y = 0x3fdac0d852646fe6  # 0.4180203251469251
 figure_pole_z = 0x3fe3db09d8f50c5a  # 0.6204880940862367
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fb2ab3e5efa4d85  # 0.07292547053139316
-geometric_albedo_v = 0x3fb93f5ba9e4ca5c  # 0.09862301729007455
-geometric_albedo_r = 0x3fbe94db32be975d  # 0.11945886601332974
+geometric_albedo_b = 0x3fb5ac14d7ea42ad  # 0.08465700408329253
+geometric_albedo_v = 0x3fb9c08fb5063ef7  # 0.10059450311223005
+geometric_albedo_r = 0x3fbd95d4b440104f  # 0.11556748772278634
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -5433,14 +5433,14 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fb38ed3a073efb0  # 0.07639811198526902
+bond_albedo = 0x3fb3f2e9e9fa0582  # 0.07792531931229088
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x408927764d183d54  # 804.9327642339435
-equator_pole_contrast_k = 0xc053131daff9c5d8  # -76.29868697540167
-day_night_contrast_k = 0x408eff84ae6160d3  # 991.9397857291864
+mean_surface_temperature_k = 0x408924cc6a18eb76  # 804.5998117396218
+equator_pole_contrast_k = 0xc05311189ae83ce8  # -76.2671267764996
+day_night_contrast_k = 0x408efc1d4e485f21  # 991.5143094686538
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408c28f930f9ae1a  # 901.121675444246
+sigma_h_m = 0x408c291099e99204  # 901.1331060645757
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb8f0b2ddf3d5a8  # 0.09742277067910854
 surface_age_yr = 0x418a5e45e451951a  # 55298236.53983517
@@ -5490,7 +5490,7 @@ iron = 0x3fcb068590ee431f  # 0.21113652779288203
 rock = 0x3fe93e5e9bc46f38  # 0.7888634722071179
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40832ed1e7bb3565  # 613.8524927735967
+t_eq_k = 0x40832cc9e3a7f60c  # 613.5985787507975
 moons: []
 rings: []
 population: NotApplicable
@@ -5528,9 +5528,9 @@ figure_pole_y = 0xbfe49600ddcd601c  # -0.6433109600138809
 figure_pole_z = 0x3fe8596ed99dc937  # 0.7609171152419439
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fb2ab3e5d3f5773  # 0.07292547012852228
-geometric_albedo_v = 0x3fb93f5ba78dbcf8  # 0.09862301674523966
-geometric_albedo_r = 0x3fbe94db2fe8fa86  # 0.11945886535338887
+geometric_albedo_b = 0x3fb5ac14d5dddac8  # 0.0846570036063482
+geometric_albedo_v = 0x3fb9c08fb2971d9b  # 0.10059450254549633
+geometric_albedo_r = 0x3fbd95d4b1742f00  # 0.11556748707169717
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -5538,14 +5538,14 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fb38ed39ea3e1b6  # 0.07639811156321383
+bond_albedo = 0x3fb3f2e9e81750a0  # 0.07792531887327181
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x40832ed1e7bb3565  # 613.8524927735967
-equator_pole_contrast_k = 0x40716f875eebf56d  # 278.9705495087754
-day_night_contrast_k = 0x40875d7878646d57  # 747.6838233800762
+mean_surface_temperature_k = 0x40832cc9e3a7f60c  # 613.5985787507975
+equator_pole_contrast_k = 0x40716daeb8286975  # 278.85515609537043
+day_night_contrast_k = 0x40875adff1f292c3  # 747.3593481970823
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x408c85c1f27acf9d  # 912.7197007746323
+sigma_h_m = 0x408c85f53712a850  # 912.7447339494338
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fb925f557ea29b9  # 0.09823544880251846
 surface_age_yr = 0x4189bd2cf32bbc4b  # 53978526.396355234
@@ -5809,7 +5809,7 @@ iron = 0x3fd5714e0ab7069f  # 0.3350405792844899
 rock = 0x3fe502ad22915918  # 0.6565766978408503
 water = 0x0000000000000000  # 0.0
 envelope = 0x3f812af604c8e65f  # 0.008382722874659963
-t_eq_k = 0x4063d770db4ea255  # 158.7325264488051
+t_eq_k = 0x4063dcb6fd4d6b82  # 158.89733758088192
 moons: [1001, 1002, 1003, 1004, 1005]
 rings: [1080]
 population: NotApplicable
@@ -5847,9 +5847,9 @@ figure_pole_y = 0xbfe84075ed026862  # -0.7578687314119288
 figure_pole_z = 0x3fe4b064a04996ec  # 0.6465323572744786
 moment_of_inertia_factor = 0x3fcd70a3d70a3d71  # 0.23
 photometry: Neptune, provisional true
-geometric_albedo_b = 0x3fe305fc4b8675f7  # 0.5944806552030845
-geometric_albedo_v = 0x3fddec430e076def  # 0.46754528398534395
-geometric_albedo_r = 0x3fc881ca0803c49b  # 0.1914608515867585
+geometric_albedo_b = 0x3fe2de67fa9310f3  # 0.5896491903336297
+geometric_albedo_v = 0x3fddae0163e0f37b  # 0.4637454486253813
+geometric_albedo_r = 0x3fc84ecd030829e0  # 0.18990481040994123
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -5857,7 +5857,7 @@ phase_integral_b = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_v = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fd5aab81365c71c  # 0.338544863646449
+bond_albedo = 0x3fd57da3c5af9c83  # 0.3357934408690612
 bond_ratio = 0x3ffb71b9571a4b65  # 1.7152646448564266
 envelope: Ok
 body 1001 C g I: Moon(Regular) about Some(Body(BodyIndex(4096))), Present
@@ -6009,9 +6009,9 @@ figure_pole_y = 0xbfde5c4a54152bab  # -0.4743829556579679
 figure_pole_z = 0xbfeb04f349ba7f7c  # -0.8443542900094907
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab4213b028b83a  # 0.053238501790801654
+geometric_albedo_b = 0x3fa6d379b6c48ea7  # 0.044582179604075116
 geometric_albedo_v = 0x3fab4213b028b83a  # 0.053238501790801654
-geometric_albedo_r = 0x3fab4213b028b83a  # 0.053238501790801654
+geometric_albedo_r = 0x3fb1d37c96861916  # 0.06963328051469761
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6097,9 +6097,9 @@ figure_pole_y = 0xbfe646b9354a0837  # -0.6961332360081148
 figure_pole_z = 0x3fc57189520a7bca  # 0.16752735620408848
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
+geometric_albedo_b = 0x3fd883fc1f28861f  # 0.38305571596910853
 geometric_albedo_v = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
-geometric_albedo_r = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
+geometric_albedo_r = 0x3fd8f68d2e252864  # 0.39004830843317095
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6185,9 +6185,9 @@ figure_pole_y = 0xbf9e35b697beecdc  # -0.029501774799183575
 figure_pole_z = 0xbfeff225d74a2c9c  # -0.9983090596082493
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
+geometric_albedo_b = 0x3fd883fc1f28861f  # 0.38305571596910853
 geometric_albedo_v = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
-geometric_albedo_r = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
+geometric_albedo_r = 0x3fd8f68d2e252864  # 0.39004830843317095
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6273,9 +6273,9 @@ figure_pole_y = 0x3fe9e69e00fd91fb  # 0.8094015139909624
 figure_pole_z = 0xbfc6ea362fc91550  # -0.17902257283473455
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
+geometric_albedo_b = 0x3fd883fc1f28861f  # 0.38305571596910853
 geometric_albedo_v = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
-geometric_albedo_r = 0x3fd8ba3cc2c4f63f  # 0.3863670255703688
+geometric_albedo_r = 0x3fd8f68d2e252864  # 0.39004830843317095
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6348,7 +6348,7 @@ iron = 0x3fc29bf1cfde3b87  # 0.14538405084428183
 rock = 0x3fd23bef3f7ce61c  # 0.2849081153868569
 water = 0x3fe0140cc6eb0a1c  # 0.5024474988097754
 envelope = 0x3fb137f92af79fa2  # 0.06726033495908593
-t_eq_k = 0x405befdfa328f0df  # 111.74802474020133
+t_eq_k = 0x405c45424810fd86  # 113.08217050227367
 moons: [1101, 1102, 1103, 1104, 1105, 1106]
 rings: [1180]
 population: NotApplicable
@@ -6386,9 +6386,9 @@ figure_pole_y = 0xbfddbde5c5702303  # -0.46471542626436263
 figure_pole_z = 0x3fe9b6a173cb5643  # 0.803543783341134
 moment_of_inertia_factor = 0x3fcd70a3d70a3d71  # 0.23
 photometry: Neptune, provisional false
-geometric_albedo_b = 0x3fd27a06f20debf9  # 0.28869794500468476
-geometric_albedo_v = 0x3fcd101d2548014a  # 0.227054255679841
-geometric_albedo_r = 0x3fb7cd7ca6101cdb  # 0.09297923139830593
+geometric_albedo_b = 0x3fcbd283d3bf0e31  # 0.2173619064252406
+geometric_albedo_v = 0x3fc5e1b178fb629e  # 0.17095011145899702
+geometric_albedo_r = 0x3fb1ebcfe7239ae7  # 0.07000445740741733
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -6396,8 +6396,8 @@ phase_integral_b = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_v = 0x3ff3df41a7b098bf  # 1.242005972898866
 phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fc50b4fe0a03a83  # 0.16440771549283192
-bond_ratio = 0x3ffb71b9571a4b65  # 1.7152646448564266
+bond_albedo = 0x3fbfb042968614d3  # 0.123783265828098
+bond_ratio = 0x3ffb71b9571a4b66  # 1.7152646448564268
 envelope: NotModelled
 body 1101 C h I: Moon(Regular) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ef59ea8d60f3a0a  # 2.0618213401319244e-5
@@ -6460,9 +6460,9 @@ figure_pole_y = 0xbfda5213579cd4a3  # -0.41125949436111336
 figure_pole_z = 0x3fea62dc22050b7b  # 0.8245678581664458
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3fe4689856  # 0.38636777215504503
+geometric_albedo_b = 0x3fd883ff39ed5926  # 0.3830564561552755
 geometric_albedo_v = 0x3fd8ba3fe4689856  # 0.38636777215504503
-geometric_albedo_r = 0x3fd8ba3fe4689856  # 0.38636777215504503
+geometric_albedo_r = 0x3fd8f690576c1ca1  # 0.39004906213126317
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6552,9 +6552,9 @@ figure_pole_y = 0xbfe48267fc269068  # -0.6409187245194632
 figure_pole_z = 0x3fe5e87fa19ace47  # 0.684631171831321
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba3fe4689856  # 0.38636777215504503
+geometric_albedo_b = 0x3fd883ff39ed5926  # 0.3830564561552755
 geometric_albedo_v = 0x3fd8ba3fe4689856  # 0.38636777215504503
-geometric_albedo_r = 0x3fd8ba3fe4689856  # 0.38636777215504503
+geometric_albedo_r = 0x3fd8f690576c1ca1  # 0.39004906213126317
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6644,9 +6644,9 @@ figure_pole_y = 0xbfea46e46ea14c74  # -0.8211538468116388
 figure_pole_z = 0x3fe0656b960ed257  # 0.5123804026430417
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fbb84e9212ebc7c  # 0.1074968057644003
+geometric_albedo_b = 0x3fb6e082af013fe5  # 0.08936325810031993
 geometric_albedo_v = 0x3fbb84e9212ebc7c  # 0.1074968057644003
-geometric_albedo_r = 0x3fbb84e9212ebc7c  # 0.1074968057644003
+geometric_albedo_r = 0x3fbce53a4371161d  # 0.11287273546721406
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6732,9 +6732,9 @@ figure_pole_y = 0x3fe5c9562fb254b7  # 0.6808272296499557
 figure_pole_z = 0xbfe50b0c6820fc53  # -0.6575986894384961
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab420e67021b17  # 0.05323834426331169
+geometric_albedo_b = 0x3fa6d37549a1fa90  # 0.044582047689791016
 geometric_albedo_v = 0x3fab420e67021b17  # 0.05323834426331169
-geometric_albedo_r = 0x3fab420e67021b17  # 0.05323834426331169
+geometric_albedo_r = 0x3fb1d3792198e416  # 0.06963307447667008
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6820,9 +6820,9 @@ figure_pole_y = 0x3fe2ae122363aac5  # 0.5837488833616012
 figure_pole_z = 0xbfe4353fc2f14b7a  # -0.6315001304122767
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab420e67021b17  # 0.05323834426331169
+geometric_albedo_b = 0x3fa6d37549a1fa90  # 0.044582047689791016
 geometric_albedo_v = 0x3fab420e67021b17  # 0.05323834426331169
-geometric_albedo_r = 0x3fab420e67021b17  # 0.05323834426331169
+geometric_albedo_r = 0x3fb1d3792198e416  # 0.06963307447667008
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -6908,9 +6908,9 @@ figure_pole_y = 0xbfe3308dd2b6a4e1  # -0.5996770015236984
 figure_pole_z = 0x3fe65a9e94de41c4  # 0.6985619456846099
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab420e67021b17  # 0.05323834426331169
+geometric_albedo_b = 0x3fa6d37549a1fa90  # 0.044582047689791016
 geometric_albedo_v = 0x3fab420e67021b17  # 0.05323834426331169
-geometric_albedo_r = 0x3fab420e67021b17  # 0.05323834426331169
+geometric_albedo_r = 0x3fb1d3792198e416  # 0.06963307447667008
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -7092,9 +7092,9 @@ figure_pole_y = 0xbfe284516d112102  # -0.5786521082127651
 figure_pole_z = 0x3fe93c5f359e4ff4  # 0.7886196181520959
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba579e5ebd1c  # 0.38637342897250604
+geometric_albedo_b = 0x3fd88416c01ef895  # 0.3830620647603465
 geometric_albedo_v = 0x3fd8ba579e5ebd1c  # 0.38637342897250604
-geometric_albedo_r = 0x3fd8ba579e5ebd1c  # 0.38637342897250604
+geometric_albedo_r = 0x3fd8f6a84aef59dc  # 0.3900547725474135
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -7188,9 +7188,9 @@ figure_pole_y = 0xbfeb552082945e64  # -0.8541414785749564
 figure_pole_z = 0x3fe09ec526382bd6  # 0.5193811174843812
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba5789d1762a  # 0.38637340983209134
+geometric_albedo_b = 0x3fd88416ab74f3cf  # 0.38306204551537076
 geometric_albedo_v = 0x3fd8ba5789d1762a  # 0.38637340983209134
-geometric_albedo_r = 0x3fd8ba5789d1762a  # 0.38637340983209134
+geometric_albedo_r = 0x3fd8f6a8368228a1  # 0.3900547535237227
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -7284,9 +7284,9 @@ figure_pole_y = 0xbfe89ec4963da7e0  # -0.7693808493033849
 figure_pole_z = 0x3fe236da9e44aca7  # 0.569196042173094
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba5789d0a02f  # 0.3863734098290505
+geometric_albedo_b = 0x3fd88416ab741ca9  # 0.3830620455123133
 geometric_albedo_v = 0x3fd8ba5789d0a02f  # 0.3863734098290505
-geometric_albedo_r = 0x3fd8ba5789d0a02f  # 0.3863734098290505
+geometric_albedo_r = 0x3fd8f6a8368153f3  # 0.39005475352070035
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -7380,9 +7380,9 @@ figure_pole_y = 0xbfd4ebb32c43cac5  # -0.32688597986922857
 figure_pole_z = 0x3fea63a43ee7c86c  # 0.8246632794018871
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab41e67cfaf82f  # 0.05323715472830803
+geometric_albedo_b = 0x3fa6d353dd01b26e  # 0.044581051567409755
 geometric_albedo_v = 0x3fab41e67cfaf82f  # 0.05323715472830803
-geometric_albedo_r = 0x3fab41e67cfaf82f  # 0.05323715472830803
+geometric_albedo_r = 0x3fb1d35f0743a082  # 0.06963151862476205
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -7468,9 +7468,9 @@ figure_pole_y = 0x3fe492a5548720fe  # 0.642901101201488
 figure_pole_z = 0xbfe3cf51d80bec5d  # -0.6190575809154201
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab41e67cfaf82f  # 0.05323715472830803
+geometric_albedo_b = 0x3fa6d353dd01b26e  # 0.044581051567409755
 geometric_albedo_v = 0x3fab41e67cfaf82f  # 0.05323715472830803
-geometric_albedo_r = 0x3fab41e67cfaf82f  # 0.05323715472830803
+geometric_albedo_r = 0x3fb1d35f0743a082  # 0.06963151862476205
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -7556,9 +7556,9 @@ figure_pole_y = 0x3feb30520c53e9fb  # 0.849648498609269
 figure_pole_z = 0xbfc4d6eb5ac40ebd  # -0.16280881816793694
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab41e67cfaf82f  # 0.05323715472830803
+geometric_albedo_b = 0x3fa6d353dd01b26e  # 0.044581051567409755
 geometric_albedo_v = 0x3fab41e67cfaf82f  # 0.05323715472830803
-geometric_albedo_r = 0x3fab41e67cfaf82f  # 0.05323715472830803
+geometric_albedo_r = 0x3fb1d35f0743a082  # 0.06963151862476205
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -7644,9 +7644,9 @@ figure_pole_y = 0xbfc3ee664a043866  # -0.15571287740789613
 figure_pole_z = 0xbfed8020efda41c7  # -0.9218907055492814
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fab41e67cfaf82f  # 0.05323715472830803
+geometric_albedo_b = 0x3fa6d353dd01b26e  # 0.044581051567409755
 geometric_albedo_v = 0x3fab41e67cfaf82f  # 0.05323715472830803
-geometric_albedo_r = 0x3fab41e67cfaf82f  # 0.05323715472830803
+geometric_albedo_r = 0x3fb1d35f0743a082  # 0.06963151862476205
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -7915,7 +7915,7 @@ iron = 0x3f9b1e6f301ae3b4  # 0.026483285246942947
 rock = 0x3fef270c867f28e2  # 0.973516714753057
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x404a8dd51199b7ef  # 53.1080648422793
+t_eq_k = 0x404a8dd50f085acb  # 53.10806453617041
 moons: []
 rings: []
 population: NotApplicable
@@ -7953,9 +7953,9 @@ figure_pole_y = 0x3fec9d1961ce496d  # 0.8941771421689687
 figure_pole_z = 0x3fd16014cfd5b329  # 0.2714893369327905
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fd33ad2230b25ef  # 0.3004651396009583
-geometric_albedo_v = 0x3fda01877618d436  # 0.4063433316508197
-geometric_albedo_r = 0x3fdf800ca4ae4cc3  # 0.4921905143939506
+geometric_albedo_b = 0x3fd5e2c1a632adab  # 0.3419651148821809
+geometric_albedo_v = 0x3fda01878bfebad5  # 0.40634335204496824
+geometric_albedo_r = 0x3fdde0781bfc72bd  # 0.4668255112936029
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -7963,12 +7963,12 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fd4253daaceba06  # 0.31477300339148007
+bond_albedo = 0x3fd4253dbbc5536f  # 0.31477301918976414
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x404a8dd51199b7ef  # 53.1080648422793
-equator_pole_contrast_k = 0x4022de893443d834  # 9.43464053466969
-day_night_contrast_k = 0x40433c0acf366e31  # 38.46907987745033
+mean_surface_temperature_k = 0x404a8dd50f085acb  # 53.10806453617041
+equator_pole_contrast_k = 0x4022de893270b8e0  # 9.434640480289488
+day_night_contrast_k = 0x40433c0acbcc2eb9  # 38.46907947034692
 surface_pressure_pa = 0x0000000000000000  # 0.0
 sigma_h_m = 0x40b14f0698f2fe02  # 4431.025771319402
 continental_fraction = 0x0000000000000000  # 0.0
@@ -8006,7 +8006,7 @@ iron = 0x3fce885bfbe10daa  # 0.23853635596070194
 rock = 0x3fe85de90107bc96  # 0.7614636440392981
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x40424616e0cf1652  # 36.547573186032096
+t_eq_k = 0x40424616df8b0bd0  # 36.547573035138726
 moons: []
 rings: []
 population: NotApplicable
@@ -8044,9 +8044,9 @@ figure_pole_y = 0x3feebc38368b6b7a  # 0.9604760232281102
 figure_pole_z = 0xbfccf7140ad39db3  # -0.22629023102420617
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fd4e97f3f3e474d  # 0.32675152946568603
-geometric_albedo_v = 0x3fdc47f7aadcc1f3  # 0.4418925446107373
-geometric_albedo_r = 0x3fe120c4de774697  # 0.5352501244580762
+geometric_albedo_b = 0x3fd78c0b12bd6da5  # 0.3679225619323126
+geometric_albedo_v = 0x3fdc47f7b9eae607  # 0.4418925586320203
+geometric_albedo_r = 0x3fe4912c2e6224a8  # 0.6427212625432235
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -8054,31 +8054,31 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fd5e86cecebe92d  # 0.3423111261069092
-bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
+bond_albedo = 0x3fd5e86cf8958352  # 0.3423111369684665
+bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
 surface_state: Tenuous, Rock; climate AirlessLike, Locked, N2, RadiativeEquilibrium
-mean_surface_temperature_k = 0x40424616e0cf1652  # 36.547573186032096
-equator_pole_contrast_k = 0x402ed7b0d7aa3d6c  # 15.42127107575535
-day_night_contrast_k = 0x402766937199c4cc  # 11.70034365655956
-surface_pressure_pa = 0x3f83896d1b4667fe  # 0.00953946341978806
-sigma_h_m = 0x40a0f452fb175588  # 2170.162071923438
+mean_surface_temperature_k = 0x40424616df8b0bd0  # 36.547573035138726
+equator_pole_contrast_k = 0x402ed7b0d587529c  # 15.421271012085803
+day_night_contrast_k = 0x4027669369024de2  # 11.700343400508192
+surface_pressure_pa = 0x3f83896d1df0a87a  # 0.00953946349735112
+sigma_h_m = 0x40a0f452fb224003  # 2170.1620722487582
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fa8c9d3280d1ed7  # 0.048414801253384425
 surface_age_yr = 0x41b92d5b6a099583  # 422402922.0374376
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3f90332c6501d9db  # 0.015820211091034025
+ice_fraction = 0x3f90332c6501db5a  # 0.015820211091035354
 condensate: CO2, Solid, seasonal false
 reservoir_kg_m2 = 0x40e7a4b5012c28a9  # 48421.65639312688
 reservoir_gel_m = 0x403cbb533739732a  # 28.731738521123738
 area_fraction = 0x3f8e7d0764402550  # 0.014886911150841314
 condensate: N2, Solid, seasonal true
-reservoir_kg_m2 = 0x409c829b8e002b3f  # 1824.651908877029
-reservoir_gel_m = 0x3ffc8ce2d631bd0c  # 1.7843960158314216
-area_fraction = 0x3f4e4bc028878c63  # 0.000924557521156177
+reservoir_kg_m2 = 0x409c829b8e002b4f  # 1824.6519088770326
+reservoir_gel_m = 0x3ffc8ce2d631bd1c  # 1.7843960158314252
+area_fraction = 0x3f4e4bc028878c74  # 0.0009245575211561789
 condensate: Ar, Solid, seasonal true
-reservoir_kg_m2 = 0x403d80247372bd2c  # 29.500556197655143
-reservoir_gel_m = 0x3f91471f0db88338  # 0.016872868740509278
-area_fraction = 0x3ee2558cec567f0a  # 8.742419036533305e-6
+reservoir_kg_m2 = 0x403d80247372ae0b  # 29.500556197641384
+reservoir_gel_m = 0x3f91471f0dc3c198  # 0.01687286874306579
+area_fraction = 0x3ee2558cec626d65  # 8.74241903785792e-6
 crust: lid Secondary; primary ultramafic, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Oxidised, RockMelted(MagmaOcean)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k: none
@@ -8109,7 +8109,7 @@ iron = 0x3fdab81f943232d0  # 0.4174879977443142
 rock = 0x3fe2a3f035e6e698  # 0.5825120022556858
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x403bee1c9f20f21b  # 27.930124230903044
+t_eq_k = 0x403bee1c9dc865c3  # 27.93012415068166
 moons: []
 rings: []
 population: NotApplicable
@@ -8147,9 +8147,9 @@ figure_pole_y = 0x3fee6b70ce5a3a28  # 0.9506153135606086
 figure_pole_z = 0xbfcdfb4dccc76292  # -0.2342316865822523
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fcc39de0d552e76  # 0.22051597262394623
-geometric_albedo_v = 0x3fd316100de443fd  # 0.29822160107238443
-geometric_albedo_r = 0x3fd71e5458f06f32  # 0.3612261646792262
+geometric_albedo_b = 0x3fd2f885aa693700  # 0.29641858712862756
+geometric_albedo_v = 0x3fd316101a23356a  # 0.2982216124772409
+geometric_albedo_r = 0x3fd32f17860c9ec0  # 0.29974926081420605
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -8157,8 +8157,8 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fcd91f4d103e789  # 0.23101673322508656
-bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+bond_albedo = 0x3fcd91f4e3fcdbc5  # 0.2310167420598345
+bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Tenuous, Rock; climate AirlessLike, Locked, N2, RadiativeEquilibrium
 mean_surface_temperature_k = 0x403e1304f615db12  # 30.07429445298755
 equator_pole_contrast_k = 0x402ab040f7604088  # 13.344245653628846
@@ -8247,9 +8247,9 @@ figure_pole_y = 0x3fed7f4ba732afdf  # 0.9217890039049016
 figure_pole_z = 0xbfc459c2a8f7ee03  # -0.15898926973737568
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd300991f970cb2  # 0.29691150746311756
+geometric_albedo_b = 0x3fd2ee60e14f138b  # 0.2957994652063511
 geometric_albedo_v = 0x3fd300991f970cb2  # 0.29691150746311756
-geometric_albedo_r = 0x3fd300991f970cb2  # 0.29691150746311756
+geometric_albedo_r = 0x3fd314da8192418c  # 0.29814779904793265
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -8354,9 +8354,9 @@ figure_pole_y = 0x3feac907fc61056e  # 0.8370399407651072
 figure_pole_z = 0xbfb31d878d92dd94  # -0.07466933447255136
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fec2164634cd5cf  # 0.8790761889892397
+geometric_albedo_b = 0x3ff3058345705ff7  # 1.1888458931407493
 geometric_albedo_v = 0x3ff3058345957aa2  # 1.188845893680686
-geometric_albedo_r = 0x3ff70a4878575009  # 1.4400105191061832
+geometric_albedo_r = 0x3ff305834586a083  # 1.1888458934645605
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -8457,9 +8457,9 @@ figure_pole_y = 0x3fecb810d8b0c878  # 0.8974689705121497
 figure_pole_z = 0xbfdbe92b20824f7f  # -0.4361064736815407
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fe175a33e2ebf7f  # 0.5456100668434231
+geometric_albedo_b = 0x3fe16c393f8c8d48  # 0.5444608918373115
 geometric_albedo_v = 0x3fe175a33e2ebf7f  # 0.5456100668434231
-geometric_albedo_r = 0x3fe175a33e2ebf7f  # 0.5456100668434231
+geometric_albedo_r = 0x3fe1801a81b900f3  # 0.5468876393934167
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -8526,7 +8526,7 @@ iron = 0x3fe0eb34e6b87f2c  # 0.5287117487205015
 rock = 0x3fde2996328f01a8  # 0.47128825127949847
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x400efee3ec39ba2c  # 3.874458165656753
+t_eq_k = 0x400efee3ec3388fa  # 3.874458165476537
 moons: []
 rings: []
 population: NotApplicable
@@ -8564,9 +8564,9 @@ figure_pole_y = 0x3fefc24dbebec26c  # 0.9924687123767177
 figure_pole_z = 0xbfb89260cf7ff754  # -0.09598355356135119
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fdce78a0bc5c404  # 0.4516320338216817
-geometric_albedo_v = 0x3fe38b7f7a8d0aa4  # 0.6107785600255125
-geometric_albedo_r = 0x3fe7ac9333170212  # 0.7398162839745643
+geometric_albedo_b = 0x3fe36fb253d6afa8  # 0.6073848378632549
+geometric_albedo_v = 0x3fe38b7f7a9e6eee  # 0.6107785601520541
+geometric_albedo_r = 0x3fe39a6b1f2a7f60  # 0.6125999077521378
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -8574,7 +8574,7 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fde47e5f3f3c12a  # 0.47313832114652377
+bond_albedo = 0x3fde47e5f40eb314  # 0.473138321244549
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Tenuous, Rock; climate AirlessLike, Seasonal, N2, RadiativeEquilibrium
 mean_surface_temperature_k = 0x40403b94f2943e96  # 32.465483019242285
@@ -8664,9 +8664,9 @@ figure_pole_y = 0x3feb36fb05edced0  # 0.8504614940452146
 figure_pole_z = 0xbf989ea279cf17a8  # -0.024042643246296486
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fec259572e084ac  # 0.8795878642742045
+geometric_albedo_b = 0x3ff30858dd61a808  # 1.189537873050087
 geometric_albedo_v = 0x3ff30858dd86c01c  # 1.1895378735898765
-geometric_albedo_r = 0x3ff70db75ba6d310  # 1.440848691953935
+geometric_albedo_r = 0x3ff30858dd77e6be  # 1.1895378733737938
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -8784,7 +8784,7 @@ iron = 0x3fb5da2729dc5106  # 0.08536000034320432
 rock = 0x3fed44bb1ac475df  # 0.9146399996567957
 water = 0x0000000000000000  # 0.0
 envelope = 0x0000000000000000  # 0.0
-t_eq_k = 0x406a04b030e08ce4  # 208.14650768144122
+t_eq_k = 0x406a01e443771070  # 208.05911420111397
 moons: []
 rings: NotModelled
 population: NotApplicable
@@ -8822,9 +8822,9 @@ figure_pole_y = 0xbf915e3a3719004c  # -0.01696101151742395
 figure_pole_z = 0xbfc556c8e63f4bbb  # -0.16671096079389067
 moment_of_inertia_factor = 0x3fd51eb851eb851f  # 0.33
 photometry: Mercury, provisional false
-geometric_albedo_b = 0x3fb4ceeb1770c8f9  # 0.08128232309607943
-geometric_albedo_v = 0x3fbc2405db6f14aa  # 0.10992466552041216
-geometric_albedo_r = 0x3fc10afff110cb9d  # 0.13314818640500628
+geometric_albedo_b = 0x3fb81bfd664d52fc  # 0.09417709109886724
+geometric_albedo_v = 0x3fbca5ed1fbc5cdd  # 0.11190683388518914
+geometric_albedo_r = 0x3fc074c5a0b38a6b  # 0.1285635981249301
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -8832,23 +8832,23 @@ phase_integral_b = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_v = 0x3fdeb512e312482f  # 0.4798018662924077
 phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
-bond_albedo = 0x3fb5cc94c3393411  # 0.08515290991017845
+bond_albedo = 0x3fb63135e27fe2fb  # 0.08668839244627329
 bond_ratio = 0x3fe3d1f73ec84f2c  # 0.6193805910320171
 surface_state: Airless, Rock; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
-mean_surface_temperature_k = 0x406a04b030e08ce4  # 208.14650768144122
-equator_pole_contrast_k = 0x405372481e522a94  # 77.78565176033072
-day_night_contrast_k = 0x40675427255a9f81  # 186.62977855396096
+mean_surface_temperature_k = 0x406a01e443771070  # 208.05911420111397
+equator_pole_contrast_k = 0x40537031067d97c4  # 77.75299227013517
+day_night_contrast_k = 0x40675116fdd4f6b1  # 186.5340565833517
 surface_pressure_pa = 0x0000000000000000  # 0.0
-sigma_h_m = 0x40b28f35a5862096  # 4751.209556944805
+sigma_h_m = 0x40b28f35a590e58e  # 4751.2095575867115
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3f74fc46dbce03b5  # 0.00512340239663527
 surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
 ocean_fraction = 0x0000000000000000  # 0.0
-ice_fraction = 0x3e3b08faba51ef06  # 6.29459410039853e-9
+ice_fraction = 0x3e3b1240d54ae654  # 6.303028616990961e-9
 condensate: H2O, Solid, seasonal false
-reservoir_kg_m2 = 0x3ecbf5ff4446614d  # 3.333202160681894e-6
-reservoir_gel_m = 0x3e2eb281163f39ac  # 3.5736339876675082e-9
-area_fraction = 0x3e3b08faba51ef06  # 6.29459410039853e-9
+reservoir_kg_m2 = 0x3ecbff96ad22e632  # 3.3376685247526794e-6
+reservoir_gel_m = 0x3e2ebd08caa9c344  # 3.5784225212382987e-9
+area_fraction = 0x3e3b1240d54ae654  # 6.303028616990961e-9
 crust: lid Secondary; primary none, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Intermediate, RockMelted(Radiogenic)
 melt_area_fraction = 0x0000000000000000  # 0.0
 peak_central_temperature_k = 0x40b2cfdcf6a02755  # 4815.86313820801
@@ -8914,9 +8914,9 @@ figure_pole_y = 0xbfb8c16497204387  # -0.09670094194031097
 figure_pole_z = 0x3fe3d22640f20816  # 0.6194030064073128
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd7bb951fea36fc  # 0.37082412831010436
+geometric_albedo_b = 0x3fd7878333cd813d  # 0.36764602717268585
 geometric_albedo_v = 0x3fd7bb951fea36fc  # 0.37082412831010436
-geometric_albedo_r = 0x3fd7bb951fea36fc  # 0.37082412831010436
+geometric_albedo_r = 0x3fd7f57866daca7e  # 0.37435731930160177
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -9010,9 +9010,9 @@ figure_pole_y = 0xbfe73b312a0df6b9  # -0.725975591790948
 figure_pole_z = 0xbfd1c45f0239b18e  # -0.2776105424625478
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd7d9d4a940e9f4  # 0.37267033127468996
+geometric_albedo_b = 0x3fd7a5805fb4f567  # 0.36947640749334315
 geometric_albedo_v = 0x3fd7d9d4a940e9f4  # 0.37267033127468996
-geometric_albedo_r = 0x3fd7d9d4a940e9f4  # 0.37267033127468996
+geometric_albedo_r = 0x3fd81401b7dc54d1  # 0.3762211127771709
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -9194,9 +9194,9 @@ figure_pole_y = 0xbfd4cd45433dd011  # -0.325028720536694
 figure_pole_z = 0xbfe91a9844815956  # -0.7844964349740546
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd7b76ed260c440  # 0.3705708555672267
+geometric_albedo_b = 0x3fd7836600f04c9b  # 0.3673949250380219
 geometric_albedo_v = 0x3fd7b76ed260c440  # 0.3705708555672267
-geometric_albedo_r = 0x3fd7b76ed260c440  # 0.3705708555672267
+geometric_albedo_r = 0x3fd7f147fa3d0be2  # 0.37410163342809544
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -9286,9 +9286,9 @@ figure_pole_y = 0x3f9ce568da21f89f  # 0.028218878091586515
 figure_pole_z = 0x3fbaf8c6214d4a7f  # 0.10535848916087252
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd7cb8b8efa80d7  # 0.37179841006037634
+geometric_albedo_b = 0x3fd797569e308299  # 0.3686119599169984
 geometric_albedo_v = 0x3fd7cb8b8efa80d7  # 0.37179841006037634
-geometric_albedo_r = 0x3fd7cb8b8efa80d7  # 0.37179841006037634
+geometric_albedo_r = 0x3fd80595c437ea59  # 0.3753408828921799
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -9580,9 +9580,9 @@ figure_pole_y = 0xbfe867b6c61b4e03  # -0.7626603955527006
 figure_pole_z = 0x3fdf48e34fc050d4  # 0.48882372654158
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba78d6ea0451  # 0.38638134944637154
+geometric_albedo_b = 0x3fd88437af7d4d64  # 0.3830699170841483
 geometric_albedo_v = 0x3fd8ba78d6ea0451  # 0.38638134944637154
-geometric_albedo_r = 0x3fd8ba78d6ea0451  # 0.38638134944637154
+geometric_albedo_r = 0x3fd8f6c9d4d4be6c  # 0.3900627687862428
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -9676,9 +9676,9 @@ figure_pole_y = 0xbfe2b19de8543b11  # -0.5841817414928717
 figure_pole_z = 0x3fe9e4c18fb09619  # 0.8091743284646241
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ba8156b50b8e  # 0.3863833758115839
+geometric_albedo_b = 0x3fd884401db6f8f2  # 0.38307192708806703
 geometric_albedo_v = 0x3fd8ba8156b50b8e  # 0.3863833758115839
-geometric_albedo_r = 0x3fd8ba8156b50b8e  # 0.3863833758115839
+geometric_albedo_r = 0x3fd8f6d26827207e  # 0.390064813339002
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
@@ -9772,9 +9772,9 @@ figure_pole_y = 0xbfe1e74b57516737  # -0.5594841676167793
 figure_pole_z = 0x3fea7f8462cc9298  # 0.8280660562200692
 moment_of_inertia_factor = 0x3fd5c28f5c28f5c3  # 0.34
 photometry: AirlessIce, provisional true
-geometric_albedo_b = 0x3fd8ca9d7bd9181b  # 0.3873666486218796
+geometric_albedo_b = 0x3fd89438e9566d48  # 0.38404677187800873
 geometric_albedo_v = 0x3fd8ca9d7bd9181b  # 0.3873666486218796
-geometric_albedo_r = 0x3fd8ca9d7bd9181b  # 0.3873666486218796
+geometric_albedo_r = 0x3fd90715d9eafcf4  # 0.39105745583579155
 phase_exponent_b = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_v = 0x3fea4a06ebb7c5fe  # 0.8215365032066868
 phase_exponent_r = 0x3fea4a06ebb7c5fe  # 0.8215365032066868

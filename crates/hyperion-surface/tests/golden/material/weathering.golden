@@ -1,4 +1,4 @@
-# generator_version = 30
+# generator_version = 31
 constants
 regolith_host_index = 0x3ffb333333333333  # 1.7
 ice_host_index = 0x3ff4f5c28f5c28f6  # 1.31
@@ -657,26 +657,26 @@ Lambert a0 1.2 f 0.2 m 1 nm 640: 0x0000000000000000 same
 Lambert a0 1.2 f 0.2 m 1 nm 2200: 0x0000000000000000 same
 Lambert a0 1.2 f 0.2 m 1 nm 5200: 0x0000000000000000 same
 entries: <world> <entry> <key> m <maturity>: A_N in B, V and R
-EarthLike 0 basalt m 0.5: 0x3faeea1ca558dd0c 0x3fb145d57871f9f1 0x3fb1e2b66d47c1ad
-EarthLike 0 basalt m 1: 0x3fab244a663909d2 0x3fad3e31a64c241c 0x3fae2a62a9de6c10
+EarthLike 0 basalt m 0.5: 0x3fad38cd0032aa35 0x3fb145d57871f9f1 0x3fb2cbf4244290eb
+EarthLike 0 basalt m 1: 0x3fa8748096f2a715 0x3fad3e31a64c241c 0x3fb042e9653223c3
 EarthLike 1 granite m 0.5: 0x3fd199999999999a 0x3fd199999999999a 0x3fd199999999999a
 EarthLike 1 granite m 1: 0x3fd199999999999a 0x3fd199999999999a 0x3fd199999999999a
 EarthLike 2 H2O m 0.5: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 EarthLike 2 H2O m 1: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 EarthLike 3 H2O m 0.5: 0x3f959b3d07c84b5e 0x3f94fdf3b645a1cb 0x3f94af4f0d844d01
 EarthLike 3 H2O m 1: 0x3f959b3d07c84b5e 0x3f94fdf3b645a1cb 0x3f94af4f0d844d01
-MarsLike 0 basalt_fe m 0.5: 0x3fab248b1b1e4c30 0x3fad3eaa8b0e088c 0x3fae2aead21f4441
-MarsLike 0 basalt_fe m 1: 0x3faa14d44fce08e8 0x3faa85629be2fb4a 0x3faad6111c72f17d
+MarsLike 0 basalt_fe m 0.5: 0x3fa874ec0ccf326d 0x3fad3eaa8b0e088c 0x3fb04323f8b310be
+MarsLike 0 basalt_fe m 1: 0x3fa60cb3edc0252b 0x3faa85629be2fb4a 0x3fadee5b3667ba2e
 MarsLike 1 CO2 m 0.5: 0x3fe3333333333333 0x3fe3333333333333 0x3fe3333333333333
 MarsLike 1 CO2 m 1: 0x3fe3333333333333 0x3fe3333333333333 0x3fe3333333333333
 MarsLike 2 H2O m 0.5: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 MarsLike 2 H2O m 1: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 MarsLike 3 mars_dust m 0.5: 0x3fcb851eb851eb85 0x3fcb851eb851eb85 0x3fcb851eb851eb85
 MarsLike 3 mars_dust m 1: 0x3fcb851eb851eb85 0x3fcb851eb851eb85 0x3fcb851eb851eb85
-MoonLike 0 feldspathic m 0.5: 0x3fbb1ac66ef0a287 0x3fc031830251b285 0x3fc0ff48f3a7032b
-MoonLike 0 feldspathic m 1: 0x3fb3815dc75ac0ef 0x3fb837edf9558cd7 0x3fb9de1f45dd6ecc
-MoonLike 1 basalt_fe m 0.5: 0x3fab248b1b1e4c30 0x3fad3eaa8b0e088c 0x3fae2aead21f4441
-MoonLike 1 basalt_fe m 1: 0x3faa14d44fce08e8 0x3faa85629be2fb4a 0x3faad6111c72f17d
+MoonLike 0 feldspathic m 0.5: 0x3fbb03c124fd8bbe 0x3fc031830251b285 0x3fc162e6c7c59f09
+MoonLike 0 feldspathic m 1: 0x3fb3f1b93c3f7a3b 0x3fb837edf9558cd7 0x3fbaa75a9c17a86a
+MoonLike 1 basalt_fe m 0.5: 0x3fa874ec0ccf326d 0x3fad3eaa8b0e088c 0x3fb04323f8b310be
+MoonLike 1 basalt_fe m 1: 0x3fa60cb3edc0252b 0x3faa85629be2fb4a 0x3fadee5b3667ba2e
 MoonLike 2 H2O m 0.5: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 MoonLike 2 H2O m 1: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 CeresLike 0 phyllosilicate m 0.5: 0x3fb810624dd2f1aa 0x3fb810624dd2f1aa 0x3fb810624dd2f1aa
@@ -685,7 +685,7 @@ CeresLike 1 H2O m 0.5: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 CeresLike 1 H2O m 1: 0x3feee147ae147ae1 0x3feee147ae147ae1 0x3feee147ae147ae1
 CeresLike 2 Na2CO3 m 0.5: 0x3fe4cccccccccccd 0x3fe4cccccccccccd 0x3fe4cccccccccccd
 CeresLike 2 Na2CO3 m 1: 0x3fe4cccccccccccd 0x3fe4cccccccccccd 0x3fe4cccccccccccd
-Flat 0 feldspathic m 0.5: 0x3fbb1ac66ef0a287 0x3fc031830251b285 0x3fc0ff48f3a7032b
-Flat 0 feldspathic m 1: 0x3fb3815dc75ac0ef 0x3fb837edf9558cd7 0x3fb9de1f45dd6ecc
-OneCrater 0 feldspathic m 0.5: 0x3fbb1ac66ef0a287 0x3fc031830251b285 0x3fc0ff48f3a7032b
-OneCrater 0 feldspathic m 1: 0x3fb3815dc75ac0ef 0x3fb837edf9558cd7 0x3fb9de1f45dd6ecc
+Flat 0 feldspathic m 0.5: 0x3fbb03c124fd8bbe 0x3fc031830251b285 0x3fc162e6c7c59f09
+Flat 0 feldspathic m 1: 0x3fb3f1b93c3f7a3b 0x3fb837edf9558cd7 0x3fbaa75a9c17a86a
+OneCrater 0 feldspathic m 0.5: 0x3fbb03c124fd8bbe 0x3fc031830251b285 0x3fc162e6c7c59f09
+OneCrater 0 feldspathic m 1: 0x3fb3f1b93c3f7a3b 0x3fb837edf9558cd7 0x3fbaa75a9c17a86a

@@ -1,4 +1,4 @@
-# generator_version = 30
+# generator_version = 31
 titan_like = 01ffeb2c20000000.0900
 titan_like_palette_0 = PrimaryCrust H2O WaterIce phase row 2
 titan_like_palette_0_normal_albedo_b = 0x3feea44f2b756484  # 0.9575572823333833
@@ -129,4 +129,4 @@ airless_palette_1_normal_albedo_r = 0x3fdc5f445b63584f  # 0.44331463741889804
 airless_palette_1_grain_density = 0x40a9500000000000  # 3240.0
 airless_palette_1_transition = 0x409650999999999a  # 1428.15
 airless_palette_1_liquid = none
-airless_ground_inertia = 0x405d963d2c8bdfb8  # 118.34748376521645
+airless_ground_inertia = 0x405d95a4866090ed  # 118.3381668036488

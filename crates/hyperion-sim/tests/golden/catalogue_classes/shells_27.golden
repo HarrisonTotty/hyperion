@@ -1,9 +1,9 @@
-# generator_version = 30
+# generator_version = 31
 rules every 27 hold
-FieldCoreCollapse entries 5024 deaths in the horizon 1313
+FieldCoreCollapse entries 5025 deaths in the horizon 1311
 FieldCoreCollapse FreeExpansion shells 3
-FieldCoreCollapse SedovTaylor shells 677
-FieldCoreCollapse PressureDrivenSnowplough shells 3056
+FieldCoreCollapse SedovTaylor shells 676
+FieldCoreCollapse PressureDrivenSnowplough shells 3057
 FieldCoreCollapse MomentumConservingSnowplough shells 0
 FieldCoreCollapse radii below, in and above 10–800 ly [0, 3513, 223]
 FieldCoreCollapse largest radius ly = 0x409e57f6ee3aeb41  # 1941.9911431509101
@@ -42,5 +42,5 @@ CentreTypeIa PressureDrivenSnowplough shells 0
 CentreTypeIa MomentumConservingSnowplough shells 0
 CentreTypeIa radii below, in and above 10–800 ly [0, 0, 0]
 CentreTypeIa largest radius ly = 0x0000000000000000  # 0.0
-distinct shells 12315 non-radiative 2957
+distinct shells 12315 non-radiative 2956
 longest window yr = 0x4143d00a6470b6b6  # 2596884.7846897496

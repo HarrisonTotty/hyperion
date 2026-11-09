@@ -1,6 +1,6 @@
-# generator_version = 30
+# generator_version = 31
 LuminousRedNova Some(ClassId(2)) Onset in Photometric(V)
 event e679a0007000010d:0305000000000000
 host = 0xe679a0007000010d
 arrival 14479396845 s 843581307 ns
-flux = 0x3f393e290ae2fd75  # 0.00038517477049634176
+flux = 0x3f31160acd76145b  # 0.0002607132314199117
