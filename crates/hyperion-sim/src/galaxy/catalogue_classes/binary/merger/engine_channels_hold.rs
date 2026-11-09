@@ -1,6 +1,6 @@
 //! The tests of P11.T8.c's missing channel, from generator version 27: the stellar merger class
 //! adds the engine's dynamical main-sequence mergers, a low-mass main-sequence donor at its lobe
-//! that the engine merges dynamically, by `MERGER_SAMPLER`'s `EngineChannel` weights, and draws an
+//! that the engine merges dynamically, by `MERGER_SAMPLER_31`'s `EngineChannel` weights, and draws an
 //! evolved donor's companion by its donor's kind's mark. These hold it under every 27 hold.
 //!
 //! - Each of the three channels' share against its weight (χ², α = 10⁻³).
@@ -29,7 +29,7 @@ use crate::stellar::binary::BinaryInput;
 use crate::stellar::binary::class_merger::{donor_onset_merger, onset_segment_kinds};
 use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
 use crate::stellar::binary::testing::MergerMember;
-use crate::tables::binary::{MERGER_SAMPLER, MergerChannel, MergerMark, MergerPick};
+use crate::tables::binary::{MERGER_SAMPLER_31, MergerChannel, MergerMark, MergerPick};
 use crate::time::{CLOCK_WINDOW_H, SourceHorizon};
 
 /// The seed of the Milky Way fixture, P11.T8.c's tests'.
@@ -111,7 +111,7 @@ fn each_channel_s_share_is_its_weight_under_every_27_hold() {
         counts[k] += 1;
     }
     let n: u64 = counts.iter().sum();
-    let weights = MERGER_SAMPLER.pick(MergerPick::EngineChannel).weights();
+    let weights = MERGER_SAMPLER_31.pick(MergerPick::EngineChannel).weights();
     #[expect(clippy::cast_precision_loss, reason = "counts of some hundreds")]
     let expected: Vec<f64> = weights.iter().map(|w| w * n as f64).collect();
     println!(
@@ -207,7 +207,8 @@ fn every_dynamical_pair_merges_as_the_engine_merges_it() {
         );
         checked += 1;
     }
-    assert!(checked > 50, "{checked}");
+    // From 31 the fitted channel weights give the dynamical channel some 3.5% of the entries.
+    assert!(checked >= 5, "{checked}");
 }
 
 /// Every evolved donor's companion lies inside its donor's kind's mark's limits: a gap donor's
@@ -235,7 +236,7 @@ fn every_evolved_companion_lies_inside_its_donor_s_kind_s_mark() {
             MergerMark::AgbMassRatio,
             MergerMark::AgbMassRatio,
         ][k];
-        let (lo, hi) = MERGER_SAMPLER.mark(mark).limits();
+        let (lo, hi) = MERGER_SAMPLER_31.mark(mark).limits();
         let q = entry.scan().secondary_mass().value() / entry.scan().primary_mass().value();
         let floor =
             crate::stellar::sse::MIN_INITIAL_MASS.value() / entry.scan().primary_mass().value();
@@ -616,9 +617,10 @@ fn the_engine_channels_against_the_engine_under_every_27_hold() {
 /// 24); the masses' stay high, the engine holding 13% of its primaries in layers D and E against
 /// the class's 1.3% and (at 24) its giant-branch donors heavier (median 1.69 M☉) than the class's
 /// at the turn-off. Re-pinned at 30 on v30's refitted binary rows (landing round 4): 211.96, 62.83
-/// and 311.25 (211.75, 62.80 and 310.99 at 29).
+/// and 311.25 (211.75, 62.80 and 310.99 at 29), and at 31 on the fitted merger sampler
+/// (`MERGER_SAMPLER_31`, P15.T10.b): 231.00, 143.08 and 253.08.
 const PINNED_CHI_SQUARE: [f64; 3] = [
-    211.959_925_991_593_1,
-    62.832_942_918_403_08,
-    311.248_889_764_339_37,
+    231.003_033_942_612_94,
+    143.084_337_337_703_18,
+    253.079_954_405_918_41,
 ];

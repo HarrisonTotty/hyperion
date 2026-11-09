@@ -1,6 +1,6 @@
 //! The tests of P11.T8.c's fix, from generator version 27: the stellar merger class draws the
 //! engine's channels, a contact pair at the tidal limit or an evolved donor whose common envelope
-//! merges it with its companion, by `MERGER_SAMPLER`'s channel weights, and a dynamical
+//! merges it with its companion, by `MERGER_SAMPLER_31`'s channel weights, and a dynamical
 //! main-sequence merger beside them (`engine_channels_hold.rs`, which holds the three channels'
 //! shares). These hold them under every 26 hold.
 //!
@@ -35,7 +35,7 @@ use crate::galaxy::rules::GalaxyRules;
 use crate::stellar::binary::BinaryInput;
 use crate::stellar::binary::class_merger::{donor_onset_merger, onset_segment_kinds};
 use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
-use crate::tables::binary::{MERGER_SAMPLER, MergerChannel, MergerPick};
+use crate::tables::binary::{MERGER_SAMPLER_31, MergerChannel, MergerPick};
 use crate::time::{CLOCK_WINDOW_H, SourceHorizon};
 
 use super::reference::{decile_chi_square, members};
@@ -117,7 +117,8 @@ fn every_contact_pair_is_at_the_tidal_limit() {
         assert!((0.06..=0.15).contains(&q), "{:?}: q {q}", entry.scan().id());
         checked += 1;
     }
-    assert!(checked > 10, "{checked}");
+    // From 31 the fitted channel weights give the contact channel some 3% of the entries.
+    assert!(checked >= 3, "{checked}");
 }
 
 /// Every evolved donor is past its main sequence and living at T, its companion on its main
@@ -360,7 +361,7 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
         split[0] / total,
         split[1] / total,
         split[2] / total,
-        MERGER_SAMPLER.pick(MergerPick::EngineChannel).weights()
+        MERGER_SAMPLER_31.pick(MergerPick::EngineChannel).weights()
     );
     let evolved: f64 = kinds.iter().sum();
     println!(
@@ -393,9 +394,10 @@ fn the_channel_sampler_against_the_engine_under_every_26_hold() {
 /// raised segment cap moves none of it (the same bits at 64): the masses' over P15.T10.b's 3.1, a
 /// finding, and from 27 the mass ratio's under it; and at 30 (16.46, 3.12 and 16.69; 16.19, 3.09
 /// and 16.42 at 29) on v30's refitted binary rows, the mass ratio's now just over it (landing round
-/// 4), a finding.
+/// 4), a finding; and at 31 (14.63, 8.30 and 10.69) on the fitted merger sampler
+/// (`MERGER_SAMPLER_31`, P15.T10.b), its mass ratio's now far over P15.T10.b's 3.1, a finding.
 const PINNED_CHI_SQUARE: [f64; 3] = [
-    16.457_539_474_400_352,
-    3.117_521_416_572_119_5,
-    16.691_595_914_205_166,
+    14.627_675_840_494_17,
+    8.299_529_498_705_436,
+    10.687_228_294_519_818,
 ];

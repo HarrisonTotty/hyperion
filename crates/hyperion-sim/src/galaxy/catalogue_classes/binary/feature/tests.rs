@@ -21,7 +21,7 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::rules::GalaxyRules;
 use crate::stellar::binary::scan::engine_calls;
 use crate::stellar::binary::testing::MemberCells;
-use crate::tables::binary::CLASS_SHARES;
+use crate::tables::binary::CLASS_SHARES_31;
 
 /// The seed of the tests' Milky Way.
 const SEED: u64 = 0x1108_f000_0000_0001;
@@ -93,7 +93,7 @@ fn features_list_the_binary_classes_and_the_catalogue_keeps_the_rest() {
     }
     assert!(listing > 40, "{listing} features list a binary class");
     for component in on.fields().components() {
-        for row in CLASS_SHARES.rows() {
+        for row in CLASS_SHARES_31.rows() {
             let kept = catalogue_share(on, row, component);
             assert!((0.0..=1.0).contains(&kept) && kept.is_finite(), "{kept}");
         }
@@ -314,7 +314,7 @@ fn the_catalogue_and_the_features_hold_each_class_s_budget() {
     let on = listed();
     let formed = on.mean_formed_mass().value();
     let mut report = String::new();
-    for row in CLASS_SHARES.rows() {
+    for row in CLASS_SHARES_31.rows() {
         let carved = row.class();
         for population in POPULATIONS {
             let components: Vec<&Component> = on
@@ -859,7 +859,7 @@ fn the_globulars_hold_what_the_catalogue_gives_up_for_them() {
     let (bulge, thick, halo) = shares.globulars().population_masses();
     let per_system = galaxy.mean_formed_mass().value();
     let weights = shares.globular_band_weights();
-    for row in CLASS_SHARES.rows() {
+    for row in CLASS_SHARES_31.rows() {
         if row.class() == CarvedClass::XrayBinary {
             continue;
         }
@@ -910,7 +910,7 @@ fn the_globulars_hold_what_the_catalogue_gives_up_for_them() {
             if class == ClassId::XRAY_BINARY {
                 continue;
             }
-            let row = CLASS_SHARES.row(carved_of(class).unwrap());
+            let row = CLASS_SHARES_31.row(carved_of(class).unwrap());
             let band_weight: f64 = MassBand::ALL
                 .iter()
                 .map(|&b| row.layer_share(b) * weights[b.index()])

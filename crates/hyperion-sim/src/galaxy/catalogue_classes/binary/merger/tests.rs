@@ -26,7 +26,7 @@ use crate::galaxy::placement;
 use crate::id::Layer;
 use crate::stellar::binary::BinaryClass;
 use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
-use crate::tables::binary::{CLASS_SHARES, MILKY_WAY_FORMED_MASS, MergerChannel};
+use crate::tables::binary::{CLASS_SHARES_31, MILKY_WAY_FORMED_MASS, MergerChannel};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
@@ -94,7 +94,7 @@ fn shifted(t: UniverseTime, years: f64) -> UniverseTime {
 /// The class and the features' lists together hold its share row's mergers, the catalogue all but
 /// the features' share (P11.T8.f): at the Milky Way fixture the row's 9 × 10⁴ in the source
 /// horizon, 0.34 a year, inside Kochanek et al.'s (2014) 0.2–0.5 a year, the brainstorm's figure,
-/// of which the catalogue's are 0.9962.
+/// of which the catalogue's are 0.921 from 31 (0.9962 to 30).
 #[test]
 fn the_class_holds_its_share_row_s_mergers_at_kochanek_s_rate() {
     let galaxy = galaxy();
@@ -106,7 +106,7 @@ fn the_class_holds_its_share_row_s_mergers_at_kochanek_s_rate() {
         * galaxy.mean_formed_mass().value();
     assert!((formed / MILKY_WAY_FORMED_MASS - 1.0).abs() < 1e-9);
     let process = StellarMergers::new(galaxy);
-    let row = CLASS_SHARES.row(CarvedClass::StellarMerger);
+    let row = CLASS_SHARES_31.row(CarvedClass::StellarMerger);
     let by_row: f64 = process
         .hosts()
         .components()
@@ -123,7 +123,9 @@ fn the_class_holds_its_share_row_s_mergers_at_kochanek_s_rate() {
         hosts / by_row
     );
     assert!((by_row / 9.0e4 - 1.0).abs() < 1e-9, "{by_row}");
-    assert!(hosts < by_row && hosts > 0.99 * by_row, "{hosts}");
+    // From 31 the fitted row's populations leave the features 0.079 of the mergers (0.0038 on
+    // the scratch row's): the catalogue holds 82,880 of the 9 × 10⁴, 0.921 (a finding).
+    assert!(hosts < by_row && hosts > 0.9 * by_row, "{hosts}");
     let rate = process.mergers_per_year(galaxy);
     println!("{rate:.4} stellar mergers a year in the catalogue");
     assert!((0.2..=0.5).contains(&rate), "{rate}");
@@ -283,8 +285,9 @@ fn one_id_is_the_pair_before_t_and_the_merged_star_after() {
         assert!(product.phase_fraction() <= tau[0].max(tau[1]) + 1e-12);
         checked += 1;
     }
-    // The contact channel holds some 15% of the entries (`MERGER_SAMPLER`'s weight).
-    assert!(checked > 20, "{checked}");
+    // The contact channel holds some 3% of the entries from 31 (`MERGER_SAMPLER_31`'s weight; 15%
+    // on the scratch table's).
+    assert!(checked >= 3, "{checked}");
 }
 
 /// The contact orbit of a contact entry: the primary fills its Roche lobe exactly, the secondary

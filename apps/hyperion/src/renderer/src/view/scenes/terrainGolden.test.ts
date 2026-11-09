@@ -93,7 +93,8 @@ describe("the terrain golden (R10.T16.d)", () => {
     const { maturity } = golden;
     // The line's comment, which the reader does not read, gives the same values in decimal.
     expect(maturity?.crustAlbedoBvr).toEqual([
-      0.099776827272101, 0.12322632988308144, 0.13121348331486257,
+      // From 31 its B and R are drawn toward the mature lunar colour (P14.T47's mature colour).
+      0.10159917958593741, 0.12322632988308144, 0.13499756555733064,
     ]);
     expect(maturity?.patches.map(({ key }) => key)).toEqual([
       { face: 0, level: 8, i: 255, j: 216 },
@@ -102,7 +103,7 @@ describe("the terrain golden (R10.T16.d)", () => {
     ]);
     expect([maturity?.patches[0]?.codesDigest, maturity?.classMap.nodesDigest]).toEqual([
       0x726e2b8a01c7c42en,
-      0x7fd95ce487df8338n,
+      0x31010401c26c3777n,
     ]);
     // The weathered field's payloads are TERRAIN TEST's own surveys over another world.
     expect(golden.payloads.map(({ revision, have }) => [revision, have])).toEqual(

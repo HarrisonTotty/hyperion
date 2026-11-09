@@ -1209,9 +1209,9 @@ mod tests {
             let error = AwdParams::of(&manifest(|t| t.replacen(from, to, 1))).unwrap_err();
             assert!(error.to_string().contains(key), "{from} → {to}: {error}");
         };
-        assert_eq!(params.census.version, GeneratorVersion::new(30));
+        assert_eq!(params.census.version, GeneratorVersion::new(31));
         refused(
-            "generator_version = 30",
+            "generator_version = 31",
             "generator_version = 23",
             "generator_version",
         );

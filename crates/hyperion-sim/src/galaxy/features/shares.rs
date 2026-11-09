@@ -354,7 +354,7 @@ impl FeatureShares {
     /// systems for each class, `r` the class's hosts per solar mass formed in the population, `m̄_f`
     /// the mass formed per system, `w_b` the share of the hosts whose primary lies in band b and
     /// `S_b` the band's share of the systems. [`Galaxy`](crate::galaxy::Galaxy) sets
-    /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES) when it builds these shares.
+    /// [`CLASS_SHARES`](crate::tables::binary::CLASS_SHARES_31) when it builds these shares.
     ///
     /// # Panics
     ///
@@ -892,7 +892,7 @@ mod tests {
                     * galaxy.shares().share(band, population)
                     * shares.class_share(population, band);
             }
-            let rates: f64 = crate::tables::binary::CLASS_SHARES
+            let rates: f64 = crate::tables::binary::CLASS_SHARES_31
                 .rows()
                 .iter()
                 .map(|row| row.hosts_per_formed_mass(population))
@@ -909,7 +909,7 @@ mod tests {
         // the scratch rows), well under the hundredth that would move the field's factor off
         // `1 − φ` by a per cent.
         let rows = |band: MassBand| {
-            crate::tables::binary::CLASS_SHARES
+            crate::tables::binary::CLASS_SHARES_31
                 .rows()
                 .iter()
                 .fold(0.0, |sum, row| {

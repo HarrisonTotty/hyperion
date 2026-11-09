@@ -4256,7 +4256,9 @@ mod tests {
     /// the envelope's chain fails it until the fixture is refreshed from [`envelope`]'s output for
     /// the same inputs (`serde_json::to_string_pretty` of it, pasted).
     ///
-    /// The values are the generator's under the rules in force, generator version 27's (refreshed
+    /// The values are the generator's under the rules in force (refreshed at 31's bump, its
+    /// chromophore mixed in its haze's gas and that haze at τ(550) 7, by a by-hand bless of the
+    /// envelope's value alone), generator version 27's before it (refreshed
     /// at its bump: κ₁ refitted at the giants' own Bond albedos, 2.92 × 10⁻³, the chromophore at
     /// the disc's column and the NH₃ deck's second mode, its haze, P14.T24.h.b parts 5–6, and the
     /// hot Jupiter's composition with P14.T52.e's further carriers; at 26's bump the decks' grain

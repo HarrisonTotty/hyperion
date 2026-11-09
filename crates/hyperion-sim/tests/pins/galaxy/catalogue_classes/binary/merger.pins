@@ -1,2 +1,2 @@
 # Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
-the_mergers_layers_against_the_share_row.layer_counts = [40, 76, 173, 3, 0]
+the_mergers_layers_against_the_share_row.layer_counts = [3, 6, 352, 7, 0]

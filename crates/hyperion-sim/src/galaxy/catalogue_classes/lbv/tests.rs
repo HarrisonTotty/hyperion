@@ -1227,7 +1227,9 @@ fn the_class_test_holds_every_host_of_a_million_layer_e_stars() {
     let process = LbvProcess::new(galaxy);
     let young = process.components()[0];
     let laws = galaxy.fields().component(young.id());
-    let layer_e = laws.count_with_unborn() * young.share();
+    // The field's layer-E systems, alive or not, as the sample draws them: from 31 the class's own
+    // share is the alive share (the field's times the alive odds), which its thinning reads.
+    let layer_e = laws.count_with_unborn() * galaxy.field_component_share(MassBand::E, young.id());
     let census = fixture_census();
     let expected = layer_e * left / records;
     eprintln!(

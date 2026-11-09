@@ -6182,3 +6182,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   there (`Unbuilt`); a route or reach disagreement keeps the table's draw. `FateRead::Table` gained
   `lower`. The census builds both arms at the budget with the 31 residuals, and resumes from
   `HYPERION_CENSUS_CHECKPOINT` (chunks of 512 columns).
+  - _Folded at 31 (train 31):_ `CARVE_RESIDUALS_VERSION`, `CarveResidualsRules`,
+    `GalaxyRules::residuals` and `every_31_hold` deleted; both fixes always apply. Its tests are
+    `lbv/alive_law_tests` (lean: they check the rule, so they stay, the held comparisons gone);
+    `the_class_s_deaths_inside_the_table_s_excess` and the `_under_the_31_residuals` twins went.

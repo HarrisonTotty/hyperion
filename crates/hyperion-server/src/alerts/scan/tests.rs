@@ -455,16 +455,32 @@ fn a_class_the_sensor_cannot_see_plans_no_job_and_draws_nothing() {
     assert_eq!(ScanResult::of_pieces(&work, []).drawn(), Some(0));
 }
 
-/// Seed 9's red nova of stellar merger cell [−2, 7, −1], one of its 231 candidates, which goes off
-/// 727.1 years after the epoch at [−6,820.3, 29,961.6, −858.1] ly, out by the solar circle.
+/// Seed 9's first red nova after the epoch in the stellar merger cell nearest [−2, 7, −1], out by
+/// the solar circle, that holds one (to 30 the red nova of that cell's host
+/// `0xfc27_0b87_8000_0040`, 727.1 years after the epoch; from 31 the fitted merger tables draw
+/// the cells' mergers anew).
 fn red_nova() -> OneShotEvent {
-    let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [-2, 7, -1]).unwrap();
-    let host = hyperion_sim::id::SystemId::from_raw(0xfc27_0b87_8000_0040).unwrap();
-    StellarMergers::new(galaxy())
-        .cell_events(galaxy(), key)
+    let process = StellarMergers::new(galaxy());
+    let mut cells: Vec<[i32; 3]> = (-16..16)
+        .flat_map(|x| (-16..16).flat_map(move |y| (-2..2).map(move |z| [x, y, z])))
+        .collect();
+    cells.sort_by_key(|[x, y, z]| {
+        (
+            (x + 2).pow(2) + (y - 7).pow(2) + (z + 1).pow(2),
+            [*x, *y, *z],
+        )
+    });
+    cells
         .into_iter()
-        .find(|event| event.host() == host)
-        .expect("the cell's merger makes its red nova")
+        .find_map(|at| {
+            let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, at).ok()?;
+            process
+                .cell_events(galaxy(), key)
+                .into_iter()
+                .filter(|event| event.emitted() > UniverseTime::EPOCH)
+                .min_by_key(OneShotEvent::emitted)
+        })
+        .expect("a cell's mergers make a red nova after the epoch")
 }
 
 /// A merger class, whose hosts move from their cells to their mergers and whose merger times are

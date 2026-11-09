@@ -30,7 +30,7 @@ use crate::orbit::peters_merger_time;
 use crate::stellar::binary::BinaryClass;
 use crate::stellar::binary::scan::{engine_calls, scan_nsm_cell};
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
-use crate::tables::binary::{CLASS_SHARES, MILKY_WAY_FORMED_MASS, NsmPairKind};
+use crate::tables::binary::{CLASS_SHARES_31, MILKY_WAY_FORMED_MASS, NsmPairKind};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L, Span, UniverseTime};
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
 
@@ -152,8 +152,8 @@ fn shifted(t: UniverseTime, years: f64) -> UniverseTime {
 
 /// The class and the features' lists together hold its share row's mergers, the catalogue all but
 /// the features' share (P11.T8.f): at the Milky Way fixture the row's ten in the source horizon,
-/// the brainstorm's "about 10", inside the plan's 8–12, of which the catalogue's are 9.96; and the
-/// fixture's own realised count is a Poisson draw of the catalogue's.
+/// the brainstorm's "about 10", inside the plan's 8–12, of which the catalogue's are 8.58 from 31
+/// (9.96 to 30); and the fixture's own realised count is a Poisson draw of the catalogue's.
 #[test]
 fn the_class_expects_about_ten_mergers_and_draws_them() {
     let galaxy = galaxy();
@@ -165,7 +165,7 @@ fn the_class_expects_about_ten_mergers_and_draws_them() {
         * galaxy.mean_formed_mass().value();
     assert!((formed / MILKY_WAY_FORMED_MASS - 1.0).abs() < 1e-9);
     let process = NeutronStarMergers::new(galaxy);
-    let row = CLASS_SHARES.row(CarvedClass::NeutronStarMerger);
+    let row = CLASS_SHARES_31.row(CarvedClass::NeutronStarMerger);
     let by_row: f64 = process
         .hosts()
         .components()
@@ -179,7 +179,9 @@ fn the_class_expects_about_ten_mergers_and_draws_them() {
     let expected = process.hosts().expected_hosts(galaxy);
     assert!((by_row / 10.0 - 1.0).abs() < 1e-9, "{by_row}");
     assert!((8.0..=12.0).contains(&by_row));
-    assert!(expected < by_row && expected > 0.99 * by_row, "{expected}");
+    // From 31 the fitted row's populations leave the features 0.14 of the mergers: the catalogue
+    // holds 8.58 of the ten (a finding).
+    assert!(expected < by_row && expected > 0.85 * by_row, "{expected}");
     let realised = all_entries().count();
     println!("{realised} neutron-star mergers against {expected:.3} expected");
     assert_poisson_count(

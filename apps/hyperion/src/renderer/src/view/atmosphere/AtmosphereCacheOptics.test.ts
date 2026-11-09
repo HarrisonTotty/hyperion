@@ -188,7 +188,8 @@ describe("an optics worker's answers", () => {
     if (reply.kind !== "assembled" || reply.assembled.medium === undefined) {
       throw new Error(`the giant was answered ${reply.kind} with no medium`);
     }
-    expect(reply.lobes.length).toBe(3);
+    // Its NH₃ deck's, its haze's and its chromophore's, and from 31 its NH₄SH and H₂O decks' too.
+    expect(reply.lobes.length).toBe(5);
     expect(reply.lobes).toEqual(madeLobesOf(reply.assembled.medium));
   }, 300_000);
 
@@ -303,14 +304,15 @@ describe("an optics worker's answers", () => {
 
 describe("an optics worker's gas envelopes (R08.T16.a.2)", () => {
   // Which of the NH₃ deck, the NH₄SH deck, the H₂O deck and the NH₃ deck's haze each draws. The
-  // generated Jupiter, generator version 27's record, carries its NH₃ deck's haze, τ 10 of its own
-  // (P14.T24.h.b part 6), which puts its floor at 0.566 bar inside it, above its NH₄SH and H₂O
-  // decks, which the cut drops; 26's record drew all three decks and had no haze. The hand Jupiter
+  // generated Jupiter, generator version 31's record, carries its NH₃ deck's haze at τ 7 (P14.T24.h.b
+  // part 6's follow-up), which puts its floor at 1.878 bar inside its NH₄SH and H₂O decks, so all
+  // three decks and the haze are drawn; 27's to 30's haze of τ 10 put it at 0.566 bar inside it,
+  // and the cut dropped those two decks; 26's record drew all three decks and had no haze. The hand Jupiter
   // carries the haze at 30's τ 7 (`giantFixtures.ts`'s `coldGiantHazes`) over its own decks, its
   // floor at 2.12 bar, above its H₂O deck.
   it.each([
     ["the hand Jupiter", handJupiterDetail, [true, true, false, true]],
-    ["the protocol fixture's generated Jupiter", jupiterDetail, [true, false, false, true]],
+    ["the protocol fixture's generated Jupiter", jupiterDetail, [true, true, true, true]],
   ] as const)(
     "assembles %s's envelope, split at its floor, its volatile decks above it drawn, APPROXIMATE with the thick reason",
     async (_, detail, decks) => {

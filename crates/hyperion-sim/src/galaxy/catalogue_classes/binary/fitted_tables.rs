@@ -40,8 +40,8 @@ use crate::stellar::binary::testing::{
 };
 use crate::tables::binary::{
     AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark, AwdPick, BLACK_HOLE_TRANSIENT_SHARE,
-    CLASS_SHARES, ClassSamplerTable, ClassShareTable, SCRATCH_CLASS_SHARES, SamplerKey,
-    XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
+    CLASS_SHARES, CLASS_SHARES_31, ClassSamplerTable, ClassShareTable, SCRATCH_CLASS_SHARES,
+    SamplerKey, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
 };
 use crate::time::LIGHT_CROSSING_L;
 use crate::units::consts::SECONDS_PER_DAY;
@@ -107,7 +107,7 @@ fn a_galaxy_carries_the_fitted_binary_tables() {
                 .feature_shares()
                 .class_share(population, band);
             let fitted_share = fitted().feature_shares().class_share(population, band);
-            let expected = carved(&CLASS_SHARES, population, band)
+            let expected = carved(&CLASS_SHARES_31, population, band)
                 / carved(&SCRATCH_CLASS_SHARES, population, band);
             assert!(
                 (fitted_share - scratch_share * expected).abs() <= 1e-12 * scratch_share.abs(),

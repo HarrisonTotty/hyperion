@@ -317,19 +317,20 @@ describe("the hand Jupiter's medium", () => {
   });
 });
 
-describe("the protocol fixture's Jupiter (generator version 27's record)", () => {
+describe("the protocol fixture's Jupiter (generator version 31's record)", () => {
   // From 27 its NH₃ deck carries its cloud's haze as its second mode (P14.T24.h.b part 6): NH₃ ice
-  // of 1 µm, well mixed from the deck's base to 0.1 bar at τ(550) 10, which alone reaches the
-  // split's τ, so its floor lies inside it, above every other deck. 26's record had no haze and
-  // its decks' τ 5.7 lay under the split's 10, its floor at 14.45 bar in its molten silicate
-  // decks' tails, below its water deck.
-  it("bases its NH₃, NH₄SH and H₂O decks at 0.6348, 2.107 and 4.822 bar, τ 2.39, 1.59 and 1.73, and its NH₃ deck's haze at its base, τ 10 to 0.1 bar", () => {
+  // of 1 µm, well mixed from the deck's base to 0.1 bar, at τ(550) 7 from 31 (10 to 30, which
+  // alone reached the split's τ and put the floor inside the haze at 0.5661 bar). From 31 the NH₃
+  // deck, its haze and the chromophore together hold 9.46 above the NH₄SH deck's top, so the floor
+  // lies inside the NH₄SH and H₂O decks. 26's record had no haze and its decks' τ 5.7 lay under the
+  // split's 10, its floor at 14.45 bar in its molten silicate decks' tails, below its water deck.
+  it("bases its NH₃, NH₄SH and H₂O decks at 0.6348, 2.107 and 4.822 bar, τ 2.39, 1.59 and 1.73, and its NH₃ deck's haze at its base, τ 7 to 0.1 bar", () => {
     const decks = ["NH3", "NH4SH", "H2O"].map((m) => modeOf("jupiter", m));
     expect(decks.map((m) => Math.round(m.basePa / 10) / 1e4)).toEqual([0.6348, 2.1066, 4.8221]);
     expect(decks.map((m) => Math.round(skyOpticalDepth550(m) * 100) / 100)).toEqual([
       2.39, 1.59, 1.73,
     ]);
-    // 5.7 together, under the split's 10; the haze's 10 alone reaches it.
+    // 5.7 together, under the split's 10; with the haze's 7, 12.7.
     expect(decks.reduce((sum, m) => sum + skyOpticalDepth550(m), 0)).toBeLessThan(
       CLOUD_DECK_SPLIT_OPTICAL_DEPTH,
     );
@@ -337,7 +338,7 @@ describe("the protocol fixture's Jupiter (generator version 27's record)", () =>
     expect([haze.basePa, haze.topPa, skyOpticalDepth550(haze), haze.fSed]).toEqual([
       modeOf("jupiter", "NH3").basePa,
       1e4,
-      10,
+      7,
       0,
     ]);
   });
@@ -365,25 +366,29 @@ describe("the protocol fixture's Jupiter (generator version 27's record)", () =>
     expect(result.reasons.filter((r) => r.includes("sizes lie outside the optics"))).toEqual([]);
   });
 
-  it("puts its floor inside its NH₃ deck and its haze, above its NH₄SH deck's top, at 0.5661 bar", () => {
+  it("puts its floor below its NH₃ deck and its haze, inside its NH₄SH and H₂O decks, at 1.878 bar", () => {
     const { floorPa, floorAltitudeM } = drawnOf("jupiter").drawn.envelope;
-    // Measured 2026-11-04 at 27: 0.5661 bar, the gas's τ 0.052 and the modes' 9.948 above it: the
-    // NH₃ deck's 1.116, its haze's 8.715 and the chromophore's 0.117 (26's: 14.45 bar).
+    // Measured 2026-11-08 at 31: 1.878 bar, the gas's τ 0.171 and the modes' 9.829 above it: the
+    // NH₃ deck's 2.389, its haze's 7, the chromophore's 0.074, the NH₄SH deck's 0.364 and the H₂O
+    // deck's 0.002 (to 30 0.5661 bar, inside the NH₃ deck and its haze; 26's: 14.45 bar).
     for (const mode of [modeOf("jupiter", "NH3"), hazeOf("jupiter")]) {
+      expect(floorPa).toBeGreaterThan(mode.basePa);
+    }
+    for (const mode of [modeOf("jupiter", "NH4SH"), modeOf("jupiter", "H2O")]) {
       expect(floorPa).toBeGreaterThan(mode.topPa);
       expect(floorPa).toBeLessThan(mode.basePa);
     }
-    expect(floorPa).toBeLessThan(modeOf("jupiter", "NH4SH").topPa);
     const modes = envelopeOf(ANSWERS.jupiter()).aerosols.modes;
     const depth = molecularDepth550("jupiter", floorAltitudeM) + modesAbove(modes, floorPa);
     expect(Math.abs(depth / CLOUD_DECK_SPLIT_OPTICAL_DEPTH - 1)).toBeLessThan(1e-4);
-    expect(Math.abs(floorPa / 0.5661e5 - 1)).toBeLessThan(1e-3);
+    expect(Math.abs(floorPa / 1.878e5 - 1)).toBeLessThan(1e-3);
   });
 
-  it("drops every deck whose top lies below the floor, all but its NH₃ deck's two modes, with no term and no label", () => {
+  it("drops every deck whose top lies below the floor, all but its NH₃, NH₄SH and H₂O decks' modes, with no term and no label", () => {
     const { medium, drawn, result } = drawnOf("jupiter");
-    // Measured 2026-11-04 at 27: the NH₄SH deck's top, 1.130 bar, and every deck's below it lie
-    // below the floor; 26's floor dropped Fe, Cr, MnS and Na₂S alone.
+    // Measured 2026-11-08 at 31: every deck's top below the H₂O deck's, 1.771 bar, lies below the
+    // floor (to 30 the NH₄SH and H₂O decks were dropped too; 26's floor dropped Fe, Cr, MnS and
+    // Na₂S alone).
     const dropped = [
       "Fe",
       "CaTiO3",
@@ -395,31 +400,33 @@ describe("the protocol fixture's Jupiter (generator version 27's record)", () =>
       "Na2S",
       "KCl",
       "ZnS",
-      "H2O",
-      "NH4SH",
     ];
     expect(drawn.envelope.dropped).toEqual(dropped);
     expect(medium.terms.map((t) => t.name).filter((n) => n.startsWith("aerosol:"))).toEqual([
+      "aerosol:H2O",
+      "aerosol:NH4SH",
       "aerosol:NH3",
       "aerosol:NH3:2",
       "aerosol:chromophore",
     ]);
-    // Two reasons name H₂O, but not its deck: its vapour's, and the H₂O ice NH₃ ice is drawn on.
+    // No reason names a dropped deck (to 30 two named H₂O, then dropped, but not its deck).
     const named = new RegExp(`\\b(?:${dropped.join("|")})\\b`, "u");
-    expect(result.reasons.filter((r) => named.test(r))).toEqual([
-      expect.stringMatching(/^H2O: no absorption data on file/u),
-      expect.stringMatching(/^NH3 ice drawn on H2O ice's /u),
-    ]);
+    expect(result.reasons.filter((r) => named.test(r))).toEqual([]);
   });
 
-  it("lets its NH₃ deck and its haze enter with the τ their profiles put above the floor, cut there", () => {
+  it("lets its decks and its haze enter with the τ their profiles put above the floor, cut there", () => {
     const { floorPa } = drawnOf("jupiter").drawn.envelope;
-    const cut = [modeOf("jupiter", "NH3"), hazeOf("jupiter")].map(
-      (mode) => Math.round(skyOpticalDepth550(mode) * shareAbove(mode, floorPa) * 1000) / 1000,
-    );
-    // Measured 2026-11-04 at 27: 1.116 of the deck's 2.39 and 8.715 of the haze's 10. 26's record
-    // let its molten Mg₂SiO₄ and MgSiO₃ decks' tails in so, 0.958 and 1.663, which 27's floor drops.
-    expect(cut).toEqual([1.116, 8.715]);
+    const cut = [
+      modeOf("jupiter", "NH3"),
+      hazeOf("jupiter"),
+      modeOf("jupiter", "NH4SH"),
+      modeOf("jupiter", "H2O"),
+    ].map((mode) => Math.round(skyOpticalDepth550(mode) * shareAbove(mode, floorPa) * 1000) / 1000);
+    // Measured 2026-11-08 at 31: the NH₃ deck's 2.389 and the haze's 7 whole, 0.364 of the NH₄SH
+    // deck's 1.59 and 0.002 of the H₂O deck's 1.73 (to 30 1.116 of the NH₃ deck's and 8.715 of
+    // the haze's 10). 26's record let its molten Mg₂SiO₄ and MgSiO₃ decks' tails in so, 0.958 and
+    // 1.663, which 27's floor drops.
+    expect(cut).toEqual([2.389, 7, 0.364, 0.002]);
   });
 
   it("lays its cut NH₃ deck and haze above the floor", () => {
@@ -433,9 +440,9 @@ describe("the protocol fixture's Jupiter (generator version 27's record)", () =>
   it("drops its KCl deck, its top far below the floor, with no reason of its own", () => {
     const kcl = modeOf("jupiter", "KCl");
     const { medium, drawn, result } = drawnOf("jupiter");
-    // Measured 2026-11-04 at 27: its top at 14.42 bar, 25 times the floor's pressure. 26's floor
-    // lay 0.16% below its top, let its tail in and left it out at the term limit, labelled
-    // (`assembleEarth.test.ts` holds a mode left out at the term limit).
+    // Measured 2026-11-04 at 27: its top at 14.42 bar, 25 times the floor's pressure (7.7 at 31).
+    // 26's floor lay 0.16% below its top, let its tail in and left it out at the term limit,
+    // labelled (`assembleEarth.test.ts` holds a mode left out at the term limit).
     expect(kcl.topPa).toBeGreaterThan(drawn.envelope.floorPa);
     expect(shareAbove(kcl, drawn.envelope.floorPa)).toBe(0);
     expect(medium.terms.map((t) => t.name)).not.toContain("aerosol:KCl");
@@ -444,8 +451,9 @@ describe("the protocol fixture's Jupiter (generator version 27's record)", () =>
 
   it("labels none of its dropped decks and none below the floor by the stand-in rule", () => {
     // materials.ts's depth rule: a stand-in shown while less than τ 10 lies above its top, which
-    // every mode the cut lets in has, and none it drops. Eight of its twelve dropped decks would
-    // carry one drawn at the top (its liquid metals and silicates, its Na₂S and NH₄SH).
+    // every mode the cut lets in has, and none it drops. Seven of its ten dropped decks would
+    // carry one drawn at the top (its liquid metals and silicates and its Na₂S; to 30 its NH₄SH
+    // too, of twelve).
     const { result, drawn } = drawnOf("jupiter");
     const standIns = materialApproximations(
       drawn.envelope.dropped.map((material) => ({
@@ -454,7 +462,7 @@ describe("the protocol fixture's Jupiter (generator version 27's record)", () =>
         opticalDepthAbove550: 0,
       })),
     ).map((a) => a.reason);
-    expect(standIns).toHaveLength(8);
+    expect(standIns).toHaveLength(7);
     expect(result.reasons.filter((r) => standIns.includes(r))).toEqual([]);
   });
 });

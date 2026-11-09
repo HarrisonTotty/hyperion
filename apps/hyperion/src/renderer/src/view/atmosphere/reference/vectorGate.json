@@ -5326,7 +5326,7 @@
     "route": "an envelope's cloudDeck split at the hand Jupiter's floor (classifyRegime under its cover), the upper medium the kernels', its J with the correction summed in, the deck read to the case's black ground at DECK_MODES",
     "radiance": "vector",
     "split": {
-      "altitudeM": 224323.24031675188,
+      "altitudeM": 224290.49587709876,
       "floor": "envelope"
     },
     "floorAltitudeM": 0,
@@ -5341,36 +5341,36 @@
         "passes": 2,
         "misses": 0,
         "refusals": 22,
-        "worstRatio": 0.6201458,
+        "worstRatio": 0.6531213,
         "worstAt": "limb-1H/b",
         "missed": []
       },
       "images": [
         ["disc-p0", 3, 0, 0, 3, null, null, null],
-        ["disc-p30", 3, 1, 0, 2, 0.3538793, "disc-p30", "r"],
+        ["disc-p30", 3, 1, 0, 2, 0.3654433, "disc-p30", "r"],
         ["disc-p60", 3, 0, 0, 3, null, null, null],
         ["disc-p75", 3, 0, 0, 3, null, null, null],
         ["disc-p85", 3, 0, 0, 3, null, null, null],
-        ["limb", 9, 1, 0, 8, 0.6201458, "limb-1H", "b"]
+        ["limb", 9, 1, 0, 8, 0.6531213, "limb-1H", "b"]
       ]
     },
     "ratios": [
-      ["disc-p0", 0.9772579, "disc-p0/r", 1.088374, "disc-p0/b"],
-      ["disc-p30", 0.9833089, "disc-p30/g", 1.097547, "disc-p30/b"],
-      ["disc-p60", 1.007527, "disc-p60/r", 1.084102, "disc-p60/b"],
-      ["disc-p75", 1.004029, "disc-p75/g", 1.020792, "disc-p75/r"],
-      ["disc-p85", 0.7612398, "disc-p85/g", 1.008737, "disc-p85/b"],
-      ["limb", 1.015084, "limb-0.1H/r", 1.045556, "limb-1H/b"]
+      ["disc-p0", 0.9807665, "disc-p0/r", 1.090016, "disc-p0/b"],
+      ["disc-p30", 0.9810525, "disc-p30/g", 1.085419, "disc-p30/b"],
+      ["disc-p60", 1.005617, "disc-p60/r", 1.082346, "disc-p60/b"],
+      ["disc-p75", 1.000338, "disc-p75/g", 1.024536, "disc-p75/r"],
+      ["disc-p85", 0.7598367, "disc-p85/g", 1.007862, "disc-p85/b"],
+      ["limb", 1.006851, "limb-0.3H/g", 1.04769, "limb-1H/b"]
     ],
     "geometries": [
-      ["disc-p0", "disc-p0", "orbit", 1, 35636.97, 33184.21, 27200.21, 0, 0, 0, 36466.29, 33151.03, 24991.61, 806.6858, 919.5338, 331.8184, 1823.314, 1657.552, 1249.58, "refused", "refused", "refused", 0.1642197, 0.006218077, 0.8570931],
-      ["disc-p30", "disc-p30", "orbit", 1, 30791.37, 28495.29, 23214.91, 0, 0, 0, 30063.91, 28978.98, 21151.64, 138.1212, 1194.619, 332.7611, 1503.195, 1448.949, 1057.582, "pass", "refused", "refused", 0.3538793, 0.07767136, 0.8637873],
-      ["disc-p60", "disc-p60", "orbit", 1, 16516.83, 14992.03, 12073.38, 0, 0, 0, 16393.44, 14727.76, 11136.76, 106.8368, 98.47337, 72.57602, 819.6721, 736.3882, 556.8382, "refused", "refused", "refused", 0.09894622, 0.2338059, 1.105618],
-      ["disc-p75", "disc-p75", "orbit", 1, 7574.566, 6934.797, 5777.359, 0, 0, 0, 7420.281, 6906.971, 5720.75, 54.26888, 260.1604, 295.9781, 371.0141, 345.3485, 286.0375, "refused", "refused", "refused", 0.2623491, 0.02007681, 0.03851079],
-      ["disc-p85", "disc-p85", "orbit", 1, 2032.507, 1919.346, 1712.993, 0, 0, 0, 2139.384, 2521.342, 1698.156, 82.10639, 613.1865, 30.68063, 106.9692, 126.0671, 84.9078, "refused", "refused", "refused", 0.2454725, 0.2334393, 0.07145893],
-      ["limb-0.1H", "limb", "orbit", 0.3623464, 16705.48, 15595.23, 14142.45, 0, 0, 0, 16457.24, 15283.62, 13891.48, 107.5078, 102.6421, 117.036, 822.8618, 764.1808, 694.5739, "refused", "refused", "refused", 0.1981366, 0.2652605, 0.2158498],
-      ["limb-0.3H", "limb", "orbit", 0.1476677, 16611.6, 15545.43, 14143.78, 0, 0, 0, 16104.76, 15256.45, 13863.23, 118.5015, 120.8863, 107.9113, 805.2378, 762.8224, 693.1613, "refused", "refused", "refused", 0.3962064, 0.2318594, 0.2494235],
-      ["limb-1H", "limb", "orbit", 0, 16239.57, 15368.16, 14161.38, 0, 0, 0, 15604.31, 14749.31, 13544.35, 302.315, 179.9394, 79.44085, 780.2154, 737.4653, 677.2173, "refused", "refused", "pass", 0.3193111, 0.4246799, 0.6201458]
+      ["disc-p0", "disc-p0", "orbit", 1, 35638.28, 33185.41, 27200.92, 0, 0, 0, 36337.17, 33173.24, 24954.61, 785.9378, 920.0687, 331.0106, 1816.858, 1658.662, 1247.731, "refused", "refused", "refused", 0.1408872, 0.002280123, 0.8734476],
+      ["disc-p30", "disc-p30", "orbit", 1, 30792.37, 28496.2, 23215.42, 0, 0, 0, 30039.98, 29046.56, 21388.44, 139.2082, 1195.175, 415.6639, 1501.999, 1452.328, 1069.422, "pass", "refused", "refused", 0.3654433, 0.08829687, 0.6687143],
+      ["disc-p60", "disc-p60", "orbit", 1, 16517.11, 14992.28, 12073.43, 0, 0, 0, 16424.85, 14734.8, 11154.87, 112.5786, 99.67157, 86.53692, 821.2426, 736.7399, 557.7437, "refused", "refused", "refused", 0.07255581, 0.2267704, 1.016223],
+      ["disc-p75", "disc-p75", "orbit", 1, 7574.259, 6934.661, 5777.166, 0, 0, 0, 7392.87, 6932.321, 5715.415, 53.54454, 261.2368, 296.0877, 369.6435, 346.6161, 285.7708, "refused", "refused", "refused", 0.3106922, 0.001681551, 0.04200367],
+      ["disc-p85", "disc-p85", "orbit", 1, 2032.358, 1919.213, 1712.727, 0, 0, 0, 2141.508, 2525.823, 1699.367, 82.0878, 613.2122, 30.43627, 107.0754, 126.2912, 84.96834, "refused", "refused", "refused", 0.2506743, 0.2351987, 0.06463147],
+      ["limb-0.1H", "limb", "orbit", 0.3623464, 16706.64, 15596.31, 14143.74, 0, 0, 0, 16452.85, 15259.77, 13851.14, 106.9429, 102.1817, 116.0743, 822.6426, 762.9885, 692.5569, "refused", "refused", "refused", 0.202963, 0.2872202, 0.252929],
+      ["limb-0.3H", "limb", "orbit", 0.1476677, 16612.75, 15546.52, 14144.96, 0, 0, 0, 16140.04, 15440.74, 13903.22, 119.5288, 207.4366, 112.6916, 807.0019, 772.0369, 695.1609, "refused", "refused", "refused", 0.3678358, 0.06603968, 0.2109575],
+      ["limb-1H", "limb", "orbit", 0, 16240.62, 15369.12, 14162.29, 0, 0, 0, 15628.65, 14772.45, 13517.64, 302.4519, 179.8041, 77.787, 781.4323, 738.6224, 675.882, "refused", "refused", "pass", 0.3073333, 0.4092853, 0.6531213]
     ],
     "tables": {
       "bands": 1,
@@ -5382,21 +5382,21 @@
       "corrected": true
     },
     "twinValues": [
-      ["case/radiance/jupiter-envelope/disc-p0", 35636.97, 33184.21, 27200.21],
+      ["case/radiance/jupiter-envelope/disc-p0", 35638.28, 33185.41, 27200.92],
       ["case/surfaceShare/jupiter-envelope/disc-p0", 0, 0, 0],
-      ["case/radiance/jupiter-envelope/disc-p30", 30791.37, 28495.29, 23214.91],
+      ["case/radiance/jupiter-envelope/disc-p30", 30792.37, 28496.2, 23215.42],
       ["case/surfaceShare/jupiter-envelope/disc-p30", 0, 0, 0],
-      ["case/radiance/jupiter-envelope/disc-p60", 16516.83, 14992.03, 12073.38],
+      ["case/radiance/jupiter-envelope/disc-p60", 16517.11, 14992.28, 12073.43],
       ["case/surfaceShare/jupiter-envelope/disc-p60", 0, 0, 0],
-      ["case/radiance/jupiter-envelope/disc-p75", 7574.566, 6934.797, 5777.359],
+      ["case/radiance/jupiter-envelope/disc-p75", 7574.259, 6934.661, 5777.166],
       ["case/surfaceShare/jupiter-envelope/disc-p75", 0, 0, 0],
-      ["case/radiance/jupiter-envelope/disc-p85", 2032.507, 1919.346, 1712.993],
+      ["case/radiance/jupiter-envelope/disc-p85", 2032.358, 1919.213, 1712.727],
       ["case/surfaceShare/jupiter-envelope/disc-p85", 0, 0, 0],
-      ["case/radiance/jupiter-envelope/limb-0.1H", 16705.48, 15595.23, 14142.45],
+      ["case/radiance/jupiter-envelope/limb-0.1H", 16706.64, 15596.31, 14143.74],
       ["case/surfaceShare/jupiter-envelope/limb-0.1H", 0, 0, 0],
-      ["case/radiance/jupiter-envelope/limb-0.3H", 16611.6, 15545.43, 14143.78],
+      ["case/radiance/jupiter-envelope/limb-0.3H", 16612.75, 15546.52, 14144.96],
       ["case/surfaceShare/jupiter-envelope/limb-0.3H", 0, 0, 0],
-      ["case/radiance/jupiter-envelope/limb-1H", 16239.57, 15368.16, 14161.38],
+      ["case/radiance/jupiter-envelope/limb-1H", 16240.62, 15369.12, 14162.29],
       ["case/surfaceShare/jupiter-envelope/limb-1H", 0, 0, 0]
     ]
   }

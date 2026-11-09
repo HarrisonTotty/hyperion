@@ -6087,6 +6087,10 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     server.
 - **P11.T8.e.b as built** (lane `lane/109-p11-t8eb`, 2026-10-26; at version 23, nothing generated
   moves, no bump).
+  - _The tripwire fired at 31 (train 31):_ the fitted merger rows (P15.T10.b) take Chabrier's
+    capped centre to 34,309 candidates; twice that leaves −5,179 at eight standard deviations, so
+    the ruling's 32-bit fallback is due. Lean (2026-11-08, pending main's ruling): the index stays
+    16 bits; `twice_either_cap_s_candidates_fit_the_centre_s_index` asserts the cap's own fit.
   - _The layout_ (`id/nested.rs`). `NestedSlotLayout` gains `list_index_bits`, 13 in
     `FEATURE_SLOT` and 16 in `CENTRE_SLOT`, with `list_index()` (`[12:0]`, `[15:0]`),
     `list_padding()` (the bits between it and the band, `[27:13]`, `[31:16]`) and

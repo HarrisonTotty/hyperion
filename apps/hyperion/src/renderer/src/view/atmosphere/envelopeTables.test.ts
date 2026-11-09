@@ -41,7 +41,8 @@ describe("a gas envelope's tables (R08.T16.a.2)", () => {
     // By its levels' densities the kernels kept 51% of its NH₃ deck's column (2026-11-02), so it is
     // projected, its column kept. Under 30's NH₃ haze (`giantFixtures.ts`'s `coldGiantHazes`) the
     // floor rises to 2.12 bar: its water deck lies below it, and its NH₄SH deck, cut there, keeps
-    // 100.28% by its levels (measured 2026-11-05), the haze 100.03% and the chromophore 100.00%,
+    // 100.28% by its levels (measured 2026-11-05), the haze 100.05% (100.03% to 30, the hand
+    // giant's figure moving with the fixture's record at 31) and the chromophore 100.00%,
     // each within the tolerance and kept on its levels' densities.
     const kept = new Map(
       upper.terms.flatMap((term, i) => {
@@ -66,7 +67,7 @@ describe("a gas envelope's tables (R08.T16.a.2)", () => {
     ).toEqual([
       [true, 1.0028],
       [true, 1],
-      [true, 1.0003],
+      [true, 1.0005],
       [true, 1],
     ]);
   }, 180_000);
