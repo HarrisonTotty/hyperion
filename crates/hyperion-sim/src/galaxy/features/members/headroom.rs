@@ -124,13 +124,16 @@ pub const CLASS_ACCEPTANCE_FLOOR: f64 = 0.9;
 /// use hyperion_sim::galaxy::params::GalaxyParams;
 /// use hyperion_sim::stellar::binary::CarvedClass;
 ///
-/// // Nearly all of the Milky Way centre's hosts are accreting white dwarfs, and the indices their
-/// // candidates leave say whether P11.T8.f may list them there.
+/// // Most of the Milky Way centre's hosts are accreting white dwarfs, and from 31 most of the
+/// // rest its stellar mergers (their fitted rows, P15.T10.b), and the indices their candidates
+/// // leave say whether P11.T8.f may list them there.
 /// let forecast = centre_list_forecast(&GalaxyParams::milky_way_like())?;
 /// let hosts = CLASS_ACCEPTANCE_FLOOR * forecast.candidates();
 /// let white_dwarfs =
 ///     forecast.hosts(CarvedClass::AccretingWdFast) + forecast.hosts(CarvedClass::AccretingWdSlow);
-/// assert!(white_dwarfs > 0.98 * hosts);
+/// let mergers = forecast.hosts(CarvedClass::StellarMerger);
+/// assert!(white_dwarfs > 0.7 * hosts);
+/// assert!(white_dwarfs + mergers > 0.99 * hosts);
 /// assert_eq!(forecast.fits(), forecast.margin(8.0) > 0.0);
 /// # Ok::<(), BuildCentreError>(())
 /// ```
