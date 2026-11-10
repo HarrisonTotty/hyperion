@@ -2276,6 +2276,142 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     );
   });
 
+  describe("a choice while a body is focused (the owner's report, 2026-11-10)", () => {
+    /** The orbit map's `FOCUS BODY`. */
+    function focusBody(): HTMLElement {
+      return within(mapPanel()).getByRole("button", { name: "C FOCUS BODY" });
+    }
+
+    /** The map's frame, as its `FRAME` reads. */
+    function frame(): string {
+      return within(mapPanel()).getByText(/^(BODY |SYSTEM BARYCENTRIC$)/).textContent;
+    }
+
+    /** Focuses the planet of the row `name` with `C`. */
+    async function focusRow(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+      await selectRow(user, name);
+      await user.keyboard("c");
+    }
+
+    it("moves the focus to another planet chosen in the list", async () => {
+      const { user, socket } = renderView();
+      await answer(socket, populatedBodies());
+      await focusRow(user, /\/57345,/);
+      expect(frame()).toBe("BODY H7K 4C0RFZ D-7 /57345");
+
+      await selectRow(user, /\/256,/);
+
+      expect([focusBody().getAttribute("aria-pressed"), frame()]).toEqual([
+        "true",
+        "BODY H7K 4C0RFZ D-7 /256",
+      ]);
+    });
+
+    it("fits the view to the planet it moves the focus to", async () => {
+      const { user, socket } = renderView();
+      await answer(socket, populatedBodies());
+      // The planet's own fit, focused from the system frame.
+      await focusRow(user, /\/256,/);
+      const fitted = scaleBar();
+      await user.keyboard("c");
+      await focusRow(user, /\/57345,/);
+      await user.keyboard("+");
+
+      await selectRow(user, /\/256,/);
+
+      expect(scaleBar()).toBe(fitted);
+    });
+
+    it("moves the focus to a moon's planet chosen in the list", async () => {
+      const { user, socket } = renderView();
+      await answer(socket, populatedBodies());
+      await focusRow(user, /\/57345,/);
+
+      await selectRow(user, /\/257,/);
+
+      expect([frame(), reading("KIND")]).toEqual(["BODY H7K 4C0RFZ D-7 /256", "MOON"]);
+    });
+
+    it("keeps the focus and the view's zoom when the planet's moon or ring is chosen", async () => {
+      const { user, socket } = renderView();
+      await answer(socket, populatedBodies());
+      await focusRow(user, /\/256,/);
+      await user.keyboard("+");
+      const zoomed = scaleBar();
+
+      await selectRow(user, /\/257,/);
+      await selectRow(user, /\/384,/);
+
+      expect([frame(), scaleBar(), reading("KIND")]).toEqual([
+        "BODY H7K 4C0RFZ D-7 /256",
+        zoomed,
+        "RING",
+      ]);
+    });
+
+    it("keeps the focus when the star is chosen, and selects the star", async () => {
+      const { user, socket } = renderView();
+      await answer(socket, populatedBodies());
+      await focusRow(user, /\/256,/);
+
+      await selectRow(user, /\/0,/);
+
+      expect([
+        frame(),
+        focusBody().getAttribute("aria-pressed"),
+        focusBody().getAttribute("aria-disabled"),
+        within(screen.getByRole("tree", { name: "Bodies" }))
+          .getByRole("treeitem", { name: /\/0,/ })
+          .getAttribute("aria-selected"),
+      ]).toEqual(["BODY H7K 4C0RFZ D-7 /256", "true", null, "true"]);
+    });
+
+    it("returns to the system frame on FOCUS BODY with the star chosen", async () => {
+      const { user, socket } = renderView();
+      await answer(socket, populatedBodies());
+      await focusRow(user, /\/256,/);
+      await selectRow(user, /\/0,/);
+
+      await user.keyboard("c");
+
+      expect([frame(), focusBody().getAttribute("aria-pressed")]).toEqual([
+        "SYSTEM BARYCENTRIC",
+        "false",
+      ]);
+    });
+
+    it("keeps the focus when a destroyed planet or a belt is chosen", async () => {
+      const { user, socket } = renderView();
+      await answer(socket, populatedBodies());
+      await focusRow(user, /\/256,/);
+
+      await selectRow(user, /\/512,/);
+      const destroyed = frame();
+      await selectRow(user, /\/57344,/);
+
+      expect([destroyed, frame()]).toEqual([
+        "BODY H7K 4C0RFZ D-7 /256",
+        "BODY H7K 4C0RFZ D-7 /256",
+      ]);
+    });
+
+    it("opens the newly focused planet's moon with VIEW BODY and OPEN IN PLANET VIEWER", async () => {
+      const viewed = vi.fn<(inspection: BodyInspection) => void>();
+      const opened = vi.fn<(inspection: BodyInspection) => void>();
+      const { user, socket } = renderView(viewed, opened);
+      await answer(socket, populatedBodies());
+      await focusRow(user, /\/57345,/);
+      await selectRow(user, /\/257,/);
+
+      await user.keyboard("v");
+      await user.keyboard("p");
+
+      expect(
+        [viewed, opened].map((spy) => spy.mock.calls.map(([inspection]) => inspection.body)),
+      ).toEqual([[`${FIXTURE_SYSTEM}.0101`], [`${FIXTURE_SYSTEM}.0101`]]);
+    });
+  });
+
   describe("VIEW BODY, which opens the focused body in VIEW (the owner's request)", () => {
     /** The orbit map's `VIEW BODY`. */
     function viewBody(): HTMLElement {

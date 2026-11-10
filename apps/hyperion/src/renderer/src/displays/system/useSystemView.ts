@@ -202,6 +202,17 @@ export interface SystemViewState {
    * when nothing is (ruling 113.2).
    */
   readonly notes: ReadonlyArray<string>;
+  /**
+   * Chooses a host or a body, on the map, in the body list or in the event list.
+   *
+   * @remarks
+   * While a body is focused, a choice with another planet for `FOCUS BODY` to focus moves the focus
+   * to that planet and fits the view again, as a press from the system frame does (the owner's
+   * report, 2026-11-10). Any other choice moves the selection alone and keeps the frame (the UX
+   * advisor's ruling, 2026-11-10): the focused planet, a moon or ring of it, or a choice
+   * `FOCUS BODY` is held back for, such as a host, a belt, a disc, the halo, a planet not present
+   * or off its orbit, or a moon or ring of one.
+   */
   readonly select: (id: string) => void;
   /** Chooses a zoom preset, which returns the map to the system frame. */
   readonly chooseZoom: (zoom: ZoomPreset) => void;
@@ -566,6 +577,23 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     setFitRequest((count) => count + 1);
   }, []);
   const focusedBodyId = focusedBody?.id ?? null;
+  const select = useCallback(
+    (id: string): void => {
+      setChosenId(id);
+      if (focusedBodyId === null) {
+        return;
+      }
+      // A focused map follows a choice of another planet, or of a moon or ring of one, as a press
+      // of FOCUS BODY would (the owner's report, 2026-11-10); a choice with no planet to focus
+      // leaves the focus where it is.
+      const next = focusTarget(bodyList.find((body) => body.id === id) ?? null, bodyList);
+      if (next !== null && next.id !== focusedBodyId) {
+        setFocusedId(next.id);
+        setFitRequest((count) => count + 1);
+      }
+    },
+    [focusedBodyId, bodyList],
+  );
   const focusableId = focusable?.id ?? null;
   const toggleFocus = useCallback((): void => {
     if (focusedBodyId !== null) {
@@ -634,7 +662,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     primaryZone: zoneOfPrimary,
     selected,
     notes: formed === null || known === null ? NO_NOTES : systemNotes(known),
-    select: setChosenId,
+    select,
     chooseZoom,
     toggleFocus,
     fitChanged: setZoomHeld,

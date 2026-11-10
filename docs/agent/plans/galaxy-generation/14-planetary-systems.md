@@ -34469,3 +34469,10 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     for the tests. The colour census reads one draw two ways (the version's, and its template's row
     at the same Bond albedo, labelled the version before), renamed
     `randomize_s_discs_take_their_own_colours`.
+- **`FOCUS BODY` follows a choice (lane `fix-focus-follows-selection`, 2026-11-10; the owner's
+  report).** While a body is focused, `useSystemView`'s `select` (the body list, the event list and
+  the map) moves the focus to the choice's `focusTarget` where that is another planet, and fits the
+  view again (`fitRequest`), as a press does.
+  - _Lean (2026-11-10), ruled by the UX advisor:_ a choice with no focus target (a host, a belt, a
+    disc, the halo, a planet not present or off its orbit, or a moon or ring of one) keeps the
+    focus and moves the selection alone; `FOCUS BODY` still returns the map to the system frame.

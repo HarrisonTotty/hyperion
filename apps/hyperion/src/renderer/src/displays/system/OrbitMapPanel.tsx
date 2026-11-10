@@ -106,11 +106,13 @@ export interface OrbitMapPanelProps {
  * press. `FOCUS BODY`, key `C`, draws the selected planet, or a selected moon's or ring's, in its own
  * frame, `BODY <designation>`, with its moons and rings about it, its equatorial plane for
  * reference and the scale bar in `Mm` and `km`; pressed again, or on a zoom preset, the map returns
- * to `SYSTEM BARYCENTRIC` (P14.T42.b). `VIEW BODY`, key `V`, opens the focused planet, or a
- * selected moon of it, in `VIEW`'s body inspection, photorealistic (the owner's request,
- * 2026-11-01); it is held back with its reason, `NO BODY FOCUSED` before a body is focused, whose
- * line is hidden while `FOCUS BODY`'s stands, so that the head holds one line of reasons. Where the
- * launch offers the `PLANET VIEWER`, `OPEN IN PLANET VIEWER`, key `P`, opens the body `VIEW BODY`
+ * to `SYSTEM BARYCENTRIC` (P14.T42.b). While a planet is focused, a body chosen in a list or on the
+ * map with another planet to focus moves the focus there and fits the view again, as a press from
+ * the system frame does; any other choice moves the selection alone (the owner's report,
+ * 2026-11-10). `VIEW BODY`, key `V`, opens the focused planet, or a selected moon of it, in
+ * `VIEW`'s body inspection, photorealistic (the owner's request, 2026-11-01); it is held back with
+ * its reason, `NO BODY FOCUSED` before a body is focused, whose line is hidden while `FOCUS BODY`'s
+ * stands, so that the head holds one line of reasons. Where the launch offers the `PLANET VIEWER`, `OPEN IN PLANET VIEWER`, key `P`, opens the body `VIEW BODY`
  * would open there (plan R15, T5), a planet or a moon, held back as it is. The
  * zones' switches stand only in the system frame. Until there is an answer the panel
  * reads the request's state in words and draws nothing; a system not yet formed reads
