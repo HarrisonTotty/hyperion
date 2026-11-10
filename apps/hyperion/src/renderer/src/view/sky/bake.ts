@@ -238,6 +238,85 @@ function texelSolidAnglesF32(sizePx: number): Float32Array {
   return angles;
 }
 
+/**
+ * A worker that forms one face size's solid angles: `solidAngles.worker.ts`, or a test's. It posts
+ * back the `Float32Array` {@link texelSolidAnglesLowerF32} makes, its buffer transferred.
+ */
+export interface SolidAnglesWorker {
+  addEventListener(type: "message", listener: (event: MessageEvent<unknown>) => void): void;
+  addEventListener(type: "error" | "messageerror", listener: (event: Event) => void): void;
+  postMessage(sizePx: number, transfer: Transferable[]): void;
+  terminate(): void;
+}
+
+/** Starts the solid angles' module worker, or gives `null` where the page has no `Worker`. */
+function startSolidAnglesWorker(): SolidAnglesWorker | null {
+  return typeof Worker === "undefined"
+    ? null
+    : new Worker(new URL("./solidAngles.worker.ts", import.meta.url), {
+        type: "module",
+        name: "sky solid angles",
+      });
+}
+
+/** The face sizes whose solid angles a worker is forming. */
+const WARMING = new Set<number>();
+
+/**
+ * Has a worker form a face size's solid angles ahead of its first bake (lane perf-long-tasks-2):
+ * at high, the 3,072² face's triangle, 4.7 million arctangents, held the page's thread some 250 to
+ * 400 ms on the pod within the first sky's frame. A view calls it from its first frame on; it does
+ * nothing once the size is formed or forming.
+ *
+ * @remarks
+ * The worker runs the same function on the same engine's `Math` (V8's `atan2` and the IEEE `sqrt`),
+ * so its table is the one the page would form, to the bit. A bake that comes first forms its own,
+ * as before, and the worker's is then dropped; so is a reply of the wrong length, or none (a worker
+ * that fails to load or to answer leaves the bake to form it).
+ *
+ * @param start - Starts the worker; the module worker's by default.
+ */
+export function warmTexelSolidAngles(
+  sizePx: number,
+  start: () => SolidAnglesWorker | null = startSolidAnglesWorker,
+): void {
+  if (SOLID_ANGLES_F32.has(sizePx) || WARMING.has(sizePx)) {
+    return;
+  }
+  const worker = start();
+  if (worker === null) {
+    return;
+  }
+  WARMING.add(sizePx);
+  const settle = (angles: Float32Array | null): void => {
+    WARMING.delete(sizePx);
+    worker.terminate();
+    if (angles !== null && !SOLID_ANGLES_F32.has(sizePx)) {
+      SOLID_ANGLES_F32.set(sizePx, angles);
+    }
+  };
+  worker.addEventListener("message", (event) => {
+    const angles = event.data;
+    settle(
+      angles instanceof Float32Array && angles.length === (sizePx * (sizePx + 1)) / 2
+        ? angles
+        : null,
+    );
+  });
+  worker.addEventListener("error", () => {
+    settle(null);
+  });
+  worker.addEventListener("messageerror", () => {
+    settle(null);
+  });
+  worker.postMessage(sizePx, []);
+}
+
+/** Whether a face size's solid angles are formed, for the tests. */
+export function hasTexelSolidAngles(sizePx: number): boolean {
+  return SOLID_ANGLES_F32.has(sizePx);
+}
+
 /** Workgroups of 8 × 8 over a square of `size`. */
 function groups(size: number): readonly [number, number, number] {
   return [Math.ceil(size / 8), Math.ceil(size / 8), 1];

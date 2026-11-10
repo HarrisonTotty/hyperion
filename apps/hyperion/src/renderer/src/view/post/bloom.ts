@@ -331,17 +331,79 @@ export const FIT_RADII_PX: ReadonlyArray<number> = [
 /** Half the side of the window, in texels of level m, over which level m's response is formed. */
 const RESPONSE_HALF_TEXELS = 5;
 
+/**
+ * {@link computedLevelResponseEE}'s values for levels 0 to 6, the settings' own (high's 0 to 6,
+ * low's 1 to 5; {@link BLOOM_LEVELS}), each the shortest decimal that reads back as its `f64`.
+ *
+ * @remarks
+ * A view's first bloom kernel formed all seven on the page's thread, some 260 to 300 ms on the pod,
+ * the most of them level 6's 640² impulse taken down and up (lane perf-long-tasks-2: within the
+ * first frame's 1.25 to 1.32 s task at high). They are pure numbers of the chain's filters, so they
+ * are pinned here; the bloom's tests form each level afresh and compare every value exactly.
+ */
+export const LEVEL_RESPONSES_EE: ReadonlyArray<ReadonlyArray<number>> = [
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  [
+    0.0323486328125, 0.1505126953125, 0.2584228515625, 0.346923828125, 0.622344970703125,
+    0.817657470703125, 0.989532470703125, 0.999969482421875, 1, 1, 1, 1, 1, 1, 1, 1,
+  ],
+  [
+    0.006721414625644684, 0.03308143466711044, 0.05892622470855713, 0.08376851677894592,
+    0.1779102310538292, 0.28295549750328064, 0.5396042577922344, 0.7463510558009148,
+    0.9599447883665562, 0.9981265999376774, 0.9999999953433871, 1, 1, 1, 1, 1,
+  ],
+  [
+    0.0016066845200839452, 0.008003164439287502, 0.014369530603289604, 0.020676148793427274,
+    0.04557776319234108, 0.07588233557180502, 0.16687025224973695, 0.27344910983083537,
+    0.5141006066551199, 0.733381408461355, 0.9548982352007442, 0.9973614746431849,
+    0.999999969739747, 1, 1, 1,
+  ],
+  [
+    0.0003972384009998109, 0.0019843408864304024, 0.00356959443888627, 0.005151157785888927,
+    0.01145717002569624, 0.019287883232692593, 0.043956728673236356, 0.07545174425402545,
+    0.16149072667075226, 0.273497132416552, 0.5158232883808067, 0.7314958943763665,
+    0.9538838503612181, 0.9971355877452791, 0.9999999611637331, 0.9999999999999999,
+  ],
+  [
+    0.00009903504402549584, 0.0004950601490647868, 0.0008909702169148659, 0.001286650330739686,
+    0.0028681068765973126, 0.00484168440327401, 0.01113255958222921, 0.01933290017368313,
+    0.04279394517104043, 0.0760809095750815, 0.16350697511169818, 0.2743709456651369,
+    0.5168321202256062, 0.7309135629289787, 0.9537643322859963, 0.9970794464024507,
+  ],
+  [
+    0.000024741634563750147, 0.0001237009906241083, 0.00022265316501801635, 0.00032159097796211793,
+    0.0007172632547158349, 0.0012116508218457762, 0.0027921516282966826, 0.004863012309988632,
+    0.010855639843444176, 0.019538472955931988, 0.04345339522848647, 0.07651214747693795,
+    0.1642588169785648, 0.27451583836190574, 0.5173802689795126, 0.7307954301656302,
+  ],
+];
+
 const responseCache = new Map<number, ReadonlyArray<number>>();
+
+/**
+ * The encircled energy at {@link FIT_RADII_PX} of mip level `level`'s unit impulse response at
+ * level 0: {@link LEVEL_RESPONSES_EE}'s row where it has one, else
+ * {@link computedLevelResponseEE}'s, formed once.
+ */
+export function levelResponseEE(level: number): ReadonlyArray<number> {
+  const pinned = LEVEL_RESPONSES_EE[level];
+  if (pinned !== undefined) {
+    return pinned;
+  }
+  const known = responseCache.get(level);
+  if (known !== undefined) {
+    return known;
+  }
+  const ee = computedLevelResponseEE(level);
+  responseCache.set(level, ee);
+  return ee;
+}
 
 /**
  * The encircled energy at {@link FIT_RADII_PX} of mip level `level`'s unit impulse response at
  * level 0: a unit impulse taken down `level` times and tent-upsampled back, exactly.
  */
-export function levelResponseEE(level: number): ReadonlyArray<number> {
-  const known = responseCache.get(level);
-  if (known !== undefined) {
-    return known;
-  }
+export function computedLevelResponseEE(level: number): ReadonlyArray<number> {
   const side = 2 * RESPONSE_HALF_TEXELS * 2 ** level;
   const centre = side / 2;
   let image = bloomImage(side, side);
@@ -355,9 +417,7 @@ export function levelResponseEE(level: number): ReadonlyArray<number> {
     const [w, h] = sizes[m] ?? [0, 0];
     image = bloomUpTent(image, w, h);
   }
-  const ee = encircledEnergy(image, centre, centre, FIT_RADII_PX);
-  responseCache.set(level, ee);
-  return ee;
+  return encircledEnergy(image, centre, centre, FIT_RADII_PX);
 }
 
 /** The side, sub-samples, of the grid integrating the spread function over pixels near the centre. */

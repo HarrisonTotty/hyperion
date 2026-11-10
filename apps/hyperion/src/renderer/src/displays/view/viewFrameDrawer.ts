@@ -49,7 +49,7 @@ import {
 } from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene, type ViewStar } from "../../view/scene/model";
 import { BandLayer } from "../../view/sky/band";
-import type { BakedCube } from "../../view/sky/bake";
+import { type BakedCube, warmTexelSolidAngles } from "../../view/sky/bake";
 import { skyCubeCacheOf } from "../../view/sky/cache";
 import { cameraFromObserverM } from "../../view/sky/camera";
 import { SkyCubeLayer } from "../../view/sky/cubeLayer";
@@ -875,6 +875,11 @@ export class ViewFrameDrawer {
 
   #cubeFor(sky: DrawnSky | null, setting: QualitySetting): BakedCube | null {
     const cache = skyCubeCacheOf(this.#engine);
+    if (this.#engine.capabilities.float32Blendable) {
+      // The GPU bake's solid angles formed on a worker while the first sky is awaited, rather
+      // than in its frame (perf-long-tasks-2); a no-op once formed.
+      warmTexelSolidAngles(skyFaceSizePx(setting, true));
+    }
     if (sky === null || sky === this.#failedFor) {
       cache.release(this.#name);
       return null;

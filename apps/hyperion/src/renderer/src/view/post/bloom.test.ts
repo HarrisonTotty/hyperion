@@ -14,8 +14,11 @@ import {
   bloomKernel,
   bloomThreshold,
   bloomUpTent,
+  computedLevelResponseEE,
   encircledEnergy,
   FIT_RADII_PX,
+  LEVEL_RESPONSES_EE,
+  levelResponseEE,
   levelWeight,
   roundToHalf,
   spreadPixelEE,
@@ -74,6 +77,28 @@ describe("the chain's passes", () => {
     expect(4 * bloomEnergy(down)).toBeCloseTo(3, 12);
     const up = bloomUpTent(down, 32, 32);
     expect(bloomEnergy(up)).toBeCloseTo(3, 12);
+  });
+});
+
+describe("the levels' responses (perf-long-tasks-2)", () => {
+  it("pins every level the settings weight, each value as its impulse forms it", () => {
+    const last = Math.max(
+      ...(["high", "low"] as const).map(
+        (setting) => BLOOM_LEVELS[setting].firstLevel + BLOOM_LEVELS[setting].levels - 1,
+      ),
+    );
+    expect(LEVEL_RESPONSES_EE.length).toBe(last + 1);
+    LEVEL_RESPONSES_EE.forEach((pinned, level) => {
+      expect(pinned.length).toBe(FIT_RADII_PX.length);
+      expect(levelResponseEE(level)).toBe(pinned);
+      // Exactly: the same f64 at every radius, so that no kernel's weights move.
+      expect([...computedLevelResponseEE(level)]).toStrictEqual([...pinned]);
+    });
+  });
+
+  it("forms a level past the table from its impulse", () => {
+    const level = LEVEL_RESPONSES_EE.length;
+    expect(levelResponseEE(level)).toStrictEqual(computedLevelResponseEE(level));
   });
 });
 

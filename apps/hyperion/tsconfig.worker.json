@@ -23,6 +23,8 @@
     "src/renderer/src/view/quality/terrainKinds.ts",
     "src/renderer/src/geometry/vec3.ts",
     "src/renderer/src/view/sky/decodePayload.ts",
+    "src/renderer/src/view/sky/cube.ts",
+    "src/renderer/src/view/sky/solidAnglesJob.ts",
     "src/renderer/src/lib/linkSocketWorker.ts",
     "src/renderer/src/generated/surface/*.d.ts",
     "src/renderer/src/lib/orbit.ts",
