@@ -15,6 +15,7 @@ import {
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { geometricAlbedo, lawFor, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
 import { shapeGeometricAlbedo } from "../appearance/shapes";
+import { edgeKey, edgeSeedOf, edgeShapedShares } from "../bodies/classEdge";
 import { oblateAlbedoScale } from "../bodies/oblate";
 import { TERRAIN_DEPTH_FRACTION } from "../depth/groundPull";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
@@ -41,6 +42,7 @@ import cascadeShadowWgsl from "./shadows/cascadeShadow.wgsl?raw";
 import { CASCADE_DEPTH_BIAS } from "./shadows/cascades";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import { LIT_VERTEX_CODE } from "./gpu/resources";
+import { PALETTE_NONE } from "./workers/messages";
 import { PATH_SOURCES } from "./gpu/material";
 import {
   MATURITY_NODES,
@@ -70,6 +72,7 @@ import {
   packClassLaws,
   packClassNodes,
   packTerrainLighting,
+  paletteEdgeKeys,
   paletteMeltSlots,
   SHADOW_CASCADES_TEXTURE,
   SHADOW_COMPARE_SAMPLER,
@@ -88,6 +91,7 @@ import {
   type TerrainLighting,
   TerrainPhaseRows,
   terrainDepthMaterialSpec,
+  terrainEdgeShapedShares,
   terrainLitEmissiveMaterialSpec,
   terrainLitMaterialSpec,
   terrainReflectance,
@@ -740,6 +744,52 @@ describe("the class laws (decision-r10-limb; decision-r07-t8b)", () => {
       expect(packed[8 * k + 4]).toBe(-1);
     }
     expect(rows.laws).toHaveLength(3);
+  });
+
+  describe("its slots' edge keys (lane fix-jagged-biome-edges)", () => {
+    const photometry = photometryOf([
+      [0.1, 0.12, 0.14, 1, 1],
+      [0, 0, 0, 0, 0],
+      [0.9, 0.92, 0.94, 3, 0],
+    ]);
+    const palette = Uint8Array.from([
+      1,
+      0,
+      2,
+      PALETTE_NONE,
+      4,
+      1,
+      ...Array.from({ length: 2 * (TERRAIN_CLASSES - 3) }, () => PALETTE_NONE),
+    ]);
+    const seed = edgeSeedOf("00000000000004d2");
+
+    it("keys a slot by its form and entry as R07's class map keys a class", () => {
+      expect(paletteEdgeKeys(palette, seed).slice(0, 3)).toEqual([
+        edgeKey(seed, 1, 0),
+        edgeKey(seed, 2, PALETTE_NONE),
+        edgeKey(seed, 4, 1),
+      ]);
+    });
+
+    it("keys no empty slot", () => {
+      expect(paletteEdgeKeys(palette, seed).slice(3)).toEqual(
+        Array.from({ length: TERRAIN_CLASSES - 3 }, () => 0),
+      );
+    });
+
+    it("packs a named slot's key in its law's last word, and none for a slot of no law", () => {
+      const keys = paletteEdgeKeys(palette, seed);
+      const rows = new TerrainPhaseRows(classRowLaw(3, 0));
+      const packed = packClassLaws(photometry, rows, 1, false, [], keys);
+      expect([packed[7], packed[8 + 7], packed[16 + 7]]).toEqual([keys[0], 0, keys[2]]);
+    });
+
+    it("packs no key where none is given", () => {
+      const packed = packClassLaws(photometry, new TerrainPhaseRows(classRowLaw(3, 0)), 1);
+      expect(Array.from({ length: TERRAIN_CLASSES }, (_, k) => packed[8 * k + 7])).toEqual(
+        Array.from({ length: TERRAIN_CLASSES }, () => 0),
+      );
+    });
   });
 
   it("scales each class's A for an oblate figure as law 0's and R07's disc's laws are (R10.T10.e)", () => {
@@ -2043,5 +2093,49 @@ describe("the visibility buffer's resolve of terrain (plan R14, R14.T2.d)", () =
       source.split("lit_vertex(").length - 1,
       wgslFunction(source, "terrain_row"),
     ]).toEqual([false, true, 2, 2, "{ return textureLoad(resolve_frame, vec2u(i, 0u), 0); }"]);
+  });
+});
+
+describe("a texel's classes' edges (lane fix-jagged-biome-edges)", () => {
+  const A = [1, 0, 0, 0, 0, 0, 0, 0];
+  const B = [0, 1, 0, 0, 0, 0, 0, 0];
+  const NAMED = Array.from({ length: TERRAIN_CLASSES }, () => true);
+  const KEYS = [101, 202, 0, 0, 0, 0, 0, 0];
+  const SITE = { direction: [0.6, 0.48, 0.64] as const, footprintRad: 2e-5, latticeRad: 4e-3 };
+
+  it("shapes its edge as R07's disc shapes one from the same four corners", () => {
+    // A boundary between two columns of one class each, as at the hand-over the disc's refined
+    // cell's corners and the terrain's patch of level L − 6 hold the same weights.
+    const [fx, fy] = [0.4, 0.3];
+    const s = 1 - fx;
+    const disc = edgeShapedShares([0, s, 1 - s, 0, 0, 0, 0, 0, 0], KEYS, {
+      ...SITE,
+      meanPurity: 1,
+    });
+    const terrain = terrainEdgeShapedShares([A, B, A, B], fx, fy, NAMED, KEYS, SITE);
+    terrain.forEach((share, m) => {
+      expect(share).toBeCloseTo(disc[m] ?? Number.NaN, 12);
+    });
+  });
+
+  it("leaves a quad whose vertices hold one mix as its weights leave it", () => {
+    const mix = [0.6, 0.4, 0, 0, 0, 0, 0, 0];
+    const expected = terrainShares(mix, NAMED);
+    terrainEdgeShapedShares([mix, mix, mix, mix], 0.3, 0.7, NAMED, KEYS, SITE).forEach(
+      (share, m) => {
+        expect(share).toBeCloseTo(expected[m] ?? Number.NaN, 12);
+      },
+    );
+  });
+
+  it("moves a boundary's share where the lattice spans many pixels", () => {
+    const moved = terrainEdgeShapedShares([A, B, A, B], 0.5, 0.5, NAMED, KEYS, SITE);
+    expect(moved[1]).not.toBeCloseTo(0.5, 3);
+  });
+
+  it("is drawn by each set's shares in the lit shader", () => {
+    expect(collapseWhitespace(wgslFunction(terrainLitWgsl, "class_sets"))).toContain(
+      "edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, lattice); sets.shares[s] = at.shares;",
+    );
   });
 });

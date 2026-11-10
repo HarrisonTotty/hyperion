@@ -88,6 +88,7 @@ import type { TerrainVertexPath } from "../quality/qualitySetting";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
+import classEdgeWgsl from "../shaders/classEdge.wgsl?raw";
 import { PATH_SOURCES, TERRAIN_BINDINGS, terrainVertexStorage } from "./gpu/material";
 import {
   MATURITY_NODES,
@@ -119,7 +120,8 @@ import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
 import terrainStridesWgsl from "./shaders/terrainStrides.wgsl?raw";
 import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
 import { CLASS_NODES_BYTES, PATCH_VERTICES_PER_SIDE } from "./slotLayout";
-import { PHOTOMETRY_STRIDE, type TerrainMaturity } from "./workers/messages";
+import { PALETTE_NONE, PHOTOMETRY_STRIDE, type TerrainMaturity } from "./workers/messages";
+import { classPurity, type EdgeSite, edgeKey, edgeShapedShares } from "../bodies/classEdge";
 
 /** A palette's slots: `hyperion_surface`'s `MAX_CLASSES`. */
 export const TERRAIN_CLASSES = 8;
@@ -211,8 +213,9 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
  * horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), the survey's placement and discard
  * (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11), the stride morph
  * (`terrainStrides.wgsl`, plan R14, R14.T3.c; each material's own source declares whether it takes
- * it), the maturity nodes' formula (`shaders/maturityNodes.wgsl`, R10.T1.c) and `terrainLit.wgsl`,
- * its vertices and shading.
+ * it), the maturity nodes' formula (`shaders/maturityNodes.wgsl`, R10.T1.c), the classes' edges
+ * (`shaders/classEdge.wgsl`, lane fix-jagged-biome-edges) and `terrainLit.wgsl`, its vertices and
+ * shading.
  */
 const LIT_TERRAIN_SOURCE =
   frameWgsl +
@@ -224,6 +227,7 @@ const LIT_TERRAIN_SOURCE =
   terrainSurveyWgsl +
   terrainStridesWgsl +
   maturityNodesWgsl +
+  classEdgeWgsl +
   terrainLitWgsl;
 
 /**
@@ -1450,13 +1454,16 @@ export function figureScaledA(photometry: ClassPhotometry, polarOverEquatorial: 
  * which adds any it lacks, then whether the slot is drawn from its maturity nodes (R10.T1.c): 1 for
  * a slot with a law where `drawnFromNodes`, else 0, so that a patch without a maturity layer packs
  * what it packed before, bit for bit; then 1 where the slot's form is `Melt` (`meltSlots`, R08.T18.a),
- * which the plain material never reads and its emissive form does, else 0.
+ * which the plain material never reads and its emissive form does, else 0; then its edge key (lane
+ * fix-jagged-biome-edges; `edgeKeys`, {@link paletteEdgeKeys}), 0 for none.
  *
  * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
  * @param drawnFromNodes - Whether the patch carries a maturity layer (`TerrainLayers.maturity`),
  *   whose nodes ({@link packClassNodes}) its named slots are then drawn from.
  * @param meltSlots - Which of the palette's slots are of the `Melt` form ({@link paletteMeltSlots});
  *   none where absent.
+ * @param edgeKeys - Each slot's edge key ({@link paletteEdgeKeys}); none where absent, the edges
+ *   then drawn as the bilinear weights leave them.
  */
 export function packClassLaws(
   photometry: Float32Array,
@@ -1464,6 +1471,7 @@ export function packClassLaws(
   polarOverEquatorial: number,
   drawnFromNodes = false,
   meltSlots: ReadonlyArray<boolean> = [],
+  edgeKeys: ReadonlyArray<number> = [],
 ): Float32Array {
   const out = new Float32Array(CLASS_LAW_ROWS * 4);
   for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
@@ -1480,8 +1488,24 @@ export function packClassLaws(
     if (meltSlots[k] === true) {
       out[8 * k + 6] = 1;
     }
+    out[8 * k + 7] = edgeKeys[k] ?? 0;
   }
   return out;
+}
+
+/**
+ * Each of a patch's palette slots' edge key (lane fix-jagged-biome-edges; `bodies/classEdge.ts`'
+ * `edgeKey`) on a world of edge seed `edgeSeed`: its form's class code and its entry, as R07's
+ * class map keys its classes (`classMap.ts`' `classMapEdgeKeysOf`), so that the disc and the terrain
+ * shape one class's edges alike; 0 for an empty slot. A slot of no law gets none in
+ * {@link packClassLaws}.
+ */
+export function paletteEdgeKeys(palette: Uint8Array, edgeSeed: number): ReadonlyArray<number> {
+  return Array.from({ length: TERRAIN_CLASSES }, (_, k) => {
+    const form = palette[2 * k] ?? PALETTE_NONE;
+    const entry = palette[2 * k + 1] ?? PALETTE_NONE;
+    return form === PALETTE_NONE && entry === PALETTE_NONE ? 0 : edgeKey(edgeSeed, form, entry);
+  });
 }
 
 /**
@@ -1847,6 +1871,50 @@ export function terrainShares(
   }
   shares[0] = total >= 1 ? 0 : 1 - total;
   return shares;
+}
+
+/**
+ * A texel's laws' shares at fractions (`fx`, `fy`) of its quad with their classes' edges shaped, as
+ * `terrainLit.wgsl`'s `terrain_shares` and `edge_shape_terrain` give them (lane
+ * fix-jagged-biome-edges): the quad's four vertices' weights `vertices` (in the order 00, 10, 01,
+ * 11, eight a vertex over the palette's slots, 0 to 1) interpolated bilinearly into
+ * {@link terrainShares}' shares, then sharpened by the slots' `keys` (`paletteEdgeKeys`, 0 for none)
+ * under the gate of the vertices' purities of their eight weights, as R07's disc shapes its
+ * classes' (`classEdge.ts`' `edgeShapedShares`).
+ *
+ * @param site - Where and how finely: the texel's body-fixed unit direction, a pixel's footprint
+ *   and the patch's quad there on the unit sphere, rad.
+ */
+export function terrainEdgeShapedShares(
+  vertices: ReadonlyArray<ReadonlyArray<number>>,
+  fx: number,
+  fy: number,
+  named: ReadonlyArray<boolean>,
+  keys: ReadonlyArray<number>,
+  site: Pick<EdgeSite, "direction" | "footprintRad" | "latticeRad">,
+): number[] {
+  const b = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy];
+  const weights = Array.from({ length: TERRAIN_CLASSES }, (_, k) =>
+    vertices.reduce((sum, v, c) => sum + (b[c] ?? 0) * (v[k] ?? 0), 0),
+  );
+  // Each vertex's purity of its eight weights, as a law vector with law 0 first.
+  let purity = 0;
+  let purityNorm = 0;
+  vertices.forEach((v, c) => {
+    if (v.some((w) => w > 0)) {
+      purity += (b[c] ?? 0) * classPurity([0, ...v]);
+      purityNorm += b[c] ?? 0;
+    }
+  });
+  const shares = terrainShares(weights, named);
+  if (!(purityNorm > 0)) {
+    return shares;
+  }
+  return edgeShapedShares(shares, keys, {
+    ...site,
+    meanPurity: purity / purityNorm,
+    mixPurity: classPurity([0, ...weights]),
+  });
 }
 
 /** One of a texel's laws as the twin reads it: its A and its own row's table. */

@@ -51,6 +51,7 @@ import {
   maturitySegment,
 } from "../terrain/maturityNodes";
 import type { Face } from "../terrain/patchKey";
+import { classPurity } from "./classEdge";
 
 /** The classes one disc's class map may hold; the record and the shader carry this many laws. */
 export const MAX_DISC_CLASSES = 16;
@@ -1221,20 +1222,72 @@ export function surfaceShares(weights: ReadonlyArray<number>): number[] {
  * @param direction - Along the body-fixed axes, z the pole; it need not be unit.
  */
 export function classMapSharesAt(map: ClassMapTexels, direction: Xyz): number[] {
-  const elsewhere = (): number[] => [1, ...Array.from({ length: map.classes }, () => 0)];
+  return [...classMapReconstructionAt(map, direction).shares];
+}
+
+/**
+ * The survey-masked reconstruction at a direction ({@link classMapSharesAt}) with what its classes'
+ * edges are shaped by (lane fix-jagged-biome-edges; `classEdge.ts`' `EdgeSite`), as `surface_at`
+ * takes them.
+ */
+export interface ClassMapReconstruction {
+  /** The laws' shares, {@link classMapSharesAt}'s. */
+  readonly shares: ReadonlyArray<number>;
+  /**
+   * The mean, by the terms' bilinear weights, of each term's classes' purity (`classPurity`) over
+   * the terms that hold a class; `null` where none does.
+   */
+  readonly meanPurity: number | null;
+  /** The lattice's spacing in cell coordinates: 1 ÷ N, or 1 ÷ (N r) in a refined texel. */
+  readonly latticeSt: number;
+}
+
+/**
+ * {@link classMapSharesAt}'s reconstruction at `direction`, with its terms' mean purity and its
+ * lattice's spacing (lane fix-jagged-biome-edges), which `surface_at` shapes its classes' edges by.
+ *
+ * @param direction - Along the body-fixed axes, z the pole; it need not be unit.
+ */
+export function classMapReconstructionAt(
+  map: ClassMapTexels,
+  direction: Xyz,
+): ClassMapReconstruction {
+  const { face, holding } = reconstructionCorners(map, direction);
+  const own = storedTile(map, face, holding[0] + 1, holding[1] + 1);
+  const latticeSt =
+    map.fine !== undefined && own >= 0 ? 1 / (map.faceTexels * map.fine.side) : 1 / map.faceTexels;
+  const elsewhere = (): ClassMapReconstruction => ({
+    shares: [1, ...Array.from({ length: map.classes }, () => 0)],
+    meanPurity: null,
+    latticeSt,
+  });
   const terms = reconstructionTerms(map, direction);
   if (terms === null) {
     return elsewhere();
   }
   const shares = Array.from({ length: map.classes + 1 }, () => 0);
   let norm = 0;
+  let purity = 0;
+  let purityNorm = 0;
   for (const { at, b } of terms) {
-    surfaceShares(weightsAt(map, at)).forEach((share, m) => {
+    const one = surfaceShares(weightsAt(map, at));
+    one.forEach((share, m) => {
       shares[m] = (shares[m] ?? 0) + b * share;
     });
     norm += b;
+    if (one.slice(1).some((share) => share > 0)) {
+      purity += b * classPurity(one);
+      purityNorm += b;
+    }
   }
-  return norm > 0 ? shares.map((share) => share / norm) : elsewhere();
+  if (!(norm > 0)) {
+    return elsewhere();
+  }
+  return {
+    shares: shares.map((share) => share / norm),
+    meanPurity: purityNorm > 0 ? purity / purityNorm : null,
+    latticeSt,
+  };
 }
 
 /**

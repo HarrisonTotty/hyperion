@@ -93,9 +93,10 @@ import type { CloudBodyGpu } from "../clouds/cloudLayer";
 import type { ScreenRect } from "../wireframe/submit";
 import { MATURITY_NODES } from "../terrain/maturityNodes";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
+import { EDGE_GRAZING_MU, edgeShapedShares } from "./classEdge";
 import {
   classMapAlbedoAt,
-  classMapSharesAt,
+  classMapReconstructionAt,
   type ClassMapTexels,
   discSurfaceLaws,
   MAX_DISC_CLASSES,
@@ -130,11 +131,18 @@ export const FIRST_NODE_ROW = 52;
 export const FIRST_RING_SHADOW_ROW = FIRST_NODE_ROW + MAX_DISC_CLASSES * MATURITY_NODES;
 
 /**
- * `vec4f` rows per disc in the shader's `discs` buffer: R07's and R10's 52, a maturity node row
- * for each of K nodes of each of {@link MAX_DISC_CLASSES} classes, and R11's ring rows
- * (`RING_SHADOW_ROWS`), 318 rows, 5,088 bytes a disc (308 before R11.T9.a, 832 before R10.T1.c).
+ * The first of a record's edge key rows (lane fix-jagged-biome-edges): class k's key in channel
+ * k mod 4 of row {@link FIRST_EDGE_KEY_ROW} + ⌊k ÷ 4⌋, past the ring rows.
  */
-export const DISC_ROWS = FIRST_RING_SHADOW_ROW + RING_SHADOW_ROWS;
+export const FIRST_EDGE_KEY_ROW = FIRST_RING_SHADOW_ROW + RING_SHADOW_ROWS;
+
+/**
+ * `vec4f` rows per disc in the shader's `discs` buffer: R07's and R10's 52, a maturity node row
+ * for each of K nodes of each of {@link MAX_DISC_CLASSES} classes, R11's ring rows
+ * (`RING_SHADOW_ROWS`) and the classes' edge keys' four rows: 322 rows, 5,152 bytes a disc (318
+ * before the keys, 308 before R11.T9.a, 832 before R10.T1.c).
+ */
+export const DISC_ROWS = FIRST_EDGE_KEY_ROW + MAX_DISC_CLASSES / 4;
 
 /** The stars that light one disc at most: the brightest two, `MAX_BODY_LIGHTS`. */
 export const MAX_DISC_LIGHTS = MAX_BODY_LIGHTS;
@@ -1323,6 +1331,13 @@ export function packDiscRecords(
       put(FIRST_CLASS_ROW + k, [...law.a, law.share]);
       out[base + FIRST_CLASS_TABLE_ROW * 4 + k] = law.tableRow;
     });
+    if (record.surface.kind === "class-map") {
+      // Each class's edge key, 0 where it has none (lane fix-jagged-biome-edges).
+      const keys = record.surface.edgeKeys ?? [];
+      for (let k = 0; k < Math.min(classes.length, MAX_DISC_CLASSES); k += 1) {
+        out[base + FIRST_EDGE_KEY_ROW * 4 + k] = keys[k] ?? 0;
+      }
+    }
     if (maturity !== undefined) {
       // Each drawn class's nodes, scaled for the figure as its A is, node 0's w its flag; an
       // undrawn class's rows stay 0 and are never read.
@@ -1424,6 +1439,8 @@ interface ViewClassMap {
   readonly texels: ClassMapTexels;
   readonly normals: NormalMapTexels | null;
   readonly axes: readonly [Vec3, Vec3, Vec3];
+  /** Each class's edge key, 0 for none (lane fix-jagged-biome-edges). */
+  readonly edgeKeys: ReadonlyArray<number>;
 }
 
 /** The record seen from one camera: everything in the view's axes. */
@@ -1445,6 +1462,11 @@ interface ViewBody {
   readonly emissionStar: Vec3 | null;
   /** Its ring's shadow record in the view's axes (R11.T9.a); `null` for a record with no ring. */
   readonly ring: RingShadowRecord | null;
+  /**
+   * A pixel's angle at the camera, rad, 2 ÷ (H P₁₁) as the shader takes it (lane
+   * fix-jagged-biome-edges); `Infinity` where no viewport is given, under which no edge is shaped.
+   */
+  readonly pixelRad: number;
 }
 
 function viewBodyOf(
@@ -1452,6 +1474,7 @@ function viewBodyOf(
   camera: ProjectionCamera,
   texels: ClassMapTexels | null,
   lighting: SurfaceLightingReader,
+  viewport: Viewport | null = null,
 ): ViewBody {
   const toView = (v: Vec3): Vec3 => toViewAxes(v, camera.orientation);
   const centre = toView(record.direction);
@@ -1470,8 +1493,17 @@ function viewBodyOf(
       texels,
       normals: record.surface.normals?.texels ?? null,
       axes: [x, y, cross(x, y)],
+      edgeKeys: record.surface.edgeKeys ?? [],
     };
   }
+  // The shader's P₁₁ is the projection's y scale, s × aspect (`rayThrough`).
+  const pixelRad =
+    viewport === null
+      ? Infinity
+      : 2 /
+        (viewport.heightPx *
+          (1 / Math.tan(camera.fovXRad / 2)) *
+          (viewport.widthPx / viewport.heightPx));
   return {
     centre,
     pole,
@@ -1483,6 +1515,7 @@ function viewBodyOf(
     lighting,
     emissionStar: record.emission === undefined ? null : toView(record.emission.star),
     ring: record.ring === undefined ? null : { ...record.ring, normal: toView(record.ring.normal) },
+    pixelRad,
     lights: record.lights
       .slice(0, MAX_DISC_LIGHTS)
       .map((light) => ({ place: scale(toView(light.direction), light.distance), light })),
@@ -1560,17 +1593,46 @@ interface Shaded {
 /**
  * The share of each of the body's laws at the point `q` (from the centre ÷ a): the uniform law's
  * alone, or under a class map the shares the survey-masked bilinear reconstruction gives at the
- * point's cube-sphere direction (`classMapSharesAt`, R10.T10.d). R05's spheroid point of the unit
- * direction d is M d (`spheroidPoint`), so d is q stretched along the pole by a ÷ c, taken along
- * the body-fixed axes.
+ * point's cube-sphere direction (`classMapSharesAt`, R10.T10.d), their classes' edges shaped at the
+ * pixel's footprint, of the datum's μ `muDatum`, as `surface_at` shapes them (lane
+ * fix-jagged-biome-edges; none where the body was seen through no viewport). R05's spheroid point
+ * of the unit direction d is M d (`spheroidPoint`), so d is q stretched along the pole by a ÷ c,
+ * taken along the body-fixed axes.
  */
-function sharesAt(body: ViewBody, q: Vec3): number[] {
+function sharesAt(body: ViewBody, q: Vec3, muDatum: number): number[] {
   if (body.classMap === null) {
     return [1];
   }
   const d = normalise(stretchAlong(body.pole, body.stretch, q));
   const [x, y, z] = body.classMap.axes;
-  return classMapSharesAt(body.classMap.texels, [dot(d, x), dot(d, y), dot(d, z)]);
+  const direction = [dot(d, x), dot(d, y), dot(d, z)] as const;
+  const reconstruction = classMapReconstructionAt(body.classMap.texels, direction);
+  if (reconstruction.meanPurity === null || !Number.isFinite(body.pixelRad)) {
+    return [...reconstruction.shares];
+  }
+  // The pixel's footprint on the unit sphere, as `shade` takes it (lane fix-jagged-biome-edges).
+  const footprintRad =
+    (norm(
+      vec3(
+        q.x + body.centre.x / body.radius,
+        q.y + body.centre.y / body.radius,
+        q.z + body.centre.z / body.radius,
+      ),
+    ) *
+      body.pixelRad) /
+    Math.max(muDatum, EDGE_GRAZING_MU);
+  return edgeShapedShares(reconstruction.shares, body.classMap.edgeKeys, {
+    direction: normaliseXyz(direction),
+    footprintRad,
+    latticeRad: reconstruction.latticeSt * (Math.PI / 2),
+    meanPurity: reconstruction.meanPurity,
+  });
+}
+
+/** `v` scaled to unit length. */
+function normaliseXyz(v: readonly [number, number, number]): readonly [number, number, number] {
+  const length = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / length, v[1] / length, v[2] / length];
 }
 
 /**
@@ -1930,7 +1992,7 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   // `GetSunAndSkyIrradiance`'s `(1 + dot(normal, point) / r) × 0.5`: an isotropic sky seen by a
   // tilted plane), as the terrain's.
   const skyTilt = shading.mapped ? 0.5 * (1 + dot(tilted, normal)) : 1;
-  const shares = sharesAt(body, q);
+  const shares = sharesAt(body, q, muDatum);
   // Each law's A at the point: a class's from its nodes under a map's maturity (R10.T1.c).
   const laws = lawsAt(body, q, shares);
   const radiance: [number, number, number] = [0, 0, 0];
@@ -2302,7 +2364,7 @@ export function discCellSums(
   classMap: ClassMapTexels | null = null,
   lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
 ): ReadonlyArray<DiscCellSum> {
-  const body = viewBodyOf(record, camera, classMap, lighting);
+  const body = viewBodyOf(record, camera, classMap, lighting, viewport);
   const pixelSum = pixelSummer(body, record, viewRays(camera, viewport));
   return pixels.map(([x, y, n]) => pixelSum(x, y, n));
 }
@@ -2341,7 +2403,7 @@ export function rasteriseDisc(
   classMap: ClassMapTexels | null = null,
   lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
 ): DiscPixel[] {
-  const body = viewBodyOf(record, camera, classMap, lighting);
+  const body = viewBodyOf(record, camera, classMap, lighting, viewport);
   const pixels: DiscPixel[] = [];
   const { rect } = record;
   const rayAt = viewRays(camera, viewport);
@@ -2504,7 +2566,7 @@ export function pointSampleDisc(
       `a pixel takes a positive whole number of samples per axis, got ${samplesPerAxis}`,
     );
   }
-  const body = viewBodyOf(record, camera, classMap, lighting);
+  const body = viewBodyOf(record, camera, classMap, lighting, viewport);
   const m = samplesPerAxis;
   const share = 1 / (m * m);
   const pixels: SampledPixel[] = [];

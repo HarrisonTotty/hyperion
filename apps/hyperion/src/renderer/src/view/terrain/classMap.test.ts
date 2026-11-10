@@ -29,6 +29,7 @@ import { EngineUnavailable } from "../engine/resilientEngine";
 import {
   CLASS_MAP_FACE_TEXELS,
   CLASS_MAP_LEVEL,
+  classMapEdgeKeysOf,
   classMapLawsOf,
   classMapMeltOf,
   type ClassMapPool,
@@ -43,7 +44,15 @@ import { MATURITY_NODES } from "./maturityNodes";
 import type { Face } from "./patchKey";
 import type { BodyFigure } from "./planet";
 import { materialFormName } from "./readouts";
-import { classRowLaw, MELT_CLASS_CODE, PHASE_LAW, SEABED_CLASS_CODE } from "./terrainMaterial";
+import {
+  classRowLaw,
+  MELT_CLASS_CODE,
+  PHASE_LAW,
+  paletteEdgeKeys,
+  SEABED_CLASS_CODE,
+  TERRAIN_CLASSES,
+} from "./terrainMaterial";
+import { edgeSeedOf } from "../bodies/classEdge";
 import { type ClassMapAnswer, PALETTE_NONE } from "./workers/messages";
 import { fnv1a64 } from "./workers/f32Digest";
 import type { FieldChange } from "./workers/pool";
@@ -245,6 +254,27 @@ afterEach(() => {
 });
 
 describe("a class map from a worker's answer", () => {
+  it("gives a class of no named substance no edge key, as the terrain's law 0 (lane fix-jagged-biome-edges)", () => {
+    expect(classMapEdgeKeysOf(answerOf(TEXELS), "00000000000004d2")[2]).toBe(0);
+  });
+
+  it("keys its classes' edges as the terrain keys the same palette's slots (lane fix-jagged-biome-edges)", () => {
+    const seed = "00000000000004d2";
+    const palette = Uint8Array.from([
+      ...CLASSES.flat(),
+      ...Array.from({ length: 2 * (TERRAIN_CLASSES - CLASSES.length) }, () => PALETTE_NONE),
+    ]);
+    expect(classMapEdgeKeysOf(answerOf(TEXELS), seed).slice(0, 2)).toEqual(
+      paletteEdgeKeys(palette, edgeSeedOf(seed)).slice(0, 2),
+    );
+  });
+
+  it("keys its classes' edges by the world's seed (lane fix-jagged-biome-edges)", () => {
+    expect(classMapEdgeKeysOf(answerOf(TEXELS), "00000000000004d3")[0]).not.toBe(
+      classMapEdgeKeysOf(answerOf(TEXELS), "00000000000004d2")[0],
+    );
+  });
+
   it("says which classes have the Melt form, by their class code (R08.T18.a)", () => {
     expect(classMapMeltOf(answerOf(TEXELS))).toEqual([false, false, false]);
     const molten = { ...answerOf(TEXELS), classes: Uint8Array.from([1, 0, MELT_CLASS_CODE, 1]) };
@@ -575,6 +605,19 @@ function kindsOf(events: ReadonlyArray<AllocationEvent>): string[] {
 }
 
 describe("the class-map store", () => {
+  it("hands its surface out with each class's edge key (lane fix-jagged-biome-edges)", async () => {
+    const engine = await countingRenderEngine();
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    store.want(MOON, SEED);
+    pool.asked[0]?.resolve(answerOf(TEXELS));
+    await settle(store);
+    expect(store.classMapOf(MOON, ELSEWHERE)?.edgeKeys).toEqual(
+      classMapEdgeKeysOf(answerOf(TEXELS), SEED),
+    );
+    store.dispose();
+  });
+
   it("asks for a body's map, and files its texture, 66 × 66 texels a layer, under coarse-field-gpu", async () => {
     const engine = await countingRenderEngine();
     const events: AllocationEvent[] = [];

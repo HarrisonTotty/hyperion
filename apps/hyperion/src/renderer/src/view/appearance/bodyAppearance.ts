@@ -66,6 +66,12 @@ export interface ClassMapDiscSurface {
    * melt's temperature where its body's ground is drawn emitting; absent, none is.
    */
   readonly meltClasses?: ReadonlyArray<boolean>;
+  /**
+   * Each class's edge key (lane fix-jagged-biome-edges; `bodies/classEdge.ts`' `edgeKey`), by
+   * which the disc shapes the edges between classes: 0 for a class whose edges it draws as the
+   * reconstruction leaves them, one of no named substance; absent, every class's are.
+   */
+  readonly edgeKeys?: ReadonlyArray<number>;
 }
 
 /**

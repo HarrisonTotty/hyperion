@@ -153,6 +153,7 @@ import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import ringShadowWgsl from "../rings/shaders/ringShadow.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
 import cubeTexelWgsl from "../shaders/cubeTexel.wgsl?raw";
+import classEdgeWgsl from "../shaders/classEdge.wgsl?raw";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import bodyDiscCellsWgsl from "../shaders/bodyDiscCells.wgsl?raw";
 import bodyDiscCellsPackedWgsl from "../shaders/bodyDiscCellsPacked.wgsl?raw";
@@ -1308,7 +1309,8 @@ export function planLitBodies(
  * R08, R08.T9.b: `preciseTrig.wgsl`, `common.wgsl`, `oblate.wgsl` and `surfaceLighting.wgsl`, in
  * place of `litBody.wgsl`'s stubs), the lit-body library, R11's ring shadow (`ringShadow.wgsl`,
  * R11.T9.a, in place of `litBody.wgsl`'s stub), the cube sphere's texel lookup (`cubeTexel.wgsl`,
- * R10.T11), the maturity nodes' formula (`maturityNodes.wgsl`, R10.T1.c) and the disc's shading.
+ * R10.T11), the maturity nodes' formula (`maturityNodes.wgsl`, R10.T1.c), the classes' edges
+ * (`classEdge.wgsl`, lane fix-jagged-biome-edges) and the disc's shading.
  */
 const LIT_SOURCE =
   frameWgsl +
@@ -1317,6 +1319,7 @@ const LIT_SOURCE =
   ringShadowWgsl +
   cubeTexelWgsl +
   maturityNodesWgsl +
+  classEdgeWgsl +
   bodyDiscWgsl;
 
 const DISC_SOURCE = LIT_SOURCE + bodyDiscDrawWgsl;

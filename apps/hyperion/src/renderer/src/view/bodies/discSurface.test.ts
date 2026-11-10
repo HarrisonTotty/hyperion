@@ -50,6 +50,7 @@ import {
   type ClassMapTexels,
   classMapLayers,
   classMapMaturityLayer,
+  classMapReconstructionAt,
   classMapSharesAt,
   classMapSide,
   classMapSurface,
@@ -2197,5 +2198,38 @@ describe("the class map's fine page at its cells' corners (lane fix-coast-class-
       );
     }
     expect(worst).toBeLessThan(1e-9);
+  });
+});
+
+/** The body-fixed direction of (s, t) on face 2. */
+function onFaceTwo(s: number, t: number): readonly [number, number, number] {
+  return faceUvToXyz(2, stToUv(s), stToUv(t));
+}
+
+describe("the class map's reconstruction for its edges (lane fix-jagged-biome-edges)", () => {
+  it("reads a texel's lattice as the map's texels", () => {
+    const map = refinedMap(4, [{ texel: { face: 2, i: 1, j: 2 }, cellOf: () => 1 }]);
+    expect(classMapReconstructionAt(map, onFaceTwo(0.1, 0.1)).latticeSt).toBe(1 / 4);
+  });
+
+  it("reads a refined texel's lattice as its field cells", () => {
+    const map = refinedMap(4, [{ texel: { face: 2, i: 1, j: 2 }, cellOf: () => 1 }]);
+    expect(classMapReconstructionAt(map, onFaceTwo(0.37, 0.62)).latticeSt).toBe(1 / (4 * R));
+  });
+
+  it("gives no mean purity where the point's texel holds no weight", () => {
+    const map = packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : null));
+    expect(classMapReconstructionAt(map, onFaceTwo(0.9, 0.5)).meanPurity).toBeNull();
+  });
+
+  it("gives a mean purity of 1 across a boundary between texels of one class each", () => {
+    const map = packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : [0, 1]));
+    expect(classMapReconstructionAt(map, onFaceTwo(0.5, 0.4)).meanPurity).toBeCloseTo(1, 12);
+  });
+
+  it("gives the shares classMapSharesAt gives", () => {
+    const map = packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : [0.25, 0.75]));
+    const at = onFaceTwo(0.45, 0.4);
+    expect([...classMapReconstructionAt(map, at).shares]).toEqual(classMapSharesAt(map, at));
   });
 });

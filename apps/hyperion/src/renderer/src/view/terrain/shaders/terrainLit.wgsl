@@ -84,8 +84,10 @@
 // two `vec4f` as `f32` words: A = c A_N per display channel (r, g, b), scaled for the figure as
 // law 0's is (R10.T10.e), and its L(0); its row of
 // `phase_factor_table`, −1 for a slot with no law (empty, or of an unnamed substance), whose
-// weight goes to law 0; then 1 where the slot is drawn from its maturity nodes, else 0, and two
-// words unread. Then, from word CLASS_MATURITY_WORD, each vertex's maturity codes, one word a
+// weight goes to law 0; then 1 where the slot is drawn from its maturity nodes, else 0; 1 where it
+// is of the `Melt` form, else 0; and its edge key (lane fix-jagged-biome-edges; `classEdge.ts`'
+// `edgeKey`), a 24-bit whole number, 0 for none. Then, from word CLASS_MATURITY_WORD, each vertex's
+// maturity codes, one word a
 // vertex, the unorm16 code at the patch's band level n in its low half and at its parent's, n − 1,
 // in its high half (`TerrainLayers.maturity`, R10.T1.c); and from word CLASS_NODE_WORD the
 // palette's albedo nodes (`terrainMaterial.ts`' `packClassNodes`), slot k's level ℓ (0 n, 1 n − 1)
@@ -364,12 +366,36 @@ fn terrain_law(slot : u32, m : u32) -> LunarLambert {
   return class_law(slot, m - 1u).law;
 }
 
+// Palette slot k's edge key of `slot` (word 7 of its law), 0 for none (lane fix-jagged-biome-edges).
+fn class_edge_key(slot : u32, k : u32) -> u32 {
+  return u32(bitcast<f32>(class_layers[slot * CLASS_LAYER_WORDS + CLASS_LAW_WORD + 8u * k + 7u]));
+}
+
+// A texel's laws' shares (`terrain_shares`) with what its classes' edges are shaped by (lane
+// fix-jagged-biome-edges; `bodyDisc.wgsl`'s `SurfaceSums`): the mean of its quad's vertices' purity
+// of their eight slots' weights by their bilinear weights, over those vertices holding a weight,
+// with those weights' sum, and the purity of their interpolated weights.
+struct TerrainShares {
+  shares : array<f32, TERRAIN_LAWS>,
+  purity : f32,
+  purity_norm : f32,
+  mix_purity : f32,
+}
+
+// The purity Σ (w ÷ Σ w)² of a vertex's eight weights, and their sum.
+fn vertex_purity(w : VertexWeights) -> vec2f {
+  let total = dot(w.low, vec4f(1.0)) + dot(w.high, vec4f(1.0));
+  let squares = dot(w.low, w.low) + dot(w.high, w.high);
+  return vec2f(select(0.0, squares / (total * total), total > 0.0), total);
+}
+
 // The share of each of a texel's laws at `patch_uv` of `slot` (`terrainShares`): each slot's weight
 // interpolated bilinearly between the quad's four vertices, the slots with a law kept, scaled down
 // to sum to 1 where they sum to more, and law 0 (`elsewhere`) what they leave: the share of an
 // unnamed substance's slot and of the vertices with no weights, outside the survey, as R07's disc
-// gives `elsewhere` what its class map leaves (`surface_at`).
-fn terrain_shares(slot : u32, patch_uv : vec2f) -> array<f32, TERRAIN_LAWS> {
+// gives `elsewhere` what its class map leaves (`surface_at`); with the purities its edges are
+// shaped by (`TerrainShares`).
+fn terrain_shares(slot : u32, patch_uv : vec2f) -> TerrainShares {
   let s = patch_uv * 64.0;
   let base = min(vec2u(floor(max(s, vec2f(0.0)))), vec2u(63u));
   let f = clamp(s - vec2f(base), vec2f(0.0), vec2f(1.0));
@@ -379,6 +405,21 @@ fn terrain_shares(slot : u32, patch_uv : vec2f) -> array<f32, TERRAIN_LAWS> {
   let w11 = vertex_weights(slot, base.x + 1u, base.y + 1u);
   let low = mix(mix(w00.low, w10.low, f.x), mix(w01.low, w11.low, f.x), f.y);
   let high = mix(mix(w00.high, w10.high, f.x), mix(w01.high, w11.high, f.x), f.y);
+  var out : TerrainShares;
+  let b = vec4f((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+  let p00 = vertex_purity(w00);
+  let p10 = vertex_purity(w10);
+  let p01 = vertex_purity(w01);
+  let p11 = vertex_purity(w11);
+  let held = vec4f(
+    select(0.0, b.x, p00.y > 0.0),
+    select(0.0, b.y, p10.y > 0.0),
+    select(0.0, b.z, p01.y > 0.0),
+    select(0.0, b.w, p11.y > 0.0),
+  );
+  out.purity = dot(held, vec4f(p00.x, p10.x, p01.x, p11.x));
+  out.purity_norm = dot(held, vec4f(1.0));
+  out.mix_purity = vertex_purity(VertexWeights(low, high)).x;
   var shares : array<f32, TERRAIN_LAWS>;
   var total = 0.0;
   for (var k = 0u; k < TERRAIN_CLASSES; k = k + 1u) {
@@ -399,7 +440,66 @@ fn terrain_shares(slot : u32, patch_uv : vec2f) -> array<f32, TERRAIN_LAWS> {
     }
   }
   shares[0] = select(1.0 - total, 0.0, total >= 1.0);
-  return shares;
+  out.shares = shares;
+  return out;
+}
+
+// A class set's shares of `slot` with their classes' edges shaped (lane fix-jagged-biome-edges;
+// `bodyDisc.wgsl`'s `edge_shape_disc`, whose rule it is, operation for operation): where two or
+// more named slots of an edge key hold a share at the unit body-fixed direction `d`, each one's
+// share of their sum sharpened about the others' by its own noise, under the gate of `at`'s
+// purities, at the footprint `footprint_rad` against the lattice's spacing `lattice_rad`, both on
+// the unit sphere; law 0 keeps its share, and the keyed slots' sum is kept.
+fn edge_shape_terrain(
+  at : ptr<function, TerrainShares>,
+  slot : u32,
+  d : vec3f,
+  footprint_rad : f32,
+  lattice_rad : f32,
+) {
+  if (!((*at).purity_norm > 0.0)) {
+    return;
+  }
+  var keyed = 0u;
+  var kept = 0.0;
+  for (var m = 1u; m < TERRAIN_LAWS; m = m + 1u) {
+    if ((*at).shares[m] > 0.0 && class_edge_key(slot, m - 1u) != 0u) {
+      keyed = keyed + 1u;
+      kept = kept + (*at).shares[m];
+    }
+  }
+  if (keyed < 2u) {
+    return;
+  }
+  let gate = edge_gate((*at).purity / (*at).purity_norm, (*at).mix_purity);
+  if (!(gate > 0.0)) {
+    return;
+  }
+  let plan = edge_plan(footprint_rad);
+  let q = edge_sharpness(lattice_rad / footprint_rad, plan);
+  var logits : array<f32, TERRAIN_LAWS>;
+  var largest = -3.4e38;
+  for (var m = 1u; m < TERRAIN_LAWS; m = m + 1u) {
+    let s = (*at).shares[m];
+    let key = class_edge_key(slot, m - 1u);
+    if (!(s > 0.0) || key == 0u) {
+      continue;
+    }
+    logits[m] = edge_logit(s / kept, gate, q, edge_noise(d, key, plan));
+    largest = max(largest, logits[m]);
+  }
+  var sum = 0.0;
+  for (var m = 1u; m < TERRAIN_LAWS; m = m + 1u) {
+    if ((*at).shares[m] > 0.0 && class_edge_key(slot, m - 1u) != 0u) {
+      logits[m] = exp(logits[m] - largest);
+      sum = sum + logits[m];
+    }
+  }
+  for (var m = 1u; m < TERRAIN_LAWS; m = m + 1u) {
+    if ((*at).shares[m] > 0.0 && class_edge_key(slot, m - 1u) != 0u) {
+      (*at).shares[m] = kept * logits[m] / sum;
+    }
+  }
 }
 
 // Whether palette slot k of `slot` is drawn from its maturity nodes (R10.T1.c; word 5 of its law,
@@ -573,6 +673,17 @@ struct ClassSets {
 // set's at its morph factor and rebake, another's at its own field.
 fn class_sets(in : LitVertexOut, reference : bool) -> ClassSets {
   var sets : ClassSets;
+  // The texel's body-fixed unit direction on R05's cube sphere, from its cell coordinates on its
+  // patch's face, and a pixel's footprint there on the unit sphere, rad, as R07's disc takes it
+  // (lane fix-jagged-biome-edges; `bodyDisc.wgsl`'s `shade`): its angle at the camera times the
+  // texel's distance over a, over the datum's μ held at EDGE_GRAZING_MU.
+  let own_rec = slots[in.slot];
+  let edge_d = normalize(
+    own_rec.axisA + stToUv(in.horizonSt.x) * own_rec.axisE1 + stToUv(in.horizonSt.y) * own_rec.axisE2
+  );
+  let pixel_rad = 2.0 / (frame.viewport.y * frame.clipProjection[1][1]);
+  let edge_mu = dot(normalize(in.datumNormal), -normalize(in.fromCameraBf));
+  let footprint = length(in.fromCameraBf) / own_rec.scale.x * pixel_rad / max(edge_mu, EDGE_GRAZING_MU);
   var c = 0.0;
   var mu = 0.0;
   var ancestor_uv = in.patchUv;
@@ -610,7 +721,11 @@ fn class_sets(in : LitVertexOut, reference : bool) -> ClassSets {
     if (reference) {
       sets.shares[s][0] = 1.0;
     } else {
-      sets.shares[s] = terrain_shares(sets.slot[s], sets.uv[s]);
+      var at = terrain_shares(sets.slot[s], sets.uv[s]);
+      // Each set on its own patch's lattice, a quad a step in s (lane fix-jagged-biome-edges).
+      let lattice = slots[sets.slot[s]].step * 1.5707963267948966;
+      edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, lattice);
+      sets.shares[s] = at.shares;
     }
     // Each law's A at the texel, its maturity's where a slot is drawn from its nodes (R10.T1.c); a
     // reference fragment's law 0 alone, its slots' shares being 0.

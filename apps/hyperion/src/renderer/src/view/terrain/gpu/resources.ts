@@ -100,6 +100,7 @@ import {
   packClassLaws,
   packClassNodes,
   packTerrainLighting,
+  paletteEdgeKeys,
   paletteMeltSlots,
   TERRAIN_LIGHT_BUFFER_ROWS,
   type TerrainLighting,
@@ -1708,6 +1709,8 @@ export class TerrainResources {
             c / a,
             maturity !== undefined,
             paletteMeltSlots(layers.palette),
+            // A bake of no edge seed keys no slot: its edges are drawn as its weights leave them.
+            layers.edgeSeed === undefined ? [] : paletteEdgeKeys(layers.palette, layers.edgeSeed),
           ),
           CLASS_WEIGHTS_BYTES,
         );

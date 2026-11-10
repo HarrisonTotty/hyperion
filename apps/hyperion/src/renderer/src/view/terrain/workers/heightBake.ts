@@ -25,6 +25,7 @@
  * and the ground's two properties, over one synthesiser.
  */
 
+import { edgeSeedOf } from "../../bodies/classEdge";
 import { type BodyIdHex, type DetailSeedHex, hexToU64, parseBodyId } from "@hyperion/protocol";
 
 import { patchKeyString, type Face, type PatchKey, unreachable } from "../patchKey";
@@ -795,6 +796,7 @@ export class WorkerFields {
         complete: baked.complete,
         unsurveyedCells: baked.unsurveyedCells(),
         photometry,
+        edgeSeed: edgeSeedOf(source.detailSeed),
         horizonNear: baked.horizonNear(),
         horizonFar: baked.horizonFar(),
         horizonComplete: baked.horizonComplete,

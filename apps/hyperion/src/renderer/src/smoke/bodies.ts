@@ -626,6 +626,80 @@ function worstRelative(a: Float32Array, b: Float32Array): number {
 }
 
 /**
+ * Lane fix-jagged-biome-edges: a disc under a class map whose classes carry edge keys, their edges
+ * shaped by the noise and sharpened to the lattice's width, on the GPU and in the rasteriser alike;
+ * a two-class map of four texels a face split along i = 2, drawn 240 px across in a 256 px view,
+ * where the noise's first octave is drawn and a texel spans some 90 px. The same map with no keys
+ * draws its edges as the reconstruction leaves them, which the shaped draw must move.
+ */
+async function checkEdgeKeys(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  checks: Checks,
+  made: ClassMapDiscSurface[],
+): Promise<void> {
+  const halves = packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : [0, 1]));
+  const laws = [
+    lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+  ];
+  const plain = classMapSurface(
+    engine,
+    "smoke class map, its edges keyed",
+    halves,
+    laws,
+    PROVISIONAL_PHOTOMETRY.law,
+  );
+  made.push(plain);
+  const keyed: ClassMapDiscSurface = { ...plain, edgeKeys: [0x51f00d, 0x2c0ffe] };
+  const viewport = { widthPx: 256, heightPx: 256 };
+  const drawn = await drawDisc(
+    engine,
+    renderer,
+    viewport,
+    240,
+    60,
+    TILTED_OBLATE,
+    [0, 0],
+    CAMERA,
+    null,
+    {
+      surface: keyed,
+      rotation: TILTED,
+      texels: halves,
+    },
+  );
+  const agreement = texelAgreement(drawn);
+  const record = { surface: plain, rotation: TILTED, texels: halves };
+  const unshaped = await drawDisc(
+    engine,
+    renderer,
+    viewport,
+    240,
+    60,
+    TILTED_OBLATE,
+    [0, 0],
+    CAMERA,
+    null,
+    record,
+  );
+  // The pixels the shaping moves by more than a hundredth, of those either draw lights.
+  let moved = 0;
+  for (let i = 0; i < drawn.texels.length; i += 4) {
+    const a = drawn.texels[i + 1] ?? 0;
+    const b = unshaped.texels[i + 1] ?? 0;
+    if (Math.abs(a - b) > 0.01 * Math.max(a, b)) {
+      moved += 1;
+    }
+  }
+  checks.check(
+    "fix-jagged-biome-edges a disc under a class map with its edges keyed equals the CPU rasteriser's, and its edges move",
+    agreement.worst <= 1 && agreement.classes && drawn.expected.length > 0 && moved > 0,
+    `${String(drawn.expected.length)} pixels; worst error ${agreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(agreement.classes)}; ${String(moved)} pixels moved by the shaping${agreement.mismatches.length > 0 ? `: ${agreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+  );
+}
+
+/**
  * T8.b: a disc under a class map on the GPU: a half-surveyed two-class map (a dark lunar and a
  * bright terrestrial class, the provisional Lambert law elsewhere) against the CPU rasteriser, and a
  * map of one class equal to the uniform law against the uniform disc. R10.T10.d: each read by the
@@ -771,6 +845,7 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
         `${String(refined.expected.length)} pixels; ${String(fine.fine?.tiles ?? 0)} tiles; every texel finite ${String(fineFinite)}; worst error ${fineAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(fineAgreement.classes)}${fineAgreement.mismatches.length > 0 ? `: ${fineAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
       );
     }
+    await checkEdgeKeys(engine, renderer, checks, made);
     const results: string[] = [];
     let worst = 0;
     for (const diameterPx of [20, 40]) {

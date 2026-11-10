@@ -53,6 +53,7 @@ import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { PhotometricLaw } from "../appearance/law";
 import { cancelAirPointsOf } from "../bodies/airPoint";
+import { edgeKey, edgeSeedOf } from "../bodies/classEdge";
 import {
   CLASS_MAP_POINT_SLICE_MS,
   cancelClassMapPoint,
@@ -175,6 +176,27 @@ export function classMapLawsOf(
   elsewhere: PhotometricLaw,
 ): ReadonlyArray<PhotometricLaw | null> {
   return lawsOnBody(classLawSourcesOf(answer), elsewhere);
+}
+
+/**
+ * Each class's edge key of an answered map on a body of detail seed `detailSeed`, in its order
+ * (lane fix-jagged-biome-edges; `bodies/classEdge.ts`' `edgeKey`): its form and entry under the
+ * world's edge seed, as the terrain keys its palette's slots, or 0 for a class whose palette names
+ * no substance (law code 0), which shades with `elsewhere` as the terrain's law 0 does.
+ *
+ * @throws Error for photometry that is not five values a class, or a seed that is not 16
+ *   hexadecimal digits.
+ */
+export function classMapEdgeKeysOf(
+  answer: ClassMapAnswer,
+  detailSeed: DetailSeedHex,
+): ReadonlyArray<number> {
+  const seed = edgeSeedOf(detailSeed);
+  return Array.from({ length: classCount(answer) }, (_, k) =>
+    classPhotometryOf(answer.photometry, k) === null
+      ? 0
+      : edgeKey(seed, answer.classes[2 * k] ?? 0, answer.classes[2 * k + 1] ?? 0),
+  );
 }
 
 /** Whether each class of an answered map has the `Melt` form ({@link MELT_CLASS_CODE}), in its order. */
@@ -487,6 +509,8 @@ interface HeldMap {
   readonly meltClasses: ReadonlyArray<boolean>;
   /** Its `Seabed` classes' mean albedo, `null` for none (plan R11, R11.T8.b). */
   readonly seabedAlbedo: Rgb | null;
+  /** Each class's edge key (lane fix-jagged-biome-edges; {@link classMapEdgeKeysOf}). */
+  readonly edgeKeys: ReadonlyArray<number>;
   /** The normal map's texels, `null` for none (no surveyed cell answered). */
   readonly normals: NormalMapTexels | null;
   /** Whether every texel the survey touched, and every surveyed cell's normal, was answered. */
@@ -661,6 +685,7 @@ export class ClassMapStore implements ClassMapSource {
             ? null
             : { texture: map.normalTexture, texels: map.normals },
         ...(map.meltClasses.includes(true) ? { meltClasses: map.meltClasses } : {}),
+        edgeKeys: map.edgeKeys,
       };
       map.handedOut = map.surface;
     }
@@ -819,6 +844,7 @@ export class ClassMapStore implements ClassMapSource {
       sources,
       meltClasses: classMapMeltOf(answer),
       seabedAlbedo: seabedAlbedoOf(answer, sources),
+      edgeKeys: classMapEdgeKeysOf(answer, held.detailSeed),
       normals,
       complete: answer.complete && answer.normalsComplete,
       cellCorners: answer.cellCorners === true,

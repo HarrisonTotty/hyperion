@@ -128,6 +128,12 @@ export interface TerrainLayers {
    * it (R10.T10.c, `gpu/resources.ts`' `surveyCellCode`).
    */
   readonly fieldLevel: number;
+  /**
+   * The world's edge seed (lane fix-jagged-biome-edges; `bodies/classEdge.ts`' `edgeSeedOf` of the
+   * body's detail seed), by which the terrain keys its palette's slots' edges as R07's class map
+   * keys its classes'; absent, no slot is keyed and the edges are drawn as the weights leave them.
+   */
+  readonly edgeSeed?: number;
   /** The patch's hard bound, metres. */
   readonly boundM: number;
   /** The patch's σ, the largest omitted RMS over its surveyed cells, metres. */

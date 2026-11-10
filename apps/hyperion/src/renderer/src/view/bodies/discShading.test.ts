@@ -50,6 +50,7 @@ import {
   type DiscSamples,
   discSamples,
   FINE_DISC_PX,
+  FIRST_EDGE_KEY_ROW,
   FIRST_NODE_ROW,
   FIRST_RING_SHADOW_ROW,
   type OrientedClassMap,
@@ -897,15 +898,19 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
       wgslConstant(bodyDiscWgsl, "FIRST_RING_SHADOW_ROW"),
       wgslConstant(ringShadowWgsl, "RING_SHADOW_ROWS"),
       wgslConstant(ringShadowWgsl, "RING_SHADOW_MAX_BANDS"),
+      wgslConstant(bodyDiscWgsl, "FIRST_EDGE_KEY_ROW"),
     ]).toEqual([
       DISC_ROWS,
       FIRST_NODE_ROW,
       FIRST_RING_SHADOW_ROW,
       RING_SHADOW_ROWS,
       MAX_RING_SHADOW_BANDS,
+      FIRST_EDGE_KEY_ROW,
     ]);
     expect(FIRST_RING_SHADOW_ROW).toBe(FIRST_NODE_ROW + MAX_DISC_CLASSES * MATURITY_NODES);
-    expect(DISC_ROWS).toBe(FIRST_RING_SHADOW_ROW + RING_SHADOW_ROWS);
+    // The edge keys' rows past the ring's (lane fix-jagged-biome-edges), four keys a row.
+    expect(FIRST_EDGE_KEY_ROW).toBe(FIRST_RING_SHADOW_ROW + RING_SHADOW_ROWS);
+    expect(DISC_ROWS).toBe(FIRST_EDGE_KEY_ROW + MAX_DISC_CLASSES / 4);
     // K from the nodes' library, which the shader composes and does not restate.
     expect(wgslConstant(maturityNodesWgsl, "MATURITY_NODES")).toBe(MATURITY_NODES);
     expect(bodyDiscWgsl).not.toMatch(/const MATURITY_NODES/u);
@@ -1102,5 +1107,63 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
     expect(near.length).toBeGreaterThan(0);
     expect(Math.min(...near.map(brightening))).toBeGreaterThan(2.4);
     expect(Math.max(...far.map((p) => Math.abs(brightening(p) - 1)))).toBeLessThan(1e-12);
+  });
+});
+
+// --- The classes' edges (lane fix-jagged-biome-edges) -------------------------------------------
+
+/** A two-class map of four texels a face split along i = 2, its classes keyed by `keys`. */
+function halves(keys: ReadonlyArray<number> | undefined): OrientedClassMap {
+  const surface = classMapSurface(
+    UNREAD_TEXTURES,
+    "halves",
+    packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : [0, 1])),
+    [REGOLITH, LAMBERT],
+    OWN,
+  );
+  return {
+    ...surface,
+    rotation: IDENTITY_ROTATION,
+    ...(keys === undefined ? {} : { edgeKeys: keys }),
+  };
+}
+
+describe("a disc's classes' edges (lane fix-jagged-biome-edges)", () => {
+  it("packs each class's edge key in its channel of the key rows", () => {
+    const packed = packDiscRecords([
+      { ...recordAt(240, 60, SPHERE), surface: halves([0x51f00d, 7]), tableRows: [0, 1, 2] },
+    ]);
+    expect([
+      packed[FIRST_EDGE_KEY_ROW * 4],
+      packed[FIRST_EDGE_KEY_ROW * 4 + 1],
+      packed[FIRST_EDGE_KEY_ROW * 4 + 2],
+    ]).toEqual([0x51f00d, 7, 0]);
+  });
+
+  it("packs no key for a map that carries none", () => {
+    const packed = packDiscRecords([
+      { ...recordAt(240, 60, SPHERE), surface: halves(undefined), tableRows: [0, 1, 2] },
+    ]);
+    expect([...packed.subarray(FIRST_EDGE_KEY_ROW * 4, DISC_ROWS * 4)].every((v) => v === 0)).toBe(
+      true,
+    );
+  });
+
+  it("draws a map of no keys as the reconstruction leaves it, bit for bit", () => {
+    const record = recordAt(240, 60, SPHERE);
+    const draw = (surface: OrientedClassMap): ReturnType<typeof rasteriseDisc> =>
+      rasteriseDisc({ ...record, surface, tableRows: [0, 1, 2] }, CAMERA, VIEWPORT, surface.texels);
+    expect(draw(halves(undefined))).toEqual(draw(halves([0, 0])));
+  });
+
+  it("moves the pixels along a keyed edge and leaves those within one class's texels", () => {
+    const record = recordAt(240, 60, SPHERE);
+    const draw = (surface: OrientedClassMap): ReturnType<typeof rasteriseDisc> =>
+      rasteriseDisc({ ...record, surface, tableRows: [0, 1, 2] }, CAMERA, VIEWPORT, surface.texels);
+    const plain = draw(halves(undefined));
+    const shaped = draw(halves([0x51f00d, 0x2c0ffe]));
+    const moved = shaped.filter((pixel, k) => pixel.rgb[1] !== plain[k]?.rgb[1]).length;
+    // Within a texel's span of the classes' boundary the edge moves; the rest stays bit for bit.
+    expect([moved > 0, shaped.length - moved > 0.3 * shaped.length]).toEqual([true, true]);
   });
 });

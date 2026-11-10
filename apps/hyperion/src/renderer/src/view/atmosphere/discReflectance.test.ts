@@ -193,10 +193,10 @@ function digestOf(source: string): string {
  * band, and by the record's ten ring rows (`DISC_ROWS` 318), every other row where it was.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "e2670a01d9fe159d"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "e2670a01d9fe159d"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "65c9bfd8b2ca0da1"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "b27a7af5e525ddae"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "2616afbd91b417cb"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "2616afbd91b417cb"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "39a3629cb40bae93"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "d882ef2e22ff0e34"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
@@ -210,19 +210,19 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
   // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "aa44f0e9728ad539"],
-    ["terrain-lit-face-differences", "900476b3dd137fcc"],
+    ["terrain-lit-baked-offsets", "3454f8bfb449f773"],
+    ["terrain-lit-face-differences", "1fc0b23dd24de3de"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "2c86297bc09f0c97"],
-    ["terrain-depth-face-differences", "6ee8b4694d084902"],
-    ["terrain-shadow-baked-offsets", "ca6816ccda49d8b5"],
-    ["terrain-shadow-face-differences", "4167533837daf318"],
-    ["terrain-lit-baked-offsets-still", "5a7fbc913637657e"],
-    ["terrain-lit-face-differences-still", "beb3fdd3f65db4bf"],
-    ["terrain-depth-baked-offsets-still", "ad7de12551cacea6"],
-    ["terrain-depth-face-differences-still", "23b978d32f334277"],
-    ["terrain-shadow-baked-offsets-still", "9ea431afa5bc6226"],
-    ["terrain-shadow-face-differences-still", "27f603b3d0680df7"],
+    ["terrain-depth-baked-offsets", "affb531fd5b00e51"],
+    ["terrain-depth-face-differences", "94c285aa72496bb4"],
+    ["terrain-shadow-baked-offsets", "34c378d0c3bb5093"],
+    ["terrain-shadow-face-differences", "f0eb4037535fa23e"],
+    ["terrain-lit-baked-offsets-still", "1ccd6cbc6b2f6494"],
+    ["terrain-lit-face-differences-still", "8cb833ebb3829e3d"],
+    ["terrain-depth-baked-offsets-still", "1a092193c2486ca4"],
+    ["terrain-depth-face-differences-still", "991df9990824e50d"],
+    ["terrain-shadow-baked-offsets-still", "7083c0f6d6d1bf70"],
+    ["terrain-shadow-face-differences-still", "561462da07b8ce09"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [
