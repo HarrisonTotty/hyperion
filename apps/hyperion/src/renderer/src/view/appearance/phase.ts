@@ -9,6 +9,7 @@
  * and solves each channel's exponent s in Φ_t^s by bisection: q falls monotonically as s rises,
  * since Φ_t ≤ 1 wherever the integrand's weight sin α is not negligible.
  */
+import { pow, sin } from "../../lib/pinnedMath";
 import type { Rgb } from "../photometry/toneCurve";
 import {
   limbShareAt,
@@ -55,7 +56,7 @@ export function lawPhaseIntegral(law: PhotometricLaw): Rgb {
     const weight =
       (i === 0 || i === n ? 1 : i % 2 === 1 ? 4 : 2) *
       shapePhase(law.lommelSeeligerShare, alpha, limbShareAt(law, alpha)) *
-      Math.sin(alpha);
+      sin(alpha);
     const f = phaseFactor(law, alpha);
     sums[0] += weight * f[0];
     sums[1] += weight * f[1];
@@ -96,7 +97,7 @@ function phaseIntegralOfExponent(template: PhaseTemplateId): (s: number) => numb
   for (let i = 0; i <= SOLVE_INTERVALS; i += 1) {
     const alpha = i * h;
     const simpson = i === 0 || i === SOLVE_INTERVALS ? 1 : i % 2 === 1 ? 4 : 2;
-    weight[i] = ((2 * h) / 3) * simpson * Math.sin(alpha);
+    weight[i] = ((2 * h) / 3) * simpson * sin(alpha);
     phaseTemplate[i] = phaseV(alpha);
     shape[i] = shapePhase(lommelSeeligerShare, alpha, limbShareAt(curve, alpha));
     inRange.push(alpha <= validToRad);
@@ -105,13 +106,13 @@ function phaseIntegralOfExponent(template: PhaseTemplateId): (s: number) => numb
   const endShape = shapePhase(lommelSeeligerShare, validToRad, limbShareAt(curve, validToRad));
   return (s) => {
     const heldF =
-      endShape > 0 ? Math.min(PHASE_F_CLAMP, endTemplate ** s / endShape) : PHASE_F_CLAMP;
+      endShape > 0 ? Math.min(PHASE_F_CLAMP, pow(endTemplate, s) / endShape) : PHASE_F_CLAMP;
     let q = 0;
     for (let i = 0; i <= SOLVE_INTERVALS; i += 1) {
       const shapeI = shape[i] ?? 0;
       const phase =
         inRange[i] === true
-          ? Math.min((phaseTemplate[i] ?? 0) ** s, PHASE_F_CLAMP * shapeI)
+          ? Math.min(pow(phaseTemplate[i] ?? 0, s), PHASE_F_CLAMP * shapeI)
           : heldF * shapeI;
       q += (weight[i] ?? 0) * phase;
     }

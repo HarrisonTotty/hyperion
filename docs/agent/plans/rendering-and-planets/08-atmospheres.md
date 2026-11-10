@@ -25306,3 +25306,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     at 165°, 3% whole (its reflected point's) and 4% glow (the disc's cells on its cap's sliver).
   - `test/glowingAirs.ts` holds the ultra-hot giant (from `thermalWorlds.test.ts`) and its baked
     table.
+  - `law.ts`, `phase.ts` and `assemble.ts` take `pinnedMath.ts`' `pow`, `sin` and `log`, listed in
+    `pinnedMathPaths.test.ts` (89): no capture and no air switch fixture's bake moved.
+  - test-render part 1's captures, both variants, at BASE and after each part: byte-identical (157
+    frames each); none draws an emitting point, the smoke page stepping no slice. NOT RUN: the RTX
+    look.

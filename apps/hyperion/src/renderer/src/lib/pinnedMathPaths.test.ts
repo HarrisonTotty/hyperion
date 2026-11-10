@@ -123,12 +123,16 @@ const MODULES = import.meta.glob<string>(
     "../view/bodies/airSwitchCases.test.ts",
     // R05's descent profile, whose poses its tests pin by hash.
     "../view/spike/descentProfile.ts",
+    // The photometric laws and the assembly the air switch's fixtures read (R08.T18's lane).
+    "../view/appearance/law.ts",
+    "../view/appearance/phase.ts",
+    "../view/atmosphere/assemble.ts",
   ],
   { query: "?raw", import: "default", eager: true },
 );
 
 /** How many modules the list names: the glob drops a path that no longer exists. */
-const LISTED = 86;
+const LISTED = 89;
 
 /** Every renderer test, as its text: the scan finds among them the tests that bless a table. */
 const TESTS = import.meta.glob<string>("../**/*.test.ts", {

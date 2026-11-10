@@ -17,6 +17,7 @@
  * the TypeScript reference and the shader interpolate them linearly, so the two read one f and one
  * L.
  */
+import { pow } from "../../lib/pinnedMath";
 import type { Rgb } from "../photometry/toneCurve";
 import { shapePhase } from "./shapes";
 import { PHASE_TEMPLATES } from "./templates";
@@ -159,7 +160,7 @@ export function phaseFactor(law: PhotometricLaw, alphaRad: number): Rgb {
   const shape = shapePhase(law.lommelSeeligerShare, alpha, limbShareAt(law, alpha));
   // At conjunction the shape's phase function is zero (or rounds below it), where f is the clamp.
   const channel = (s: number): number =>
-    shape > 0 ? Math.min(PHASE_F_CLAMP, phaseV ** s / shape) : PHASE_F_CLAMP;
+    shape > 0 ? Math.min(PHASE_F_CLAMP, pow(phaseV, s) / shape) : PHASE_F_CLAMP;
   return [
     channel(law.phaseExponent[0]),
     channel(law.phaseExponent[1]),

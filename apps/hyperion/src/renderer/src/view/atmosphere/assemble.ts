@@ -1536,7 +1536,7 @@ function heightAtPa(column: AtmosphereColumn, pressurePa: number): number {
   }
   const p0 = pressuresPa[i] ?? Number.NaN;
   const p1 = pressuresPa[i + 1] ?? Number.NaN;
-  const t = Math.log(p0 / pressurePa) / Math.log(p0 / p1);
+  const t = log(p0 / pressurePa) / log(p0 / p1);
   const z0 = altitudesM[i] ?? Number.NaN;
   const z1 = altitudesM[i + 1] ?? Number.NaN;
   return z0 + (z1 - z0) * t;
