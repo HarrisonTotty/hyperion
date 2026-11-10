@@ -1088,5 +1088,7 @@ fn pick<T>(items: &[T], word: u64) -> Option<&T> {
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod colour_census;
+#[cfg(all(test, not(target_family = "wasm")))]
+mod envelope_census;
 #[cfg(test)]
 mod tests;

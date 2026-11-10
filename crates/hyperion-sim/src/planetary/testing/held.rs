@@ -21,6 +21,9 @@ use crate::planetary::derive::photometry::area_mix::{
     with_haze_layer, with_icy_regolith, with_minor_clouds, with_organic_sediment,
     with_rayleigh_adding,
 };
+use crate::planetary::derive::photometry::envelope_bond::{
+    EnvelopeColumnRules, with_envelope_column,
+};
 use crate::planetary::hooks::envelope_atmosphere::{DaysideDecksRules, with_dayside_decks};
 use crate::planetary::hooks::surface::deck::{LockedClimateRules, with_locked_climate};
 use crate::planetary::hooks::surface::{CapBalanceRules, with_cap_balance};
@@ -80,6 +83,7 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
+    envelope_column: EnvelopeColumnRules = EnvelopeColumnRules::in_force => with_envelope_column,
 }
 
 /// `share(0)` to `share(shares − 1)` on at most `hyperion_testkit::threads::granted(reserved)`
@@ -151,6 +155,17 @@ mod tests {
         let held = set_apart(HeldRules::on_this_thread);
         assert_eq!(held.install(HeldRules::on_this_thread), held);
         assert_eq!(HeldRules::on_this_thread(), version);
+    }
+
+    /// Every planetary hold of version 32 is in force under the tests' `with_every_32_hold`, each
+    /// at its 32 arm, and the version's rules outside it: an envelope's column read whole. A 32
+    /// hold's bump deletes its line here with its line in `with_every_32_hold`.
+    #[test]
+    fn every_32_hold_is_in_force_under_with_every_32_hold() {
+        use crate::planetary::testing::with_every_32_hold;
+        let rules = EnvelopeColumnRules::in_force;
+        assert_eq!(with_every_32_hold(rules), EnvelopeColumnRules::Whole);
+        assert_eq!(rules(), EnvelopeColumnRules::Clipped);
     }
 
     /// The tests that run threads, catch a panic or read the sources, none of which a wasm32-wasip1

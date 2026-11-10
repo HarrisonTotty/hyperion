@@ -3058,7 +3058,8 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
     - _Built_ 2026-11-01, held at 26, but the envelope's own albedo and the refits; the envelope's
       own albedo, the cold giants' clouds, the ice giants' methane layer and the cold envelopes'
-      κ₁ built 2026-11-01, held at 27: Risks, "Deviations in P14.T24.h.b, as built".
+      κ₁ built 2026-11-01, held at 27: Risks, "Deviations in P14.T24.h.b, as built". The column
+      read whole built 2026-11-10, held at 32: Risks, "the envelope's column read whole".
 - **P14.T24.i An unlit body's mean surface temperature** (23 → 24, before the serve gate; lane
   `p14-gate-24`, with P14.T56.f, one gate; behind a hold at 24 with a tripwire;
   decision-bump-plan-after-22, "Version-24 lanes after 23", V3.3, 2026-10-22).
@@ -34486,3 +34487,28 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   `ATMOSPHERE` lead row's, beside `GAS ENVELOPE` (`envelopeLabel`), not the `SURFACE` state's,
   which keeps `SUPERCRITICAL H2O` alone; the guide's `ATMOSPHERE` and `GAS ENVELOPE` rows now name
   it, with `CH4`, `O2` and `UNLISTED MATERIAL` as examples.
+- **P14.T24.h.b's follow-up, the envelope's column read whole (lane `fix-dark-sub-neptune`,
+  2026-11-10).** Held at 32 (`envelope_bond::ENVELOPE_COLUMN_VERSION`;
+  `EnvelopeColumnRules::{Clipped, Whole}`, `with_envelope_column`, a line in `HeldRules` and in the
+  new planetary `testing::with_every_32_hold`); nothing moves at 31.
+  - _Changed:_ the closed form's column starts at its highest mode's top above 1 Pa (Gao's soot,
+    at 0.1 Pa, was unread), and every layer takes the δ-PIFM; `layer_two_stream` takes the rules
+    first. `gas_envelope_bond` is `gas_envelope_light`, which also gives the column's B, V, R bins
+    as `Atmosphere::band_albedo` from 32 (`column::snapshot_light`).
+  - _New items:_ `envelope_bond::{ParticleTable, table_for, narrow}`: a gamma soot mode of v_eff
+    0.05 reads `narrow.rs` (`reduce_narrow.py`, eight radii a decade), not the σ_g 2 table.
+  - _Photometry:_ from 32 a provisional gas envelope (`T_eq` above 150 K) takes `p_c` = `a_c` ÷
+    `q_c` from its column; one at or below keeps its row (ruling 9).
+  - _Leans (2026-11-10):_ soot stays the haze, so the drawn air does not move; every gas envelope's
+    own albedo does (the giants +0.004 to +0.016, `GIANTS_32`, within their gates), and with it its
+    `T_eq` and satellites. The narrow table is soot's alone; the fitted cold-giant hazes keep the
+    wide one.
+  - _Sources (recalled; WebFetch refused in the pod):_ Gao et al. 2020's grid is of hot giants,
+    `T_eq` 700 K up; Kempton et al. 2023's GJ 1214b (A_B 0.51 ± 0.06) lies at `T_eq` ≈ 595 K,
+    below the soot's taper; Morley et al. 2015 make soot the dark end-member and tholin the bright.
+  - _At the bump:_ the giants' 31 pins take `GIANTS_32`, `HOT_JUPITER_32` and `COLOURS_32`;
+    `the_solar_system_draws_itself_in_its_surfaces_colours` finds the giants' colours; the slow
+    `under_every_32_hold_the_envelope_column_moves_only_gas_envelopes_and_their_satellites` and its
+    nextest override go with the hold.
+  - _Accept:_ `cargo test -p hyperion-sim --lib --` with the filters `planetary::derive`,
+    `planetary::viewer::envelope_census` and `planetary::testing::held`.

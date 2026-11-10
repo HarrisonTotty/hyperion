@@ -144,6 +144,14 @@ threads-required = 16
 test-group = "@global"
 priority = 50
 
+# The envelope column's census of the planet viewer's draws generates them on sixteen threads of its
+# own (`CENSUS_THREADS` in `planetary/viewer/envelope_census.rs`).
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & test(=planetary::viewer::envelope_census::under_every_32_hold_the_envelope_column_moves_only_gas_envelopes_and_their_satellites)"
+threads-required = 16
+test-group = "@global"
+priority = 50
+
 # The shell plan's census tests (R06.T8.i), and the census's at a synthetic ceiling (R13.T2.a),
 # census their cells on four threads of their own too.
 [[profile.default.overrides]]

@@ -876,8 +876,10 @@ fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> Bo
 /// fraction from the area mix over the surface `surface` in place of T13.c's table, and under the
 /// body's own climate the lid the pass takes ([`spun_lid`], P14.T54.a):
 ///
-/// - a gas envelope its class's ([`area_mix::giant_bond`]) at its heated temperature and for its
-///   planet class, under a full cover, which its class's albedo includes; it has no lid;
+/// - a gas envelope its own column's ([`envelope_bond::gas_envelope_light`]), or where that gives
+///   none its class's ([`area_mix::giant_bond`]) at its heated temperature and for its planet
+///   class, under a full cover, which its class's albedo includes, and from 32 its column's colour
+///   by band; it has no lid;
 /// - a magma ocean the melt's 0.10 ([`area_mix::melt_bond`]), cloudless, whatever its lid;
 /// - every other state the area mix over the condensates its pass publishes and its regolith, its
 ///   lid's row where it takes one, with the cloud fraction of its state and condensable at its
@@ -910,6 +912,8 @@ pub(super) fn area_mixed(
         }
     };
     let haze = pass_haze(air, inputs);
+    // A gas envelope's colour, from 32 its column's, which no area mix lays.
+    let mut envelope_colour = None;
     let SurfaceMix {
         disc,
         bands,
@@ -920,19 +924,23 @@ pub(super) fn area_mixed(
         cold_traps,
         present,
     } = match air.state {
-        SurfaceState::GasEnvelope => SurfaceMix {
-            disc: Disc::Whole {
-                albedo: envelope_bond::gas_envelope_bond(shade, inputs),
-                cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
-            },
-            bands: None,
-            lid: None,
-            liquid_water: false,
-            deck_water: OpenWater::Dry,
-            maturity: Err(NoMaturity::NoRegolith),
-            cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
-            present: None,
-        },
+        SurfaceState::GasEnvelope => {
+            let (albedo, colour) = envelope_bond::gas_envelope_light(shade, inputs);
+            envelope_colour = colour;
+            SurfaceMix {
+                disc: Disc::Whole {
+                    albedo,
+                    cloud_fraction: area_mix::cloud_share_of_state(SurfaceState::GasEnvelope),
+                },
+                bands: None,
+                lid: None,
+                liquid_water: false,
+                deck_water: OpenWater::Dry,
+                maturity: Err(NoMaturity::NoRegolith),
+                cold_traps: Err(no_cold_traps(surface, NoColdTraps::Unqualified)),
+                present: None,
+            }
+        }
         SurfaceState::MagmaOcean => {
             let lid = match surface.climate {
                 PassClimate::Spun(spun) => spun_lid(air, inputs, spun, None),
@@ -967,7 +975,9 @@ pub(super) fn area_mixed(
         spun_read::trace(lid.as_ref());
     }
     let albedo = floored(disc, air, inputs, (shade, haze));
-    let band_albedo = bands.and_then(|bands| bands.laid(disc, air, inputs, (shade, haze)));
+    let band_albedo = bands
+        .and_then(|bands| bands.laid(disc, air, inputs, (shade, haze)))
+        .or(envelope_colour);
     let runaway_deck = match air.state {
         SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope => surface.deck,
         SurfaceState::GasEnvelope

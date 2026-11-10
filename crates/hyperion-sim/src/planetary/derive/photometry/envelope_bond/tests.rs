@@ -9,7 +9,7 @@ use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::hooks::EnvelopeAtmosphere;
 use crate::planetary::hooks::aerosols::AerosolDeck;
 use crate::substance::aloft::law_aloft;
-use crate::substance::by_key;
+use crate::substance::{CondensedPhase, by_key};
 use crate::units::{Kelvin, Pascals};
 
 /// The record's atmosphere `atmosphere` under `gravity` (m s⁻²) as the engine reads it (the tests'
@@ -69,20 +69,197 @@ fn sun() -> HostShade {
     HostShade::sun()
 }
 
-/// A conservative isotropic layer's two-stream is its closed form, R = γ₁τ ÷ (1 + γ₁τ) with γ₁ ¾,
-/// and a deep absorbing one's its limit with no overflow.
+/// Under either closure a conservative isotropic layer's two-stream is its closed form, R = γ₁τ ÷
+/// (1 + γ₁τ) with γ₁ ¾, and a deep absorbing one's its limit with no overflow.
 #[test]
 fn the_two_stream_takes_its_limits() {
-    let (r, t) = layer_two_stream(2.0, 1.0, 0.0);
-    assert!((r - 1.5 / 2.5).abs() < 1e-12, "{r}");
-    assert!((r + t - 1.0).abs() < 1e-12);
-    let (r, t) = layer_two_stream(1e6, 0.5, 0.3);
+    for rules in [EnvelopeColumnRules::Clipped, EnvelopeColumnRules::Whole] {
+        let (r, t) = layer_two_stream(rules, 2.0, 1.0, 0.0);
+        assert!((r - 1.5 / 2.5).abs() < 1e-12, "{rules:?}: {r}");
+        assert!((r + t - 1.0).abs() < 1e-12);
+        let (r, t) = layer_two_stream(rules, 1e6, 0.5, 0.3);
+        assert!(r.is_finite() && (0.0..1.0).contains(&r), "{rules:?}: {r}");
+        assert_same_bits(t, 0.0);
+        let (r, _) = layer_two_stream(rules, 1e6, 0.0, 0.0);
+        assert_same_bits(r, 0.0);
+    }
+}
+
+/// The envelope's column is read whole only from the 31 → 32 bump: the rules in force are the
+/// clipped ones, and the tests' switch reaches 32's.
+#[test]
+fn the_envelope_column_is_held_only_until_the_32_bump() {
     assert!(
-        r.is_finite() && (0.0..1.0).contains(&r) && t == 0.0,
-        "{r} {t}"
+        crate::GENERATOR_VERSION < ENVELOPE_COLUMN_VERSION,
+        "the 31 → 32 bump reads an envelope's column whole: delete `ENVELOPE_COLUMN_VERSION`, \
+         `EnvelopeColumnRules` with its `Clipped` arm and its matches in `layer_two_stream` (and \
+         its `rules` parameter, which `bin_albedos` reads), `column_top`, `table_for` and \
+         `gas_envelope_light`, the tests that call the `Clipped` arm, the tests' \
+         `with_envelope_column`, its lines in `HeldRules` and `with_every_32_hold`, and this test; \
+         have the `under_every_32_hold_` tests read the version's rules alone, re-pin the giants' \
+         31 figures at their 32 ones, and have `the_solar_system_draws_itself_in_its_surfaces_\
+         colours` find the giants' colours"
     );
-    let (r, _) = layer_two_stream(1e6, 0.0, 0.0);
-    assert_same_bits(r, 0.0);
+    assert_eq!(ENVELOPE_COLUMN_VERSION, crate::GeneratorVersion::new(32));
+    assert_eq!(
+        EnvelopeColumnRules::in_force(),
+        EnvelopeColumnRules::Clipped
+    );
+    for rules in [EnvelopeColumnRules::Clipped, EnvelopeColumnRules::Whole] {
+        assert_eq!(
+            with_envelope_column(rules, EnvelopeColumnRules::in_force),
+            rules
+        );
+    }
+}
+
+/// A homogeneous Henyey–Greenstein layer's diffuse reflectance over black, exact: the lane's
+/// doubling (`fix-dark-sub-neptune`, 2026-11-10; 48 Gauss streams a hemisphere, the azimuthal mean
+/// of the phase function to 200 Legendre terms, a layer of τ ÷ 2³⁰ doubled 30 times, lit
+/// isotropically): τ, ω, g and R.
+const EXACT_DIFFUSE: [(f64, f64, f64, f64); 12] = [
+    (17.0, 0.1, 0.05, 0.0205),
+    (17.0, 0.25, 0.0, 0.0598),
+    (17.0, 0.25, 0.15, 0.0511),
+    (17.0, 0.35, 0.2, 0.0737),
+    (17.0, 0.5, 0.2, 0.1225),
+    (17.0, 0.7, 0.3, 0.2042),
+    (17.0, 0.9, 0.5, 0.3602),
+    (17.0, 0.99, 0.7, 0.6457),
+    (1.0, 1.0, 0.0, 0.4466),
+    (1.0, 0.9, 0.5, 0.2280),
+    (0.3, 0.5, 0.2, 0.0689),
+    (2.0, 0.2, 0.1, 0.0414),
+];
+
+/// The whole column's δ-PIFM is honest for a dark layer: on each of [`EXACT_DIFFUSE`]'s layers it
+/// lies within 10% below the exact reflectance (0.5–9%), where the clipped δ-Eddington lies up to 0.06
+/// below it and returns nothing for the darkest (soot's ω about 0.25 among them); at ω = 1 the two
+/// closures agree.
+#[test]
+fn the_whole_column_s_closure_is_honest_for_a_dark_layer() {
+    for (tau, omega, g, exact) in EXACT_DIFFUSE {
+        let (pifm, _) = layer_two_stream(EnvelopeColumnRules::Whole, tau, omega, g);
+        let (eddington, _) = layer_two_stream(EnvelopeColumnRules::Clipped, tau, omega, g);
+        eprintln!(
+            "τ {tau} ω {omega} g {g}: exact {exact}, δ-PIFM {pifm:.4}, δ-Eddington {eddington:.4}"
+        );
+        assert!(
+            (0.90 * exact..=1.005 * exact).contains(&pifm),
+            "τ {tau} ω {omega} g {g}: {pifm} against {exact}"
+        );
+        assert!(eddington <= pifm + 1e-12, "τ {tau} ω {omega} g {g}");
+    }
+    let (soot, _) = layer_two_stream(EnvelopeColumnRules::Clipped, 17.0, 0.25, 0.15);
+    assert_same_bits(soot, 0.0);
+    let pifm = layer_two_stream(EnvelopeColumnRules::Whole, 3.0, 1.0, 0.6);
+    let eddington = layer_two_stream(EnvelopeColumnRules::Clipped, 3.0, 1.0, 0.6);
+    assert!((pifm.0 - eddington.0).abs() < 1e-12 && (pifm.1 - eddington.1).abs() < 1e-12);
+}
+
+/// The whole column reads a haze above 1 Pa: a soot layer of τ(550) 2 between 0.1 and 0.27 Pa
+/// (Gao et al.'s, of 50 nm) over a clear H₂–He gas is no part of the clipped column, which starts
+/// at 1 Pa, and all of the whole one's, which starts at its top, where it darkens the blue that
+/// the gas's Rayleigh layer returns to under half.
+#[test]
+fn the_whole_column_reads_a_haze_above_one_pascal() {
+    let gas = Absorbers {
+        hydrogen: 0.86,
+        helium: 0.14,
+        ..Absorbers::default()
+    };
+    let soot = particle_table("soot", CondensedPhase::Solid).expect("soot's table");
+    let haze = |rules| ColumnMode {
+        tau: 2.0,
+        base: 0.1 * core::f64::consts::E,
+        top: 0.1,
+        exponent: 0.0,
+        coverage: 1.0,
+        optics: Some((
+            with_envelope_column(rules, || table_for(soot, &gao_soot())),
+            5.0e-8,
+        )),
+    };
+    let haze_tau = |column: &EnvelopeColumn| -> f64 {
+        column
+            .layers
+            .iter()
+            .map(|layer| layer.particles[2][0])
+            .sum()
+    };
+    let read = |rules| {
+        with_envelope_column(rules, || {
+            let column = assemble((12.0, 2.3), &gas, &[haze(rules)], |_| 600.0, |_, _| gas);
+            let clear = assemble((12.0, 2.3), &gas, &[], |_| 600.0, |_, _| gas);
+            (column, bin_albedos(&clear))
+        })
+    };
+    let (clipped, _) = read(EnvelopeColumnRules::Clipped);
+    assert_same_bits(clipped.layers[0].top, COLUMN_TOP_PA);
+    assert!(haze_tau(&clipped) < 1e-12, "{}", haze_tau(&clipped));
+    let (whole, clear) = read(EnvelopeColumnRules::Whole);
+    assert_same_bits(whole.layers[0].top, 0.1);
+    // The V bin's extinction over 550 nm's is within some per cent of 1 for 50 nm soot.
+    let tau = haze_tau(&whole);
+    eprintln!("the haze's extinction in the whole column's V bin {tau:.4}");
+    assert!((1.8..=2.2).contains(&tau), "{tau}");
+    let hazed = with_envelope_column(EnvelopeColumnRules::Whole, || bin_albedos(&whole));
+    assert!(
+        hazed[1] < 0.5 * clear[1],
+        "B: {} against the clear {}",
+        hazed[1],
+        clear[1]
+    );
+}
+
+/// Gao et al.'s soot as the record draws it: a gamma of effective radius 50 nm and `v_eff` 0.05
+/// (`photochem::SOOT_PARTICLES`).
+fn gao_soot() -> crate::substance::SizeDistribution {
+    crate::substance::SizeDistribution::gamma(crate::units::Metres::new(5.0e-8), 0.05)
+        .expect("a gamma's radius and variance")
+}
+
+/// From 32 a gamma soot mode of `v_eff` 0.05 reads the narrow table, whose ω at 50 nm is the
+/// gamma's (the lane's Mie sums, 0.158, 0.102 and 0.068 in B, V and R, within the table's
+/// interpolation), far under the wide table's 0.22, 0.18 and 0.14; a log-normal soot, a gamma of
+/// another width, a material with no narrow table and every mode at 31 read the wide one.
+#[test]
+fn a_gamma_soot_mode_reads_the_narrow_table_from_32() {
+    use crate::substance::SizeDistribution;
+    use crate::units::Metres;
+    let soot = particle_table("soot", CondensedPhase::Solid).expect("soot's table");
+    let haze = particle_table("ice_giant_haze", CondensedPhase::Solid).expect("its table");
+    let log_normal = SizeDistribution::log_normal(Metres::new(5.0e-8), 0.6).expect("a log-normal");
+    let wider = SizeDistribution::gamma(Metres::new(5.0e-8), 0.2).expect("a gamma");
+    let whole = |table, distribution: &SizeDistribution| {
+        with_envelope_column(EnvelopeColumnRules::Whole, || {
+            table_for(table, distribution)
+        })
+    };
+    assert_eq!(whole(soot, &gao_soot()), ParticleTable::Narrow(0));
+    assert_eq!(whole(soot, &log_normal), ParticleTable::Wide(soot));
+    assert_eq!(whole(soot, &wider), ParticleTable::Wide(soot));
+    assert_eq!(whole(haze, &gao_soot()), ParticleTable::Wide(haze));
+    assert_eq!(table_for(soot, &gao_soot()), ParticleTable::Wide(soot));
+    let omega = |table: ParticleTable, bin| {
+        let at = log_bracket(table.radii(), 5.0e-8);
+        particle_optics_at(table, at, bin)[1]
+    };
+    for (bin, narrow, wide) in [(1, 0.158, 0.221), (2, 0.102, 0.176), (3, 0.068, 0.143)] {
+        let (n, w) = (
+            omega(ParticleTable::Narrow(0), bin),
+            omega(ParticleTable::Wide(soot), bin),
+        );
+        eprintln!("bin {bin}: ω narrow {n:.4} (Mie {narrow}), wide {w:.4} (Mie {wide})");
+        assert!(
+            (n - narrow).abs() < 0.006,
+            "bin {bin}: narrow {n} against {narrow}"
+        );
+        assert!(
+            (w - wide).abs() < 0.01,
+            "bin {bin}: wide {w} against {wide}"
+        );
+    }
 }
 
 /// The Rayleigh factor of a bin is its mean of (550 ÷ λ)^4.08: 1 for a bin at 550 nm alone, about
@@ -222,7 +399,13 @@ fn a_rayleigh_column_is_its_layer_s_two_stream() {
         })
         .sum();
     assert!((tau - FLOOR_OPTICAL_DEPTH).abs() < 1e-6, "{tau}");
-    let one = layer_two_stream(tau * rayleigh_bin_factor(2), 1.0, 0.0).0;
+    let one = layer_two_stream(
+        EnvelopeColumnRules::Clipped,
+        tau * rayleigh_bin_factor(2),
+        1.0,
+        0.0,
+    )
+    .0;
     assert!(
         (bins[2] - one).abs() < 0.01,
         "{} against one layer's {one}",
@@ -467,4 +650,104 @@ fn the_snapshot_path_s_cost_a_pass_is_stated() {
             );
         };
     }
+}
+
+/// The table's giants' own Bond albedos under every 32 hold, pinned, in [`GIANTS`]' order: the
+/// δ-PIFM returns some of the light of the absorbing g-points' layers that the δ-Eddington held at
+/// R = 0, Jupiter 0.5049, Saturn 0.3186, Uranus 0.3236 and Neptune 0.3394 (from 31's 0.5013,
+/// 0.3077, 0.3084 and 0.3238): Jupiter +0.2 sigma of Li et al.'s 0.503, Saturn −0.8 sigma of
+/// Hanel et al.'s 0.342, the ice giants +0.5 and +0.7 sigma of theirs.
+const GIANTS_32: [f64; 4] = [0.5049, 0.3186, 0.3236, 0.3394];
+
+/// The hot fixture's own Bond albedo about a Sun under every 32 hold, pinned: 0.1370 (from 31's
+/// [`HOT_JUPITER`]).
+const HOT_JUPITER_32: f64 = 0.1370;
+
+/// Jupiter's and Saturn's bins 1 ÷ 2 and 3 ÷ 2 under every 32 hold, pinned: 0.8820 and 1.0379, and
+/// 0.7182 and 1.0639 (from 31's 0.8794 and 1.0384, and 0.7006 and 1.0648), 7.1% from Table 7's
+/// `p_B` ÷ `p_V` for Jupiter and 5.7% and 6.5% from Saturn's two.
+const COLOURS_32: [(&str, f64, f64); 2] = [("Jupiter", 0.8820, 1.0379), ("Saturn", 0.7182, 1.0639)];
+
+/// Under every 32 hold the giants keep their gates (the brief's "the giants' colour gates
+/// unmoved"): the table's giants' own Bond albedos each within its measurement as at 31
+/// (Jupiter's 0.503 ± 0.012, Li et al. 2018; Saturn's stated against Hanel et al.'s 0.342 ± 0.030;
+/// the ice giants' within theirs), Jupiter's `T_eff` in 123–128 K and Uranus's `T_eq` in 56–62 K,
+/// Jupiter's bins within 10% of Table 7's `p_B` ÷ `p_V` and Saturn's within 15% of both its
+/// ratios, the hot fixture in 0.05–0.2, and the closed form within 0.04 of the record's own
+/// envelope read alike; each figure pinned ([`GIANTS_32`], [`HOT_JUPITER_32`], [`COLOURS_32`]).
+#[test]
+fn under_every_32_hold_the_giants_keep_their_gates() {
+    use crate::planetary::derive::solar::{found, solar_system};
+    use crate::planetary::testing::with_every_32_hold;
+    // At 31 no envelope carries a colour, so its photometry is its row's, bit for bit.
+    assert!(
+        gas_envelope_light(&sun(), &hot_jupiter_inputs())
+            .1
+            .is_none()
+    );
+    let table = solar_system();
+    for (name, ..) in GIANTS {
+        assert!(
+            found(&table, name).atmosphere().band_albedo().is_none(),
+            "{name}"
+        );
+    }
+    with_every_32_hold(|| {
+        assert!(
+            gas_envelope_light(&sun(), &hot_jupiter_inputs())
+                .1
+                .is_some()
+        );
+        let own = solar_system();
+        for ((name, (measured, error), held), pinned) in GIANTS.iter().zip(GIANTS_32) {
+            let body = found(&own, name);
+            let albedo = body.albedo().value();
+            eprintln!(
+                "{name} under every 32 hold: own Bond albedo {albedo:.4} (31's {held}) at T_eq \
+                 {:.2} K, against {measured} ± {error} measured ({:+.1} sigma)",
+                body.equilibrium_temperature().value(),
+                (albedo - measured) / error
+            );
+            assert!(
+                (albedo - pinned).abs() < 0.003,
+                "{name}: {albedo} against {pinned}"
+            );
+            if *name != "Saturn" {
+                assert!((albedo - measured).abs() <= *error, "{name}: {albedo}");
+            }
+        }
+        let jupiter = found(&own, "Jupiter");
+        let t_eff = jupiter.effective_temperature().expect("a giant's").value();
+        assert!((123.0..=128.0).contains(&t_eff), "{t_eff} K");
+        let uranus = found(&own, "Uranus").equilibrium_temperature().value();
+        assert!((56.0..=62.0).contains(&uranus), "{uranus} K");
+        for (name, blue, red) in COLOURS_32 {
+            let body = found(&own, name);
+            let bins =
+                bin_albedos(&column::snapshot_column(&giant_inputs(body)).expect("a column"));
+            let (b, r) = (bins[1] / bins[2], bins[3] / bins[2]);
+            let &(_, want_b, want_r) = TABLE_7_COLOURS
+                .iter()
+                .find(|(n, ..)| *n == name)
+                .expect("a measured colour");
+            eprintln!(
+                "{name} under every 32 hold: bins B/V {b:.4} against {want_b:.4} and R/V {r:.4} \
+                 against {want_r:.4}"
+            );
+            assert!((b - blue).abs() < 0.003, "{name}: B/V {b} against {blue}");
+            assert!((r - red).abs() < 0.003, "{name}: R/V {r} against {red}");
+            if name == "Jupiter" {
+                assert!((b / want_b - 1.0).abs() <= 0.10, "{b}");
+            } else {
+                assert!((b / want_b - 1.0).abs() <= 0.15, "{b}");
+                assert!((r / want_r - 1.0).abs() <= 0.15, "{r}");
+            }
+        }
+        let hot =
+            column::snapshot_bond(&hot_jupiter_inputs(), &sun()).expect("the fixture's column");
+        eprintln!("the hot fixture under every 32 hold: own Bond albedo {hot:.4}");
+        assert!((hot - HOT_JUPITER_32).abs() < 0.003, "{hot}");
+        assert!((0.05..0.2).contains(&hot), "{hot}");
+        closed_form_follows_the_record("under every 32 hold");
+    });
 }

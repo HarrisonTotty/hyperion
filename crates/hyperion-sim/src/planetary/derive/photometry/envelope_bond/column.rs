@@ -77,7 +77,8 @@ use crate::units::{
 };
 
 use super::{
-    Absorbers, COLUMN_TOP_PA, ColumnMode, EnvelopeColumn, assemble, column_bond, particle_table,
+    Absorbers, COLUMN_TOP_PA, ColumnMode, EnvelopeColumn, OPTICS_BANDS, assemble, band_weighted,
+    bin_albedos, particle_table, table_for,
 };
 
 /// The rows whose decks the closed form draws, in their condensation order on a solar gas
@@ -711,14 +712,25 @@ fn profile_free_one_bar(
 }
 
 /// The Bond albedo of the gas envelope `inputs` describes under the light `shade`, its own
-/// column's ([`snapshot_column`], [`column_bond`]); `None` where the closed form gives no column,
-/// or where its column returns no light at all (labelled): an opaque top layer the Eddington
+/// column's ([`snapshot_column`], [`super::column_bond`]); `None` where the closed form gives no column,
+/// or where its column returns no light at all (labelled): to 31, an opaque top layer the Eddington
 /// closure holds at R = 0, ω′(4 − 3g′) < 1, as a soot-shrouded sub-Neptune's (τ 17, ω about 0.25),
 /// where the photometry needs a p above 0 and a semi-infinite layer reflects a few per cent.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn snapshot_bond(inputs: &AtmosphereInputs, shade: &HostShade) -> Option<f64> {
-    let bond = column_bond(&snapshot_column(inputs)?, shade);
-    (bond.is_finite() && bond > 0.0 && bond <= 1.0).then_some(bond)
+    snapshot_light(inputs, shade).map(|(bond, _)| bond)
+}
+
+/// [`snapshot_bond`] with the spherical albedo by bin it weighs ([`bin_albedos`]).
+#[must_use]
+pub(crate) fn snapshot_light(
+    inputs: &AtmosphereInputs,
+    shade: &HostShade,
+) -> Option<(f64, [f64; OPTICS_BANDS])> {
+    let bins = bin_albedos(&snapshot_column(inputs)?);
+    let bond = band_weighted(&bins, shade.bands());
+    (bond.is_finite() && bond > 0.0 && bond <= 1.0).then_some((bond, bins))
 }
 
 /// A mode as the column's assembly reads it: `None` for one with no τ(550).
@@ -727,7 +739,9 @@ pub(crate) fn column_mode(mode: &AerosolMode) -> Option<ColumnMode> {
     let profile = mode.profile();
     let key = mode.material().substance().key();
     let optics = particle_table(key.as_str(), mode.phase()).and_then(|table| match mode.size() {
-        Ok(ParticleSize::Distribution(d)) => Some((table, d.effective_radius().value())),
+        Ok(ParticleSize::Distribution(d)) => {
+            Some((table_for(table, &d), d.effective_radius().value()))
+        }
         Ok(ParticleSize::Aggregate(_)) | Err(_) => None,
     });
     Some(ColumnMode {

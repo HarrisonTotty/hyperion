@@ -65,9 +65,23 @@
 //! (the lane's science check, 2026-11-06). A part of the disc with
 //! no albedos by band of its own takes its analogue's measured colour, `p_c` ÷ `p_V` of its row:
 //! an airless silicate regolith under the space-weathering stand-in, or whose lid is not known,
-//! Mercury's, and Venus's deck Venus's; a disc with none at all (a gas envelope, a melt) is its
-//! template's row, as below 31. So every Solar System analogue in its own state is still drawn with
+//! Mercury's, and Venus's deck Venus's; a disc with none at all (a gas envelope to 31, a melt)
+//! is its template's row, as below 31. So every Solar System analogue in its own state is still drawn with
 //! its row (ruling 9): Mercury's regolith is the stand-in's and Venus's disc its deck.
+//!
+//! # The colour of a provisional envelope (from generator version 32)
+//!
+//! From 32 a gas envelope's own column gives its spherical albedo in the B, V and R bins too
+//! (`envelope_bond`'s "The column read whole"). An envelope at or below
+//! [`HOT_GIANT_TEMPERATURE`], whose template is a Solar System analogue's, keeps its row as above
+//! (ruling 9). One above it, `provisional`, has no analogue whose row its colour or its `p_V` ÷
+//! `A_Bond` could borrow, so each band is its column's own, `p_c` = `a_c` ÷ `q_c` with the
+//! template's q (capped so that `p_c` `q_c` ≤ 1), whatever its hosts' light: its Bond albedo,
+//! which that light weighs, scales none of them. Where the closed form gives no column, the class
+//! table's Bond albedo scales its row as below 32. The template's q is an approximation: a dark
+//! envelope's disc, its light scattered once, is nearer a Lommel–Seeliger sphere's q of 16 (1 −
+//! ln 2) ÷ 3 ≈ 1.64 than Neptune's 1.24, so its p may be some 30% bright (the lane's science
+//! check).
 //!
 //! From 31 too a weathered lid's colour tends to the mature lunar colour as its npFe⁰
 //! extinguishes its grains' interiors (`area_mix`'s "The weathered area mix"), where the slab alone
@@ -797,9 +811,22 @@ pub struct PhotometryInputs {
     ///
     /// It is its albedo in the B, V and R bins
     /// ([`Atmosphere::band_albedo`](crate::planetary::derive::Atmosphere::band_albedo)), whose
-    /// ratios to V give `p_B` and `p_R`. `None` for a disc with no albedos by band (a gas envelope,
-    /// a melt), which keeps its template's row.
+    /// ratios to V give `p_B` and `p_R`; from 32 a gas envelope's column's, which a provisional
+    /// envelope's p reads band by band (the [module documentation](self), "The colour of a
+    /// provisional envelope"). `None` for a disc with no albedos by band (a melt, a gas envelope
+    /// below 32 or with no column), which keeps its template's row.
     pub band_albedo: Option<DiscColour>,
+}
+
+/// Where a disc's p takes its bands from ([`BodyPhotometry::derive`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Drawn {
+    /// Its template's row, scaled by the Bond factor.
+    Row,
+    /// `p_V` the row's scaled, `p_B` and `p_R` it times these ratios to V.
+    OverV(f64, f64),
+    /// Its own albedo by band, over q (a provisional envelope's from 32).
+    Own(DiscColour),
 }
 
 /// A body's photometry at a record's time (P14.T47.c): its template, its geometric albedo per
@@ -825,14 +852,42 @@ impl BodyPhotometry {
         let row = template.row();
         let scale = inputs.bond.value() / row.reference_bond().value();
         let q = row.phase_integral;
-        let colour = inputs.band_albedo.map(DiscColour::over_v);
-        let p = match colour {
-            None => Bands {
+        let hot = inputs.state == SurfaceState::GasEnvelope
+            && inputs.equilibrium_temperature > HOT_GIANT_TEMPERATURE;
+        // A gas envelope's column gives its albedo by band from 32 (`envelope_bond`'s "The column
+        // read whole"): an envelope with an analogue keeps its row (ruling 9), and only one with
+        // none, a provisional one, is drawn from its own column ("The colour of a provisional
+        // envelope").
+        let drawn = match inputs.state {
+            SurfaceState::GasEnvelope if hot => inputs.band_albedo.map_or(Drawn::Row, Drawn::Own),
+            SurfaceState::GasEnvelope => Drawn::Row,
+            SurfaceState::MagmaOcean
+            | SurfaceState::Airless
+            | SurfaceState::RunawayGreenhouse
+            | SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::Snowball
+            | SurfaceState::Tenuous
+            | SurfaceState::SteamEnvelope => inputs.band_albedo.map_or(Drawn::Row, |colour| {
+                let (b, r) = colour.over_v();
+                Drawn::OverV(b, r)
+            }),
+        };
+        let p = match drawn {
+            Drawn::Own(own) => {
+                let a = own.albedo();
+                Bands {
+                    b: (a.b / q.b).min(1.0 / q.b),
+                    v: (a.v / q.v).min(1.0 / q.v),
+                    r: (a.r / q.r).min(1.0 / q.r),
+                }
+            }
+            Drawn::Row => Bands {
                 b: (row.albedo.b * scale).min(1.0 / q.b),
                 v: (row.albedo.v * scale).min(1.0 / q.v),
                 r: (row.albedo.r * scale).min(1.0 / q.r),
             },
-            Some((b, r)) => {
+            Drawn::OverV(b, r) => {
                 let v = (row.albedo.v * scale).min(1.0 / q.v);
                 Bands {
                     b: (v * b).min(1.0 / q.b),
@@ -841,8 +896,6 @@ impl BodyPhotometry {
                 }
             }
         };
-        let hot = inputs.state == SurfaceState::GasEnvelope
-            && inputs.equilibrium_temperature > HOT_GIANT_TEMPERATURE;
         Self {
             geometric_albedo: p,
             template,
@@ -1413,6 +1466,77 @@ mod tests {
         let photometry = BodyPhotometry::derive(&neptune);
         assert_eq!(photometry.template(), PhaseTemplate::Neptune);
         assert!(photometry.provisional());
+    }
+
+    /// From 32 a provisional gas envelope, above [`HOT_GIANT_TEMPERATURE`], is drawn from its
+    /// column's own albedo by band, `p_c` = `a_c` ÷ `q_c`, whatever its Bond albedo (its hosts' light
+    /// weighs that, not its p); one at or below it, whose template is its analogue's, keeps its
+    /// row scaled by its Bond albedo, to the bit, its colour notwithstanding; and one with no colour
+    /// (no column, or below 32) is its row's, as before.
+    #[test]
+    fn only_a_provisional_envelope_is_drawn_from_its_column() {
+        let colour = DiscColour::new(Bands {
+            b: 0.0282,
+            v: 0.0191,
+            r: 0.0129,
+        });
+        let envelope = |t: f64, band_albedo| PhotometryInputs {
+            state: SurfaceState::GasEnvelope,
+            class: PlanetClass::SubNeptune,
+            fractions: MassFractions::of(CoreComposition::new(0.3, 0.5).unwrap(), 0.1),
+            equilibrium_temperature: Kelvin::new(t),
+            surface_temperature: Kelvin::new(t),
+            bond: BondAlbedo::new(0.006).unwrap(),
+            band_albedo,
+            ..airless(SurfaceMaterial::Rock, SurfaceState::GasEnvelope, 0.006)
+        };
+        let row = PhaseTemplate::Neptune.row();
+        let q = row.phase_integral;
+        let hot = BodyPhotometry::derive(&envelope(670.0, colour));
+        let a = colour.expect("a colour").albedo();
+        assert_same_bits(hot.geometric_albedo().b, a.b / q.b);
+        assert_same_bits(hot.geometric_albedo().v, a.v / q.v);
+        assert_same_bits(hot.geometric_albedo().r, a.r / q.r);
+        assert!(hot.provisional());
+        let scale = 0.006 / row.reference_bond().value();
+        for t in [670.0, 120.0] {
+            let with = BodyPhotometry::derive(&envelope(t, colour)).geometric_albedo();
+            let without = BodyPhotometry::derive(&envelope(t, None)).geometric_albedo();
+            assert_same_bits(without.b, row.albedo.b * scale);
+            assert_same_bits(without.v, row.albedo.v * scale);
+            assert_same_bits(without.r, row.albedo.r * scale);
+            if t < HOT_GIANT_TEMPERATURE.value() {
+                for (got, want) in [
+                    (with.b, without.b),
+                    (with.v, without.v),
+                    (with.r, without.r),
+                ] {
+                    assert_same_bits(got, want);
+                }
+            }
+        }
+    }
+
+    /// Under every 32 hold the Solar System's four giants carry their columns' colours, and each
+    /// still draws its row's (ruling 9), scaled by its own Bond albedo, to the bit: none lies above
+    /// [`HOT_GIANT_TEMPERATURE`].
+    #[test]
+    fn under_every_32_hold_the_giants_still_draw_their_rows() {
+        crate::planetary::testing::with_every_32_hold(|| {
+            let planets = solar_system();
+            for name in ["Jupiter", "Saturn", "Uranus", "Neptune"] {
+                let body = found(&planets, name);
+                assert!(body.atmosphere().band_albedo().is_some(), "{name}");
+                let photometry = BodyPhotometry::derive(&inputs_of(body));
+                let row = photometry.template().row();
+                let scale = body.albedo().value() / row.reference_bond().value();
+                let (p, q) = (photometry.geometric_albedo(), row.phase_integral);
+                assert_same_bits(p.b, (row.albedo.b * scale).min(1.0 / q.b));
+                assert_same_bits(p.v, (row.albedo.v * scale).min(1.0 / q.v));
+                assert_same_bits(p.r, (row.albedo.r * scale).min(1.0 / q.r));
+                assert!(!photometry.provisional(), "{name}");
+            }
+        });
     }
 
     /// From 31 `p_V` is the template's scale and `p_B` and `p_R` are `p_V` times the disc's own

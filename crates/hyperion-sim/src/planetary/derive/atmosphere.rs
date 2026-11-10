@@ -2920,8 +2920,10 @@ impl Atmosphere {
     /// under its cloud, its air's Rayleigh layer and its haze, as its Bond albedo sums them over
     /// its hosts' light, which the photometry's B and R read
     /// ([`PhotometryInputs::band_albedo`](crate::planetary::derive::photometry::PhotometryInputs::band_albedo)).
-    /// `None` below 31, before the area mix, for a disc of one albedo (a gas envelope, a melt, a
-    /// body of no mass or radius) and where its albedos are not a colour ([`DiscColour::new`]).
+    /// From 32 a gas envelope's is its own column's spherical albedo in those bins
+    /// (`envelope_bond`'s "The column read whole"). `None` below 31, before the area mix, for a
+    /// disc of one albedo (a gas envelope below 32 or with no column, a melt, a body of no mass or
+    /// radius) and where its albedos are not a colour ([`DiscColour::new`]).
     #[must_use]
     pub const fn band_albedo(&self) -> Option<DiscColour> {
         self.band_albedo
