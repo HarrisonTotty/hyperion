@@ -9,8 +9,8 @@ import {
 } from "../../test/airSwitchCases";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { type DiscAir, discEmissionOf } from "../atmosphere/discReflectance";
-import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
-import { magmaOceanSurface } from "../../test/thermalSurfaces";
+import { type SurfaceTemperatureField, surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+import { lavaWorldSurface, magmaOceanSurface } from "../../test/thermalSurfaces";
 import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { ProjectionCamera, Viewport } from "../camera/projection";
@@ -319,58 +319,183 @@ describe("an air body's point (R07.T8.a, R08.T16.b; airPoint.ts)", () => {
   });
 });
 
-describe("a glowing body's point (R08.T18)", () => {
-  /** The young magma ocean's field, one for every frame, as the atmosphere cache holds a reply's. */
-  const field = surfaceTemperatureFieldOf(magmaOceanSurface());
-  /** The young magma ocean seen from `towardsObserver`, its star along +z. */
-  const glowingOf = (towardsObserver = vec3(0, 0, 1)): GlowPointBody => {
-    const law = aLitBody().photometry.law;
-    const star = vec3(0, 0, 1);
-    const emission = discEmissionOf(field, [law.a], [[1e5, 1e5, 1e5]], star, []);
-    const figure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 };
-    return {
-      emission,
-      air: null,
-      figure,
-      glowFigure: figure,
-      glowSurface: { kind: "uniform", law },
-      pole: vec3(0, 1, 0),
-      rotation: null,
-      classMap: null,
-      towardsObserver,
-    };
+/** A fresh field of the young magma ocean: its glows' holder, its own to each test. */
+const magmaField = (): SurfaceTemperatureField => surfaceTemperatureFieldOf(magmaOceanSurface());
+/** The magma ocean under `field` seen from `towardsObserver`, its star along +z. */
+const glowingOf = (
+  field: SurfaceTemperatureField,
+  towardsObserver = vec3(0, 0, 1),
+): GlowPointBody => {
+  const law = aLitBody().photometry.law;
+  const figure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 };
+  return {
+    emission: discEmissionOf(field, [law.a], [[1e5, 1e5, 1e5]], vec3(0, 0, 1), []),
+    air: null,
+    figure,
+    glowFigure: figure,
+    glowSurface: { kind: "uniform", law },
+    pole: vec3(0, 1, 0),
+    rotation: null,
+    classMap: null,
+    towardsObserver,
   };
+};
+/** A body of `item`'s figure, airless, glowing under `field`, `px` across at `phaseDeg`. */
+const glowingScene = (
+  item: AirSwitchBody,
+  field: SurfaceTemperatureField,
+  px: number,
+  phaseDeg: number,
+): { readonly body: LitBodyInput; readonly hosts: PlacedLight[] } => {
+  const { body, hosts } = sceneOf(item, px, phaseDeg);
+  const { air: _air, ...airless } = body;
+  return { body: { ...airless, thermal: field }, hosts };
+};
 
-  it("draws no glow until the slices find it, then its samples' sum, one refresh a body", () => {
+describe("a glowing body's point (R08.T18)", () => {
+  it("draws no glow until the slices find it", () => {
     drain();
-    const body = glowingOf();
-    expect(body.emission).not.toBeNull();
-    expect(glowPointLight(body)).toEqual([0, 0, 0]);
-    expect(glowPointLight(body)).toEqual([0, 0, 0]);
+    expect(glowPointLight(glowingOf(magmaField()))).toEqual([0, 0, 0]);
+  });
+
+  it("queues one refresh a body, however often its frames ask", () => {
+    drain();
+    const body = glowingOf(magmaField());
+    glowPointLight(body);
+    glowPointLight(body);
     expect(airPointWork().refreshes).toBe(1);
+  });
+
+  it("draws its samples' sum once the slices find it", () => {
     drain();
-    const sum = glowPointSum(body);
-    expect(sum.every((value) => Number.isFinite(value))).toBe(true);
-    expect(sum[0]).toBeGreaterThan(0);
-    expect(glowPointLight(body)).toEqual(sum);
+    const body = glowingOf(magmaField());
+    glowPointLight(body);
+    drain();
+    expect(glowPointLight(body)).toEqual(glowPointSum(body));
+  });
+
+  it("sums a molten night's light as positive and finite in red", () => {
+    const sum = glowPointSum(glowingOf(magmaField(), vec3(0, 0, -1)));
+    expect([Number.isFinite(sum[0]) && sum[0] > 0, sum.every(Number.isFinite)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("begins a glow near the switch once, however often it is begun", () => {
+    drain();
+    const body = glowingOf(magmaField());
+    warmGlowPoint(body);
+    warmGlowPoint(body);
+    expect(airPointWork().refreshes).toBe(1);
+  });
+
+  it("stands its held glow in within the stale angle, its refresh queued", () => {
+    drain();
+    const field = magmaField();
+    const body = glowingOf(field);
+    warmGlowPoint(body);
+    drain();
+    // Turned 0.01 rad, past the cache's angle and within the stale one.
+    const turned = glowingOf(field, normalise(vec3(0.01, 0, 1)));
+    expect([glowPointLight(turned), airPointWork().refreshes]).toEqual([glowPointSum(body), 1]);
+  });
+
+  it("draws the turned glow once the slices find it", () => {
+    drain();
+    const field = magmaField();
+    warmGlowPoint(glowingOf(field));
+    drain();
+    const turned = glowingOf(field, normalise(vec3(0.01, 0, 1)));
+    glowPointLight(turned);
+    drain();
+    expect(glowPointLight(turned)).toEqual(glowPointSum(turned));
+  });
+
+  it("begins a disc's glow near the switch, which its first frame as a point finds held", () => {
+    drain();
+    const field = magmaField();
+    const item = caseOf("test-earth");
+    const near = glowingScene(item, field, 6, 30);
+    planLitBodies([near.body], near.hosts, OPTIONS, new Map([[near.body.id, "disc"]]));
+    drain();
+    const point = glowingScene(item, field, 2.99, 30);
+    pointFlux(point.body, point.hosts, [], DISC_ANNULI_HIGH);
     expect(airPointWork().refreshes).toBe(0);
   });
 
-  it("begins a glow near the switch, keeps its held one within the stale angle, and refreshes it", () => {
+  it("begins no glow for a disc past the band", () => {
     drain();
-    // A view the test before holds none at.
-    const body = glowingOf(normalise(vec3(0.5, 0, 1)));
-    warmGlowPoint(body);
-    expect(airPointWork().refreshes).toBe(1);
-    warmGlowPoint(body);
+    const far = glowingScene(caseOf("test-earth"), magmaField(), 40, 30);
+    planLitBodies([far.body], far.hosts, OPTIONS, new Map([[far.body.id, "disc"]]));
+    expect(airPointWork().refreshes).toBe(0);
+  });
+
+  it("steps a glow in the near scope only while a frame draws it near", () => {
+    drain();
+    glowPointLight(glowingOf(magmaField()));
+    let ms = 0;
+    const clock = (): number => {
+      ms += 1;
+      return ms;
+    };
+    // Past the notes' slices with no frame drawing it, the near scope steps none of it.
+    for (let i = 0; i <= AIR_POINT_NEAR_SLICES; i += 1) {
+      stepAirPoints(0, clock, "all");
+    }
+    expect([
+      stepAirPoints(Number.POSITIVE_INFINITY, clock, "near"),
+      airPointWork().refreshes,
+    ]).toEqual([false, 1]);
+  });
+
+  it("steps a glow in the near scope while a frame draws it near", () => {
+    drain();
+    const body = glowingOf(magmaField());
+    glowPointLight(body);
+    while (stepAirPoints(Number.POSITIVE_INFINITY, () => 0, "near")) {
+      // Its glow found.
+    }
+    expect(airPointWork().refreshes).toBe(0);
+  });
+
+  it("drops a class map's queued glow as the map is dropped", () => {
+    drain();
+    const item = caseOf("served-class-map");
+    const map = item.surface?.kind === "class-map" ? item.surface : null;
+    if (map === null) {
+      throw new Error("the case is drawn under a class map");
+    }
+    const { body, hosts } = glowingScene(
+      item,
+      surfaceTemperatureFieldOf(lavaWorldSurface()),
+      2.99,
+      60,
+    );
+    pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+    const queued = airPointWork().refreshes;
+    cancelAirPointsOf(map.texels);
+    expect([queued, airPointWork().refreshes]).toEqual([1, 0]);
+  });
+
+  it("drops a class map's held glow as the map is dropped, and finds it anew", () => {
+    drain();
+    const item = caseOf("served-class-map");
+    const map = item.surface?.kind === "class-map" ? item.surface : null;
+    if (map === null) {
+      throw new Error("the case is drawn under a class map");
+    }
+    const { body, hosts } = glowingScene(
+      item,
+      surfaceTemperatureFieldOf(lavaWorldSurface()),
+      2.99,
+      60,
+    );
+    pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+    drain();
+    cancelAirPointsOf(map.texels);
+    pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
     expect(airPointWork().refreshes).toBe(1);
     drain();
-    // Turned 0.01 rad, past the cache's angle and within the stale one: the held glow stands in
-    // while its refresh is queued.
-    const turned = glowingOf(normalise(vec3(0.5 + 0.0125, 0, 1)));
-    expect(glowPointLight(turned)).toEqual(glowPointSum(body));
-    expect(airPointWork().refreshes).toBe(1);
-    drain();
-    expect(glowPointLight(turned)).toEqual(glowPointSum(turned));
   });
 });

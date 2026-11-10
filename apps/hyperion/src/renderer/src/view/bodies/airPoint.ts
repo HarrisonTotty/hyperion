@@ -99,10 +99,13 @@ export const AIR_POINT_RADIUS_OVER_DISTANCE = 1e-3;
 /** The ratios a table holds at most: two stars from four views. */
 export const HELD_PER_TABLE = 8;
 
-/** The ratios the frames' slices hold queued at most, the oldest let go past it. */
+/** The ratios and glows the frames' slices hold queued at most, the oldest let go past it. */
 export const AIR_POINT_QUEUE = 16;
 
-/** The slices a frame's note of a table near the switch holds for, as a class map's. */
+/**
+ * The slices a frame's note of a table, or of a glow's holder, near the switch holds for, as a
+ * class map's.
+ */
 export const AIR_POINT_NEAR_SLICES = 4;
 
 /** The camera the samples are taken in: the galactic axes are the view's. */
@@ -217,6 +220,8 @@ interface AirLightGeometry {
   readonly slot: number;
   readonly surfaceKey: object;
   readonly airedKey: object;
+  /** The class map's texels either disc shades with, which drop it with them; `null` for none. */
+  readonly mapKey: ClassMapTexels | null;
   /** The two figures' semi-axes, m. */
   readonly figureKey: string;
   /** The light's and the observer's directions in the body's frame. */
@@ -241,6 +246,8 @@ interface GlowGeometry {
   /** The ground's field its emission is of, or `null` for none. */
   readonly fieldKey: object | null;
   readonly surfaceKey: object;
+  /** The class map's texels its disc shades with, which drop it with them; `null` for none. */
+  readonly mapKey: ClassMapTexels | null;
   /** The body's own figure's and the glowing disc's semi-axes, m. */
   readonly figureKey: string;
   /**
@@ -552,6 +559,7 @@ function geometryOf(body: AirPointBody, slot: number): AirLightGeometry | null {
     slot,
     surfaceKey: surfaceKeyOf(body.surface),
     airedKey: surfaceKeyOf(body.airedSurface),
+    mapKey: body.classMap,
     figureKey: [
       figure.equatorialRadiusM,
       figure.polarRadiusM,
@@ -730,10 +738,12 @@ function hold(table: DiscReflectanceTable, entry: HeldAirRatio): void {
   const replaced = nearestHeld(held, entry, classMapPointStaleAngleRad(phaseOf(entry)));
   const kept = held.filter((each) => each !== replaced);
   HELD.set(table, [...kept.slice(-(HELD_PER_TABLE - 1)), entry]);
-  for (const key of [entry.surfaceKey, entry.airedKey]) {
-    const tables = TABLES_OF_MAP.get(key) ?? new Set<DiscReflectanceTable>();
+  // A class map's alone: a uniform law's set would hold its tables while the law lives, which for
+  // the black ground beneath a gas envelope's air (`draw.ts`' `GROUND_SURFACE`) is the session.
+  if (entry.mapKey !== null) {
+    const tables = TABLES_OF_MAP.get(entry.mapKey) ?? new Set<DiscReflectanceTable>();
     tables.add(table);
-    TABLES_OF_MAP.set(key, tables);
+    TABLES_OF_MAP.set(entry.mapKey, tables);
   }
 }
 
@@ -751,6 +761,7 @@ function glowGeometryOf(body: GlowPointBody): GlowGeometry {
   return {
     fieldKey: body.emission?.field ?? null,
     surfaceKey: surfaceKeyOf(body.glowSurface),
+    mapKey: body.classMap,
     figureKey: [
       figure.equatorialRadiusM,
       figure.polarRadiusM,
@@ -788,9 +799,9 @@ const NO_GLOW: Rgb = [0, 0, 0];
 
 /**
  * What a body's disc emits towards the observer (the module's remarks; R08.T18), over (a ÷ Δ)², cd
- * m⁻² per channel: its held glow nearest its geometry, or none while none is held near, its glow
- * queued for the frames' slices. Never sums on the frame, and is cut by no eclipse. Notes its
- * holder near the switch.
+ * m⁻² per channel: a glow held within the cache's angle of its geometry; else, its glow queued for
+ * the frames' slices, the held one nearest it within the stale angle, or none. Never sums on the
+ * frame, and is cut by no eclipse. Notes its holder near the switch.
  */
 export function glowPointLight(body: GlowPointBody): Rgb {
   const holder = glowHolderOf(body);
@@ -833,9 +844,12 @@ function holdGlow(holder: object, entry: HeldGlow): void {
   const replaced = nearestOf(held, entry, classMapPointStaleAngleRad(phaseOf(entry)), sameGlow);
   const kept = held.filter((each) => each !== replaced);
   HELD_GLOWS.set(holder, [...kept.slice(-(GLOWS_HELD - 1)), entry]);
-  const holders = GLOW_HOLDERS_OF_MAP.get(entry.surfaceKey) ?? new Set<object>();
-  holders.add(holder);
-  GLOW_HOLDERS_OF_MAP.set(entry.surfaceKey, holders);
+  // A class map's alone, as `hold`'s.
+  if (entry.mapKey !== null) {
+    const holders = GLOW_HOLDERS_OF_MAP.get(entry.mapKey) ?? new Set<object>();
+    holders.add(holder);
+    GLOW_HOLDERS_OF_MAP.set(entry.mapKey, holders);
+  }
 }
 
 /**
@@ -849,7 +863,7 @@ export function cancelAirPointsOf(texels: ClassMapTexels): void {
   const glowOfMap = (entry: GlowGeometry): boolean => entry.surfaceKey === texels;
   for (let q = REFRESHES.length - 1; q >= 0; q -= 1) {
     const refresh = REFRESHES[q];
-    if (refresh !== undefined && (refresh.kind === "ratio" ? ofMap(refresh) : glowOfMap(refresh))) {
+    if (refresh !== undefined && refreshOfMap(refresh, texels)) {
       REFRESHES.splice(q, 1);
     }
   }
@@ -869,6 +883,34 @@ export function cancelAirPointsOf(texels: ClassMapTexels): void {
   GLOW_HOLDERS_OF_MAP.delete(texels);
 }
 
+/** Whether a queued refresh was found on a class map's texels. */
+function refreshOfMap(refresh: QueuedRefresh, texels: ClassMapTexels): boolean {
+  let of: boolean;
+  switch (refresh.kind) {
+    case "ratio":
+      of = refresh.surfaceKey === texels || refresh.airedKey === texels;
+      break;
+    case "glow":
+      of = refresh.surfaceKey === texels;
+      break;
+  }
+  return of;
+}
+
+/** What a queued refresh's frame notes near the switch: its table, or its glow's holder. */
+function holderOfRefresh(refresh: QueuedRefresh): object {
+  let holder: object;
+  switch (refresh.kind) {
+    case "ratio":
+      holder = refresh.table;
+      break;
+    case "glow":
+      holder = refresh.holder;
+      break;
+  }
+  return holder;
+}
+
 /** Removes `item` from `queue`, where it is. */
 function removeFrom<T>(queue: T[], item: T): void {
   const at = queue.indexOf(item);
@@ -877,7 +919,10 @@ function removeFrom<T>(queue: T[], item: T): void {
   }
 }
 
-/** Which queued ratios a slice steps: all, or those of tables a frame drew near the switch lately. */
+/**
+ * Which queued ratios and glows a slice steps: all, or those of tables and glow holders a frame drew
+ * near the switch lately.
+ */
 export type AirPointScope = "all" | "near";
 
 /** The ratios and glows the frames' slices hold queued. */
@@ -887,34 +932,44 @@ export function airPointWork(): { readonly refreshes: number } {
 
 /** Steps a refresh once, and holds what it found where it is done; whether it is. */
 function advance(refresh: QueuedRefresh): boolean {
-  if (refresh.kind === "ratio") {
-    const step = refresh.steps.next();
-    if (step.done === true) {
-      hold(refresh.table, {
-        lightKey: refresh.lightKey,
-        slot: refresh.slot,
-        surfaceKey: refresh.surfaceKey,
-        airedKey: refresh.airedKey,
-        figureKey: refresh.figureKey,
-        towardsLight: refresh.towardsLight,
-        towardsObserver: refresh.towardsObserver,
-        found: step.value,
-      });
+  let done: boolean;
+  switch (refresh.kind) {
+    case "ratio": {
+      const step = refresh.steps.next();
+      done = step.done === true;
+      if (step.done === true) {
+        hold(refresh.table, {
+          lightKey: refresh.lightKey,
+          slot: refresh.slot,
+          surfaceKey: refresh.surfaceKey,
+          airedKey: refresh.airedKey,
+          mapKey: refresh.mapKey,
+          figureKey: refresh.figureKey,
+          towardsLight: refresh.towardsLight,
+          towardsObserver: refresh.towardsObserver,
+          found: step.value,
+        });
+      }
+      break;
     }
-    return step.done === true;
+    case "glow": {
+      const step = refresh.steps.next();
+      done = step.done === true;
+      if (step.done === true) {
+        holdGlow(refresh.holder, {
+          fieldKey: refresh.fieldKey,
+          surfaceKey: refresh.surfaceKey,
+          mapKey: refresh.mapKey,
+          figureKey: refresh.figureKey,
+          towardsLight: refresh.towardsLight,
+          towardsObserver: refresh.towardsObserver,
+          glow: step.value,
+        });
+      }
+      break;
+    }
   }
-  const step = refresh.steps.next();
-  if (step.done === true) {
-    holdGlow(refresh.holder, {
-      fieldKey: refresh.fieldKey,
-      surfaceKey: refresh.surfaceKey,
-      figureKey: refresh.figureKey,
-      towardsLight: refresh.towardsLight,
-      towardsObserver: refresh.towardsObserver,
-      glow: step.value,
-    });
-  }
-  return step.done === true;
+  return done;
 }
 
 /**
@@ -940,7 +995,7 @@ export function stepAirPoints(
     if (scope === "all") {
       return true;
     }
-    const noted = NEAR.get(refresh.kind === "ratio" ? refresh.table : refresh.holder);
+    const noted = NEAR.get(holderOfRefresh(refresh));
     return noted !== undefined && SLICES_RUN - noted <= AIR_POINT_NEAR_SLICES;
   };
   if (!REFRESHES.some(taken)) {

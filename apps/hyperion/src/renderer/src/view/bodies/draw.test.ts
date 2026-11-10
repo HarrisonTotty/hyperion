@@ -91,7 +91,7 @@ import type { DiscGround } from "../atmosphere/AtmosphereCache";
 import type { SpheroidFigure } from "../atmosphere/oblate";
 import type { DiscAir } from "../atmosphere/discReflectance";
 import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
-import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+import { type SurfaceTemperatureField, surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import {
   lavaWorldSurface,
   magmaOceanSurface,
@@ -627,15 +627,30 @@ function once<T>(make: () => T): () => T {
   return () => (made ??= make());
 }
 
+/** An air with a table of its own identity, its values shared: a glow's holder of its own. */
+function freshAir(given: DiscAir): DiscAir {
+  return { ...given, table: { ...given.table } };
+}
+
 /**
- * The worst error a case allows, of the light in a channel: 1%, as the air switch's, but the locked
- * lava world's at 165°, whose light is its reflection, its glow some 2% of it: there the airless
- * point stands 1.3% over its disc's own exact flux and the disc's 8 × 8 cells 1.2% under it
- * (`exactDiscFlux`; R07.T8.a's tests stop at 150°), its glow within 2 × 10⁻³: pinned as measured
- * (2026-11-10), a finding of the reflected point's.
+ * The worst error a case's whole point allows, of the light in a channel: 1%, as the air switch's,
+ * but the locked lava world's at 165°, whose light is its reflection, its glow some 2% of it: there
+ * the airless point stands 1.3% over its disc's own exact flux and the disc's 8 × 8 cells 1.2% under
+ * it (`exactDiscFlux`; R07.T8.a's tests stop at 150°): pinned as measured (2026-11-10), a finding
+ * of the reflected point's.
+ */
+const wholeBoundOf = (name: string, phaseDeg: number): number =>
+  name === "the locked lava world" && phaseDeg === 165 ? 0.03 : 0.01;
+
+/**
+ * The worst error a case's glow allows, of its brightest channel: 1%, but the locked lava world's at
+ * 165°, where it glows from the sliver of its pool's cap past the limb, and the disc's 8 × 8 cells
+ * take 3.3% under the point, which stands within 2 × 10⁻³ of the disc's own exact glow: pinned as
+ * measured (2026-11-10), a finding of the disc's, as TEST VENUS's crescent.
  */
 const glowBoundOf = (name: string, phaseDeg: number): number =>
-  name === "the locked lava world" && phaseDeg === 165 ? 0.03 : 0.01;
+  name === "the locked lava world" && phaseDeg === 165 ? 0.04 : 0.01;
+
 /** A body without its glow: no ground field, its table without its thermal layers. */
 const unlit = (body: LitBodyInput): LitBodyInput => {
   const { thermal: _thermal, air: given, ...rest } = body;
@@ -645,40 +660,79 @@ const unlit = (body: LitBodyInput): LitBodyInput => {
   const { thermalScale: _scale, ...table } = given.table;
   return { ...rest, air: { ...given, table } };
 };
+
+/** The air switch's synthetic class map, its land class made `Melt`. */
+const meltMap = (): DiscSurface => {
+  const surface = airSwitchBodyOf(
+    airSwitchFixtureOf(AIR_SWITCH_FIXTURES["served-class-map"].json),
+  ).surface;
+  if (surface?.kind !== "class-map") {
+    throw new Error("the served case is drawn under a class map");
+  }
+  return { ...surface, meltClasses: [false, true] };
+};
+const lava = (): SurfaceTemperatureField => surfaceTemperatureFieldOf(lavaWorldSurface());
+const magma = (): SurfaceTemperatureField => surfaceTemperatureFieldOf(magmaOceanSurface());
+/** A body's class map's texels, or `null`. */
+const mapOf = (body: LitBodyInput): ClassMapTexels | null =>
+  body.surface?.kind === "class-map" ? body.surface.texels : null;
 describe("a glowing body's disc and its point at the 3 px switch (R08.T18)", () => {
   const options: BodyFrameOptions = { ...OPTIONS, drawsAir: true };
   const giantAir = once(() =>
     discAirOf(bakedDiscTable(HOT_GIANT, HOT_GIANT_RADIUS_M, HOT_GIANT_DAYSIDE_K)),
   );
   const thinAir = once(() => discAirOf(bakedDiscTable(greyColumn(0.5, 0.3), 6.371e6, null)));
-  const lava = surfaceTemperatureFieldOf(lavaWorldSurface());
-  const magma = surfaceTemperatureFieldOf(magmaOceanSurface());
+  /** A rotation whose body-fixed z, a class map's pole, is the view's +y. */
+  const POLE_UP = rotation3FromRows([vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, -1, 0)]);
   /**
    * The cases, each lit by the scene's Sun at 1 au, so that the point's reflected light, which the
    * air switch's tests hold, is under its glow: the protocol fixture's locked lava world, its pool
    * on its dayside; that world as a young magma ocean, molten everywhere; the magma ocean under a
-   * thin, cold grey air (τ 0.5), whose table dims its glow; and the ultra-hot giant, its air
-   * isothermal at 2,700 K and opaque, which glows through its table alone.
+   * thin, cold grey air (τ 0.5), whose table dims its glow; the ultra-hot giant, its air isothermal
+   * at 2,700 K and opaque, which glows through its table alone; and the lava world under a class
+   * map whose land is `Melt`, whose point's reflection is the map's stand-in until the slices make
+   * its elements, so that its glow alone is held. Each call gives its holders anew: a field and a
+   * table of their own, so that no other test's held glows are its.
    */
   const CASES: ReadonlyArray<{
     readonly name: string;
     readonly radiusM: number;
     readonly body: () => Partial<LitBodyInput>;
+    /** Whether its whole point is held, beside its glow. */
+    readonly whole: boolean;
   }> = [
-    { name: "the locked lava world", radiusM: 6.371e6, body: () => ({ thermal: lava }) },
-    { name: "the young magma ocean", radiusM: 6.371e6, body: () => ({ thermal: magma }) },
+    {
+      name: "the locked lava world",
+      radiusM: 6.371e6,
+      body: () => ({ thermal: lava() }),
+      whole: true,
+    },
+    {
+      name: "the young magma ocean",
+      radiusM: 6.371e6,
+      body: () => ({ thermal: magma() }),
+      whole: true,
+    },
     {
       name: "the magma ocean under a thin air",
       radiusM: 6.371e6,
-      body: () => ({ thermal: magma, air: thinAir() }),
+      body: () => ({ thermal: magma(), air: freshAir(thinAir()) }),
+      whole: true,
     },
     {
       name: "the ultra-hot giant",
       radiusM: HOT_GIANT_RADIUS_M,
       body: () => ({
-        air: giantAir(),
+        air: freshAir(giantAir()),
         photometry: photometryFor([0.05, 0.05, 0.05], [1.5, 1.5, 1.5], "lambert"),
       }),
+      whole: true,
+    },
+    {
+      name: "the lava world under a class map with a Melt class",
+      radiusM: 6.371e6,
+      body: () => ({ thermal: lava(), surface: meltMap(), rotation: POLE_UP }),
+      whole: false,
     },
   ];
   /**
@@ -706,16 +760,18 @@ describe("a glowing body's disc and its point at the 3 px switch (R08.T18)", () 
       hosts: placed.hosts.map((host) => ({ disc: host.disc, centreM: add(host.centreM, offset) })),
     };
   };
-  for (const item of CASES) {
+  /** The four offsets of the air switch's tests, px. */
+  const OFFSETS = [
+    [0, 0],
+    [0.5, 0],
+    [0, 0.5],
+    [0.5, 0.5],
+  ] as const;
+  for (const item of CASES.filter((each) => each.whole)) {
     for (const phaseDeg of [0, 90, 165]) {
-      it(`draws one flux per channel on ${item.name}'s disc at 3.01 px and its point at 2.99 px, to ${String(100 * glowBoundOf(item.name, phaseDeg))}%, at ${String(phaseDeg)}°`, () => {
+      it(`draws one flux per channel on ${item.name}'s disc at 3.01 px and its point at 2.99 px, to ${String(100 * wholeBoundOf(item.name, phaseDeg))}%, at ${String(phaseDeg)}°`, () => {
         let worst = 0;
-        for (const offsetPx of [
-          [0, 0],
-          [0.5, 0],
-          [0, 0.5],
-          [0.5, 0.5],
-        ] as const) {
+        for (const offsetPx of OFFSETS) {
           const disc = sceneOf(item, 3.01, phaseDeg, offsetPx);
           const point = sceneOf(item, 2.99, phaseDeg, offsetPx);
           const drawn = discFlux(disc.body, disc.hosts, [], options);
@@ -724,10 +780,37 @@ describe("a glowing body's disc and its point at the 3 px switch (R08.T18)", () 
           // Both at one distance: F Δ².
           const k = (norm(point.body.centreM) / norm(disc.body.centreM)) ** 2;
           for (const c of [0, 1, 2] as const) {
-            // A signed channel, a cool glow's negative blue under its reflected light, is held to
-            // the light in it, |reflected| + |glow|, not to what is left of their sum.
+            // A signed channel, a cool glow's negative blue under its reflected light, is held
+            // to the light in it, |reflected| + |glow|, not to what is left of their sum.
             const light = Math.abs(reflected[c]) + Math.abs(flux[c] - reflected[c]);
             worst = Math.max(worst, Math.abs(drawn[c] - flux[c] * k) / (light * k));
+          }
+        }
+        expect(worst).toBeLessThan(wholeBoundOf(item.name, phaseDeg));
+      });
+    }
+  }
+  for (const item of CASES) {
+    for (const phaseDeg of [0, 90, 165]) {
+      it(`draws one glow per channel on ${item.name}'s disc at 3.01 px and its point at 2.99 px, to ${String(100 * glowBoundOf(item.name, phaseDeg))}%, at ${String(phaseDeg)}°`, () => {
+        let worst = 0;
+        for (const offsetPx of OFFSETS) {
+          const disc = sceneOf(item, 3.01, phaseDeg, offsetPx);
+          const point = sceneOf(item, 2.99, phaseDeg, offsetPx);
+          const map = mapOf(disc.body);
+          // Each one's light less its reflected light: the disc's own pixels' and the point's own.
+          const drawn = discFlux(disc.body, disc.hosts, [], options, map);
+          const drawnReflected = discFlux(unlit(disc.body), disc.hosts, [], options, map);
+          const flux = airPointFlux(point.body, point.hosts);
+          const reflected = airPointFlux(unlit(point.body), point.hosts);
+          const k = (norm(point.body.centreM) / norm(disc.body.centreM)) ** 2;
+          const glow = [0, 1, 2].map((c) => ((flux[c] ?? 0) - (reflected[c] ?? 0)) * k);
+          // Held to its brightest channel: a cool glow's green and blue are what is left of the
+          // matching functions' lobes cancelling, a few thousandths of its red at 1,400 K.
+          const brightest = Math.max(...glow.map((value) => Math.abs(value)));
+          for (const c of [0, 1, 2] as const) {
+            const own = drawn[c] - drawnReflected[c];
+            worst = Math.max(worst, Math.abs(own - (glow[c] ?? 0)) / brightest);
           }
         }
         expect(worst).toBeLessThan(glowBoundOf(item.name, phaseDeg));
@@ -736,28 +819,52 @@ describe("a glowing body's disc and its point at the 3 px switch (R08.T18)", () 
     it(`misses ${item.name}'s disc at 0° by more than 1% in red without its glow`, () => {
       const disc = sceneOf(item, 3.01, 0, [0, 0]);
       const point = sceneOf(item, 2.99, 0, [0, 0]);
-      const drawn = discFlux(disc.body, disc.hosts, [], options);
-      const flux = airPointFlux(unlit(point.body), point.hosts);
+      const map = mapOf(disc.body);
+      const drawn = discFlux(disc.body, disc.hosts, [], options, map);
+      const drawnReflected = discFlux(unlit(disc.body), disc.hosts, [], options, map);
+      const reflected = airPointFlux(unlit(point.body), point.hosts);
       const k = (norm(point.body.centreM) / norm(disc.body.centreM)) ** 2;
-      expect(drawn[0] / (flux[0] * k) - 1).toBeGreaterThan(0.01);
+      // The disc's glow, against what the point drew without one: the light it went dark by.
+      expect((drawn[0] - drawnReflected[0]) / (reflected[0] * k)).toBeGreaterThan(0.01);
     });
   }
 
-  it("keeps the point's flux of a body under the thermal cut to the bit, and queues no glow", () => {
-    const { body, hosts } = sceneOf(
+  /** A 300 K world's point, 2.99 px across at 90°, under the air `given`, where it is. */
+  const coolOf = (
+    given: DiscAir | null,
+  ): { readonly body: LitBodyInput; readonly hosts: PlacedLight[] } =>
+    sceneOf(
       {
         name: "a 300 K world",
         radiusM: 6.371e6,
-        body: () => ({ thermal: surfaceTemperatureFieldOf(warmAirlessSurface()) }),
+        body: () => ({
+          thermal: surfaceTemperatureFieldOf(warmAirlessSurface()),
+          ...(given === null ? {} : { air: given }),
+        }),
+        whole: true,
       },
       2.99,
       90,
       [0, 0],
     );
+
+  it("keeps the point's flux of an airless body under the thermal cut to the bit", () => {
+    const { body, hosts } = coolOf(null);
+    expect(pointFlux(body, hosts, [], DISC_ANNULI_HIGH)).toEqual(
+      pointFlux(unlit(body), hosts, [], DISC_ANNULI_HIGH),
+    );
+  });
+
+  it("queues no glow for an airless body under the thermal cut", () => {
     drainAirPoints();
-    const flux = pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+    const { body, hosts } = coolOf(null);
+    pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
     expect(airPointWork().refreshes).toBe(0);
-    expect(flux).toEqual(pointFlux(unlit(body), hosts, [], DISC_ANNULI_HIGH));
+  });
+
+  it("keeps the point's flux of a body under the cut whose table holds no thermal layer to the bit", () => {
+    const { body, hosts } = coolOf(freshAir(thinAir()));
+    expect(airPointFlux(body, hosts)).toEqual(airPointFlux(unlit(body), hosts));
   });
 });
 

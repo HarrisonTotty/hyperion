@@ -25174,7 +25174,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   disc table draws its point by that table's disc (plan 07's "R07.T8.a, an air body's point"),
   closing T16.b's left item "a body drawn as a point has no air" and T10.b's "a point draws no
   air"; its planetshine and its eclipses keep its figure and photometry, as T16.a.2 left them. Its
-  air's own light and its ground's emission (R08.T18) are not in the point.
+  air's own light and its ground's emission (R08.T18) are not in the point. _Added 2026-11-10:
+  "R08.T18, a glowing body's point"._
 - **The composite's march candidates read once** (2026-11-05, perf-body-shading; the owner's Mac).
   `composite.wgsl`'s `marchCandidatesOf` reads a half-resolution pixel's four march candidates'
   scene depths once; `rayMarchTexelFrom`, `rayMarchedFrom` and `behindAtMarch(…, candidates)` take
@@ -25296,7 +25297,12 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     deck's height).
 - **R08.T18, a glowing body's point (2026-11-10, fix-point-emission).** `pointFlux` adds its disc's
   own light (`airPoint.ts`' `GlowPointBody`, `glowPointLight`, `warmGlowPoint`, `glowPointSum`): the
-  twin's 32 × 64 samples with no light, so `discEmissionAt` dimmed by the table's alpha, plus `discThermalAt`.
-- Held per table, or per ground field airless, and found in `stepAirPoints`' slices (one queue for
-  ratios and glows). A body under the cut whose table holds no thermal layer: bit for bit.
-- `test/glowingAirs.ts` holds the ultra-hot giant (from `thermalWorlds.test.ts`) and its baked table.
+  twin's 32 × 64 samples with no light, so `discEmissionAt` dimmed by the table's alpha, plus
+  `discThermalAt`.
+  - Held per table, or per ground field airless, and found in `stepAirPoints`' slices (one queue
+    for ratios and glows). A body under the cut whose table holds no thermal layer: bit for bit.
+  - `draw.test.ts` holds each channel to 1% of its light, |reflected| + |glow| (a cool glow's blue
+    is negative), and the glow alone to 1% of its brightest channel. Pinned: the locked lava world
+    at 165°, 3% whole (its reflected point's) and 4% glow (the disc's cells on its cap's sliver).
+  - `test/glowingAirs.ts` holds the ultra-hot giant (from `thermalWorlds.test.ts`) and its baked
+    table.
