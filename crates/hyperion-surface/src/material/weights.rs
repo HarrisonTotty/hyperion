@@ -26,6 +26,7 @@ use super::classify::{
     IcePlacement, Point, Site, Steepness, cos_slope, finest_band, ice_share_at, kept_forms,
     on_channel_floor,
 };
+use super::edges::site_cell_at;
 use super::{CLIFF_SLOPE, GroundMaterial, SNOW_SHED_SLOPE, TRANSITION_HALF_WIDTH};
 use crate::craters::density::GAUSS_LEGENDRE_8;
 use crate::cube::{FaceUv, PatchKey, face_uv_to_xyz, unit_dir};
@@ -316,7 +317,10 @@ fn coarse_weights<F: FieldView>(
     let header = field.header();
     let sample = *sample;
     let (key, cell) = synth.cell_at(dir)?;
-    let site = Site::kept(synth, cache, key, cell)?;
+    // The record the rules read, the warped point's cell's from generator version 32 (lane
+    // fix-jagged-biome-edges); the omitted closed forms and the channels stay the point's own.
+    let (site_key, site_cell) = site_cell_at(synth, cache, dir, level)?;
+    let site = Site::kept(synth, cache, site_key, site_cell)?;
     let omitted = Omitted::of(synth, cache, key, level)?;
     let heights = height_cases(&site.height_breaks(), sample.height_m, omitted.height_m2);
     let steepnesses = steepness_cases(header, dir, &sample, omitted.slope2);
@@ -330,7 +334,10 @@ fn coarse_weights<F: FieldView>(
                 if let Some(p) = by_cut {
                     p
                 } else {
-                    let p = ice_share_at(synth, cache, (key, cell), dir, level, &sample)?;
+                    // The record's share placed on the point's own cell's shadowed ground, whose
+                    // grid the view holds wherever it holds the point (lane
+                    // fix-jagged-biome-edges): the warped cell's could read past its margin.
+                    let p = ice_share_at(synth, cache, (key, site_cell), dir, level, &sample)?;
                     by_cut = Some(p);
                     p
                 }
@@ -772,4 +779,4 @@ impl Shares {
 #[cfg(test)]
 mod golden;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

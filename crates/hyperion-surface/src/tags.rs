@@ -41,6 +41,7 @@
 //! | `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below the boundary diameter, per octave cell           |
 //! | `surface.scatter`        | `SurfaceDetail` | `surface_cell` | the authoritative rocks per octave cell: count, places and diameters |
 //! | `surface.scatter.shape`  | `SurfaceDetail` | `surface_cell` | a rock's height ratio, axial ratio, yaw and exponent, by its index |
+//! | `surface.class_edges`    | `SurfaceDetail` | `surface_item` | the class edges' warp: a 3D lattice corner's word, as [`noise`](crate::noise) keys it, and the octaves' offsets, words 2⁴⁰ + 4m + axis of item 0 |
 
 hyperion_base::domain_tags! {
     // Plan R05: the terrain geometry and the descent spike.
@@ -118,6 +119,16 @@ hyperion_base::domain_tags! {
     /// octave cell with the rock's index in the cell's draw as the instance: words 0 to 3, its
     /// height ratio, its horizontal axial ratio, its yaw and its superquadric exponent.
     SURFACE_SCATTER_SHAPE: SurfaceDetail = "surface.scatter.shape";
+
+    // Lane fix-jagged-biome-edges: the classes' edges.
+
+    /// The class edges' warp of the point whose coarse cell's record the classifier reads (lane
+    /// fix-jagged-biome-edges; `material::edges`), keyed by `surface_item` of a 3D lattice corner's
+    /// word, i << 32 | j of the corner's 32-bit two's complements, with the draw number
+    /// octave << 32 | k, as [`noise`](crate::noise) keys its corners; octave m's lattice offset is
+    /// words 2⁴⁰ + 4m + axis of item 0, above every corner's draw. Read from generator version 32
+    /// (`CLASS_EDGES_VERSION`).
+    SURFACE_CLASS_EDGES: SurfaceDetail = "surface.class_edges";
 }
 
 #[cfg(test)]

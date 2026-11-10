@@ -691,11 +691,12 @@ mod native_only {
     use std::path::Path;
 
     /// The material goldens, by name: one for each synthetic world, the property table's, the
-    /// space-weathering law's, R10.T1.c's maturity's and halo's, and the slope capacities'
-    /// (R10.T12).
-    const MATERIAL_GOLDENS: [&str; 11] = [
+    /// space-weathering law's, R10.T1.c's maturity's and halo's, the slope capacities' (R10.T12),
+    /// and the class edges' warp's (lane fix-jagged-biome-edges; `material::edges`).
+    const MATERIAL_GOLDENS: [&str; 12] = [
         "bearing_on_slope",
         "ceres_like",
+        "class_edges",
         "earth_like",
         "flat",
         "halo",

@@ -98,6 +98,8 @@ pub(crate) struct SynthesisParts {
     craters: SmallCraters,
     rims: CoarseRims,
     bounds: LevelBounds,
+    /// The classifier's class edges (lane fix-jagged-biome-edges), the generator version's.
+    class_edges: crate::material::ClassEdges,
 }
 
 impl SynthesisParts {
@@ -108,6 +110,26 @@ impl SynthesisParts {
     /// As [`CraterOctaves::new`], which no header a field holds reaches.
     #[must_use]
     pub(crate) fn new(header: &FieldHeader, seed: DetailSeed) -> Self {
+        Self::with_class_edges(
+            header,
+            seed,
+            crate::material::ClassEdgeRule::of_version(crate::generator_version()),
+        )
+    }
+
+    /// [`new`](Self::new)'s parts with the class edges of `rule` in place of the generator
+    /// version's (lane fix-jagged-biome-edges): the tests' switch of the hold at
+    /// `CLASS_EDGES_VERSION`.
+    ///
+    /// # Panics
+    ///
+    /// As [`new`](Self::new).
+    #[must_use]
+    pub(crate) fn with_class_edges(
+        header: &FieldHeader,
+        seed: DetailSeed,
+        rule: crate::material::ClassEdgeRule,
+    ) -> Self {
         let craters = SmallCraters::new(header, seed);
         let bounds = LevelBounds::of(header, craters.octaves());
         Self {
@@ -118,6 +140,7 @@ impl SynthesisParts {
             craters,
             rims: CoarseRims::new(header),
             bounds,
+            class_edges: crate::material::ClassEdges::new(header, seed, rule),
         }
     }
 
@@ -198,6 +221,26 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         }
     }
 
+    /// [`new`](Self::new)'s synthesis with the class edges of `rule` in place of the generator
+    /// version's (lane fix-jagged-biome-edges): the tests' switch of the hold at
+    /// `CLASS_EDGES_VERSION`.
+    ///
+    /// # Panics
+    ///
+    /// As [`new`](Self::new).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_class_edge_rule(
+        field: &'a F,
+        seed: DetailSeed,
+        rule: crate::material::ClassEdgeRule,
+    ) -> Self {
+        Self {
+            field,
+            parts: Cow::Owned(SynthesisParts::with_class_edges(field.header(), seed, rule)),
+        }
+    }
+
     /// The synthesis over `field` from `parts`, which [`SynthesisParts::new`] made from `field`'s
     /// header, or from a header the field's own is the same as: [`new`](Self::new)'s with
     /// `parts`' seed, bit for bit, without their build.
@@ -252,6 +295,12 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     #[must_use]
     pub fn rims(&self) -> &CoarseRims {
         &self.parts.rims
+    }
+
+    /// The classifier's class edges (lane fix-jagged-biome-edges; `material::edges`).
+    #[must_use]
+    pub(crate) fn class_edges(&self) -> &crate::material::ClassEdges {
+        &self.parts.class_edges
     }
 
     /// The body's level sets and bounds.
@@ -1357,7 +1406,10 @@ pub(crate) fn omitted_variance_in(
 /// its partial ice share lies on, kept as the channels' part is, which starts afresh at 16,384
 /// cells; and, for R10's horizon maps ([`crate::bake::horizon`]), the far field's vertex heights by
 /// face, level and lattice vertex, kept as the channels' part is, which starts afresh at 131,072
-/// heights. No height, and no material, depends on what it holds, only the time a query takes, so
+/// heights; and, for the classifier's class edges from generator version 32 (lane
+/// fix-jagged-biome-edges; `material::edges`), the warp's lattice corners a bake covers, apart from
+/// the structural octaves'. No height, and no material, depends on what it holds, only the time a
+/// query takes, so
 /// long as it is used with views of one field whose held cells only grow, as a worker's are: a
 /// result it holds answers a later query that a view lacking one of the cells it read would
 /// refuse.
@@ -1377,6 +1429,9 @@ pub(crate) fn omitted_variance_in(
 #[derive(Debug, Clone, Default)]
 pub struct SynthCache {
     lattice: LatticeCache,
+    /// The class edges' warp's lattice (lane fix-jagged-biome-edges), its octaves' indices apart
+    /// from the relief's.
+    class_edges: LatticeCache,
     channels: channels::ChannelCache,
     craters: CraterCache,
     ice_cuts: crate::material::IceCuts,
@@ -1417,6 +1472,7 @@ impl SynthCache {
     pub const fn new() -> Self {
         Self {
             lattice: LatticeCache::new(),
+            class_edges: LatticeCache::new(),
             channels: channels::ChannelCache::new(),
             craters: CraterCache::new(),
             ice_cuts: crate::material::IceCuts::new(),
@@ -1439,6 +1495,12 @@ impl SynthCache {
     #[must_use]
     pub(crate) fn lattice_mut(&mut self) -> &mut LatticeCache {
         &mut self.lattice
+    }
+
+    /// The class edges' warp's lattice cache (lane fix-jagged-biome-edges).
+    #[must_use]
+    pub(crate) fn class_edges_mut(&mut self) -> &mut LatticeCache {
+        &mut self.class_edges
     }
 
     /// The channels' cache.

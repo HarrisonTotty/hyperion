@@ -1,5 +1,6 @@
 //! The noise basis of the terrain: 3D improved Perlin gradient noise with its analytic gradient
-//! (plan R05, Design note 12), keyed for R05's test planet or for R09's structural octaves.
+//! (plan R05, Design note 12), keyed for R05's test planet, for R09's structural octaves or for
+//! the class edges' warp (lane fix-jagged-biome-edges).
 //!
 //! Perlin's improved noise (Perlin 2002, "Improving Noise", SIGGRAPH; the reference
 //! implementation at mrl.cs.nyu.edu/~perlin/noise/) with its quintic fade 6t⁵ − 15t⁴ + 10t³ and its
@@ -23,9 +24,12 @@
 //! - R09's structural octaves, [`NoiseKey::Relief`]: the body's detail seed's stream on
 //!   `surface.relief`, `DetailSeed::stream(SURFACE_RELIEF, ObjectKey::surface_item(object))`, its
 //!   points in units of the body's mean radius (`synth::relief`), so that a body's octave table
-//!   is a function of its seed alone.
+//!   is a function of its seed alone;
+//! - the class edges' warp, [`NoiseKey::ClassEdges`]: the body's detail seed's stream on
+//!   `surface.class_edges`, `DetailSeed::stream(SURFACE_CLASS_EDGES, ObjectKey::surface_item(object))`,
+//!   its points on the unit sphere (`material::edges`, from generator version 32).
 //!
-//! Both key the corner alike:
+//! All three key the corner alike:
 //!
 //! | Integer        | Where                               | Bits                                 |
 //! | -------------- | ----------------------------------- | ------------------------------------ |
@@ -35,7 +39,8 @@
 //! | k              | the draw number, bits 0–31          | k's 32-bit two's complement          |
 //!
 //! The gradient's index is the word's top four bits. The octave offsets read words 2⁴⁰ + 4n +
-//! axis of object 0 of the same stream (`test_planet::octaves` and `synth::relief`), far above
+//! axis of object 0 of the same stream (`test_planet::octaves`, `synth::relief` and
+//! `material::edges`), far above
 //! every corner's draw number, which is below 2³⁷. Every lattice index of a body up to Earth's size
 //! at the test planet's finest octave is far inside ±2³¹ (about ±1.4 × 10⁶ at λ = 4.77 m), and so
 //! is every index of the relief's octaves, which are measured in radii; [`gradient_noise`]
@@ -62,7 +67,7 @@
 use hyperion_base::Seed;
 use hyperion_base::rng::{DetailSeed, ObjectKey, Stream};
 
-use crate::tags::{SURFACE_RELIEF, TEST_PLANET};
+use crate::tags::{SURFACE_CLASS_EDGES, SURFACE_RELIEF, TEST_PLANET};
 
 /// The certified maximum of |noise| over all points and gradient choices, B (Design note 15).
 ///
@@ -123,8 +128,9 @@ const MAX_BOX_CORNERS: u64 = 1 << 22;
 ///
 /// R05's test planet belongs to no universe and keys its lattices by a plain [`Seed`] on its
 /// self-test tag; R09's structural octaves key theirs by the body's [`DetailSeed`] on
-/// `surface.relief`, which only that seed opens. The two never share a stream, even for equal
-/// 64-bit values, since their tags differ.
+/// `surface.relief`, which only that seed opens, and the class edges' warp by it on
+/// `surface.class_edges`. No two share a stream, even for equal 64-bit values, since their tags
+/// differ.
 ///
 /// The key also fixes the unit of every length an octave of it is given, its lattice spacing, its
 /// points and a cache's covered ball: the variant names it. The noise itself is the same function
@@ -138,6 +144,11 @@ pub enum NoiseKey {
     /// keyed by `ObjectKey::surface_item` (the surface tags' Key column); its lengths are
     /// body-fixed units of the body's mean radius (`synth::relief`).
     Relief(DetailSeed),
+    /// The class edges' warp of a body (lane fix-jagged-biome-edges; `material::edges`):
+    /// `surface.class_edges` from the body's detail seed, corners keyed by
+    /// `ObjectKey::surface_item`; its lengths are those of the unit sphere, R05's cube sphere's
+    /// unit directions.
+    ClassEdges(DetailSeed),
 }
 
 impl NoiseKey {
@@ -152,6 +163,9 @@ impl NoiseKey {
             }
             Self::Relief(seed) => seed
                 .stream(SURFACE_RELIEF, ObjectKey::surface_item(object))
+                .word_at(draw),
+            Self::ClassEdges(seed) => seed
+                .stream(SURFACE_CLASS_EDGES, ObjectKey::surface_item(object))
                 .word_at(draw),
         }
     }

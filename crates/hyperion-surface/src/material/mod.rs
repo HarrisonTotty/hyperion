@@ -57,18 +57,20 @@
 //! ([`maturity_nodes`], [`maturity_node_share`]), which it interpolates
 //! ([`maturity_node_albedo`]).
 //!
-//! Nothing here draws from a stream, so the module opens no domain tag.
+//! Nothing here draws from a stream but the class edges' warp (lane fix-jagged-biome-edges;
+//! `edges`, from generator version 32), which opens `surface.class_edges`.
 
 mod albedo;
 mod bearing;
 mod class;
 mod classify;
+mod edges;
 #[cfg(test)]
 mod golden;
 mod maturity;
 mod properties;
 mod weathering;
-mod weights;
+pub(crate) mod weights;
 
 pub use albedo::{
     ALBEDO_SCALE_FLOOR, AlbedoScale, BuildClassFractionsError, ClassFractions,
@@ -82,6 +84,7 @@ pub use bearing::{
 pub use class::{Material, MaterialClass, PhotometricForm};
 pub use classify::{GroundMaterial, MASSIVE_ICE_SHARE, THIN_ATMOSPHERE_PRESSURE, material_at};
 pub(crate) use classify::{IceCuts, cell_material, lapse_drop_k};
+pub(crate) use edges::{ClassEdgeRule, ClassEdges};
 pub(crate) use maturity::maturity_at_level_dir;
 pub use maturity::{
     EXCAVATION_DEPTH_RATIO, GroundExposure, HALO_EXTENT_RIM_RADII, HALO_LENGTH_RIM_RADII,

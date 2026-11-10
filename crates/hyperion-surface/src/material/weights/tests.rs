@@ -42,7 +42,7 @@ const COLD_TRAP_LATITUDE_DEG: f64 = 85.0;
 /// (T1.b's test field of that name, illustrative values: a feldspathic lid and water ice, the Moon's
 /// radius, spectrum and crater contract, and a still climate of 100 + 150 cos φ kelvin), the
 /// synthetic worlds having no partial ice on land.
-pub(super) fn cold_trapped(share: f64) -> CoarseField {
+pub(crate) fn cold_trapped(share: f64) -> CoarseField {
     let radius = 1.7374e6;
     let entry = |key: &str, role, density, transition_k, mechanics| PaletteEntry {
         substance: SubstanceKey::new(key).expect("a test key is in the grammar"),
@@ -109,7 +109,7 @@ pub(super) fn cold_trapped(share: f64) -> CoarseField {
 }
 
 /// The cold-trapped field's polar cells, those holding a partial ice share, by cell index.
-pub(super) fn cold_trap_cells(field: &CoarseField) -> Vec<PatchKey> {
+pub(crate) fn cold_trap_cells(field: &CoarseField) -> Vec<PatchKey> {
     let level = field.header().level();
     (0..level.cell_count())
         .map(|n| cell_at_index(level.get(), n).expect("a cell of the level"))

@@ -839,13 +839,17 @@ impl<'a> Point<'a> {
         let level = finest_band(field.header());
         let sample = *sample;
         let (key, cell) = synth.cell_at(dir)?;
-        let site = Site::kept(synth, cache, key, cell)?;
+        // The record the rules read, the warped point's cell's from generator version 32 (lane
+        // fix-jagged-biome-edges); the channels and the ice cut's grid stay the point's own cell's,
+        // which the view holds wherever it holds the point.
+        let (site_key, site_cell) = super::edges::site_cell_at(synth, cache, dir, level)?;
+        let site = Site::kept(synth, cache, site_key, site_cell)?;
         let h = sample.height_m;
         let in_ice = match site.ice_placement(site.under_water(h)) {
             IcePlacement::Settled(lies) => lies,
             IcePlacement::ByCut => {
-                let cut = ice_cut(synth, cache, key, cell, level)?;
-                cut.holds(shadow_terms(field, dir, &sample)?, cell.ice_fraction())
+                let cut = ice_cut(synth, cache, key, site_cell, level)?;
+                cut.holds(shadow_terms(field, dir, &sample)?, site_cell.ice_fraction())
             }
         };
         Ok(Self {

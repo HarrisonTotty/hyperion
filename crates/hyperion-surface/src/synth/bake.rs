@@ -293,22 +293,38 @@ pub(crate) fn cover_patch<F: FieldView>(
     cover(synth, cache, key, band(key.level()));
 }
 
-/// Covers the structural octaves' lattice in `cache` for every query of a bake of `key` at
-/// `level`, whose set is the parent's and more: each octave's corners within a ball about the
-/// patch's centre out to its farthest corner (the patch's edges being great circles of the cube,
-/// its corners bound it), with a tenth's margin for the spheroid. No value depends on it.
+/// Covers the class edges' warp's lattice (lane fix-jagged-biome-edges; from generator version
+/// 32) and the structural octaves' in `cache` for every query of a bake of `key` at `level`,
+/// whose set is the parent's and more: each octave's corners within a ball about the patch's
+/// centre out to its farthest corner (the patch's edges being great circles of the cube, its
+/// corners bound it), with a tenth's margin, for the spheroid's; the warp's on the unit sphere,
+/// even where the level draws no structural octave. No value depends on it.
 fn cover<F: FieldView>(
     synth: &Synthesiser<'_, F>,
     cache: &mut SynthCache,
     key: PatchKey,
     level: BandLevel,
 ) {
-    let Some(through) = synth.level_set(level).relief_through() else {
-        return;
-    };
     let figure = synth.field().header().figure();
     let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
     let centre = key.vertex_dir(quads / 2, quads / 2);
+    // The class edges' warp's octaves at the level, on the unit sphere (lane
+    // fix-jagged-biome-edges): the corners' widest angle from the centre, its chord's bound.
+    let mut angle = 0.0_f64;
+    for (x, y) in [(0, 0), (quads, 0), (0, quads), (quads, quads)] {
+        let d = key.vertex_dir(x, y);
+        let chord = [0, 1, 2].map(|a| d[a] - centre[a]);
+        angle = num::max(
+            angle,
+            (chord[0] * chord[0] + chord[1] * chord[1] + chord[2] * chord[2]).sqrt(),
+        );
+    }
+    synth
+        .class_edges()
+        .cover(centre, angle * 1.1, level, cache.class_edges_mut());
+    let Some(through) = synth.level_set(level).relief_through() else {
+        return;
+    };
     let c = figure.point(centre);
     let mut reach = 0.0_f64;
     for (x, y) in [(0, 0), (quads, 0), (0, quads), (quads, quads)] {
