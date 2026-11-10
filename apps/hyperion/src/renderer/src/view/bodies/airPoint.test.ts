@@ -7,8 +7,10 @@ import {
   airSwitchBodyOf,
   airSwitchFixtureOf,
 } from "../../test/airSwitchCases";
-import { aHostDisc } from "../../test/litFixtures";
-import type { DiscAir } from "../atmosphere/discReflectance";
+import { aHostDisc, aLitBody } from "../../test/litFixtures";
+import { type DiscAir, discEmissionOf } from "../atmosphere/discReflectance";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+import { magmaOceanSurface } from "../../test/thermalSurfaces";
 import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { ProjectionCamera, Viewport } from "../camera/projection";
@@ -27,7 +29,11 @@ import {
   airPointWork,
   AIR_POINT_NEAR_SLICES,
   cancelAirPointsOf,
+  type GlowPointBody,
+  glowPointLight,
+  glowPointSum,
   stepAirPoints,
+  warmGlowPoint,
 } from "./airPoint";
 import { makeClassMapPointNow, stepClassMapPoints } from "./classMapPoint";
 import { type LitBodyInput, planLitBodies, pointFlux } from "./draw";
@@ -310,5 +316,61 @@ describe("an air body's point (R07.T8.a, R08.T16.b; airPoint.ts)", () => {
     pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
     drain();
     expect(pointFlux(body, hosts, [], DISC_ANNULI_HIGH)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("a glowing body's point (R08.T18)", () => {
+  /** The young magma ocean's field, one for every frame, as the atmosphere cache holds a reply's. */
+  const field = surfaceTemperatureFieldOf(magmaOceanSurface());
+  /** The young magma ocean seen from `towardsObserver`, its star along +z. */
+  const glowingOf = (towardsObserver = vec3(0, 0, 1)): GlowPointBody => {
+    const law = aLitBody().photometry.law;
+    const star = vec3(0, 0, 1);
+    const emission = discEmissionOf(field, [law.a], [[1e5, 1e5, 1e5]], star, []);
+    const figure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 };
+    return {
+      emission,
+      air: null,
+      figure,
+      glowFigure: figure,
+      glowSurface: { kind: "uniform", law },
+      pole: vec3(0, 1, 0),
+      rotation: null,
+      classMap: null,
+      towardsObserver,
+    };
+  };
+
+  it("draws no glow until the slices find it, then its samples' sum, one refresh a body", () => {
+    drain();
+    const body = glowingOf();
+    expect(body.emission).not.toBeNull();
+    expect(glowPointLight(body)).toEqual([0, 0, 0]);
+    expect(glowPointLight(body)).toEqual([0, 0, 0]);
+    expect(airPointWork().refreshes).toBe(1);
+    drain();
+    const sum = glowPointSum(body);
+    expect(sum.every((value) => Number.isFinite(value))).toBe(true);
+    expect(sum[0]).toBeGreaterThan(0);
+    expect(glowPointLight(body)).toEqual(sum);
+    expect(airPointWork().refreshes).toBe(0);
+  });
+
+  it("begins a glow near the switch, keeps its held one within the stale angle, and refreshes it", () => {
+    drain();
+    // A view the test before holds none at.
+    const body = glowingOf(normalise(vec3(0.5, 0, 1)));
+    warmGlowPoint(body);
+    expect(airPointWork().refreshes).toBe(1);
+    warmGlowPoint(body);
+    expect(airPointWork().refreshes).toBe(1);
+    drain();
+    // Turned 0.01 rad, past the cache's angle and within the stale one: the held glow stands in
+    // while its refresh is queued.
+    const turned = glowingOf(normalise(vec3(0.5 + 0.0125, 0, 1)));
+    expect(glowPointLight(turned)).toEqual(glowPointSum(body));
+    expect(airPointWork().refreshes).toBe(1);
+    drain();
+    expect(glowPointLight(turned)).toEqual(glowPointSum(turned));
   });
 });

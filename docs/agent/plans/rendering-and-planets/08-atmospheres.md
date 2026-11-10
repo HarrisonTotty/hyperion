@@ -25294,3 +25294,9 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - Pending: the owner's RTX frame of the routed decked world against 16.67 ms, and the lobe term's
     and the departure's cost there; the departure below its range (a pixel under about 0.6 times the
     deck's height).
+- **R08.T18, a glowing body's point (2026-11-10, fix-point-emission).** `pointFlux` adds its disc's
+  own light (`airPoint.ts`' `GlowPointBody`, `glowPointLight`, `warmGlowPoint`, `glowPointSum`): the
+  twin's 32 × 64 samples with no light, so `discEmissionAt` dimmed by the table's alpha, plus `discThermalAt`.
+- Held per table, or per ground field airless, and found in `stepAirPoints`' slices (one queue for
+  ratios and glows). A body under the cut whose table holds no thermal layer: bit for bit.
+- `test/glowingAirs.ts` holds the ultra-hot giant (from `thermalWorlds.test.ts`) and its baked table.

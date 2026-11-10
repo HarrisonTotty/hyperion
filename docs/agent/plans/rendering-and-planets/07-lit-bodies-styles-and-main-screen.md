@@ -10165,6 +10165,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     are fixtures (`view/atmosphere/fixtures/air-switch/`), baked by hand by
     `airSwitchCases.test.ts` (`HYPERION_AIR_SWITCH=1`); the served class map is synthetic.
   - The smoke harness's 3 px check holds no air body, and its page steps no air ratio.
+  - Its ground's emission and its air's own light join the point (2026-11-10; plan 08's "R08.T18,
+    a glowing body's point").
 - **`WHITE BALANCE` (the owner's report, 2026-11-05; planet-variety-white-balance).**
   - `view/post/whiteBalance.ts`: `D65` or `HOST`, `HOST` as a view opens (the UX ruling,
     2026-11-06). Under `HOST` one linear Bradford 3 × 3 (`whiteBalanceRows`) adapts the light to

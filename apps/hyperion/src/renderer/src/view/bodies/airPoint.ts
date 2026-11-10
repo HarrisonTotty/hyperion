@@ -17,9 +17,18 @@
  *   met the map's own point to 5 × 10⁻⁴ on the six cases' class map at 60° of phase
  *   (2026-11-06).
  * - **What it leaves as it was.** Each star's term is uneclipsed: the caller cuts it by its eclipse
- *   (`discEclipseVisible`) as before. Planetshine keeps the airless reflection, and the ground's and
- *   the air's own emission are not in it (R08.T18), which the point draws neither of. A body without
- *   air is drawn bit for bit as before.
+ *   (`discEclipseVisible`) as before. Planetshine keeps the airless reflection. A body without air,
+ *   and without the glow below, is drawn bit for bit as before.
+ * - **The point's own light** (R08.T18; {@link GlowPointBody}). A body whose disc draws its ground's
+ *   emission (`discReflectance.ts`' `discEmissionOf`, R08.T18.a) or its air's thermal light (the
+ *   table's thermal layers, `discTable.ts`' `discThermalAt`, R08.T18.b) has its point add what that
+ *   disc emits: the same samples' sum of the twin's light with every star and planetshine source at
+ *   none, so that each sample is `discEmissionAt`'s, with the same melt classes, dimmed by the
+ *   table's alpha, plus the table's own light, as `disc_air` adds them; over (a ÷ D)², no ratio, and
+ *   cut by no eclipse, being no star's ({@link glowPointLight}). It is held and found off the frame
+ *   as the ratios are, keyed by its table or, airless, by its field, the star's direction its
+ *   field's turns about and the observer's; until found the point draws without it, as before. A
+ *   body under the thermal cut whose table holds no thermal layer has no glow.
  * - **The ground's lighting.** The disc lights its ground through the air's surface-lighting tables
  *   (R08.T9.b), which only the GPU holds; the sum lights it as an airless body's (transmittance 1,
  *   no sky), as R07.T8.a's CPU raster does (`rasteriseDisc`'s default `AIRLESS_LIGHTING`).
@@ -39,7 +48,7 @@
  *   found there ({@link warmAirPoint}), so that its first frame as a point finds each light's held.
  */
 import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import type { DiscAir } from "../atmosphere/discReflectance";
+import type { DiscAir, DiscEmission } from "../atmosphere/discReflectance";
 import type { DiscReflectanceTable } from "../atmosphere/discTable";
 import type { SpheroidFigure } from "../atmosphere/hillaire";
 import { AIRLESS_LIGHTING, type SurfaceLightingReader } from "../atmosphere/surfaceLighting";
@@ -159,6 +168,43 @@ export interface AirPointRatio {
   readonly reflection: Rgb;
 }
 
+/** The glows a body holds at most: one from each of four views. */
+export const GLOWS_HELD = 4;
+
+/**
+ * A body whose disc glows (the module's remarks; R08.T18) as its point's samples see it: the disc
+ * its record draws, every light at none, so that it draws its own light alone.
+ */
+export interface GlowPointBody {
+  /**
+   * Its ground's emission as its disc's record forms it (`discReflectance.ts`' `discEmissionOf`),
+   * its star its brightest's direction, galactic; `null` below the thermal cut.
+   */
+  readonly emission: DiscEmission | null;
+  /**
+   * Its air drawn by its table, which dims its ground's emission by its alpha and adds its own light
+   * where it holds a thermal layer; `null` for a body without one.
+   */
+  readonly air: DiscAir | null;
+  /** The body's own figure, the point's, along the galactic axes: the glow is over its (a ÷ Δ)². */
+  readonly figure: SpheroidFigure;
+  /**
+   * The figure the glowing disc is drawn on: its ground's table figure beneath a gas envelope's air
+   * drawn by its table (`LitBodyInput.ground`), else its own.
+   */
+  readonly glowFigure: SpheroidFigure;
+  /** What that disc shades its ground with: black beneath a gas envelope's air, else its own. */
+  readonly glowSurface: DrawnDiscSurface;
+  /** The pole the disc is drawn about, unit, along the galactic axes. */
+  readonly pole: Vec3;
+  /** A class map's body-fixed axes, whose frame its held glows are found in; `null` otherwise. */
+  readonly rotation: Rotation3 | null;
+  /** The texels of a class map the disc shades with, or `null`. */
+  readonly classMap: ClassMapTexels | null;
+  /** The unit direction from the body's centre to the observer, along the galactic axes. */
+  readonly towardsObserver: Vec3;
+}
+
 /** Each surface the ratio reads, by what its identity is held by: a map, or a uniform law. */
 function surfaceKeyOf(surface: DrawnDiscSurface): object {
   return surface.kind === "class-map" ? surface.texels : surface.law;
@@ -185,15 +231,49 @@ interface HeldAirRatio extends AirLightGeometry {
 
 /** A ratio being found in the frames' slices. */
 interface QueuedAirRefresh extends AirLightGeometry {
+  readonly kind: "ratio";
   readonly table: DiscReflectanceTable;
   readonly steps: Generator<void, AirPointRatio>;
 }
 
+/** A body's glow at a geometry (R08.T18): what a held glow, a refresh and a frame's ask share. */
+interface GlowGeometry {
+  /** The ground's field its emission is of, or `null` for none. */
+  readonly fieldKey: object | null;
+  readonly surfaceKey: object;
+  /** The body's own figure's and the glowing disc's semi-axes, m. */
+  readonly figureKey: string;
+  /**
+   * The direction its field's substellar term turns about (`DiscEmission.star`) and the observer's,
+   * in the body's frame; the first zero for a body with no emission or no star.
+   */
+  readonly towardsLight: Vec3;
+  readonly towardsObserver: Vec3;
+}
+
+/** A glow found at one geometry: Σ L Ω over (a ÷ D)², cd m⁻² per channel. */
+interface HeldGlow extends GlowGeometry {
+  readonly glow: Rgb;
+}
+
+/** A glow being found in the frames' slices, for its holder (`glowHolderOf`). */
+interface QueuedGlowRefresh extends GlowGeometry {
+  readonly kind: "glow";
+  readonly holder: object;
+  readonly steps: Generator<void, Rgb>;
+}
+
+/** A refresh of either kind. */
+type QueuedRefresh = QueuedAirRefresh | QueuedGlowRefresh;
+
 /** Each table's ratios, the latest found last. */
 const HELD = new WeakMap<DiscReflectanceTable, HeldAirRatio[]>();
 
+/** Each holder's glows (`glowHolderOf`), the latest found last. */
+const HELD_GLOWS = new WeakMap<object, HeldGlow[]>();
+
 /** The refreshes queued, the oldest first. */
-const REFRESHES: QueuedAirRefresh[] = [];
+const REFRESHES: QueuedRefresh[] = [];
 
 /**
  * The tables holding a ratio found on each class map's texels, by the texels: what
@@ -201,11 +281,17 @@ const REFRESHES: QueuedAirRefresh[] = [];
  */
 const TABLES_OF_MAP = new WeakMap<object, Set<DiscReflectanceTable>>();
 
+/** The holders of a glow found on each class map's texels, by the texels, as {@link TABLES_OF_MAP}. */
+const GLOW_HOLDERS_OF_MAP = new WeakMap<object, Set<object>>();
+
 /** The slices run so far, the clock of {@link NEAR}'s notes. */
 let SLICES_RUN = 0;
 
-/** Each table's latest note that a frame drew its body near the switch, as {@link SLICES_RUN}. */
-const NEAR = new WeakMap<DiscReflectanceTable, number>();
+/**
+ * Each table's, or glow holder's, latest note that a frame drew its body near the switch, as
+ * {@link SLICES_RUN}.
+ */
+const NEAR = new WeakMap<object, number>();
 
 /** Whether a refresh failed already, said once. */
 const SAID = { failed: false };
@@ -318,7 +404,6 @@ function sideRecord(
   air: DiscAir | undefined,
 ): DiscRecord {
   const a = figure.equatorialRadiusM;
-  const radiusOverDistance = (AIR_POINT_RADIUS_OVER_DISTANCE * a) / body.figure.equatorialRadiusM;
   const lights: DiscLight[] = body.lights.map((light, j) => ({
     direction: light.towardsLight,
     distance: light.distanceM / a,
@@ -326,6 +411,24 @@ function sideRecord(
     illuminance: j === slot ? [1, 1, 1] : [0, 0, 0],
     annuli: light.annuli,
   }));
+  return {
+    ...sampledRecord(body, figure, surface, lights),
+    ...(air === undefined ? {} : { air: { ...air, table: litTableOf(air.table) } }),
+  };
+}
+
+/**
+ * A record of the samples' disc of `body` on `figure` with `surface`, lit by `lights`, at the
+ * samples' a ÷ D for the body's own figure, its exposure 1.
+ */
+function sampledRecord(
+  body: Pick<AirPointBody, "figure" | "pole" | "towardsObserver">,
+  figure: SpheroidFigure,
+  surface: DrawnDiscSurface,
+  lights: ReadonlyArray<DiscLight>,
+): DiscRecord {
+  const a = figure.equatorialRadiusM;
+  const radiusOverDistance = (AIR_POINT_RADIUS_OVER_DISTANCE * a) / body.figure.equatorialRadiusM;
   return {
     body: "0000000000000000.0000",
     rect: { leftPx: 0, topPx: 0, rightPx: 0, bottomPx: 0 },
@@ -341,8 +444,49 @@ function sideRecord(
     lights,
     occluders: [],
     secondaries: [],
-    ...(air === undefined ? {} : { air: { ...air, table: litTableOf(air.table) } }),
   };
+}
+
+/**
+ * The glowing disc's record of `body` (the module's remarks; R08.T18): on its glow's figure and
+ * surface, its emission and its whole table, its thermal layers among it, and no light, so that each
+ * sample's light is its own alone, cd m⁻².
+ */
+function glowRecord(body: GlowPointBody): DiscRecord {
+  return {
+    ...sampledRecord(body, body.glowFigure, body.glowSurface, []),
+    ...(body.emission === null ? {} : { emission: body.emission }),
+    ...(body.air === null ? {} : { air: body.air }),
+  };
+}
+
+/** A body's glow as the frames' slices find it, a ring of samples a step: Σ L Ω over (a ÷ D)². */
+function* glowSteps(body: GlowPointBody): Generator<void, Rgb> {
+  const sum = yield* sumSteps(
+    { record: glowRecord(body), lighting: AIRLESS_LIGHTING },
+    body.classMap,
+  );
+  const solid = AIR_POINT_RADIUS_OVER_DISTANCE * AIR_POINT_RADIUS_OVER_DISTANCE;
+  return [sum[0] / solid, sum[1] / solid, sum[2] / solid];
+}
+
+/**
+ * Runs a glow's steps to their end at once (R08.T18), the synchronous path, for tests and harnesses:
+ * what `body`'s disc emits towards the observer, Σ L Ω over its samples over (a ÷ D)², cd m⁻² per
+ * channel, so that its flux at Δ is this times (a ÷ Δ)².
+ */
+export function glowPointSum(body: GlowPointBody): Rgb {
+  return finished(glowSteps(body));
+}
+
+/** Runs a generator's steps to their end at once. */
+function finished<T>(steps: Generator<void, T>): T {
+  for (;;) {
+    const step = steps.next();
+    if (step.done === true) {
+      return step.value;
+    }
+  }
 }
 
 /** A table without its thermal layers' scale, so that its air adds no light of its own. */
@@ -382,17 +526,11 @@ function* ratioSteps(body: AirPointBody, slot: number): Generator<void, AirPoint
 
 /** Runs a ratio's steps to their end at once: the synchronous path, for tests and harnesses. */
 export function airPointRatio(body: AirPointBody, slot: number): AirPointRatio {
-  const steps = ratioSteps(body, slot);
-  for (;;) {
-    const step = steps.next();
-    if (step.done === true) {
-      return step.value;
-    }
-  }
+  return finished(ratioSteps(body, slot));
 }
 
 /** A direction in the body's frame: a class map's body-fixed axes, or the drawn pole's. */
-function inBodyFrame(body: AirPointBody, v: Vec3): Vec3 {
+function inBodyFrame(body: Pick<AirPointBody, "rotation" | "pole">, v: Vec3): Vec3 {
   if (body.rotation !== null) {
     return rotateToBodyFixed(body.rotation, v);
   }
@@ -433,6 +571,21 @@ function chordSquared(a: Vec3, b: Vec3): number {
   return dx * dx + dy * dy + dz * dz;
 }
 
+/** A geometry's two directions in the body's frame, which its cache's angles are measured on. */
+interface Directed {
+  readonly towardsLight: Vec3;
+  readonly towardsObserver: Vec3;
+}
+
+/** Whether `entry` is within `angleRad` of `at` on both directions. */
+function within(entry: Directed, at: Directed, angleRad: number): boolean {
+  const limit = angleRad * angleRad;
+  return (
+    chordSquared(entry.towardsLight, at.towardsLight) <= limit &&
+    chordSquared(entry.towardsObserver, at.towardsObserver) <= limit
+  );
+}
+
 /** Whether `entry` is of `at`'s light, slot, surfaces and figures. */
 function sameLight(entry: AirLightGeometry, at: AirLightGeometry): boolean {
   return (
@@ -446,24 +599,20 @@ function sameLight(entry: AirLightGeometry, at: AirLightGeometry): boolean {
 
 /** Whether `entry` is of `at`'s light and within `angleRad` of it on both directions. */
 function nearAs(entry: AirLightGeometry, at: AirLightGeometry, angleRad: number): boolean {
-  const limit = angleRad * angleRad;
-  return (
-    sameLight(entry, at) &&
-    chordSquared(entry.towardsLight, at.towardsLight) <= limit &&
-    chordSquared(entry.towardsObserver, at.towardsObserver) <= limit
-  );
+  return sameLight(entry, at) && within(entry, at, angleRad);
 }
 
-/** The held entry of `at`'s light nearest it of those within `angleRad`, if any. */
-function nearestHeld(
-  held: ReadonlyArray<HeldAirRatio>,
-  at: AirLightGeometry,
+/** The held entry `same` as `at` nearest it of those within `angleRad`, if any. */
+function nearestOf<T extends Directed, G extends Directed>(
+  held: ReadonlyArray<T>,
+  at: G,
   angleRad: number,
-): HeldAirRatio | undefined {
-  let nearest: HeldAirRatio | undefined;
+  same: (entry: T, at: G) => boolean,
+): T | undefined {
+  let nearest: T | undefined;
   let nearestChord = Number.POSITIVE_INFINITY;
   for (const entry of held) {
-    if (!nearAs(entry, at, angleRad)) {
+    if (!same(entry, at) || !within(entry, at, angleRad)) {
       continue;
     }
     const chord = Math.max(
@@ -478,8 +627,17 @@ function nearestHeld(
   return nearest;
 }
 
-/** The phase angle of a geometry, rad. */
-function phaseOf(at: AirLightGeometry): number {
+/** The held entry of `at`'s light nearest it of those within `angleRad`, if any. */
+function nearestHeld(
+  held: ReadonlyArray<HeldAirRatio>,
+  at: AirLightGeometry,
+  angleRad: number,
+): HeldAirRatio | undefined {
+  return nearestOf(held, at, angleRad, sameLight);
+}
+
+/** The phase angle of a geometry, rad: π ÷ 2 where its light is zero. */
+function phaseOf(at: Directed): number {
   return Math.acos(Math.min(1, Math.max(-1, dot(at.towardsLight, at.towardsObserver))));
 }
 
@@ -489,10 +647,19 @@ function phaseOf(at: AirLightGeometry): number {
  */
 function queueRefresh(body: AirPointBody, slot: number, at: AirLightGeometry): void {
   const { table } = body.air;
-  if (REFRESHES.some((refresh) => refresh.table === table && sameLight(refresh, at))) {
+  if (
+    REFRESHES.some(
+      (refresh) => refresh.kind === "ratio" && refresh.table === table && sameLight(refresh, at),
+    )
+  ) {
     return;
   }
-  REFRESHES.push({ ...at, table, steps: ratioSteps(body, slot) });
+  enqueue({ kind: "ratio", ...at, table, steps: ratioSteps(body, slot) });
+}
+
+/** Queues a refresh, the oldest let go past {@link AIR_POINT_QUEUE}. */
+function enqueue(refresh: QueuedRefresh): void {
+  REFRESHES.push(refresh);
   if (REFRESHES.length > AIR_POINT_QUEUE) {
     REFRESHES.shift();
   }
@@ -570,17 +737,119 @@ function hold(table: DiscReflectanceTable, entry: HeldAirRatio): void {
   }
 }
 
+/** What stands for a glow's holder with neither a table nor a field, which no body draws. */
+const NO_GLOW_HOLDER = {};
+
+/** What a body's glows are held by: its table, or, airless, its ground's field. */
+function glowHolderOf(body: GlowPointBody): object {
+  return body.air?.table ?? body.emission?.field ?? NO_GLOW_HOLDER;
+}
+
+/** A body's glow geometry: its field, surface and figures, and its directions in its frame. */
+function glowGeometryOf(body: GlowPointBody): GlowGeometry {
+  const { figure, glowFigure } = body;
+  return {
+    fieldKey: body.emission?.field ?? null,
+    surfaceKey: surfaceKeyOf(body.glowSurface),
+    figureKey: [
+      figure.equatorialRadiusM,
+      figure.polarRadiusM,
+      glowFigure.equatorialRadiusM,
+      glowFigure.polarRadiusM,
+    ].join(" "),
+    towardsLight: inBodyFrame(body, body.emission?.star ?? vec3(0, 0, 0)),
+    towardsObserver: inBodyFrame(body, body.towardsObserver),
+  };
+}
+
+/** Whether `entry` is of `at`'s field, surface and figures. */
+function sameGlow(entry: GlowGeometry, at: GlowGeometry): boolean {
+  return (
+    entry.fieldKey === at.fieldKey &&
+    entry.surfaceKey === at.surfaceKey &&
+    entry.figureKey === at.figureKey
+  );
+}
+
+/** Queues `body`'s glow at `at` for the frames' slices, unless one of its holder's is queued. */
+function queueGlowRefresh(body: GlowPointBody, holder: object, at: GlowGeometry): void {
+  if (
+    REFRESHES.some(
+      (refresh) => refresh.kind === "glow" && refresh.holder === holder && sameGlow(refresh, at),
+    )
+  ) {
+    return;
+  }
+  enqueue({ kind: "glow", ...at, holder, steps: glowSteps(body) });
+}
+
+/** No light. */
+const NO_GLOW: Rgb = [0, 0, 0];
+
 /**
- * Drops the air points' queued ratios and held ones found on a class map's texels, as the map is
- * dropped or replaced (`ClassMapStore`, beside `cancelClassMapPoint`), so that none is stepped, or
- * holds a table's place, for a map no frame draws again.
+ * What a body's disc emits towards the observer (the module's remarks; R08.T18), over (a ÷ Δ)², cd
+ * m⁻² per channel: its held glow nearest its geometry, or none while none is held near, its glow
+ * queued for the frames' slices. Never sums on the frame, and is cut by no eclipse. Notes its
+ * holder near the switch.
+ */
+export function glowPointLight(body: GlowPointBody): Rgb {
+  const holder = glowHolderOf(body);
+  NEAR.set(holder, SLICES_RUN);
+  const at = glowGeometryOf(body);
+  const alpha = phaseOf(at);
+  const held = HELD_GLOWS.get(holder) ?? [];
+  let found = held.find(
+    (entry) => sameGlow(entry, at) && within(entry, at, classMapPointCacheAngleRad(alpha)),
+  );
+  if (found === undefined) {
+    found = nearestOf(held, at, classMapPointStaleAngleRad(alpha), sameGlow);
+    queueGlowRefresh(body, holder, at);
+  }
+  return found === undefined ? NO_GLOW : found.glow;
+}
+
+/**
+ * Begins a body's glow in the frames' slices while it is a disc near the switch, from the geometry
+ * its point would take, unless one is held within the cache's angle of it, or one is queued.
+ * Nothing is summed here. Notes its holder near the switch.
+ */
+export function warmGlowPoint(body: GlowPointBody): void {
+  const holder = glowHolderOf(body);
+  NEAR.set(holder, SLICES_RUN);
+  const at = glowGeometryOf(body);
+  const angleRad = classMapPointCacheAngleRad(phaseOf(at));
+  if ((HELD_GLOWS.get(holder) ?? []).some((e) => sameGlow(e, at) && within(e, at, angleRad))) {
+    return;
+  }
+  queueGlowRefresh(body, holder, at);
+}
+
+/**
+ * Holds a found glow for its holder in place of its held one nearest it within the stale angle,
+ * and otherwise as the latest, the oldest let go past {@link GLOWS_HELD}.
+ */
+function holdGlow(holder: object, entry: HeldGlow): void {
+  const held = HELD_GLOWS.get(holder) ?? [];
+  const replaced = nearestOf(held, entry, classMapPointStaleAngleRad(phaseOf(entry)), sameGlow);
+  const kept = held.filter((each) => each !== replaced);
+  HELD_GLOWS.set(holder, [...kept.slice(-(GLOWS_HELD - 1)), entry]);
+  const holders = GLOW_HOLDERS_OF_MAP.get(entry.surfaceKey) ?? new Set<object>();
+  holders.add(holder);
+  GLOW_HOLDERS_OF_MAP.set(entry.surfaceKey, holders);
+}
+
+/**
+ * Drops the air points' queued ratios and glows and the held ones found on a class map's texels, as
+ * the map is dropped or replaced (`ClassMapStore`, beside `cancelClassMapPoint`), so that none is
+ * stepped, or holds a table's place, for a map no frame draws again.
  */
 export function cancelAirPointsOf(texels: ClassMapTexels): void {
   const ofMap = (entry: AirLightGeometry): boolean =>
     entry.surfaceKey === texels || entry.airedKey === texels;
+  const glowOfMap = (entry: GlowGeometry): boolean => entry.surfaceKey === texels;
   for (let q = REFRESHES.length - 1; q >= 0; q -= 1) {
     const refresh = REFRESHES[q];
-    if (refresh !== undefined && ofMap(refresh)) {
+    if (refresh !== undefined && (refresh.kind === "ratio" ? ofMap(refresh) : glowOfMap(refresh))) {
       REFRESHES.splice(q, 1);
     }
   }
@@ -591,6 +860,13 @@ export function cancelAirPointsOf(texels: ClassMapTexels): void {
     );
   }
   TABLES_OF_MAP.delete(texels);
+  for (const holder of GLOW_HOLDERS_OF_MAP.get(texels) ?? []) {
+    HELD_GLOWS.set(
+      holder,
+      (HELD_GLOWS.get(holder) ?? []).filter((entry) => !glowOfMap(entry)),
+    );
+  }
+  GLOW_HOLDERS_OF_MAP.delete(texels);
 }
 
 /** Removes `item` from `queue`, where it is. */
@@ -604,22 +880,54 @@ function removeFrom<T>(queue: T[], item: T): void {
 /** Which queued ratios a slice steps: all, or those of tables a frame drew near the switch lately. */
 export type AirPointScope = "all" | "near";
 
-/** The ratios the frames' slices hold queued. */
+/** The ratios and glows the frames' slices hold queued. */
 export function airPointWork(): { readonly refreshes: number } {
   return { refreshes: REFRESHES.length };
 }
 
+/** Steps a refresh once, and holds what it found where it is done; whether it is. */
+function advance(refresh: QueuedRefresh): boolean {
+  if (refresh.kind === "ratio") {
+    const step = refresh.steps.next();
+    if (step.done === true) {
+      hold(refresh.table, {
+        lightKey: refresh.lightKey,
+        slot: refresh.slot,
+        surfaceKey: refresh.surfaceKey,
+        airedKey: refresh.airedKey,
+        figureKey: refresh.figureKey,
+        towardsLight: refresh.towardsLight,
+        towardsObserver: refresh.towardsObserver,
+        found: step.value,
+      });
+    }
+    return step.done === true;
+  }
+  const step = refresh.steps.next();
+  if (step.done === true) {
+    holdGlow(refresh.holder, {
+      fieldKey: refresh.fieldKey,
+      surfaceKey: refresh.surfaceKey,
+      figureKey: refresh.figureKey,
+      towardsLight: refresh.towardsLight,
+      towardsObserver: refresh.towardsObserver,
+      glow: step.value,
+    });
+  }
+  return step.done === true;
+}
+
 /**
  * A frame's slice of the air points' work, once a frame from the terrain session's step after the
- * class-mapped points': the oldest queued ratio's steps, a ring of samples each, of those `scope`
- * takes, until `budgetMs` has passed since the slice began, read on `now` before each step; with
- * none it takes, the slice reads no clock and steps nothing. A finished ratio is held for its table;
- * a step that throws drops its ratio, said once.
+ * class-mapped points': the oldest queued ratio's or glow's steps, a ring of samples each, of those
+ * `scope` takes, until `budgetMs` has passed since the slice began, read on `now` before each step;
+ * with none it takes, the slice reads no clock and steps nothing. A finished ratio is held for its
+ * table, a glow for its holder; a step that throws drops its refresh, said once.
  *
  * @param budgetMs - The slice's length, ms.
  * @param now - A monotonic clock, ms.
- * @param scope - `all`, or `near`: the tables whose bodies a frame drew near the switch within the
- *   last {@link AIR_POINT_NEAR_SLICES} slices.
+ * @param scope - `all`, or `near`: the tables and glows whose bodies a frame drew near the switch
+ *   within the last {@link AIR_POINT_NEAR_SLICES} slices.
  * @returns Whether work it would step remains queued.
  */
 export function stepAirPoints(
@@ -628,11 +936,11 @@ export function stepAirPoints(
   scope: AirPointScope = "all",
 ): boolean {
   SLICES_RUN += 1;
-  const taken = (refresh: QueuedAirRefresh): boolean => {
+  const taken = (refresh: QueuedRefresh): boolean => {
     if (scope === "all") {
       return true;
     }
-    const noted = NEAR.get(refresh.table);
+    const noted = NEAR.get(refresh.kind === "ratio" ? refresh.table : refresh.holder);
     return noted !== undefined && SLICES_RUN - noted <= AIR_POINT_NEAR_SLICES;
   };
   if (!REFRESHES.some(taken)) {
@@ -647,9 +955,9 @@ export function stepAirPoints(
     if (!(now() - startMs < budgetMs)) {
       return true;
     }
-    let step: IteratorResult<void, AirPointRatio>;
+    let done: boolean;
     try {
-      step = refresh.steps.next();
+      done = advance(refresh);
     } catch (error: unknown) {
       removeFrom(REFRESHES, refresh);
       if (!SAID.failed) {
@@ -658,18 +966,8 @@ export function stepAirPoints(
       }
       continue;
     }
-    if (step.done === true) {
+    if (done) {
       removeFrom(REFRESHES, refresh);
-      hold(refresh.table, {
-        lightKey: refresh.lightKey,
-        slot: refresh.slot,
-        surfaceKey: refresh.surfaceKey,
-        airedKey: refresh.airedKey,
-        figureKey: refresh.figureKey,
-        towardsLight: refresh.towardsLight,
-        towardsObserver: refresh.towardsObserver,
-        found: step.value,
-      });
     }
   }
 }

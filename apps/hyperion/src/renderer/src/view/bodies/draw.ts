@@ -171,7 +171,14 @@ import {
   MAX_DISC_OCCLUDERS,
   packDiscRecords,
 } from "./discShading";
-import { type AirPointBody, airPointReflection, warmAirPoint } from "./airPoint";
+import {
+  type AirPointBody,
+  airPointReflection,
+  type GlowPointBody,
+  glowPointLight,
+  warmAirPoint,
+  warmGlowPoint,
+} from "./airPoint";
 import {
   classMapPointReflection,
   nearClassMapPointSwitch,
@@ -568,7 +575,9 @@ function occludersOf(
  * ({@link LitBodyInput.air}) takes each star's term as its disc drawn by that table reflects it
  * (`airPoint.ts`' `airPointReflection`, R08.T16.b), its ratio to the airless term found in the
  * frames' slices, so that the point meets that disc at the 3 px switch; its planetshine stays
- * airless.
+ * airless. A body whose disc glows, its ground's emission above the cut (R08.T18.a) or its table's
+ * own light (R08.T18.b), adds what that disc emits (`airPoint.ts`' `glowPointLight`), found in the
+ * same slices and cut by no eclipse; a body with neither keeps its flux to the bit.
  *
  * @param hosts - The lights where they are drawn, for a body without its own lighting frame.
  * @param occluders - The bodies that may eclipse its stars (`occludersFor`).
@@ -611,6 +620,14 @@ export function pointFlux(
     const reflected = reflection(source.direction, source.body);
     for (const ch of [0, 1, 2] as const) {
       flux[ch] += source.illuminance[ch] * solid * reflected[ch];
+    }
+  }
+  // Its disc's own light, no star's (R08.T18; `airPoint.ts`' glow).
+  const glow = glowPointBodyOf(body, lights, toCamera);
+  if (glow !== null) {
+    const emitted = glowPointLight(glow);
+    for (const ch of [0, 1, 2] as const) {
+      flux[ch] += solid * emitted[ch];
     }
   }
   return flux;
@@ -671,6 +688,62 @@ function airPointBodyOf(
 }
 
 /**
+ * A body whose disc glows as its point's samples take it (`airPoint.ts`' glow; R08.T18): the disc
+ * its record draws, on its ground's table figure and black beneath a gas envelope's air drawn by its
+ * table, else on its own figure and surface; its ground's emission as `discRecordOf` forms it, about
+ * its brightest star; and its table. `null` for a body whose ground is under the thermal cut and
+ * whose table, where it has one, holds no thermal layer.
+ */
+function glowPointBodyOf(
+  body: LitBodyInput,
+  lights: ReadonlyArray<LightAtPoint>,
+  towardsObserver: Vec3,
+): GlowPointBody | null {
+  const { air, ground, thermal } = body;
+  if (thermal === undefined && air?.table.thermalScale === undefined) {
+    return null;
+  }
+  const surface = drawnSurface(body);
+  const beneath = air !== undefined && ground !== undefined;
+  const glowSurface = beneath ? GROUND_SURFACE : surface;
+  const brightest = lights[0];
+  const emission =
+    thermal === undefined
+      ? null
+      : discEmissionOf(
+          thermal,
+          discSurfaceLaws(glowSurface).map((law) => law.a),
+          lights.map((light) => light.illuminance),
+          brightest === undefined
+            ? vec3(0, 0, 0)
+            : scale(brightest.toStarM, 1 / norm(brightest.toStarM)),
+          glowSurface.kind === "class-map" ? (glowSurface.meltClasses ?? []) : [],
+        );
+  if (emission === null && air?.table.thermalScale === undefined) {
+    return null;
+  }
+  const figure = {
+    equatorialRadiusM: body.figure.equatorialRadiusM,
+    polarRadiusM: body.figure.polarRadiusM,
+  };
+  const classMapped = surface.kind === "class-map" ? surface : null;
+  return {
+    emission,
+    air: air ?? null,
+    figure,
+    glowFigure: beneath ? ground.tableFigure : figure,
+    glowSurface,
+    pole:
+      classMapped === null
+        ? figurePole(body.figure)
+        : rotateToBody(classMapped.rotation, vec3(0, 0, 1)),
+    rotation: classMapped?.rotation ?? null,
+    classMap: classMapped?.texels ?? null,
+    towardsObserver,
+  };
+}
+
+/**
  * Begins, in the frames' slices, each star's air ratio of a body with air drawn as a disc near the
  * 3 px switch (`airPoint.ts`' `warmAirPoint`), from the geometry its point would take, so that its
  * first frame as a point finds each star's held. Nothing for a body without a disc table or past the
@@ -702,6 +775,35 @@ function warmAirPointOf(
   );
   if (air !== null) {
     warmAirPoint(air);
+  }
+}
+
+/**
+ * Begins, in the frames' slices, the glow of a body drawn as a disc near the 3 px switch whose disc
+ * glows (`airPoint.ts`' `warmGlowPoint`, R08.T18), from the geometry its point would take, so that
+ * its first frame as a point finds it held. Nothing for a body that does not glow or past the band.
+ */
+function warmGlowPointOf(
+  body: LitBodyInput,
+  lit: BodyLightSources,
+  options: Pick<BodyFrameOptions, "camera" | "viewport">,
+): void {
+  if (
+    (body.thermal === undefined && body.air?.table.thermalScale === undefined) ||
+    !nearClassMapPointSwitch(
+      angularDiameterPx(
+        body.centreM,
+        body.figure.equatorialRadiusM,
+        options.camera,
+        options.viewport,
+      ),
+    )
+  ) {
+    return;
+  }
+  const glow = glowPointBodyOf(body, lit.stars, scale(body.centreM, -1 / norm(body.centreM)));
+  if (glow !== null) {
+    warmGlowPoint(glow);
   }
 }
 
@@ -1109,10 +1211,11 @@ export function planLitBodies(
     closeRun();
     const regime = regimes.get(body.id);
     // A disc near the 3 px switch begins its point's lights in the slices (R10.T14.f), its air's
-    // too (R08.T16.b).
+    // too (R08.T16.b), and its glow (R08.T18).
     if (regime !== "terrain") {
       warmPointOf(body, lit, camera, viewport);
       warmAirPointOf(body, lit, options);
+      warmGlowPointOf(body, lit, options);
     }
     if (drawnAsMesh(regime)) {
       // Only a body handed over has terrain over its figure to give the surveyed ground to.
