@@ -37,9 +37,13 @@ const NEIGHBOURS: ReadonlyArray<readonly [number, number]> = [
   [1, 1],
 ];
 
-/** A cell's index in a level's face-major rows: face, then row j, then column i. */
+/**
+ * A cell's index in a level's face-major rows: face, then row j, then column i. The side is
+ * `1 << level`, which is `2 ** level` for the levels it is given (0 to 8, and at most 30), without
+ * the power's call on selection's and the merge's hot paths.
+ */
 function rowIndex(face: number, level: number, i: number, j: number): number {
-  const n = 2 ** level;
+  const n = 1 << level;
   return (face * n + j) * n + i;
 }
 
@@ -60,6 +64,13 @@ export class SurveyedCells implements SurveyLookup {
   #pyramid: Uint8Array[] = [];
   #version = 0;
   readonly #step: CellOut = { face: 0, i: 0, j: 0 };
+  /** The cell on a face's edge {@link SurveyedCells.add} steps from, rewritten in place. */
+  readonly #edgeCell: { face: PatchKey["face"]; level: number; i: number; j: number } = {
+    face: 0,
+    level: 0,
+    i: 0,
+    j: 0,
+  };
   /**
    * The field-level cell under a finer patch, rewritten in place by each lookup, so that selection's
    * hot path allocates nothing (the batch review's C9).
@@ -104,27 +115,32 @@ export class SurveyedCells implements SurveyLookup {
     }
     for (let r = 0; r + 1 < runs.length; r += 2) {
       for (let index = runs[r] ?? 0; index < (runs[r + 1] ?? 0); index += 1) {
-        this.#addCell(fieldCellAt(level, index));
+        const cell = fieldCellAt(level, index);
+        this.#addCell(cell.face, level, cell.i, cell.j);
       }
     }
   }
 
   /** Adds every surveyed cell of a coverage (the store's answers). */
-  merge(coverage: CoverageView): void {
+  merge(coverage: Pick<CoverageView, "level" | "maskTexels">): void {
     const level = coverage.level;
     const texels = coverage.maskTexels();
     const n = 2 ** level;
-    for (let at = 0; at < texels.length; at += 1) {
-      if ((texels[at] ?? 0) === 0) {
-        continue;
+    // Face by face, row by row, in the texels' order, with no cell made a texel: a whole level-8
+    // coverage is 393,216 of them (perf-long-tasks-2).
+    let at = 0;
+    for (let face = 0; at < texels.length; face += 1) {
+      for (let j = 0; j < n && at < texels.length; j += 1) {
+        for (let i = 0; i < n && at < texels.length; i += 1, at += 1) {
+          if ((texels[at] ?? 0) === 0) {
+            continue;
+          }
+          if (this.#cells?.[rowIndex(face, level, i, j)] === 1 && this.#level === level) {
+            continue;
+          }
+          this.#addCell(faceOf(face), level, i, j);
+        }
       }
-      const i = at % n;
-      const j = Math.floor(at / n) % n;
-      const face = Math.floor(at / (n * n));
-      if (this.#cells?.[rowIndex(face, level, i, j)] === 1 && this.#level === level) {
-        continue;
-      }
-      this.#addCell({ face: faceOf(face), level, i, j });
     }
   }
 
@@ -184,9 +200,8 @@ export class SurveyedCells implements SurveyLookup {
     );
   }
 
-  /** Adds one surveyed cell, dilating it into the pyramid. */
-  #addCell(cell: PatchKey): void {
-    const level = cell.level;
+  /** Adds one surveyed cell, (`face`, `i`, `j`) at `level`, dilating it into the pyramid. */
+  #addCell(face: PatchKey["face"], level: number, i: number, j: number): void {
     if (this.#level !== level) {
       this.#level = level;
       this.#cells = new Uint8Array(fieldCellCount(level));
@@ -196,13 +211,28 @@ export class SurveyedCells implements SurveyLookup {
     if (cells === null) {
       throw new Error("the survey's cells were not made with its level");
     }
-    const at = rowIndex(cell.face, level, cell.i, cell.j);
+    const at = rowIndex(face, level, i, j);
     if (cells[at] === 1) {
       return;
     }
     cells[at] = 1;
     this.#version += 1;
-    this.#dilate(cell.face, cell.i, cell.j);
+    this.#dilate(face, i, j);
+    const last = (1 << level) - 1;
+    if (i > 0 && i < last && j > 0 && j < last) {
+      // A cell off its face's edges: each neighbour is (i + di, j + dj) on its own face, as
+      // `stepCellInto` folds nothing there, marked in the same order (perf-long-tasks-2: a whole
+      // level-8 coverage's merge held the page's thread some 350 to 470 ms on the pod).
+      for (const [di, dj] of NEIGHBOURS) {
+        this.#dilate(face, i + di, j + dj);
+      }
+      return;
+    }
+    const cell = this.#edgeCell;
+    cell.face = face;
+    cell.level = level;
+    cell.i = i;
+    cell.j = j;
     const out = this.#step;
     for (const [di, dj] of NEIGHBOURS) {
       if (stepCellInto(out, cell, di, dj)) {

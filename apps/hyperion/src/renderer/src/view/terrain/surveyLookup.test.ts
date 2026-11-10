@@ -144,3 +144,80 @@ describe("a body's survey as selection reads it (R10.T16.b)", () => {
     }).toThrow(RangeError);
   });
 });
+
+/** A level's patches, face by face, row by row. */
+function patchesAt(level: number): PatchKey[] {
+  const n = 2 ** level;
+  const keys: PatchKey[] = [];
+  for (const face of [0, 1, 2, 3, 4, 5] as const) {
+    for (let j = 0; j < n; j += 1) {
+      for (let i = 0; i < n; i += 1) {
+        keys.push({ face, level, i, j });
+      }
+    }
+  }
+  return keys;
+}
+
+describe("the survey's merge, cell by cell (perf-long-tasks-2)", () => {
+  it("steps an interior cell to its neighbours on its own face, as stepCellInto does", () => {
+    const out: CellOut = { face: 0, i: 0, j: 0 };
+    for (const level of [1, 2, 3, 4, 5]) {
+      const last = 2 ** level - 1;
+      for (const key of patchesAt(level)) {
+        if (key.i === 0 || key.i === last || key.j === 0 || key.j === last) {
+          continue;
+        }
+        for (const [di, dj] of [-1, 0, 1].flatMap((a) => [-1, 0, 1].map((b) => [a, b] as const))) {
+          expect(stepCellInto(out, key, di, dj)).toBe(true);
+          expect(out).toStrictEqual({ face: key.face, i: key.i + di, j: key.j + dj });
+        }
+      }
+    }
+  });
+
+  it("marks every patch at or above the field whose area or ring holds a surveyed cell, as stepping each cell's ring does", () => {
+    const level = 5;
+    const n = 2 ** level;
+    const texels = new Uint8Array(6 * n * n);
+    // A fixed scatter, every face's edges and corners among it, and one face whole.
+    let seed = 12345;
+    for (let at = 0; at < texels.length; at += 1) {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      texels[at] = seed % 7 === 0 || Math.floor(at / (n * n)) === 4 ? 1 : 0;
+    }
+    const survey = new SurveyedCells();
+    survey.merge({ level, maskTexels: () => texels });
+    // The reference: each surveyed cell and its ring, stepped by stepCellInto alone.
+    const dilated = new Set<string>();
+    const out: CellOut = { face: 0, i: 0, j: 0 };
+    let surveyed = 0;
+    for (const key of patchesAt(level)) {
+      if (texels[(key.face * n + key.j) * n + key.i] !== 1) {
+        continue;
+      }
+      surveyed += 1;
+      dilated.add(`${String(key.face)} ${String(key.i)} ${String(key.j)}`);
+      for (const [di, dj] of [-1, 0, 1].flatMap((a) => [-1, 0, 1].map((b) => [a, b] as const))) {
+        if (stepCellInto(out, key, di, dj)) {
+          dilated.add(`${String(out.face)} ${String(out.i)} ${String(out.j)}`);
+        }
+      }
+    }
+    for (let k = 0; k <= level; k += 1) {
+      const shift = level - k;
+      const marked = new Set(
+        [...dilated].map((text) => {
+          const [face, i, j] = text.split(" ").map(Number);
+          return `${String(face)} ${String((i ?? 0) >> shift)} ${String((j ?? 0) >> shift)}`;
+        }),
+      );
+      for (const key of patchesAt(k)) {
+        expect(survey.surveyedUnder(key)).toBe(
+          marked.has(`${String(key.face)} ${String(key.i)} ${String(key.j)}`),
+        );
+      }
+    }
+    expect(survey.version).toBe(surveyed);
+  });
+});
