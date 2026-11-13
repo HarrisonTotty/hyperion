@@ -444,7 +444,7 @@ describe("the lit terrain's shadow receiver (R10.T9.b)", () => {
     expect(derivatives).toBeGreaterThan(0);
     expect(derivatives).toBeLessThan(code.indexOf("discard"));
     expect(code).toContain("var cascade_lit = 1.0;");
-    expect(code).toContain("shade_terrain(in, normal, reference, cascade_lit, at)");
+    expect(code).toContain("shade_terrain(in, normal, reference, cascade_lit, at, quad_st)");
     expect(terrainLitWgsl).toContain("cascade_lit : f32,");
   });
 
@@ -2135,7 +2135,31 @@ describe("a texel's classes' edges (lane fix-jagged-biome-edges)", () => {
 
   it("is drawn by each set's shares in the lit shader", () => {
     expect(collapseWhitespace(wgslFunction(terrainLitWgsl, "class_sets"))).toContain(
-      "edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, lattice); sets.shares[s] = at.shares;",
+      "edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, sets.lattice[s] * 1.5707963267948966); } sets.shares[s] = at.shares;",
     );
+  });
+
+  it("takes its patch's quad from the varyings' rates before the discard, in uniform control flow", () => {
+    const code = terrainLitShadeWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    const rates = code.indexOf("fwidth(in.horizonSt)");
+    expect(rates).toBeGreaterThan(0);
+    expect(rates).toBeLessThan(code.indexOf("discard"));
+    expect(code).toContain(
+      "let quad_st = select(0.0, exp2(round(log2(ratio))) / 64.0, ratio > 0.0);",
+    );
+  });
+
+  it("is shaped from the fragment stage's own bindings, no slot record among them", () => {
+    // The slot records are the vertex stage's alone: a fragment-stage read of them leaves the lit
+    // material's pipeline unmade (the lane's first build, on SwiftShader).
+    for (const spec of [...TERRAIN_LIT_MATERIALS, ...TERRAIN_LIT_INTERIOR_MATERIALS]) {
+      const read = bindingStages(spec.vertexWgsl);
+      const undeclared = (spec.storageBuffers ?? []).flatMap((buffer) =>
+        [...(read.get(buffer.binding) ?? [])]
+          .filter((stage) => !(buffer.stages ?? []).includes(stage))
+          .map((stage) => `${spec.name}: ${buffer.name} in ${stage}`),
+      );
+      expect(undeclared).toEqual([]);
+    }
   });
 });

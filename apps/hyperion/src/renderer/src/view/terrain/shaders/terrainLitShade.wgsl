@@ -163,6 +163,16 @@ fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
   let geometric = cascade_geometric_normal(
     dpdxFine(in.fromCameraBf), dpdyFine(in.fromCameraBf), datum
   );
+  // The patch's quad in cell coordinates, 2⁻⁽ⁿ⁺⁶⁾ for its level n, by which its classes' edges are
+  // shaped (lane fix-jagged-biome-edges; `class_sets`): its cell coordinates change 2⁻ⁿ as fast as
+  // its place in it, so their rates' ratio rounded to its power of two; 0 where its place does not
+  // change across the pixel, a skirt's or a fin's strip, where no edge is shaped. From the
+  // fragment stage's varyings, the slot records being the vertex stage's, in uniform control flow.
+  let place_rate = fwidth(in.patchUv);
+  let cell_rate = fwidth(in.horizonSt);
+  let most = max(place_rate.x, place_rate.y);
+  let ratio = select(0.0, max(cell_rate.x, cell_rate.y) / most, most > 0.0);
+  let quad_st = select(0.0, exp2(round(log2(ratio))) / 64.0, ratio > 0.0);
   if (!survey_kept(in)) {
     discard;
   }
@@ -226,7 +236,7 @@ fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
   // normal and c′, stand in for its light, so that the profile's time is the shading's less.
   var shaded = TerrainShaded(1e-3 * (normal + vec3f(cascade_lit)), false);
   if (LIT_PROBE != 5u) {
-    shaded = shade_terrain(in, normal, reference, cascade_lit, at);
+    shaded = shade_terrain(in, normal, reference, cascade_lit, at, quad_st);
   }
   var meter = METER_OTHER;
   if (u32(terrain_row(0u).x) > 0u) {

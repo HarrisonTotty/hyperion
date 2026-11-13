@@ -1014,10 +1014,14 @@ export function terrainResolveMaterialSpec(
     ],
     [
       LIT_FRAGMENT_HEAD,
-      "fn lit_fragment(in : LitVertexOut, face_dx : vec3f, face_dy : vec3f) -> vec4f {",
+      "fn lit_fragment(\n  in : LitVertexOut,\n  face_dx : vec3f,\n  face_dy : vec3f,\n  face_uv : vec2f,\n  face_st : vec2f,\n) -> vec4f {",
       1,
     ],
     ["dpdxFine(in.fromCameraBf), dpdyFine(in.fromCameraBf)", "face_dx, face_dy", 1],
+    // The patch's place and cell coordinates across the triangle, whose ratio is the varyings'
+    // rates' (lane fix-jagged-biome-edges), in place of derivatives the resolve's loop may not take.
+    ["fwidth(in.patchUv)", "face_uv", 1],
+    ["fwidth(in.horizonSt)", "face_st", 1],
     [
       "@group(2) @binding(8) var<storage, read> terrain_lights : array<vec4f>;",
       "// The lights are the resolve frame's rows (`resolveTerrain.wgsl`).",

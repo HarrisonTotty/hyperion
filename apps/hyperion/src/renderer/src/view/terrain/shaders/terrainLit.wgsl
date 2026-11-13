@@ -664,26 +664,32 @@ struct ClassSets {
   weight : array<f32, MAX_CLASS_SETS>,
   slot : array<u32, MAX_CLASS_SETS>,
   uv : array<vec2f, MAX_CLASS_SETS>,
+  // Its patch's quad in cell coordinates (lane fix-jagged-biome-edges), 0 for none known.
+  lattice : array<f32, MAX_CLASS_SETS>,
   shares : array<array<f32, TERRAIN_LAWS>, MAX_CLASS_SETS>,
   albedos : array<array<vec3f, TERRAIN_LAWS>, MAX_CLASS_SETS>,
 }
 
 // The class sets of the texel `in`, with `reference` law 0 alone (`shade_terrain`'s): their slots,
 // places and weights, then each set's shares and A (`terrain_shares`, `terrain_albedos`), the own
-// set's at its morph factor and rebake, another's at its own field.
-fn class_sets(in : LitVertexOut, reference : bool) -> ClassSets {
+// set's at its morph factor and rebake, another's at its own field. Each set's classes' edges are
+// shaped on its patch's lattice (lane fix-jagged-biome-edges; `edge_shape_terrain`), the own
+// patch's quad `quad_st` in cell coordinates, its parent's twice it and the ancestor's 2ᵈ times it;
+// none where `quad_st` is 0.
+fn class_sets(in : LitVertexOut, reference : bool, quad_st : f32) -> ClassSets {
   var sets : ClassSets;
   // The texel's body-fixed unit direction on R05's cube sphere, from its cell coordinates on its
-  // patch's face, and a pixel's footprint there on the unit sphere, rad, as R07's disc takes it
-  // (lane fix-jagged-biome-edges; `bodyDisc.wgsl`'s `shade`): its angle at the camera times the
-  // texel's distance over a, over the datum's μ held at EDGE_GRAZING_MU.
-  let own_rec = slots[in.slot];
-  let edge_d = normalize(
-    own_rec.axisA + stToUv(in.horizonSt.x) * own_rec.axisE1 + stToUv(in.horizonSt.y) * own_rec.axisE2
-  );
+  // face (`disc_place`'s), and a pixel's footprint there on the unit sphere, rad, as R07's disc takes
+  // it (`bodyDisc.wgsl`'s `shade`): its angle at the camera times the texel's distance over a, over
+  // the datum's μ held at EDGE_GRAZING_MU. From the fragment stage's own bindings alone: the slot
+  // records are the vertex stage's.
+  let axes = horizon_face(in.horizonFace);
+  let edge_d =
+    normalize(axes.centre + stToUv(in.horizonSt.x) * axes.u + stToUv(in.horizonSt.y) * axes.v);
   let pixel_rad = 2.0 / (frame.viewport.y * frame.clipProjection[1][1]);
   let edge_mu = dot(normalize(in.datumNormal), -normalize(in.fromCameraBf));
-  let footprint = length(in.fromCameraBf) / own_rec.scale.x * pixel_rad / max(edge_mu, EDGE_GRAZING_MU);
+  let footprint =
+    length(in.fromCameraBf) * draw.cameraBodyFixedM.w * pixel_rad / max(edge_mu, EDGE_GRAZING_MU);
   var c = 0.0;
   var mu = 0.0;
   var ancestor_uv = in.patchUv;
@@ -702,18 +708,21 @@ fn class_sets(in : LitVertexOut, reference : bool) -> ClassSets {
     sets.weight[sets.count] = own;
     sets.slot[sets.count] = in.slot;
     sets.uv[sets.count] = in.patchUv;
+    sets.lattice[sets.count] = quad_st;
     sets.count = sets.count + 1u;
   }
   if (mu > 0.0 && c < 1.0) {
     sets.weight[sets.count] = (1.0 - c) * mu;
     sets.slot[sets.count] = in.parent.x;
     sets.uv[sets.count] = parentPatchUv(in.parent.y, in.patchUv);
+    sets.lattice[sets.count] = 2.0 * quad_st;
     sets.count = sets.count + 1u;
   }
   if (c > 0.0) {
     sets.weight[sets.count] = c;
     sets.slot[sets.count] = in.cells.x;
     sets.uv[sets.count] = ancestor_uv;
+    sets.lattice[sets.count] = quad_st * f32(1u << (in.cells.y & 31u));
     sets.count = sets.count + 1u;
   }
   for (var s = 0u; s < sets.count; s = s + 1u) {
@@ -722,9 +731,10 @@ fn class_sets(in : LitVertexOut, reference : bool) -> ClassSets {
       sets.shares[s][0] = 1.0;
     } else {
       var at = terrain_shares(sets.slot[s], sets.uv[s]);
-      // Each set on its own patch's lattice, a quad a step in s (lane fix-jagged-biome-edges).
-      let lattice = slots[sets.slot[s]].step * 1.5707963267948966;
-      edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, lattice);
+      // Each set on its own patch's lattice, a cell coordinate's step about π ÷ 2 rad.
+      if (sets.lattice[s] > 0.0) {
+        edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, sets.lattice[s] * 1.5707963267948966);
+      }
       sets.shares[s] = at.shares;
     }
     // Each law's A at the texel, its maturity's where a slot is drawn from its nodes (R10.T1.c); a
@@ -834,6 +844,7 @@ fn shade_terrain(
   reference : bool,
   cascade_lit : f32,
   at : ShadePlace,
+  quad_st : f32,
 ) -> TerrainShaded {
   var out : TerrainShaded;
   out.radiance = vec3f(0.0);
@@ -855,7 +866,7 @@ fn shade_terrain(
   let misc = terrain_row(2u);
   // No annuli under the lit probe's eclipse form (`surfaceLighting.wgsl`'s `LIT_PROBE`).
   let annulus_count = select(u32(counts.w), 0u, LIT_PROBE == 3u);
-  var sets = class_sets(in, reference);
+  var sets = class_sets(in, reference, quad_st);
   // The texel's mean A, for R08's sky light on the Lambert share's flat term: each set's by its
   // weight.
   var mean_a = vec3f(0.0);

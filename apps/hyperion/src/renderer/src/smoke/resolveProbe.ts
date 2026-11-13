@@ -35,7 +35,7 @@ const LIT_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(in : LitVertexOut) -> @loc
  */
 const RESOLVE_HEAD = "fn fragmentMain(@builtin(position) pixel : vec4f) -> @location(0) vec4f {";
 const RESOLVE_SHADING =
-  "colour = lit_fragment(in, at[1].fromCameraBf - at[0].fromCameraBf, at[2].fromCameraBf - at[0].fromCameraBf);";
+  "colour = lit_fragment(\n      in, at[1].fromCameraBf - at[0].fromCameraBf, at[2].fromCameraBf - at[0].fromCameraBf, face_uv, face_st\n    );";
 const RESOLVE_RETURN = "  return colour;\n}";
 
 /** `source` with `from` replaced by `to`, which it holds exactly once. */

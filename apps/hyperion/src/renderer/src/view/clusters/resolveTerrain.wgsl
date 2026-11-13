@@ -166,8 +166,14 @@ fn fragmentMain(@builtin(position) pixel : vec4f) -> @location(0) vec4f {
     in.horizonSt = b.x * at[0].horizonSt + b.y * at[1].horizonSt + b.z * at[2].horizonSt;
     in.morph = b.x * at[0].morph + b.y * at[1].morph + b.z * at[2].morph;
     in.gridHeightM = b.x * at[0].gridHeightM + b.y * at[1].gridHeightM + b.z * at[2].gridHeightM;
-    // The geometric normal is the face's, from its edges (`cascade_geometric_normal` orients it).
-    colour = lit_fragment(in, at[1].fromCameraBf - at[0].fromCameraBf, at[2].fromCameraBf - at[0].fromCameraBf);
+    // The geometric normal is the face's, from its edges (`cascade_geometric_normal` orients it);
+    // the patch's quad from the ratio of its cell coordinates' and its place's spans across them
+    // (lane fix-jagged-biome-edges), as the lit fragment takes it from their rates.
+    let face_uv = abs(at[1].patchUv - at[0].patchUv) + abs(at[2].patchUv - at[0].patchUv);
+    let face_st = abs(at[1].horizonSt - at[0].horizonSt) + abs(at[2].horizonSt - at[0].horizonSt);
+    colour = lit_fragment(
+      in, at[1].fromCameraBf - at[0].fromCameraBf, at[2].fromCameraBf - at[0].fromCameraBf, face_uv, face_st
+    );
   }
   if (!kept) {
     discard;
