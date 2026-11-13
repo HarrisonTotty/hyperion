@@ -196,8 +196,8 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "binary_xrb",
-        revision: 0,
-        since_generator_version: 31,
+        revision: 1,
+        since_generator_version: 32,
         provisional: false,
     },
     TableInfo {
@@ -497,7 +497,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "warm_haze",
         revision: 1,
-        since_generator_version: 31,
+        since_generator_version: 32,
         provisional: false,
     },
     TableInfo {

@@ -113,13 +113,13 @@ acceptance = "672 cells × 105 age bins from 33067 samples; the largest stored B
 name = "binary_xrb"
 path = "binary.rs"
 task = "binary_xrb"
-revision = 0
-inputs_sha256 = "8c5053e3736057c4ac25011a9ebd1da8156cb09ac2627f0029ea44f3cfd256f6"
-body_sha256 = "03ad34caa05d2ebc77a4982df897c4607030236cd88913ddddf00399f93dab8e"
+revision = 1
+inputs_sha256 = "3b6e18a9730c296acb1e3b6bf35496adf37c0c7b72afb3e239fbe29346702eab"
+body_sha256 = "4c8d954826318f1057669dfc3fa782bb976cc59ef79237c829a1e063af1dc2a1"
 fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 25.0, 1.0, 1.55261502182327, 1.3396048261069489, -1.5866839897114011]
-since_generator_version = 31
+since_generator_version = 32
 provisional = false
-acceptance = "slab members by kind 388/9725/4/91/7/0/239/4/0; young members by kind 543/400/108/169/873/4/97/0/5; census kinds 0.0375/0.9385/0.0007/0.0070/0.0009/0.0000/0.0150/0.0003/0.0000; weights 0.0329/0.8223/0.0006/0.1300/0.0132/0.0002 and 0.0007/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 70); high-mass hosts 8; donor mass's own nodes 14; layers C 0.000 D 0.147 E 0.853; rates a system 1.54e-4/2.29e-4/1.67e-4/1.30e-4/1.98e-4/1.21e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
+acceptance = "slab members by kind 388/9725/4/91/7/0/239/4/0; young members by kind 543/400/108/169/873/4/97/0/5; census kinds 0.0375/0.9385/0.0007/0.0070/0.0009/0.0000/0.0150/0.0003/0.0000; weights 0.0216/0.5392/0.0004/0.1300/0.0086/0.0001 and 0.2958/0.0040/0.0002; black-hole transients 1300 of 1e4 (the census's 70); high-mass hosts 3000; donor mass's own nodes 12; layers C 0.000 D 0.147 E 0.853; rates a system 1.54e-4/2.29e-4/1.67e-4/1.30e-4/1.98e-4/1.21e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`; pinned high-mass kinds Supergiant 40 and BlackHoleHighMass 2"
 
 [[table]]
 name = "bowl_permanent_shadow"
@@ -747,7 +747,7 @@ revision = 1
 inputs_sha256 = "a9a464597f1611ebf9d6192d7556300af8219901a1707812f38cd6099ae274dd"
 body_sha256 = "a5c1bacdd114ecc2edd3940b82129387f31bb700ed9d9c7dc3680d2ddc7cb4e1"
 fingerprint = [0.445505929614545, 0.1788365395179475, 595.3094197273796, 0.4964516153120823, 0.1788365394773738, 595.3094197273796, 0.5326824702788682, 0.17883653944466324, 595.3094197273796]
-since_generator_version = 31
+since_generator_version = 32
 provisional = false
 acceptance = "GJ 1214 b's Bond albedo by its coagulated haze's τ(550): 10 0.4455, 20 0.4801, 30 0.4965, 40 0.5066, 50 0.5138, 60 0.5193, 70 0.5236, 80 0.5271, 90 0.5301, 100 0.5327; fitted τ(550) 44.3180 (bisected between the bracketing depths); the Bond albedo 0.5100 (0.39–0.63; passes); `p_V` 0.1788 (0.15–0.25; passes); B/V 0.6268 (0.6–0.7; passes); R/V 1.3638 (1.1–1.6; passes); p in B, V and R 0.0879, 0.1788 and 0.2792 at q 2.32, 1.82 and 1.59"
 

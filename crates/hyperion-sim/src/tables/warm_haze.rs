@@ -7,7 +7,7 @@
 //! manifest: crates/hyperion-fit/manifests/warm_haze.toml
 //! data: none
 //! sim-fingerprint: 98750543ba72595d0070857ca6724607b4dd4bd31071cc5669e5cd2e16ffef5b
-//! since-generator-version: 31
+//! since-generator-version: 32
 //! source: GJ 1214 b's Bond albedo, 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67), on the
 //!   sim's closed form of the planet and its host (Cloutier et al. 2021, AJ 162, 174, recalled)
 //!   under 32's rules, its bright haze Khare et al.'s (1984, Icarus 60, 127) tholin in two modes
