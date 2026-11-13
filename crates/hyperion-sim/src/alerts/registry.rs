@@ -1964,6 +1964,13 @@ mod tests {
                 scan_cell(&galaxy, &high_mass, key, &mut drawn);
                 hosts.extend(drawn.into_iter().filter(|h| h.kind().is_high_mass()));
                 for host in &hosts {
+                    // A Be/X host has giant outbursts only if its mark makes it active, one in a
+                    // hundred (P11.T8.b's fix, from 32): each is bounded as an active host.
+                    let host = &if host.kind() == XrbHostKind::BeX {
+                        host.with_bex_active(true)
+                    } else {
+                        *host
+                    };
                     let span = match host.kind() {
                         XrbHostKind::NeutronStarPersistent => day,
                         XrbHostKind::BeX => window(UniverseTime::EPOCH, 1_000),

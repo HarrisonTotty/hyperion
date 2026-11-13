@@ -5425,10 +5425,11 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 ///   most 10⁻³. Its class: a diagonal jump (residual above `JUMP_RESIDUAL`), a context jump, a
 ///   lossless frost or a fixed point, and whether it took the second round. Derived twice, the
 ///   same. A fixed point's residual is at most the bracket's 2⁻³² times its crossing's slope, under
-///   10⁻⁹ where that is gentle; from generator version 27 seven cross steeply, at 1.4 × 10⁻⁹ to
-///   7.1 × 10⁻⁷, under `JUMP_RESIDUAL`'s continuous slope of −4,000 (five gas envelopes, three
-///   giants and two sub-Neptunes, at a `T_eq` of 250.00–250.05 K under their own Bond albedos,
-///   P14.T24.h.b part 5, and two icy `Snowball`s): listed and counted, pinned as measured.
+///   10⁻⁹ where that is gentle; from generator version 32 eight cross steeply, at 1.0 × 10⁻⁹ to
+///   7.1 × 10⁻⁷, under `JUMP_RESIDUAL`'s continuous slope of −4,000 (six gas envelopes, three
+///   giants and three sub-Neptunes, at a `T_eq` of 250.00–250.16 K under their own Bond albedos,
+///   P14.T24.h.b part 5, and two icy `Snowball`s; seven from 27, the envelope column read whole at
+///   32 adding a sub-Neptune): listed and counted, pinned as measured.
 /// - **The limits** (over all bodies, item 5): at most 3% bracketed and 1% jumping, and planets
 ///   jumping at most 2%. Reported by kind with each kind's pass histogram.
 /// - **The lid** (P14.T54.a's C3; the first relay's sample test 11, item 17's constraint 1): every
@@ -6129,7 +6130,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         steep.len(),
         steep.join("\n  ")
     );
-    assert_eq!(steep.len(), 7, "{steep:#?}");
+    assert_eq!(steep.len(), 8, "{steep:#?}");
     // The ruling's measures, over all bodies (decision-p14-t54a-passes §1.8 and item 5): at most
     // 1% jumping, a diagonal or a context jump, at most 3% bracketed. Above either goes to main.
     // From 24 both are missed, a finding pinned as it stands (P14.T54.b.l, to main): 24 of 954

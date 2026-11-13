@@ -128,10 +128,11 @@ fn place(kind: XrbHostKind) -> usize {
 
 /// The plan's totals at Milky Way parameters: the class and the features' lists together hold its
 /// share row's 10⁴ hosts (the plan's 0.7–1.5 × 10⁴), the catalogue all but the features' share
-/// (P11.T8.f), of which the black-hole transients are 1,300 (the plan's 1,300 ± 400,
-/// Corral-Santana et al. 2016) and the high-mass side its sampler's share, 0.0010 under the refit
-/// at 27 (P15.T10.b), the scratch sampler's 0.16 before it; each side's components are its
-/// populations', and the rate's ranks split at the line where the fitted law puts it.
+/// (P11.T8.f), of the low-mass side's over 0.99, of which the black-hole transients are 1,300 (the
+/// plan's 1,300 ± 400, Corral-Santana et al. 2016), and the high-mass side its sampler's share, 0.3
+/// from 32 (P11.T8.b's fix), 0.0010 under the refit at 27 (P15.T10.b) and the scratch sampler's
+/// 0.16 before it; each side's components are its populations', and the rate's ranks split at the
+/// line where the fitted law puts it.
 #[test]
 fn the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals() {
     let galaxy = galaxy();
@@ -169,7 +170,12 @@ fn the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals() {
     );
     assert!((row_total / 1.0e4 - 1.0).abs() < 1e-9, "{row_total}");
     assert!((7.0e3..=1.5e4).contains(&row_total));
-    assert!(total < row_total && total > 0.99 * row_total, "{total}");
+    assert!(total < row_total, "{total}");
+    // The features' lists take their share of each side: of the low-mass side's hosts under a
+    // hundredth, of the high-mass side's, the young features', some 0.6 (P11.T8.f), so that from 32,
+    // with the side at 3,000 of the row's hosts, the catalogue holds some 0.82 of the class.
+    let low = process.expected_hosts_on(galaxy, XrbSide::LowMass);
+    assert!(low < low_row && low > 0.99 * low_row, "{low} of {low_row}");
     let by_kind = process.expected_hosts_by_kind(galaxy);
     let summed: f64 = by_kind.iter().sum();
     assert!((summed / total - 1.0).abs() < 1e-12);
@@ -201,10 +207,11 @@ fn the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals() {
         "high-mass hosts: the row's {high_row:.1}, the catalogue's {high:.1}, a share of {share:.5}, \
          against Fortin et al.'s 152 catalogued"
     );
-    // The high-mass side's share of the class's hosts under the refit at 27, its sampler's
-    // high-mass weights over all its weights (P15.T10.b), pinned as measured: 0.0010 at 27, 10.2
-    // hosts of the row's 10⁴, of which the catalogue holds 4.1 and the young features' lists the
-    // rest, against Fortin et al.'s (2023, A&A 671, A149; recalled) 152 catalogued, a finding.
+    // The high-mass side's share of the class's hosts, its sampler's high-mass weights over all its
+    // weights (P15.T10.b), pinned as measured: from 32 the 0.3 the fit pins (P11.T8.b's fix), 3,000
+    // hosts of the row's 10⁴, of which the catalogue holds 1,201 and the young features' lists the
+    // rest; at 27 it was 0.0010, 10.2 hosts, against Fortin et al.'s (2023, A&A 671, A149;
+    // recalled) 152 catalogued.
     let mut pins = hyperion_testkit::pins!(
         "galaxy/catalogue_classes/binary/xrb",
         "the_class_holds_its_share_row_s_hosts_and_the_plan_s_totals"
