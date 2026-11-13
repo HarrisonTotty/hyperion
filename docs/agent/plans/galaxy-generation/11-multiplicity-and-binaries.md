@@ -7835,5 +7835,5 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   `GalaxyRules::xrb_tables` and `every_32_hold` are gone; the class reads `XRB_SAMPLER`, which
   task `binary_xrb` (revision 1, the three keys; `binary_xrb_32` deleted) refits `--since 32`, and
   every Be/X host draws its active mark. The tests are `high_mass_side_tests`. Leans as recorded:
-  the outburst rate is counted before the young lists' age thinning; `binary_xrb.toml` stays at
-  generator version 31's rules, which 32's census shares (lean, 2026-11-13).
+  the outburst rate is counted before the young lists' age thinning. `binary_xrb`'s manifests and
+  fingerprint galaxy are at 32 (`XRB_FINGERPRINT_VERSION`; its census is 31's), `binary_awd`'s at 31.

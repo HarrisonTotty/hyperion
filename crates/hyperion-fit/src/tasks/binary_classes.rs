@@ -127,7 +127,8 @@ pub const OWN_SITES: [(Population, &str); 5] = [
 const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 
 /// The generator version the fingerprints' galaxy is built at: the refit's, the manifests'
-/// (a test holds the four manifests to it).
+/// (a test holds `binary_awd`'s two manifests to it; `binary_xrb`'s fit at
+/// [`xrb::XRB_FINGERPRINT_VERSION`]).
 const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 
 /// The fingerprints' galaxy: the Milky Way fixture of [`FINGERPRINT_SEED`] at
@@ -139,10 +140,22 @@ const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 /// If the Milky Way fixture does not build.
 #[must_use]
 fn fingerprint_galaxy() -> Galaxy {
+    fingerprint_galaxy_at(FINGERPRINT_VERSION)
+}
+
+/// [`fingerprint_galaxy`] at `version`'s rules in place of [`FINGERPRINT_VERSION`]'s: a task's
+/// whose manifest fits at a later version (`xrb::BinaryXrbTask`, at
+/// [`xrb::XRB_FINGERPRINT_VERSION`]).
+///
+/// # Panics
+///
+/// If the Milky Way fixture does not build.
+#[must_use]
+fn fingerprint_galaxy_at(version: GeneratorVersion) -> Galaxy {
     Galaxy::from_params_for_binary_refit(
         Seed::new(FINGERPRINT_SEED),
         GalaxyParams::milky_way_like(),
-        FINGERPRINT_VERSION,
+        version,
     )
     .expect("the Milky Way fixture builds")
 }
@@ -1235,31 +1248,36 @@ mod tests {
         refused("min_members = 50", "min_members = 5", "min_members");
     }
 
-    /// The four binary manifests fit at the fingerprints' version, so that `check`'s probes are
-    /// the census galaxy's.
+    /// The binary manifests fit at their fingerprints' version, so that `check`'s probes are the
+    /// census galaxy's: `binary_awd`'s two at [`FINGERPRINT_VERSION`], and `binary_xrb`'s two at
+    /// [`xrb::XRB_FINGERPRINT_VERSION`].
     #[test]
     fn the_manifests_fit_at_the_fingerprints_version() {
-        for (path, text) in [
+        for (path, text, version) in [
             (
                 "binary_awd.toml",
                 include_str!("../../manifests/binary_awd.toml"),
+                FINGERPRINT_VERSION,
             ),
             (
                 "binary_awd.smoke.toml",
                 include_str!("../../manifests/binary_awd.smoke.toml"),
+                FINGERPRINT_VERSION,
             ),
             (
                 "binary_xrb.toml",
                 include_str!("../../manifests/binary_xrb.toml"),
+                xrb::XRB_FINGERPRINT_VERSION,
             ),
             (
                 "binary_xrb.smoke.toml",
                 include_str!("../../manifests/binary_xrb.smoke.toml"),
+                xrb::XRB_FINGERPRINT_VERSION,
             ),
         ] {
             let manifest = Manifest::from_bytes(path.as_ref(), text.as_bytes().to_vec()).unwrap();
             let params = CensusParams::of(&manifest).unwrap();
-            assert_eq!(params.version, FINGERPRINT_VERSION, "{path}");
+            assert_eq!(params.version, version, "{path}");
         }
     }
 
