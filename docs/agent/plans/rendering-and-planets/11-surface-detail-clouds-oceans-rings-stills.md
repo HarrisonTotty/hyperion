@@ -991,6 +991,35 @@ ripples and scars read as ground, and turn off with the setting.
 
 ### R11.T3 Authoritative rocks in `hyperion-surface`
 
+_The names T3 calls, re-validated against the code (2026-11-02): `QueryHeightError`,
+`Synthesiser`, `SynthCache` and `BakeHook` are as written; where the rest differ, these hold:_
+
+- `ground::ground_at(synth, cache, p: &[f64; 3]) -> Result<GroundPoint, QueryHeightError>`, the
+  height in `GroundPoint::height` and the point's foot in `dir`.
+- `material::material_at(synth, cache, at: FaceUv) -> Result<GroundMaterial, QueryHeightError>`:
+  `RockSite`'s material is a `GroundMaterial` (class and `Option<u8>` entry), not a `Material`.
+- `ObjectKey::surface_cell(face, level, i, j, instance: u16)`: `RockCellKey::object_key` takes a
+  `u16`.
+- `hyperion_surface::tags` (`domain_tags!` with its key-form table): `surface.scatter` is reserved,
+  not declared; T3.b declares it and `surface.scatter.shape`, both keyed by `surface_cell`.
+- `FieldHeader::surface_age() -> Gigayears` and `surface_pressure() -> Pascals`: the pressure is 0
+  airless and below 100 Pa tenuous (decision-r11-palette-liquids §2, item 5), so `AtmosphereClass`
+  is `Airless`, `Tenuous` or `Atmosphere`.
+- The sim's `AIRLESS_PRESSURE` (`planetary::derive::atmosphere`) is repeated as
+  `scatter::AIRLESS_PRESSURE`, as `material::THIN_ATMOSPHERE_PRESSURE` repeats its own.
+- `material::MaterialClass` (fifteen forms) and `field::MaterialPalette::get(entry)`'s
+  `PaletteEntry::mechanics`, which k_base reads for the entry.
+- The coarse craters: `FieldView::craters_reaching(coarse_cell)`, each a `CoarseCrater` with
+  `centre`, `diameter` and `age`.
+- `ROCK_OCTAVE_LEVELS` is the body's: `rock_octave_levels(figure)`, as R09's crater octaves'
+  levels are.
+- The goldens over the synthetic worlds live in the library (`scatter/golden.rs`, as
+  `ground/golden.rs`), since `ci`'s wasip1 run does not enable `testing` for `tests/`; the slow
+  test is a library `#[ignore = "slow: …"]` test.
+- No `GENERATOR_VERSION` bump: every rock is held at `ROCKS_VERSION` = 27 (rule B), and tests reach
+  the 27 rules through `scatter::with_rock_rules`.
+- The sketches' `BodyFixed` and `Gyr` are `[f64; 3]` and `Gigayears`.
+
 - **R11.T3.a The law and the site.** `RockAbundance`, `exponential_integral_e1`, `RockSite`,
   `rock_site` (from R09's `FieldHeader.surface_age` and `surface_pressure`), `AtmosphereClass`,
   `atmosphere_class`, `rock_abundance`, `AUTHORITATIVE_ROCK_HEIGHT`, `AUTHORITATIVE_ROCK_DIAMETER`
@@ -1008,6 +1037,7 @@ ripples and scars read as ground, and turn off with the setting.
   falls faster on an `Airless` body than on one with an `Atmosphere`, classed from
   `FieldHeader.surface_pressure` against `AIRLESS_PRESSURE`; k is zero on `Seabed`, `SeaIce` and
   `Sand`; `AUTHORITATIVE_ROCK_DIAMETER` equals the height over the ratio's upper bound.
+  _Built 2026-11-02._
 - **R11.T3.b Placement.** `RockCellKey`, `ROCK_OCTAVES`, `rocks_in_cell`, `Rock` and its shapes, and
   the tags `surface.scatter` and `surface.scatter.shape` (Design note 5). Tests: the same seed gives
   the same rocks twice; the counts over 10⁵ cells at three k match the law's expectation per octave
