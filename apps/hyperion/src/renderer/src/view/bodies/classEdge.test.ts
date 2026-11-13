@@ -14,9 +14,12 @@ import {
   EDGE_OCTAVE_GAIN,
   EDGE_OCTAVES,
   EDGE_SHARPNESS_MAX,
+  EDGE_SMOOTH_FULL_PX,
+  EDGE_SMOOTH_NONE_PX,
   EDGE_WIDTH_PX,
   edgeGate,
   edgeHash,
+  edgeHeld,
   edgeKey,
   edgeNoise,
   edgePlan,
@@ -24,6 +27,7 @@ import {
   edgeShapedShares,
   edgeSharpness,
   type EdgeSite,
+  edgeSmoothing,
   gradientNoise,
 } from "./classEdge";
 
@@ -64,6 +68,8 @@ describe("the edge noise (lane fix-jagged-biome-edges)", () => {
       wgslConstant(classEdgeWgsl, "EDGE_SHARPNESS_MAX"),
       wgslConstant(classEdgeWgsl, "EDGE_NOISE_SLOPE_RMS"),
       wgslConstant(classEdgeWgsl, "EDGE_GRAZING_MU"),
+      wgslConstant(classEdgeWgsl, "EDGE_SMOOTH_FULL_PX"),
+      wgslConstant(classEdgeWgsl, "EDGE_SMOOTH_NONE_PX"),
     ]).toEqual([
       EDGE_BASE_WAVELENGTH_RAD,
       EDGE_OCTAVES,
@@ -75,6 +81,8 @@ describe("the edge noise (lane fix-jagged-biome-edges)", () => {
       EDGE_SHARPNESS_MAX,
       EDGE_NOISE_SLOPE_RMS,
       EDGE_GRAZING_MU,
+      EDGE_SMOOTH_FULL_PX,
+      EDGE_SMOOTH_NONE_PX,
     ]);
     const sigma =
       EDGE_NOISE_RMS *
@@ -186,18 +194,62 @@ describe("the edges' gate and sharpness (lane fix-jagged-biome-edges)", () => {
   });
 
   it("is no sharper than the bilinear blend where a lattice spacing is a pixel", () => {
-    expect(edgeSharpness(1, edgePlan(1e-3))).toBe(1);
+    expect(edgeSharpness(1, edgePlan(1e-3), 0)).toBe(1);
   });
 
   it("is held to its most where a lattice spacing is a thousand pixels", () => {
-    expect(edgeSharpness(1000, edgePlan(1))).toBe(EDGE_SHARPNESS_MAX);
+    expect(edgeSharpness(1000, edgePlan(1), 0)).toBe(EDGE_SHARPNESS_MAX);
   });
 
   it("draws an edge EDGE_WIDTH_PX wide across a lattice of 10 px and no noise", () => {
-    expect(edgeSharpness(10, edgePlan(1))).toBeCloseTo(
+    expect(edgeSharpness(10, edgePlan(1), 0)).toBeCloseTo(
       (2 * Math.log(9)) / (EDGE_WIDTH_PX * 0.4),
       9,
     );
+  });
+
+  it("is no softer than the bilinear blend where the box-smoothed fractions are drawn", () => {
+    // The box-smoothed share rises at half the bilinear's slope at its midpoint: q 2 restores it.
+    expect(edgeSharpness(1, edgePlan(1e-3), 1)).toBe(2);
+  });
+
+  it("draws a box-smoothed edge EDGE_WIDTH_PX wide across a lattice of 4 px and no noise", () => {
+    // Half smoothed, the midpoint's slope is 4 × ¾ ÷ 4 px.
+    expect(edgeSharpness(4, edgePlan(1), 0.5)).toBeCloseTo(
+      (2 * Math.log(9)) / (EDGE_WIDTH_PX * 0.75),
+      9,
+    );
+  });
+});
+
+describe("the edges' box smoothing (lane fix-jagged-biome-edges)", () => {
+  it("is whole where a lattice spacing spans EDGE_SMOOTH_FULL_PX or fewer", () => {
+    expect([edgeSmoothing(1), edgeSmoothing(EDGE_SMOOTH_FULL_PX)]).toEqual([1, 1]);
+  });
+
+  it("is none where a lattice spacing spans EDGE_SMOOTH_NONE_PX or more", () => {
+    expect([edgeSmoothing(EDGE_SMOOTH_NONE_PX), edgeSmoothing(100)]).toEqual([0, 0]);
+  });
+
+  it("fades between", () => {
+    expect(edgeSmoothing((EDGE_SMOOTH_FULL_PX + EDGE_SMOOTH_NONE_PX) / 2)).toBeCloseTo(0.5, 12);
+  });
+
+  it("gives a class of no fraction none", () => {
+    expect(edgeHeld(0, 0.4)).toBe(0);
+  });
+
+  it("keeps a class of all of it whole", () => {
+    expect(edgeHeld(1, 0.6)).toBe(1);
+  });
+
+  it("takes the smoothed fraction where the lattice's own blend is even", () => {
+    expect(edgeHeld(0.5, 0.2)).toBe(0.2);
+  });
+
+  it("keeps a lattice point's class within a quarter spacing of it", () => {
+    // Bilinearly, ¾ of a class is a quarter spacing from its lattice point toward the next.
+    expect(edgeHeld(0.75, 0)).toBe(0.5);
   });
 });
 
@@ -260,6 +312,79 @@ describe("the shaped shares (lane fix-jagged-biome-edges)", () => {
       const atA = edgeShapedShares([0, 0.999, 0.001, 0], KEYS, boundarySite(d, 200));
       expect(atA[1]).toBeGreaterThan(0.5);
     }
+  });
+
+  /**
+   * A site of no noise (no octave spans a pixel) on a lattice of `latticePx` pixels, across pure
+   * points, its points around it each of class 2 four times class 1's.
+   */
+  const smoothingSite = (
+    latticePx: number,
+    around?: ReadonlyArray<ReadonlyArray<number>>,
+  ): EdgeSite => ({
+    direction: unit(0.4, 0.1, 0.9),
+    footprintRad: EDGE_BASE_WAVELENGTH_RAD,
+    latticeRad: latticePx * EDGE_BASE_WAVELENGTH_RAD,
+    meanPurity: 1,
+    ...(around === undefined ? {} : { around }),
+  });
+  const AROUND = [0, 1, 2, 3].map(() => [0, 0.2, 0.8, 0]);
+
+  it("draws a boundary from its points around it where a lattice spacing spans two pixels", () => {
+    // Its own blend leans to class 1, its points around it to class 2.
+    const own = edgeShapedShares([0, 0.6, 0.4, 0], KEYS, smoothingSite(2))[1] ?? 0;
+    const smoothed = edgeShapedShares([0, 0.6, 0.4, 0], KEYS, smoothingSite(2, AROUND))[1] ?? 0;
+    expect([own > 0.5, smoothed < 0.5]).toEqual([true, true]);
+  });
+
+  it("keeps the keyed classes' sum where it smooths them", () => {
+    const [, a = 0, b = 0, c = 0] = edgeShapedShares(
+      [0.1, 0.5, 0.3, 0.1],
+      KEYS,
+      smoothingSite(2, AROUND),
+    );
+    expect([a + b, c]).toEqual([expect.closeTo(0.8, 12), 0.1]);
+  });
+
+  it("draws a boundary from its own blend alone where a lattice spacing spans six pixels", () => {
+    const shares = [0, 0.6, 0.4, 0];
+    expect(edgeShapedShares(shares, KEYS, smoothingSite(6, AROUND))).toEqual(
+      edgeShapedShares(shares, KEYS, smoothingSite(6)),
+    );
+  });
+
+  it("changes continuously as a point around it leaves the keyed classes", () => {
+    const shares = [0, 0.6, 0.4, 0];
+    const fading = (e: number): number =>
+      edgeShapedShares(
+        shares,
+        KEYS,
+        smoothingSite(2, [[1 - e, 0.2 * e, 0.8 * e, 0], ...AROUND.slice(1)]),
+      )[1] ?? 0;
+    expect(Math.abs(fading(1e-9) - fading(0))).toBeLessThan(1e-6);
+  });
+
+  it("fades the smoothing as its points' keyed share falls below its own", () => {
+    const shares = [0, 0.6, 0.4, 0];
+    const at = (keyed: number): number =>
+      edgeShapedShares(
+        shares,
+        KEYS,
+        smoothingSite(
+          2,
+          AROUND.map(() => [1 - keyed, 0.2 * keyed, 0.8 * keyed, 0]),
+        ),
+      )[1] ?? 0;
+    // Its own blend's class 1 wins unsmoothed, the points' class 2 smoothed whole.
+    expect([at(0.25) > at(1), at(1) < 0.5]).toEqual([true, true]);
+  });
+
+  it("passes over a point around it of no keyed class", () => {
+    const shares = [0, 0.6, 0.4, 0];
+    const some = AROUND.slice(1);
+    expect(edgeShapedShares(shares, KEYS, smoothingSite(2, [[1, 0, 0, 0], ...some]))).toEqual(
+      edgeShapedShares(shares, KEYS, smoothingSite(2, some)),
+    );
   });
 
   it("is the bilinear blend itself where the pixel spans the lattice", () => {

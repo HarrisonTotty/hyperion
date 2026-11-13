@@ -28,7 +28,22 @@
  *   gains finer detail as the camera closes in.
  * - **The width.** The sharpness q ({@link edgeSharpness}) makes the line about
  *   {@link EDGE_WIDTH_PX} pixels wide, from the lattice's spacing on screen and the noise's own
- *   slope, never below 1 (the bilinear blend itself) and so never wider than one lattice spacing.
+ *   slope, never below the bilinear blend's own and so never wider than one lattice spacing.
+ * - **A lattice of few pixels.** Where a spacing spans {@link EDGE_SMOOTH_FULL_PX} pixels or
+ *   fewer, the staircase's steps are jaggies that no octave of the noise can break (none finer
+ *   than {@link EDGE_FADE_FROM_PX} pixels is drawn). There the classes' fractions are box-smoothed
+ *   first: replaced, by the smoothing's weight, by their mean over the reconstructions at the four
+ *   points half a spacing off along the lattice's diagonals, which rounds the staircase's corners
+ *   into the line it steps along, that mean held to its band about the point's own fraction
+ *   ({@link edgeHeld}), so that a lattice point keeps its class within a quarter spacing of it (a
+ *   one-cell island stays a dot) and the smoothing never reaches past the lattice's own blend.
+ *   Each point weighs in by its keyed classes' share, and the smoothing fades as that share does,
+ *   so the shares stay continuous where a point leaves the keyed classes. Two steps remain: the
+ *   survey's mask, a point in a texel of no weight left out, as it is for the point itself; and a
+ *   cube face's edge, where the points about a pixel move from its face's gutter to the next
+ *   face's own texels, a second-order shift. It fades out to {@link EDGE_SMOOTH_NONE_PX}, where
+ *   the noise's octaves of a cell and finer take over: the disc is drawn so at the terrain's
+ *   hand-over, whose lattice is never smoothed.
  *
  * The shader twin is `shaders/classEdge.wgsl`, operation for operation in `f32`; this module is its
  * twin in `f64`. Nothing here is generated: the weights are the module's, and the shaders only mix
@@ -51,6 +66,12 @@ export const EDGE_OCTAVES = 11;
  * warp takes it (`material::edges`' `WARP_GAIN`).
  */
 export const EDGE_OCTAVE_GAIN = 0.5946035575013605;
+
+/** A lattice spacing's pixels at and below which a boundary is drawn box-smoothed whole. */
+export const EDGE_SMOOTH_FULL_PX = 3;
+
+/** A lattice spacing's pixels from which a boundary is drawn from the lattice's own blend alone. */
+export const EDGE_SMOOTH_NONE_PX = 6;
 
 /** The pixels below which an octave's wavelength is not drawn. */
 export const EDGE_FADE_FROM_PX = 2;
@@ -220,14 +241,37 @@ export function edgeNoise(d: Direction, key: number, plan: EdgePlan): number {
 }
 
 /**
- * The sharpness q of an edge whose lattice spacing spans `latticePx` pixels under `plan`: the logit
- * rises {@link RISE_LOGIT} over {@link EDGE_WIDTH_PX}, from the bilinear share's own slope 4 ÷ Δ and
- * the two classes' noises' (√2 B their sum's slope), held to 1 to {@link EDGE_SHARPNESS_MAX}.
+ * The sharpness q of an edge whose lattice spacing spans `latticePx` pixels under `plan`, its
+ * fractions box-smoothed by `smoothing` (0 to 1, {@link edgeSmoothing}): the logit rises
+ * {@link RISE_LOGIT} over {@link EDGE_WIDTH_PX}, from the share's own slope at its midpoint, 4 ÷ Δ
+ * bilinear and half that box-smoothed, so (4 − 2 w) ÷ Δ, and the two classes' noises' (√2 B their
+ * sum's slope), held to 1 ÷ (1 − w ÷ 2), the bilinear blend's own slope, to
+ * {@link EDGE_SHARPNESS_MAX}.
  */
-export function edgeSharpness(latticePx: number, plan: EdgePlan): number {
-  const slope = MIDPOINT_SLOPE / latticePx + Math.SQRT2 * EDGE_NOISE_WEIGHT * plan.slopePerPx;
+export function edgeSharpness(latticePx: number, plan: EdgePlan, smoothing: number): number {
+  const flattened = 1 - 0.5 * smoothing;
+  const slope =
+    (MIDPOINT_SLOPE * flattened) / latticePx + Math.SQRT2 * EDGE_NOISE_WEIGHT * plan.slopePerPx;
   const q = RISE_LOGIT / (EDGE_WIDTH_PX * slope);
-  return Math.min(Math.max(q, 1), EDGE_SHARPNESS_MAX);
+  return Math.min(Math.max(q, 1 / flattened), EDGE_SHARPNESS_MAX);
+}
+
+/**
+ * The weight, 0 to 1, of the box-smoothed reconstruction where a lattice spacing spans `latticePx`
+ * pixels: 1 to {@link EDGE_SMOOTH_FULL_PX}, falling by smoothstep to 0 at
+ * {@link EDGE_SMOOTH_NONE_PX}.
+ */
+export function edgeSmoothing(latticePx: number): number {
+  return 1 - smoothstep(EDGE_SMOOTH_FULL_PX, EDGE_SMOOTH_NONE_PX, latticePx);
+}
+
+/**
+ * A keyed class's box-smoothed fraction `mean` held to its band about its own fraction `own`,
+ * 2 own − 1 to 2 own: so that a class of no fraction gains none, a class of all of it keeps it,
+ * and a boundary moves only where the lattice's own blend is between a quarter and three quarters.
+ */
+export function edgeHeld(own: number, mean: number): number {
+  return Math.min(Math.max(mean, 2 * own - 1), 2 * own);
 }
 
 /**
@@ -272,14 +316,21 @@ export interface EdgeSite {
    * `terrainEdgeShapedShares`); absent, the shares' own ({@link classPurity}).
    */
   readonly mixPurity?: number;
+  /**
+   * The laws' shares at the four points half a lattice spacing off along its diagonals, by which
+   * the classes' fractions are box-smoothed (the module's remarks), in `surface_at`'s order, each
+   * weighted by its keyed classes' share. Absent, or empty, the fractions are not smoothed.
+   */
+  readonly around?: ReadonlyArray<ReadonlyArray<number>>;
 }
 
 /**
  * The laws' shares `shares` (law 0, then a class a law) with their classes' edges shaped (the
- * module's remarks): each class of a key of its own (`keys[m − 1]`, 0 for none) and a
- * share above 0 sharpened about the others by its noise, their sum kept; law 0 and a class of no
- * key keep their shares. Unchanged where fewer than two keyed classes hold a share, or where the
- * gate is 0.
+ * module's remarks): each class of a key of its own (`keys[m − 1]`, 0 for none) and a share above
+ * 0 takes its fraction of their sum, box-smoothed by `site`'s points around it where the lattice
+ * spans few pixels ({@link edgeSmoothing}, {@link edgeHeld}), then sharpened about the others by
+ * its noise, their sum kept; law 0 and a class of no key keep their shares. Unchanged where fewer
+ * than two keyed classes hold a share, or where the gate is 0.
  */
 export function edgeShapedShares(
   shares: ReadonlyArray<number>,
@@ -287,10 +338,11 @@ export function edgeShapedShares(
   site: EdgeSite,
 ): number[] {
   const out = [...shares];
+  const keyedClass = (m: number): boolean => (keys[m - 1] ?? 0) !== 0;
   let keyed = 0;
   let kept = 0;
   for (let m = 1; m < shares.length; m += 1) {
-    if ((keys[m - 1] ?? 0) !== 0 && (shares[m] ?? 0) > 0) {
+    if (keyedClass(m) && (shares[m] ?? 0) > 0) {
       keyed += 1;
       kept += shares[m] ?? 0;
     }
@@ -302,18 +354,18 @@ export function edgeShapedShares(
   if (!(gate > 0)) {
     return out;
   }
+  const latticePx = site.latticeRad / site.footprintRad;
+  const fractions = boxSmoothed(shares, keyedClass, kept, gate * edgeSmoothing(latticePx), site);
   const plan = edgePlan(site.footprintRad);
-  const q = edgeSharpness(site.latticeRad / site.footprintRad, plan);
+  const q = edgeSharpness(latticePx, plan, fractions.smoothing);
   const logits = new Map<number, number>();
   let largest = -Infinity;
-  for (let m = 1; m < shares.length; m += 1) {
-    const key = keys[m - 1] ?? 0;
-    const s = shares[m] ?? 0;
-    if (key === 0 || !(s > 0)) {
+  for (const [m, f] of fractions.byClass) {
+    if (!(f > 0)) {
       continue;
     }
-    const noise = edgeNoise(site.direction, key, plan);
-    const z = (1 + gate * (q - 1)) * Math.log(s / kept) + gate * q * EDGE_NOISE_WEIGHT * noise;
+    const noise = edgeNoise(site.direction, keys[m - 1] ?? 0, plan);
+    const z = (1 + gate * (q - 1)) * Math.log(f) + gate * q * EDGE_NOISE_WEIGHT * noise;
     logits.set(m, z);
     largest = Math.max(largest, z);
   }
@@ -321,10 +373,69 @@ export function edgeShapedShares(
   for (const z of logits.values()) {
     sum += Math.exp(z - largest);
   }
-  for (const [m, z] of logits) {
-    out[m] = (kept * Math.exp(z - largest)) / sum;
+  for (const [m] of fractions.byClass) {
+    const z = logits.get(m);
+    out[m] = z === undefined ? 0 : (kept * Math.exp(z - largest)) / sum;
   }
   return out;
+}
+
+/** The keyed classes' fractions of their sum, smoothed, and the smoothing's weight drawn. */
+interface SmoothedFractions {
+  /** Each keyed class's fraction by its law's index. */
+  readonly byClass: ReadonlyMap<number, number>;
+  /** The weight the box-smoothed fractions were mixed in by, 0 where none were. */
+  readonly smoothing: number;
+}
+
+/**
+ * The keyed classes' fractions of their sum `kept` at a point of shares `shares`, mixed by
+ * `smoothing` toward the mean fraction over `site`'s points around it, each point weighted by its
+ * keyed classes' share, each class's mean held to its band ({@link edgeHeld}) and renormalised;
+ * the smoothing faded by the points' keyed share against four times the point's, so that it fades
+ * as theirs does. As `edge_shape_disc` does.
+ */
+function boxSmoothed(
+  shares: ReadonlyArray<number>,
+  keyedClass: (m: number) => boolean,
+  kept: number,
+  smoothing: number,
+  site: EdgeSite,
+): SmoothedFractions {
+  const own = new Map<number, number>();
+  for (let m = 1; m < shares.length; m += 1) {
+    if (keyedClass(m)) {
+      own.set(m, (shares[m] ?? 0) / kept);
+    }
+  }
+  const sums = new Map<number, number>();
+  let keyed = 0;
+  for (const around of site.around ?? []) {
+    for (const m of own.keys()) {
+      const share = around[m] ?? 0;
+      sums.set(m, (sums.get(m) ?? 0) + share);
+      keyed += share;
+    }
+  }
+  if (!(smoothing > 0 && keyed > 0)) {
+    return { byClass: own, smoothing: 0 };
+  }
+  const held = new Map<number, number>();
+  let total = 0;
+  for (const [m, f] of own) {
+    const h = edgeHeld(f, (sums.get(m) ?? 0) / keyed);
+    held.set(m, h);
+    total += h;
+  }
+  if (!(total > 0)) {
+    return { byClass: own, smoothing: 0 };
+  }
+  const blend = smoothing * Math.min(1, keyed / (4 * kept));
+  const byClass = new Map<number, number>();
+  for (const [m, f] of own) {
+    byClass.set(m, f + blend * ((held.get(m) ?? 0) / total - f));
+  }
+  return { byClass, smoothing: blend };
 }
 
 /** The 24 bits a key keeps, so that an `f32` holds it exactly. */

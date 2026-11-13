@@ -301,13 +301,16 @@ struct SurfaceAt {
 
 // A class map's layout, as `surface_at` reads it (`discSurface.ts`): its classes and their layers'
 // groups, whether it carries its texels' maturity, the first of its fine page's index layers, and
-// whether it carries a fine page (lane fix-coast-class-map; `ClassMapFine`).
+// whether it carries a fine page (lane fix-coast-class-map; `ClassMapFine`); and whether the
+// reconstruction reads its terms' codes, under a maturity at the point itself alone and not at the
+// points about it that box-smooth its edges (lane fix-jagged-biome-edges).
 struct ClassMapLayout {
   count : u32,
   groups : u32,
   maturity : bool,
   index_layer : u32,
   fine : bool,
+  codes : bool,
 }
 
 // A refined texel's tile in the fine page: its first texel, its page's first layer and its cells
@@ -387,7 +390,7 @@ fn add_term(
     (*sums).purity = (*sums).purity + b * squares / (classes * classes);
     (*sums).purity_norm = (*sums).purity_norm + b;
   }
-  if (map_layout.maturity) {
+  if (map_layout.codes) {
     (*sums).b[(*sums).terms] = b;
     (*sums).segment[(*sums).terms] = maturity_segment(class_map_maturity(texel, code_layer));
   }
@@ -480,11 +483,65 @@ fn edge_key_of(k : u32) -> u32 {
   return u32(disc_row(FIRST_EDGE_KEY_ROW + k / 4u)[k % 4u]);
 }
 
+// What a point's classes' edges are shaped by (lane fix-jagged-biome-edges): the gate, the weight
+// of the box-smoothed reconstruction under it, and each keyed class's share summed over the
+// points half a lattice spacing off (`surface_at`), with the keyed classes' shares' sum there.
+struct EdgeSmoothing {
+  gate : f32,
+  smoothing : f32,
+  shares : array<f32, SURFACE_LAWS>,
+  keyed : f32,
+}
+
+// The classes of an edge key that hold a share of `surface`.
+fn edge_keyed(surface : SurfaceAt, count : u32) -> u32 {
+  var keyed = 0u;
+  for (var m = 1u; m <= count; m = m + 1u) {
+    if (surface.shares[m] > 0.0 && edge_key_of(m - 1u) != 0u) {
+      keyed = keyed + 1u;
+    }
+  }
+  return keyed;
+}
+
+// The gate of the shares `surface` against the lattice points' mean purity `mean_purity`
+// (`edgeGate`): the classes' mix's purity against theirs.
+fn edge_gate_disc(surface : SurfaceAt, count : u32, mean_purity : f32) -> f32 {
+  var classes = 0.0;
+  var squares = 0.0;
+  for (var m = 1u; m <= count; m = m + 1u) {
+    let s = surface.shares[m];
+    classes = classes + s;
+    squares = squares + s * s;
+  }
+  if (!(classes > 0.0)) {
+    return 0.0;
+  }
+  return edge_gate(mean_purity, squares / (classes * classes));
+}
+
+// Adds one offset point's reconstruction `one` to `edge`: its keyed classes' shares, so that a
+// point's weight in their mean is its keyed classes' share and fades with it; none where the
+// texel or cell holding it holds no weight.
+fn edge_smoothed(edge : ptr<function, EdgeSmoothing>, one : Reconstruction, count : u32) {
+  if (one.none) {
+    return;
+  }
+  for (var m = 1u; m <= count; m = m + 1u) {
+    if (edge_key_of(m - 1u) != 0u) {
+      let share = one.sums.sum[m] / one.sums.norm;
+      (*edge).shares[m] = (*edge).shares[m] + share;
+      (*edge).keyed = (*edge).keyed + share;
+    }
+  }
+}
+
 // The classes' edges of `surface`'s shares shaped (lane fix-jagged-biome-edges; `classEdge.ts`'
 // `edgeShapedShares`, its twin): where two or more classes of an edge key hold a share at the
-// unit body-fixed direction `p`, each one's share of their sum sharpened about the others' by its
-// own noise, under the gate of the lattice points' mean purity `mean_purity` against the purity of
-// the classes' mix here, at the footprint `footprint_rad` against the lattice's spacing
+// unit body-fixed direction `p`, each one's fraction of their sum, mixed by `edge`'s smoothing
+// toward the offset points' mean fraction held to its band (`edge_held`), the smoothing faded as
+// their keyed share falls below the point's, then sharpened about the others' by its own noise
+// under `edge`'s gate, at the footprint `footprint_rad` against the lattice's spacing
 // `lattice_rad`, both on the unit sphere; law 0 and a class of no key keep their shares, and the
 // keyed classes' sum is kept.
 fn edge_shape_disc(
@@ -493,53 +550,148 @@ fn edge_shape_disc(
   p : vec3f,
   footprint_rad : f32,
   lattice_rad : f32,
-  mean_purity : f32,
+  edge : EdgeSmoothing,
 ) {
   var keyed = 0u;
   var kept = 0.0;
-  var classes = 0.0;
-  var squares = 0.0;
   for (var m = 1u; m <= count; m = m + 1u) {
     let s = (*surface).shares[m];
-    classes = classes + s;
-    squares = squares + s * s;
     if (s > 0.0 && edge_key_of(m - 1u) != 0u) {
       keyed = keyed + 1u;
       kept = kept + s;
     }
   }
-  if (keyed < 2u || !(classes > 0.0)) {
+  if (keyed < 2u) {
     return;
   }
-  let gate = edge_gate(mean_purity, squares / (classes * classes));
-  if (!(gate > 0.0)) {
-    return;
+  // Each keyed class's fraction, its own and, smoothed, the offset points' mean held to its band,
+  // renormalised.
+  var fractions : array<f32, SURFACE_LAWS>;
+  var held = 0.0;
+  if (edge.smoothing > 0.0 && edge.keyed > 0.0) {
+    for (var m = 1u; m <= count; m = m + 1u) {
+      if (edge_key_of(m - 1u) != 0u) {
+        fractions[m] = edge_held((*surface).shares[m] / kept, edge.shares[m] / edge.keyed);
+        held = held + fractions[m];
+      }
+    }
   }
+  let reach = min(1.0, edge.keyed / (4.0 * kept));
+  let blend = select(0.0, edge.smoothing * reach, held > 0.0);
   let plan = edge_plan(footprint_rad);
-  let q = edge_sharpness(lattice_rad / footprint_rad, plan);
+  let q = edge_sharpness(lattice_rad / footprint_rad, plan, blend);
   var logits : array<f32, SURFACE_LAWS>;
   var largest = -3.4e38;
   for (var m = 1u; m <= count; m = m + 1u) {
-    let s = (*surface).shares[m];
     let key = edge_key_of(m - 1u);
-    if (!(s > 0.0) || key == 0u) {
+    if (key == 0u) {
       continue;
     }
-    logits[m] = edge_logit(s / kept, gate, q, edge_noise(p, key, plan));
+    let own = (*surface).shares[m] / kept;
+    if (blend > 0.0) {
+      fractions[m] = mix(own, fractions[m] / held, blend);
+    } else {
+      fractions[m] = own;
+    }
+    if (!(fractions[m] > 0.0)) {
+      continue;
+    }
+    logits[m] = edge_logit(fractions[m], edge.gate, q, edge_noise(p, key, plan));
     largest = max(largest, logits[m]);
   }
   var sum = 0.0;
   for (var m = 1u; m <= count; m = m + 1u) {
-    if ((*surface).shares[m] > 0.0 && edge_key_of(m - 1u) != 0u) {
+    if (fractions[m] > 0.0 && edge_key_of(m - 1u) != 0u) {
       logits[m] = exp(logits[m] - largest);
       sum = sum + logits[m];
     }
   }
   for (var m = 1u; m <= count; m = m + 1u) {
-    if ((*surface).shares[m] > 0.0 && edge_key_of(m - 1u) != 0u) {
-      (*surface).shares[m] = kept * logits[m] / sum;
+    if (edge_key_of(m - 1u) != 0u) {
+      (*surface).shares[m] = select(0.0, kept * logits[m] / sum, fractions[m] > 0.0);
     }
   }
+}
+
+// The survey-masked reconstruction at a point (`surface_at`'s rule): its sums, the spacing of the
+// lattice it read, cell coordinates (the map's texels, or a refined texel's cells), and whether
+// the texel or cell holding the point holds no weight, law 0 alone.
+struct Reconstruction {
+  sums : SurfaceSums,
+  lattice_st : f32,
+  none : bool,
+}
+
+// The survey-masked reconstruction at (n s, n t) = `st_n` of face `face`, N = `n` (`surface_at`'s
+// rule; `classMapReconstructionAt`).
+fn reconstruct(face : u32, st_n : vec2f, n : u32, map_layout : ClassMapLayout) -> Reconstruction {
+  var out : Reconstruction;
+  out.none = true;
+  let count = map_layout.count;
+  let last = f32(n - 1u);
+  let holding = vec2i(clamp(floor(st_n), vec2f(0.0), vec2f(last)));
+  out.lattice_st = 1.0 / f32(n);
+  let own = fine_tile(vec2u(holding + vec2i(1)), face, map_layout);
+  if (own.found && own.corners) {
+    // In a refined texel of a fine page at its cells' corners: the corners of its cell holding the
+    // point, as the terrain's patch of level L − 6 draws its quad there, a corner not surveyed as
+    // the patch's vertex of no weight.
+    // A point off the face, as a point about another reads, held to the texel's span.
+    let r = f32(own.side);
+    out.lattice_st = out.lattice_st / r;
+    let local = clamp(st_n * r - r * vec2f(holding), vec2f(0.0), vec2f(r));
+    let held = vec2u(clamp(floor(local), vec2f(0.0), vec2f(r - 1.0)));
+    if (!fine_cell_surveyed(own, held)) {
+      return out;
+    }
+    add_cell_corners(&out.sums, own, held, local - vec2f(held), 1.0, map_layout, true);
+  } else if (own.found) {
+    // In a refined texel: its tile's cells, on the grid of N r a face.
+    let r = f32(own.side);
+    out.lattice_st = out.lattice_st / r;
+    let local = st_n * r - r * vec2f(holding);
+    let held = vec2u(clamp(floor(local), vec2f(0.0), vec2f(r - 1.0)));
+    if (!texel_shares(own.origin + held + vec2u(1u), own.layer, 1u, count).surveyed) {
+      return out;
+    }
+    let first = vec2i(clamp(floor(local - 0.5), vec2f(-1.0), vec2f(r - 1.0)));
+    let f = local - 0.5 - vec2f(first);
+    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+      let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+      let stored = vec2u(vec2i(own.origin) + first + step + vec2i(1));
+      let one = texel_shares(stored, own.layer, 1u, count);
+      if (!one.surveyed) {
+        continue;
+      }
+      let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+      add_term(&out.sums, one, b, map_layout, stored, own.layer + map_layout.groups);
+    }
+  } else {
+    let corner_at = st_n - 0.5;
+    let first = vec2i(clamp(floor(corner_at), vec2f(-1.0), vec2f(last)));
+    let f = corner_at - vec2f(first);
+    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+      let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+      let texel = first + step;
+      let stored = vec2u(texel + vec2i(1));
+      let one = texel_shares(stored, face, 6u, count);
+      if (all(texel == holding) && !one.surveyed) {
+        return out;
+      }
+      if (!one.surveyed) {
+        continue;
+      }
+      let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+      let tile = fine_tile(stored, face, map_layout);
+      if (tile.found) {
+        add_clamped_cells(&out.sums, tile, texel, st_n, b, map_layout);
+        continue;
+      }
+      add_term(&out.sums, one, b, map_layout, stored, face + 6u * map_layout.groups);
+    }
+  }
+  out.none = !(out.sums.norm > 0.0);
+  return out;
 }
 
 // The share of each of the disc's laws at the point `q` (from the body's centre ÷ a): law 0's
@@ -561,7 +713,10 @@ fn edge_shape_disc(
 // b, T(x) its nodes' albedo at the term's code (`maturity_segment`, `maturity_mix`), a zero share's
 // class skipped before any node is read. Last, the classes' edges are shaped (`edge_shape_disc`,
 // lane fix-jagged-biome-edges) at the pixel's footprint `footprint` on the unit sphere, rad, against
-// the lattice the point was read on: a refined texel's cells, or the map's texels.
+// the lattice the point was read on: a refined texel's cells, or the map's texels; where that
+// lattice's points disagree and its spacing spans fewer than EDGE_SMOOTH_NONE_PX pixels, from the
+// keyed classes' fractions at the four points half a spacing off along its diagonals too, each
+// reconstructed by the same rule.
 fn surface_at(body : Body, q : vec3f, classes : u32, footprint : f32) -> SurfaceAt {
   var out : SurfaceAt;
   let count = min(classes, MAX_DISC_CLASSES);
@@ -576,6 +731,7 @@ fn surface_at(body : Body, q : vec3f, classes : u32, footprint : f32) -> Surface
   map_layout.count = count;
   map_layout.groups = (count + 3u) / 4u;
   map_layout.maturity = body.maturity;
+  map_layout.codes = body.maturity;
   map_layout.index_layer = 6u * map_layout.groups + select(0u, 6u, body.maturity);
   map_layout.fine = textureNumLayers(class_weights) > map_layout.index_layer;
   let d = normalize(stretch_along(body, q));
@@ -583,83 +739,46 @@ fn surface_at(body : Body, q : vec3f, classes : u32, footprint : f32) -> Surface
   let at = cube_face_uv(p);
   // N, the texels along a face's side, the gutter apart.
   let n = textureDimensions(class_weights).x - 2u;
-  let last = f32(n - 1u);
   let st_n = vec2f(uv_to_st(at.uv.x), uv_to_st(at.uv.y)) * f32(n);
-  let holding = vec2i(clamp(floor(st_n), vec2f(0.0), vec2f(last)));
-  var sums : SurfaceSums;
-  // The lattice's spacing, cell coordinates: the map's texels, or a refined texel's cells.
-  var lattice_st = 1.0 / f32(n);
-  let own = fine_tile(vec2u(holding + vec2i(1)), at.face, map_layout);
-  if (own.found && own.corners) {
-    // In a refined texel of a fine page at its cells' corners: the corners of its cell holding the
-    // point, as the terrain's patch of level L − 6 draws its quad there, a corner not surveyed as
-    // the patch's vertex of no weight.
-    let r = f32(own.side);
-    lattice_st = lattice_st / r;
-    let local = st_n * r - r * vec2f(holding);
-    let held = vec2u(clamp(floor(local), vec2f(0.0), vec2f(r - 1.0)));
-    if (!fine_cell_surveyed(own, held)) {
+  // The point's reconstruction, then, where it is box-smoothed (`edge_shape_disc`), the four
+  // points half a lattice spacing off: one call site, so that a compiler that inlines every call
+  // takes one copy of the reconstruction.
+  var centre : Reconstruction;
+  var edge : EdgeSmoothing;
+  for (var k = 0u; k < 5u; k = k + 1u) {
+    if (k > 0u && !(edge.smoothing > 0.0)) {
+      break;
+    }
+    let corner = vec2f(select(-0.5, 0.5, (k & 1u) == 1u), select(-0.5, 0.5, (k & 2u) == 2u));
+    let offset = select(vec2f(0.0), corner * (centre.lattice_st * f32(n)), k > 0u);
+    var point_layout = map_layout;
+    point_layout.codes = map_layout.codes && k == 0u;
+    let one = reconstruct(at.face, st_n + offset, n, point_layout);
+    if (k > 0u) {
+      edge_smoothed(&edge, one, count);
+      continue;
+    }
+    if (one.none) {
       return out;
     }
-    add_cell_corners(&sums, own, held, local - vec2f(held), 1.0, map_layout, true);
-  } else if (own.found) {
-    // In a refined texel: its tile's cells, on the grid of N r a face.
-    let r = f32(own.side);
-    lattice_st = lattice_st / r;
-    let local = st_n * r - r * vec2f(holding);
-    let held = vec2u(clamp(floor(local), vec2f(0.0), vec2f(r - 1.0)));
-    if (!texel_shares(own.origin + held + vec2u(1u), own.layer, 1u, count).surveyed) {
-      return out;
+    centre = one;
+    for (var m = 0u; m <= count; m = m + 1u) {
+      out.shares[m] = centre.sums.sum[m] / centre.sums.norm;
     }
-    let first = vec2i(clamp(floor(local - 0.5), vec2f(-1.0), vec2f(r - 1.0)));
-    let f = local - 0.5 - vec2f(first);
-    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
-      let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
-      let stored = vec2u(vec2i(own.origin) + first + step + vec2i(1));
-      let one = texel_shares(stored, own.layer, 1u, count);
-      if (!one.surveyed) {
-        continue;
-      }
-      let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
-      add_term(&sums, one, b, map_layout, stored, own.layer + map_layout.groups);
-    }
-  } else {
-    let corner_at = st_n - 0.5;
-    let first = vec2i(clamp(floor(corner_at), vec2f(-1.0), vec2f(last)));
-    let f = corner_at - vec2f(first);
-    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
-      let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
-      let texel = first + step;
-      let stored = vec2u(texel + vec2i(1));
-      let one = texel_shares(stored, at.face, 6u, count);
-      if (all(texel == holding) && !one.surveyed) {
-        return out;
-      }
-      if (!one.surveyed) {
-        continue;
-      }
-      let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
-      let tile = fine_tile(stored, at.face, map_layout);
-      if (tile.found) {
-        add_clamped_cells(&sums, tile, texel, st_n, b, map_layout);
-        continue;
-      }
-      add_term(&sums, one, b, map_layout, stored, at.face + 6u * map_layout.groups);
+    if (centre.sums.purity_norm > 0.0 && edge_keyed(out, count) > 1u) {
+      edge.gate = edge_gate_disc(out, count, centre.sums.purity / centre.sums.purity_norm);
+      // A cell coordinate's step is about π ÷ 2 rad on the unit sphere: a face spans a quarter turn.
+      let lattice_px = centre.lattice_st * 1.5707963267948966 / footprint;
+      edge.smoothing = edge.gate * edge_smoothing(lattice_px);
     }
   }
-  if (!(sums.norm > 0.0)) {
-    return out;
-  }
-  for (var m = 0u; m <= count; m = m + 1u) {
-    out.shares[m] = sums.sum[m] / sums.norm;
-  }
-  if (sums.purity_norm > 0.0) {
-    // A cell coordinate's step is about π ÷ 2 rad on the unit sphere: a face spans a quarter turn.
-    edge_shape_disc(&out, count, p, footprint, lattice_st * 1.5707963267948966, sums.purity / sums.purity_norm);
+  if (edge.gate > 0.0) {
+    edge_shape_disc(&out, count, p, footprint, centre.lattice_st * 1.5707963267948966, edge);
   }
   if (!body.maturity) {
     return out;
   }
+  let sums = centre.sums;
   for (var k = 0u; k < count; k = k + 1u) {
     // A class of no share reads none of its nodes, as the terrain skips a zero-share slot.
     if (!(out.shares[k + 1u] > 0.0) || !class_drawn(k)) {

@@ -26,6 +26,10 @@ const EDGE_OCTAVE_OFFSET : vec3f = vec3f(0.618034, 0.414214, 0.732051);
 // The datum's μ below which a pixel's footprint stops growing: so that the limb's foreshortened
 // pixels take a finite one.
 const EDGE_GRAZING_MU : f32 = 0.2;
+// The lattice spacings, px: at and below the first a boundary is drawn from the box-smoothed
+// fractions whole, and from the second from the lattice's own blend alone (`edgeSmoothing`).
+const EDGE_SMOOTH_FULL_PX : f32 = 3.0;
+const EDGE_SMOOTH_NONE_PX : f32 = 6.0;
 
 // Wellons' `lowbias32`: a 32-bit word's avalanche (`classEdge.ts`' `mix32`).
 fn edge_mix32(x : u32) -> u32 {
@@ -115,10 +119,24 @@ fn edge_noise(d : vec3f, key : u32, plan : EdgePlan) -> f32 {
   return sum / EDGE_NOISE_SIGMA;
 }
 
-// The sharpness q of an edge whose lattice spacing spans `lattice_px` pixels (`edgeSharpness`).
-fn edge_sharpness(lattice_px : f32, plan : EdgePlan) -> f32 {
-  let slope = EDGE_MIDPOINT_SLOPE / lattice_px + 1.4142135623730951 * EDGE_NOISE_WEIGHT * plan.slope_per_px;
-  return clamp(EDGE_RISE_LOGIT / (EDGE_WIDTH_PX * slope), 1.0, EDGE_SHARPNESS_MAX);
+// The sharpness q of an edge whose lattice spacing spans `lattice_px` pixels, its fractions
+// box-smoothed by `smoothing` (`edgeSharpness`).
+fn edge_sharpness(lattice_px : f32, plan : EdgePlan, smoothing : f32) -> f32 {
+  let flattened = 1.0 - 0.5 * smoothing;
+  let slope = EDGE_MIDPOINT_SLOPE * flattened / lattice_px + 1.4142135623730951 * EDGE_NOISE_WEIGHT * plan.slope_per_px;
+  return clamp(EDGE_RISE_LOGIT / (EDGE_WIDTH_PX * slope), 1.0 / flattened, EDGE_SHARPNESS_MAX);
+}
+
+// The weight of the box-smoothed reconstruction where a lattice spacing spans `lattice_px` pixels
+// (`edgeSmoothing`).
+fn edge_smoothing(lattice_px : f32) -> f32 {
+  return 1.0 - smoothstep(EDGE_SMOOTH_FULL_PX, EDGE_SMOOTH_NONE_PX, lattice_px);
+}
+
+// A keyed class's box-smoothed fraction `mean`, held to the band about its own fraction `own`
+// where the lattice's reconstruction allows it (`edgeHeld`).
+fn edge_held(own : f32, mean : f32) -> f32 {
+  return clamp(mean, 2.0 * own - 1.0, 2.0 * own);
 }
 
 // The boundary's gate from the lattice points' mean purity and the purity of their mean (`edgeGate`).

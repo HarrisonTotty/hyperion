@@ -31,7 +31,7 @@ import {
   type RingShadowRecord,
 } from "../rings/ringShadows";
 import ringShadowWgsl from "../rings/shaders/ringShadow.wgsl?raw";
-import { faceUvToXyz, stToUv } from "../terrain/cube";
+import { faceUvToXyz, stToUv, uvToSt, xyzToFaceUv } from "../terrain/cube";
 import {
   MATURITY_CODE_MAX,
   MATURITY_NODES,
@@ -45,6 +45,7 @@ import {
   compositeDiscPixels,
   DISC_ROWS,
   discLawTerms,
+  type DiscPixel,
   type DiscRecord,
   discReflectance,
   type DiscSamples,
@@ -64,6 +65,7 @@ import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
 import {
   classMapAlbedoAt,
   type ClassMapTexel,
+  type ClassMapTexels,
   classMapMaturityLayer,
   classMapSharesAt,
   classMapSurface,
@@ -926,13 +928,15 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
         "return code / MATURITY_CODE_MAX; }",
     );
     // A face texel's code in layer face + 6 ⌈count ÷ 4⌉, a fine page's cell's past its page's weights.
-    const surface = wgslFunction(bodyDiscWgsl, "surface_at");
-    expect(surface).toContain("map_layout.groups = (count + 3u) / 4u;");
-    expect(surface).toContain(
-      "add_term(&sums, one, b, map_layout, stored, at.face + 6u * map_layout.groups);",
+    expect(wgslFunction(bodyDiscWgsl, "surface_at")).toContain(
+      "map_layout.groups = (count + 3u) / 4u;",
     );
-    expect(surface).toContain(
-      "add_term(&sums, one, b, map_layout, stored, own.layer + map_layout.groups);",
+    const reconstruct = wgslFunction(bodyDiscWgsl, "reconstruct");
+    expect(reconstruct).toContain(
+      "add_term(&out.sums, one, b, map_layout, stored, face + 6u * map_layout.groups);",
+    );
+    expect(reconstruct).toContain(
+      "add_term(&out.sums, one, b, map_layout, stored, own.layer + map_layout.groups);",
     );
     expect([
       wgslConstant(bodyDiscWgsl, "UNORM8_MAX"),
@@ -953,8 +957,11 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
   it("takes a corner's code only under the record's flag, through the nodes' library and never its own formula", () => {
     const body = wgslFunction(bodyDiscWgsl, "surface_at");
     expect(body).toContain("map_layout.maturity = body.maturity;");
+    // The point's own terms' codes alone, not those of the points about it (fix-jagged-biome-edges).
+    expect(body).toContain("map_layout.codes = body.maturity;");
+    expect(body).toContain("point_layout.codes = map_layout.codes && k == 0u;");
     expect(wgslFunction(bodyDiscWgsl, "add_term")).toContain(
-      "if (map_layout.maturity) { (*sums).b[(*sums).terms] = b; (*sums).segment[(*sums).terms] = maturity_segment(class_map_maturity(texel, code_layer)); }",
+      "if (map_layout.codes) { (*sums).b[(*sums).terms] = b; (*sums).segment[(*sums).terms] = maturity_segment(class_map_maturity(texel, code_layer)); }",
     );
     expect(body).toContain("maturity_mix(lo, hi, segment.fraction)");
     expect(bodyDiscWgsl).not.toMatch(/fn maturity_segment|fn maturity_mix|pow\(/u);
@@ -1112,20 +1119,51 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
 
 // --- The classes' edges (lane fix-jagged-biome-edges) -------------------------------------------
 
-/** A two-class map of four texels a face split along i = 2, its classes keyed by `keys`. */
-function halves(keys: ReadonlyArray<number> | undefined): OrientedClassMap {
-  const surface = classMapSurface(
-    UNREAD_TEXTURES,
-    "halves",
-    packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : [0, 1])),
-    [REGOLITH, LAMBERT],
-    OWN,
-  );
+/**
+ * The face and cell coordinates (n s, n t) on N = `n` texels a face of the point of a sphere's
+ * record that a view's point (`xPx`, `yPx`) sees, the class map's axes the view's under
+ * `IDENTITY_ROTATION` and the camera's orientation, as the twin takes them.
+ */
+function seenCell(
+  record: DiscRecord,
+  xPx: number,
+  yPx: number,
+  n: number,
+): { readonly face: number; readonly sN: number; readonly tN: number } {
+  const ray = normalise(viewRay(xPx, yPx, CAMERA, VIEWPORT));
+  const centre = vec3(0, 0, -1);
+  const r = record.radiusOverDistance;
+  const b = dot(ray, centre);
+  const t = b - Math.sqrt(b * b - (1 - r * r));
+  const q = scale(sub(scale(ray, t), centre), 1 / r);
+  const { face, u, v } = xyzToFaceUv([q.x, q.y, q.z]);
+  return { face, sN: uvToSt(u) * n, tN: uvToSt(v) * n };
+}
+
+/** A two-class map's weights split at n s = 32 on N = 64 texels a face. */
+function splitAtHalf({ i }: ClassMapTexel): number[] {
+  return i < 32 ? [1, 0] : [0, 1];
+}
+
+/** A two-class map of the regolith and Lambert laws, its classes keyed by `keys`. */
+function twoClasses(
+  texels: ClassMapTexels,
+  keys: ReadonlyArray<number> | undefined,
+): OrientedClassMap {
+  const surface = classMapSurface(UNREAD_TEXTURES, "two classes", texels, [REGOLITH, LAMBERT], OWN);
   return {
     ...surface,
     rotation: IDENTITY_ROTATION,
     ...(keys === undefined ? {} : { edgeKeys: keys }),
   };
+}
+
+/** A two-class map of four texels a face split along i = 2, its classes keyed by `keys`. */
+function halves(keys: ReadonlyArray<number> | undefined): OrientedClassMap {
+  return twoClasses(
+    packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : [0, 1])),
+    keys,
+  );
 }
 
 describe("a disc's classes' edges (lane fix-jagged-biome-edges)", () => {
@@ -1154,6 +1192,74 @@ describe("a disc's classes' edges (lane fix-jagged-biome-edges)", () => {
     const draw = (surface: OrientedClassMap): ReturnType<typeof rasteriseDisc> =>
       rasteriseDisc({ ...record, surface, tableRows: [0, 1, 2] }, CAMERA, VIEWPORT, surface.texels);
     expect(draw(halves(undefined))).toEqual(draw(halves([0, 0])));
+  });
+
+  it("reconstructs the point and the points about it at one call site", () => {
+    const body = wgslFunction(bodyDiscWgsl, "surface_at");
+    expect(body.match(/reconstruct\(/gu)).toHaveLength(1);
+  });
+
+  it("reads the points about a point only where its edges are box-smoothed", () => {
+    expect(wgslFunction(bodyDiscWgsl, "surface_at")).toContain(
+      "if (k > 0u && !(edge.smoothing > 0.0)) { break; }",
+    );
+  });
+
+  it("keeps a one-texel line of its class where a texel spans 3 px, box-smoothed", () => {
+    // R10's 64 texels a face on a disc 240 px across: some 2.9 px a texel at the centre.
+    const record = recordAt(240, 60, SPHERE);
+    const draw = (texels: ClassMapTexels, keys?: ReadonlyArray<number>): number[] =>
+      rasteriseDisc(
+        { ...record, surface: twoClasses(texels, keys), tableRows: [0, 1, 2] },
+        CAMERA,
+        VIEWPORT,
+        texels,
+      ).map((pixel) => pixel.rgb[1]);
+    const first = draw(packClassMap(64, 2, () => [1, 0]));
+    const second = draw(packClassMap(64, 2, () => [0, 1]));
+    const line = draw(
+      packClassMap(64, 2, ({ i }) => (i === 40 ? [0, 1] : [1, 0])),
+      [0x51f00d, 0x2c0ffe],
+    );
+    // Each pixel's share of the second class, from its light between the two classes' alone.
+    const held = line.filter((g, k) => {
+      const a = first[k] ?? Number.NaN;
+      const b = second[k] ?? Number.NaN;
+      return Math.abs(b - a) > 1e-6 && (g - a) / (b - a) > 0.5;
+    }).length;
+    expect(held).toBeGreaterThan(20);
+  });
+
+  it("reads the texels half a spacing past a pixel's own four where a texel spans 3 px", () => {
+    // R10's 64 texels a face on a disc 240 px across, some 2.9 px a texel at its centre, the
+    // sub-camera point at face +z's centre: the classes split at n s = 32, and texel (33, 32) of
+    // the second turned to the first. Unsmoothed, a pixel reads that texel only within a spacing
+    // of its centre (Chebyshev, cell coordinates); box-smoothed, within one and a half.
+    const record = recordAt(240, 60, SPHERE);
+    const draw = (texels: ClassMapTexels): DiscPixel[] =>
+      rasteriseDisc(
+        { ...record, surface: twoClasses(texels, [0x51f00d, 0x2c0ffe]), tableRows: [0, 1, 2] },
+        CAMERA,
+        VIEWPORT,
+        texels,
+      );
+    const before = draw(packClassMap(64, 2, splitAtHalf));
+    const after = draw(
+      packClassMap(64, 2, (texel) =>
+        texel.i === 33 && texel.j === 32 ? [1, 0] : splitAtHalf(texel),
+      ),
+    );
+    const home = seenCell(record, VIEWPORT.widthPx / 2, VIEWPORT.heightPx / 2, 64);
+    const moved = after
+      .filter((pixel, k) => pixel.draw === "interior" && pixel.rgb[1] !== before[k]?.rgb[1])
+      .map((pixel) => {
+        const at = seenCell(record, pixel.xPx + 0.5, pixel.yPx + 0.5, 64);
+        return at.face === home.face
+          ? Math.max(Math.abs(at.sN - 33.5), Math.abs(at.tN - 32.5))
+          : Infinity;
+      });
+    // A pixel's samples lie within half a pixel, about 0.17 of a texel, of its centre.
+    expect([Math.max(...moved) > 1.25, Math.max(...moved) < 1.75]).toEqual([true, true]);
   });
 
   it("moves the pixels along a keyed edge and leaves those within one class's texels", () => {

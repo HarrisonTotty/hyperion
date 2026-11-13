@@ -2232,4 +2232,21 @@ describe("the class map's reconstruction for its edges (lane fix-jagged-biome-ed
     const at = onFaceTwo(0.45, 0.4);
     expect([...classMapReconstructionAt(map, at).shares]).toEqual(classMapSharesAt(map, at));
   });
+
+  it("reads a point offset along its face's cell coordinates where the offset moves it", () => {
+    const map = packClassMap(4, 2, ({ i, j }) => (i + j < 3 ? [1, 0] : [0.25, 0.75]));
+    const offset = classMapReconstructionAt(map, onFaceTwo(0.45, 0.4), [0.125, -0.0625]).shares;
+    const moved = classMapReconstructionAt(map, onFaceTwo(0.575, 0.3375)).shares;
+    offset.forEach((share, m) => {
+      expect(share).toBeCloseTo(moved[m] ?? Number.NaN, 12);
+    });
+  });
+
+  it("reads a point offset past its face's edge on its own face's gutter", () => {
+    // Class 0 on face 2, class 1 on the faces beside it, whose texels face 2's gutter holds: at
+    // s = 1.05, (n s − ½) is 3.7, so 0.7 of the gutter's texel and 0.3 of face 2's last.
+    const map = packClassMap(4, 2, ({ face }) => (face === 2 ? [1, 0] : [0, 1]));
+    const past = classMapReconstructionAt(map, onFaceTwo(0.95, 0.5), [0.1, 0]).shares;
+    expect(past[2] ?? 0).toBeCloseTo(0.7, 12);
+  });
 });
