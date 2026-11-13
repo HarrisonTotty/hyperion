@@ -15,6 +15,10 @@
 //!   gives, in closed form through the exponential integral.
 //! - [`site`]: what decides k at a point, from the material, the surface's age and atmosphere and
 //!   a coarse crater's ejecta, every input one both sides hold.
+//! - [`place`]: where the rocks lie, drawn by hash in cells per diameter octave.
+//! - [`shape`]: each rock's superquadric, half buried on the ground, and its top along a normal.
+//! - [`hold`]: the rocks are placed from generator version 27 ([`ROCKS_VERSION`]); below it the
+//!   crate places none.
 //!
 //! # The layers
 //!
@@ -22,12 +26,25 @@
 //! the same bake and cache before R11 lands; R11 owns the module and gives the type its variants
 //! (its `Rocks(Vec<Rock>)`, R11.T4.a) and the hook its implementation (`RockBakeHook`).
 
+#[cfg(test)]
+mod golden;
+pub mod hold;
 pub mod law;
+pub mod place;
+pub mod shape;
 pub mod site;
 
 use hyperion_base::units::Metres;
 
+pub use hold::{ROCKS_VERSION, RockRules};
+#[cfg(any(test, feature = "testing"))]
+pub use hold::{with_rock_rules, with_rocks_placed};
 pub use law::{MAX_ROCK_ABUNDANCE, RockAbundance, exponential_integral_e1};
+pub use place::{
+    REACH_MARGIN, ROCK_OCTAVE_COUNT, ROCK_OCTAVES, RockCellKey, RockError, rock_octave_levels,
+    rocks_in_cell,
+};
+pub use shape::{MAX_REACH_SHARE, ROCK_ASPECT, ROCK_EXPONENT, Rock, RockShape};
 pub use site::{
     AIRLESS_PRESSURE, AtmosphereClass, CraterEjecta, RockSite, atmosphere_class, rock_abundance,
     rock_site,

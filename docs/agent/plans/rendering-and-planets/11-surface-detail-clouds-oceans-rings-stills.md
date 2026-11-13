@@ -1045,6 +1045,7 @@ _The names T3 calls, re-validated against the code (2026-11-02): `QueryHeightErr
   height or more is present; drawn height ratios lie in [0.25, 0.5] and b/a in [0.55, 0.9]; every
   key is built from integers; a golden of the rocks of twelve pinned cells, one per face and at a
   cube corner.
+  _Built 2026-11-02._
 - **R11.T3.c Contact.** `Rock::top_above`, `Rock::exposed_height`, `rocks_near`, `RockCache` and
   `surface_height_with_rocks`. Tests: an ellipsoid's and a superquadric's top heights against closed
   forms; the exposed height above R10's `ground_at` equals the drawn one; the result is the ground's

@@ -2,8 +2,8 @@
 //!
 //! One of three registries (plan R04, Design note 4), beside `hyperion_base::rng::tags` and the
 //! sim's `rng::tags`, which asserts all three disjoint. Every tag the surface crate opens is
-//! declared here: the `surface.` prefix is reserved for this registry (R11's `surface.scatter` is
-//! reserved by R09 and not yet declared), and `selftest.surface.` for its tags of scope
+//! declared here: the `surface.` prefix is reserved for this registry (R11's `surface.scatter`,
+//! reserved by R09, is declared by R11.T3.b), and `selftest.surface.` for its tags of scope
 //! `SelfTest`, such as R05's provisional test planet's. Tags the server derives in the sim,
 //! `body.surface` and `body.surface.detail`, are the sim's, not this registry's.
 //!
@@ -39,6 +39,8 @@
 //! | `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                           |
 //! | `surface.channel.bend`   | `SurfaceDetail` | `surface_cell` | a trunk's bend (a world dry now's; under R09.T6.i every trunk's), a word for each interior vertex of its two chords; and under R09.T6.i a tributary's, keyed by its own cell at its level, a word for each interior vertex of its one chord |
 //! | `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below the boundary diameter, per octave cell           |
+//! | `surface.scatter`        | `SurfaceDetail` | `surface_cell` | the authoritative rocks per octave cell: count, places and diameters |
+//! | `surface.scatter.shape`  | `SurfaceDetail` | `surface_cell` | a rock's height ratio, axial ratio, yaw and exponent, by its index |
 
 hyperion_base::domain_tags! {
     // Plan R05: the terrain geometry and the descent spike.
@@ -101,6 +103,21 @@ hyperion_base::domain_tags! {
     /// its placement (s, t and the acceptance's mark, at most 64 candidates), one for its diameter
     /// and one for its age.
     SURFACE_CRATER: SurfaceDetail = "surface.crater";
+
+    // Rendering plan R11: the authoritative rocks (R11.T3.b), each with the key form of the table
+    // above.
+
+    /// The authoritative rocks (R11, Design note 5), keyed by `surface_cell` of a rock octave's
+    /// quadtree cells, instance 0, the level naming the octave: each cell's count, a Poisson draw
+    /// (no word at a mean of 0, one below a mean of 10), then each rock's words in turn, three for
+    /// each candidate of its placement (s, t and the acceptance's mark, at most 64 candidates) and
+    /// one for its diameter within the octave.
+    SURFACE_SCATTER: SurfaceDetail = "surface.scatter";
+
+    /// The authoritative rocks' shapes (R11, Design note 5), keyed by `surface_cell` of the rock's
+    /// octave cell with the rock's index in the cell's draw as the instance: words 0 to 3, its
+    /// height ratio, its horizontal axial ratio, its yaw and its superquadric exponent.
+    SURFACE_SCATTER_SHAPE: SurfaceDetail = "surface.scatter.shape";
 }
 
 #[cfg(test)]

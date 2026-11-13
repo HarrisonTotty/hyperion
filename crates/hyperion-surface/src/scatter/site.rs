@@ -444,10 +444,23 @@ pub fn rock_site<F: FieldView>(
     cache: &mut SynthCache,
     at: &[f64; 3],
 ) -> Result<RockSite, QueryHeightError> {
+    let (dir, _) = datum_foot(&synth.field().header().figure(), at);
+    site_at(synth, cache, dir)
+}
+
+/// [`rock_site`] at the unit direction `dir` of the point's foot.
+///
+/// # Errors
+///
+/// As [`rock_site`].
+pub(crate) fn site_at<F: FieldView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    dir: [f64; 3],
+) -> Result<RockSite, QueryHeightError> {
     let field = synth.field();
     let header = field.header();
     let figure = header.figure();
-    let (dir, _) = datum_foot(&figure, at);
     let material = material_at(synth, cache, xyz_to_face_uv(dir))?;
     let mechanics = material
         .entry()

@@ -1607,7 +1607,7 @@ struct OctaveMoments {
 ///
 /// If no level's cells hold the reach.
 #[must_use]
-fn search_level(reach_m: f64, smallest_radius_m: f64) -> u8 {
+pub(crate) fn search_level(reach_m: f64, smallest_radius_m: f64) -> u8 {
     (0..=MAX_LEVEL)
         .rev()
         .find(|&level| {
@@ -1744,7 +1744,7 @@ pub fn cell_area(cell: PatchKey, figure: &Spheroid) -> SquareMetres {
 /// gnomonic factor at its smallest |u| and |v|, times a² c ÷ min(a, c), since |M⁻¹d| ≤ 1 ÷ min(a,
 /// c).
 #[must_use]
-fn area_density_bound(cell: PatchKey, figure: &Spheroid) -> f64 {
+pub(crate) fn area_density_bound(cell: PatchKey, figure: &Spheroid) -> f64 {
     let rate = |(lo, hi): (f64, f64)| 8.0 / 3.0 * num::max(hi, 1.0 - lo);
     let nearest = |(lo, hi): (f64, f64)| {
         if lo <= 0.5 && hi >= 0.5 {
@@ -2613,7 +2613,7 @@ fn gap_root(at: FaceUv) -> f64 {
 
 /// The smaller of `figure`'s two radii, metres, which every [`CellEdges::gap_m`] scales by.
 #[must_use]
-fn smallest_radius_m(figure: &Spheroid) -> f64 {
+pub(crate) fn smallest_radius_m(figure: &Spheroid) -> f64 {
     num::min(figure.equatorial_radius_m, figure.polar_radius_m)
 }
 
@@ -2725,7 +2725,7 @@ fn num_octaves_through(count: usize, through: u8) -> u8 {
 /// (three at a cube corner), across face edges by the cube's rule, sorted by key without repeats;
 /// the array and how many of it are the neighbourhood.
 #[must_use]
-fn neighbourhood(cell: PatchKey) -> ([PatchKey; 9], usize) {
+pub(crate) fn neighbourhood(cell: PatchKey) -> ([PatchKey; 9], usize) {
     let mut cells = [cell; 9];
     let mut n = 1;
     for edge in Edge::ALL {
@@ -2754,7 +2754,12 @@ fn neighbourhood(cell: PatchKey) -> ([PatchKey; 9], usize) {
 /// ([`Threshold::from_ratio`], whose debug assertion holds the bound), and the last of
 /// [`MAX_PLACEMENT_ATTEMPTS`] is taken whatever it draws.
 #[must_use]
-fn place(cell: PatchKey, figure: &Spheroid, bound: f64, stream: &mut Stream) -> [f64; 3] {
+pub(crate) fn place(
+    cell: PatchKey,
+    figure: &Spheroid,
+    bound: f64,
+    stream: &mut Stream,
+) -> [f64; 3] {
     let side = f64::from(1_u32 << cell.level());
     let (i, j) = (f64::from(cell.i()), f64::from(cell.j()));
     let mut attempt = 1;
