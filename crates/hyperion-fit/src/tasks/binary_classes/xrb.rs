@@ -23,7 +23,6 @@
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 
-use hyperion_sim::GeneratorVersion;
 use hyperion_sim::galaxy::imf::{BandShares, MassBand};
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
 use hyperion_sim::math;
@@ -39,7 +38,7 @@ use hyperion_sim::units::consts::SECONDS_PER_DAY;
 
 use super::{
     CensusParams, Censuses, FittedMark, MarkPoint, MarkSource, RunCensusError, ShareRow,
-    census_error, conditional, fingerprint_galaxy_at, run_censuses, share_rows, unconditional,
+    census_error, conditional, fingerprint_galaxy, run_censuses, share_rows, unconditional,
     weighted_to_shares,
 };
 use crate::emit::{RustTable, TableItem, literal};
@@ -49,11 +48,6 @@ use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 /// The X-ray binaries' task's revision: 1 from generator version 32, whose manifest pins the
 /// high-mass side to its own count (P11.T8.b's fix, folded from task `binary_xrb_32`).
 pub const XRB_VERSION: u32 = 1;
-
-/// The generator version task `binary_xrb`'s manifests fit at and its fingerprint's galaxy is
-/// built at: 32, the first whose sim reads the pinned side (a manifest may not fit below the sim's
-/// version; a test holds the two manifests to it). Its census is 31's, which no 32 change moves.
-pub const XRB_FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(32);
 
 /// The X-ray binaries' block's items, in its order: the sampler, then the share row.
 pub const XRB_ITEMS: [&str; 9] = [
@@ -926,7 +920,7 @@ impl FitTask for BinaryXrbTask {
     }
 
     fn fingerprint(&self) -> SimFingerprint {
-        xrb_fingerprint(&fingerprint_galaxy_at(XRB_FINGERPRINT_VERSION))
+        xrb_fingerprint(&fingerprint_galaxy())
     }
 
     fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
