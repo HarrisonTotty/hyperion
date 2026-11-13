@@ -16,6 +16,7 @@
 import { NagaError, parseWgsl, validate } from "naga-wasm";
 import { describe, expect, it } from "vitest";
 
+import { type CompositeProbe, compositeProbedMaterial } from "../atmosphere/hillaire";
 import { type CatalogueEntry, WGSL_CATALOGUE } from "./catalogue";
 import { CLUSTER_OVER_KERNEL } from "../clusters/overCount";
 import { TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS } from "../terrain/terrainMaterial";
@@ -74,11 +75,24 @@ function isProbed(format: string): format is ProbedTargetFormat {
   return Object.hasOwn(PROBE_VALUES, format);
 }
 
+/** The composite's check-only probes (`hillaire.ts`' CompositeProbe), each its own module. */
+const COMPOSITE_PROBES: ReadonlyArray<CompositeProbe> = [
+  "sky-off",
+  "transmittance-off",
+  "per-pixel",
+  "surface-grey",
+  "edge-off",
+  "limb-off",
+  "aerial-off",
+  "discs-off",
+  "scene-only",
+];
+
 /**
  * Every module the engine can compile, each source once: the catalogue's, and those the engine makes
  * outside it (the post-processes' full-screen stage, the mips' downsampling, the rounding probe's
- * passes, the ID raster's `primitive_index` forms, which SwiftShader cannot compile, and the
- * clusters' over-count copy).
+ * passes, the ID raster's `primitive_index` forms, which SwiftShader cannot compile, the clusters'
+ * over-count copy, and the composite's probes, an inspection profile's).
  */
 const MODULES: ReadonlyArray<ShippedModule> = [
   ...WGSL_CATALOGUE.flatMap(entryModules),
@@ -89,6 +103,10 @@ const MODULES: ReadonlyArray<ShippedModule> = [
   ...Object.keys(PROBE_VALUES)
     .filter(isProbed)
     .map((format) => ({ name: `rounding probe ${format}`, wgsl: probeWgsl(format) })),
+  ...COMPOSITE_PROBES.map((probe) => ({
+    name: `atmosphere composite, probe ${probe}`,
+    wgsl: compositeProbedMaterial(probe).fragmentWgsl,
+  })),
 ].filter(({ wgsl }, index, all) => all.findIndex((other) => other.wgsl === wgsl) === index);
 
 /** Every `.wgsl` file under `view/`, by its path from here. */

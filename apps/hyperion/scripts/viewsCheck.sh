@@ -14,7 +14,8 @@
 #                  | --atmosphere
 #                  | --planet-viewer
 #                  | --inspection --universe <ID> --body <ID>
-#                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey]
+#                    [--timing [--composite-probe sky-off|transmittance-off|per-pixel|surface-grey
+#                                                |edge-off|limb-off|aerial-off|discs-off|scene-only]
 #                              [--count-gpu-calls]
 #                              [--march-probe centre|depth-zero|one-source|no-lobes]
 #                              [--march-cover area|tiles] [--limb-rays per-texel|packed]
@@ -148,7 +149,10 @@
 # 2026-11-01) draws that profile's atmosphere composite with its sky branch off (sky-off), with its
 # transmittance across from above off (transmittance-off), with that transmittance per pixel as
 # the setting's way back forms it (per-pixel), or with every drawn surface dimmed by the channels'
-# mean as the grey way back does (surface-grey; plan R08, R08.T9.c), the A/B of the composite's
+# mean as the grey way back does (surface-grey; plan R08, R08.T9.c), or with one of the terms it
+# forms a pixel off (perf-composite-close): no drawn edge searched (edge-off), no far-limb footprint
+# from above the top (limb-off), no aerial volume read (aerial-off), no source's disc (discs-off), or
+# nothing but the scene's light, the pass's floor (scene-only), the A/B of the composite's
 # cost; its files end -composite-<probe>, and their pictures are not a player's. --count-gpu-calls
 # (plan R14, the owner's Mac) has that profile count every WebGPU call each window makes, by kind
 # (draws, dispatches, setPipeline, setBindGroup, writeBuffer and its bytes, bind groups and views

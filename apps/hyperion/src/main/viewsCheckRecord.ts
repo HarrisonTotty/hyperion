@@ -38,6 +38,7 @@ import type {
   InspectionReactComponent,
   InspectionTimingBytes,
   InspectionTimingCompile,
+  InspectionTimingCompositeCensus,
   InspectionTimingFirstFrame,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
@@ -1601,6 +1602,7 @@ function timingCensus(value: unknown): InspectionTimingMarchCensus | null | unde
   }
   const { kernel, wholeMeans, centresInAir, tiles, limbTiles, rays, laneRays } = value;
   const texelsByNodes = numbers(value["texelsByNodes"]);
+  const composite = compositeCensus(value["composite"]);
   return typeof kernel !== "string" ||
     kernel.length === 0 ||
     texelsByNodes === null ||
@@ -1613,9 +1615,51 @@ function timingCensus(value: unknown): InspectionTimingMarchCensus | null | unde
     limbTiles > tiles ||
     !isCount(rays) ||
     !isCount(laneRays) ||
-    laneRays < rays
+    laneRays < rays ||
+    composite === undefined
     ? undefined
-    : { kernel, texelsByNodes, wholeMeans, centresInAir, tiles, limbTiles, rays, laneRays };
+    : {
+        kernel,
+        texelsByNodes,
+        wholeMeans,
+        centresInAir,
+        tiles,
+        limbTiles,
+        rays,
+        laneRays,
+        composite,
+      };
+}
+
+/**
+ * A march census's composite census (perf-composite-close): `null` where it has none, absent
+ * included; `undefined` where it is not one: its counts whole numbers, each class within the
+ * output's pixels and each subclass within its class (the discs the sky's).
+ */
+function compositeCensus(value: unknown): InspectionTimingCompositeCensus | null | undefined {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { pixels, outside, sky, skyFromMarch, skyPerPixel, surface, aerial, edges, discs } = value;
+  return !isCount(pixels) ||
+    !isCount(outside) ||
+    !isCount(sky) ||
+    !isCount(skyFromMarch) ||
+    !isCount(skyPerPixel) ||
+    !isCount(surface) ||
+    !isCount(aerial) ||
+    !isCount(edges) ||
+    !isCount(discs) ||
+    outside + sky + surface > pixels ||
+    skyFromMarch + skyPerPixel > sky ||
+    aerial > surface ||
+    edges > pixels ||
+    discs > sky
+    ? undefined
+    : { pixels, outside, sky, skyFromMarch, skyPerPixel, surface, aerial, edges, discs };
 }
 
 /**

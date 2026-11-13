@@ -115,6 +115,22 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     ratios: [1],
     countSides: false,
   },
+  ...(
+    [
+      ["scene-only", "nothing but the scene's light, the pass's floor and its wait on the march"],
+      ["edge-off", "no drawn edge searched"],
+      ["limb-off", "no far-limb footprint from above the top"],
+      ["aerial-off", "no aerial volume read"],
+      ["discs-off", "no source's disc tested or drawn"],
+    ] as const
+  ).map(([probe, what]): MacProfileLever => ({
+    name: `composite-${probe}`,
+    decides: `perf-composite-close, a probe of the composite's cost, not a lever: as drawn (A) against ${what} (B)`,
+    a: [],
+    b: ["--composite-probe", probe],
+    ratios: [1],
+    countSides: false,
+  })),
   {
     name: "occlusion",
     decides: "R14.T3.d, occlusion: off (A) against the depth pyramid's (B)",

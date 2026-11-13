@@ -1202,9 +1202,10 @@ describe("starlight and the scene through the air (R08.T7)", () => {
     const fragmentReturns = [...fragment.matchAll(/return vec4f\(([^;]*)\);/gu)].map(
       (m) => m[1] ?? "",
     );
-    // The early return outside the march's area from above the top (R08.T16.a.2's giant), the
-    // views check's sky-off probe's (the owner's priority), the sky's, the volume's and the march's.
-    expect(fragmentReturns).toHaveLength(5);
+    // The views check's scene-only probe's (perf-composite-close), the early return outside the
+    // march's area from above the top (R08.T16.a.2's giant), the sky-off probe's (the owner's
+    // priority), the sky's, the volume's and the march's.
+    expect(fragmentReturns).toHaveLength(6);
     for (const value of fragmentReturns) {
       expect(value).toMatch(/, meterClass$/u);
     }

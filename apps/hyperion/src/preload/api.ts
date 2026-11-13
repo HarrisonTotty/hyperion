@@ -1606,10 +1606,22 @@ export interface ViewsCheckLaunch {
  * transmittance per pixel whatever the setting, the way back's composite, the frame forming its
  * target at the march's resolution all the same; `surface-grey` dims every drawn surface by the
  * channels' mean whatever the setting (plan R08, R08.T9.c), the grey way back's composite, the frame
- * storing the transmittance per channel all the same. Each is a measurement's picture, never a
- * player's.
+ * storing the transmittance per channel all the same. Since perf-composite-close (plan R08), one a
+ * term the composite forms a pixel: `edge-off` searches no drawn edge, `limb-off` forms no far-limb
+ * footprint from above the top, `aerial-off` reads no aerial volume, `discs-off` tests and draws no
+ * source's disc, and `scene-only` keeps every pixel's scene light with nothing else read, the pass's
+ * floor. Each is a measurement's picture, never a player's.
  */
-export type CompositeProbeName = "sky-off" | "transmittance-off" | "per-pixel" | "surface-grey";
+export type CompositeProbeName =
+  | "sky-off"
+  | "transmittance-off"
+  | "per-pixel"
+  | "surface-grey"
+  | "edge-off"
+  | "limb-off"
+  | "aerial-off"
+  | "discs-off"
+  | "scene-only";
 
 /**
  * A probe of the atmosphere's march for the inspection run's frame profile (plan R08, R08.T8.d; the
@@ -2919,6 +2931,34 @@ export interface InspectionTimingMarchCensus {
   /** The rays that meet the shell, and the same as each tile's lanes wait on its slowest texel. */
   readonly rays: number;
   readonly laneRays: number;
+  /**
+   * The composite's census of the same frame (perf-composite-close), or `null` where none was
+   * taken.
+   */
+  readonly composite: InspectionTimingCompositeCensus | null;
+}
+
+/**
+ * The composite's pixels by the terms it forms for each (plan R08, perf-composite-close;
+ * `view/atmosphere/marchProbe.ts`'s `CompositeCensus`), classed from the march's uniforms and the
+ * scene's depth.
+ */
+export interface InspectionTimingCompositeCensus {
+  /** The output's pixels. */
+  readonly pixels: number;
+  /** From above the top, outside the march's area with no disc: the scene's light kept at once. */
+  readonly outside: number;
+  /** The sky's pixels composited, and of those from above the top the ones whose behind is read
+   * at the march's resolution and the ones that form it per pixel. */
+  readonly sky: number;
+  readonly skyFromMarch: number;
+  readonly skyPerPixel: number;
+  /** The drawn surfaces' pixels composited, and those within the aerial volume's reach. */
+  readonly surface: number;
+  readonly aerial: number;
+  /** The pixels whose drawn edge is searched, and the sky's within a drawn source's disc. */
+  readonly edges: number;
+  readonly discs: number;
 }
 
 /**

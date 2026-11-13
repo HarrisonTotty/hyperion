@@ -2295,6 +2295,16 @@ const VIEW_MEMBERS = [
 ] as const;
 
 /**
+ * The output's size in pixels a view's uniform block holds (`view.wgsl`'s `AtmosphereView.output`,
+ * x and y), for a check that dispatches over a frame's pixels (plan R08, perf-composite-close: the
+ * composite's census, `marchProbe.ts`).
+ */
+export function viewOutputPxOf(view: ArrayLike<number>): readonly [number, number] {
+  const at = VIEW_MEMBERS.indexOf("output") * 4;
+  return [view[at] ?? 0, view[at + 1] ?? 0];
+}
+
+/**
  * The composite's `Draw` members after the view's, in its order: the shell, the march's area
  * (R08.T11.d) and the composite's levers (the owner's priority, 2026-11-01).
  */
@@ -2370,17 +2380,34 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
  * target at the march's resolution all the same, so that one build's profiles tell the composite's
  * saving apart from that pass's cost; or `surface-grey`, every drawn surface dimmed by the channels'
  * mean whatever {@link AtmosphereSettings.surfaceTransmittance} (R08.T9.c), the grey way back's
- * composite, the frame storing the transmittance per channel all the same. It is check-only: an
- * inspection profile's `--composite-probe`, never drawn on a player's launch.
+ * composite, the frame storing the transmittance per channel all the same. Since perf-composite-close
+ * (plan R08), one for each term the composite forms a pixel: `edge-off`, no drawn edge searched,
+ * every pixel reading the march's nearest candidate (R08.T17's `rayMarchEdgeOf`); `limb-off`, from
+ * above the top every transmittance across the centre ray's alone, no far-limb footprint formed;
+ * `aerial-off`, a drawn surface within the aerial volume's reach reading no volume; `discs-off`, no
+ * source's disc tested or drawn; and `scene-only`, every pixel the scene's light with nothing else
+ * read, the pass's own floor, so that a GPU whose pass timer counts a pass's wait on the march
+ * before it tells that wait from the composite's work. It is check-only: an inspection profile's
+ * `--composite-probe`, never drawn on a player's launch.
  */
-export type CompositeProbe = "sky-off" | "transmittance-off" | "per-pixel" | "surface-grey";
+export type CompositeProbe =
+  | "sky-off"
+  | "transmittance-off"
+  | "per-pixel"
+  | "surface-grey"
+  | "edge-off"
+  | "limb-off"
+  | "aerial-off"
+  | "discs-off"
+  | "scene-only";
 
 /** The line of `composite.wgsl` a probe's material replaces. */
 const COMPOSITE_PROBE_LINE = "const COMPOSITE_PROBE : u32 = 0u;";
 
 /**
  * {@link COMPOSITE_MATERIAL} under `probe`: the same draw with `composite.wgsl`'s `COMPOSITE_PROBE`
- * set, 1 for `sky-off`, 2 for `transmittance-off`, 3 for `per-pixel` and 4 for `surface-grey`.
+ * set, 1 for `sky-off`, 2 for `transmittance-off`, 3 for `per-pixel`, 4 for `surface-grey`, 5 for
+ * `edge-off`, 6 for `limb-off`, 7 for `aerial-off`, 8 for `discs-off` and 9 for `scene-only`.
  *
  * @throws Error if the composite's WGSL no longer declares the probe's constant.
  */
@@ -2398,6 +2425,21 @@ export function compositeProbedMaterial(probe: CompositeProbe): WgslMaterialSpec
       break;
     case "surface-grey":
       value = 4;
+      break;
+    case "edge-off":
+      value = 5;
+      break;
+    case "limb-off":
+      value = 6;
+      break;
+    case "aerial-off":
+      value = 7;
+      break;
+    case "discs-off":
+      value = 8;
+      break;
+    case "scene-only":
+      value = 9;
       break;
   }
   if (!COMPOSITE_WGSL.includes(COMPOSITE_PROBE_LINE)) {

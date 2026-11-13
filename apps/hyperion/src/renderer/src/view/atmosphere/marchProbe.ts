@@ -12,6 +12,9 @@
  * - {@link MARCH_CENSUS_KERNEL}: the footprint's rays counted over a march's area as its entry point
  *   marches them (`marchCensus.wgsl`), texel by texel and tile by tile, so that a profile names how
  *   many texels take how many node rays and how much of the area's work waits on them.
+ * - {@link COMPOSITE_CENSUS_KERNEL} (perf-composite-close): the composite's pixels counted by the
+ *   terms it forms for each (`compositeCensus.wgsl`), dispatched beside the march's census, so that
+ *   a profile names each term's share of the frame beside the composite's probes' times.
  */
 
 import { BUFFER_USAGE } from "../engine/gpuFlags";
@@ -19,6 +22,7 @@ import type { KernelPair } from "../engine/kernels";
 import type { BufferHandle, ComputeBindings } from "../engine/types";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
+import compositeCensusWgsl from "./shaders/compositeCensus.wgsl?raw";
 import farLimbWgsl from "./shaders/farLimb.wgsl?raw";
 import marchAreaWgsl from "./shaders/marchArea.wgsl?raw";
 import marchCensusWgsl from "./shaders/marchCensus.wgsl?raw";
@@ -154,7 +158,8 @@ export const MARCH_CENSUS_BUFFER = {
 
 /**
  * A march's far-limb census: what each texel of its area marches under the `area` cover, the
- * footprint's entry point over every tile, whatever cover drew the frame.
+ * footprint's entry point over every tile, whatever cover drew the frame; and the composite's
+ * census of the same frame beside it.
  */
 export interface MarchCensus {
   /** The march's kernel the census was taken beside. */
@@ -177,9 +182,11 @@ export interface MarchCensus {
    * lanes' time spent waiting.
    */
   readonly laneRays: number;
+  /** The composite's census of the frame ({@link CompositeCensus}), or `null` where none was taken. */
+  readonly composite: CompositeCensus | null;
 }
 
-/** The census of the words `marchCensus.wgsl` wrote, taken beside `kernel`. */
+/** The census of the words `marchCensus.wgsl` wrote, taken beside `kernel`, with no composite's. */
 export function marchCensusOf(kernel: string, words: Uint32Array): MarchCensus {
   if (words.length < MARCH_CENSUS_WORDS) {
     throw new RangeError(
@@ -197,6 +204,7 @@ export function marchCensusOf(kernel: string, words: Uint32Array): MarchCensus {
     limbTiles: word(first + 3),
     rays: word(first + 4),
     laneRays: word(first + 5),
+    composite: null,
   };
 }
 
@@ -227,6 +235,120 @@ export function marchCensusBindingsOf(
     uniforms: { medium, view, marchArea },
     buffers: { census },
     sampled: { sceneDepth, oblateBody },
+    storage: {},
+  });
+}
+
+/**
+ * The composite's census over its output (`compositeCensus.wgsl`; plan R08, perf-composite-close):
+ * dispatched beside the march's census with the march's uniforms and depth, over the output in
+ * tiles of 8 × 8 pixels, its counts integers, so read back exactly.
+ */
+export const COMPOSITE_CENSUS_KERNEL: KernelPair = {
+  name: "atmosphere composite census",
+  reference: `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${marchAreaWgsl}\n${compositeCensusWgsl}`,
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** The side of the composite census's workgroups, pixels (`compositeCensus.wgsl`'s 8 × 8). */
+export const COMPOSITE_CENSUS_TILE_PX = 8;
+
+/**
+ * The composite census's workgroups over an output of `outputPx` (width, height), or `null` for an
+ * output of no pixels.
+ */
+export function compositeCensusWorkgroupsOf(
+  outputPx: readonly [number, number],
+): readonly [number, number, number] | null {
+  const [widthPx, heightPx] = outputPx;
+  return widthPx > 0 && heightPx > 0
+    ? [
+        Math.ceil(widthPx / COMPOSITE_CENSUS_TILE_PX),
+        Math.ceil(heightPx / COMPOSITE_CENSUS_TILE_PX),
+        1,
+      ]
+    : null;
+}
+
+/** `compositeCensus.wgsl`'s `CompositeCensus`, in words. */
+const COMPOSITE_CENSUS_WORDS = 9;
+
+/** The composite census buffer's size, bytes, and its usage, as {@link MARCH_CENSUS_BUFFER}'s. */
+export const COMPOSITE_CENSUS_BUFFER = {
+  bytes: COMPOSITE_CENSUS_WORDS * 4,
+  usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC | BUFFER_USAGE.COPY_DST,
+} as const;
+
+/**
+ * The composite's pixels by the terms `composite.wgsl` forms for each, classed from the march's
+ * uniforms and the scene's depth (`compositeCensus.wgsl`): its read at the march's resolution
+ * counted where it is tried, a deck's route not read, and only the march's sources' discs.
+ */
+export interface CompositeCensus {
+  /** The output's pixels. */
+  readonly pixels: number;
+  /** From above the top, outside the march's area with no disc: the scene's light kept at once. */
+  readonly outside: number;
+  /** The sky's pixels composited. */
+  readonly sky: number;
+  /** From above the top, the sky's pixels whose behind is read at the march's resolution. */
+  readonly skyFromMarch: number;
+  /** From above the top, the sky's pixels that form it themselves: the footprint and lookups. */
+  readonly skyPerPixel: number;
+  /** The drawn surfaces' pixels composited. */
+  readonly surface: number;
+  /** The surfaces' pixels within the aerial volume's reach, which read it. */
+  readonly aerial: number;
+  /** The pixels whose drawn edge is searched (R08.T17's `rayMarchEdgeOf`). */
+  readonly edges: number;
+  /** The sky's pixels within a drawn source's disc, whose light the composite adds. */
+  readonly discs: number;
+}
+
+/** The census of the words `compositeCensus.wgsl` wrote. */
+export function compositeCensusOf(words: Uint32Array): CompositeCensus {
+  if (words.length < COMPOSITE_CENSUS_WORDS) {
+    throw new RangeError(
+      `a composite census holds ${String(COMPOSITE_CENSUS_WORDS)} words, not ${String(words.length)}`,
+    );
+  }
+  const word = (i: number): number => words[i] ?? 0;
+  return {
+    pixels: word(0),
+    outside: word(1),
+    sky: word(2),
+    skyFromMarch: word(3),
+    skyPerPixel: word(4),
+    surface: word(5),
+    aerial: word(6),
+    edges: word(7),
+    discs: word(8),
+  };
+}
+
+/**
+ * The composite census's bindings beside a march census's `bindings`, given the buffer it counts
+ * into, or `null` where those lack a member it reads: the march's medium, view and area and the
+ * scene's depth.
+ */
+export function compositeCensusBindingsOf(
+  bindings: ComputeBindings,
+): ((census: BufferHandle) => ComputeBindings) | null {
+  const { medium, view, marchArea } = bindings.uniforms;
+  const { sceneDepth } = bindings.sampled;
+  if (
+    medium === undefined ||
+    view === undefined ||
+    marchArea === undefined ||
+    sceneDepth === undefined
+  ) {
+    return null;
+  }
+  return (census) => ({
+    uniforms: { medium, view, marchArea },
+    buffers: { census },
+    sampled: { sceneDepth },
     storage: {},
   });
 }

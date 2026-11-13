@@ -64,12 +64,17 @@ const TERRAIN_FIXTURES: ReadonlyArray<ViewsCheckTerrainFixture> = [
 ];
 
 /** The composite's probes an inspection profile may draw under. */
-const COMPOSITE_PROBES: ReadonlyArray<CompositeProbeName> = [
+export const COMPOSITE_PROBE_NAMES = [
   "sky-off",
   "transmittance-off",
   "per-pixel",
   "surface-grey",
-];
+  "edge-off",
+  "limb-off",
+  "aerial-off",
+  "discs-off",
+  "scene-only",
+] as const satisfies ReadonlyArray<CompositeProbeName>;
 
 /** The march's probes an inspection profile may draw under (plan R08, R08.T8.d and R08.T8.e). */
 export const MARCH_PROBE_NAMES = [
@@ -215,7 +220,7 @@ function readLaunchBase(value: unknown): ViewsCheckLaunch | null {
   const levers = leversGiven === undefined ? null : readAtmosphereLevers(leversGiven);
   const run = RUN_KINDS.find((each) => each === value["run"]) ?? null;
   const fixture = TERRAIN_FIXTURES.find((each) => each === value["fixture"]) ?? null;
-  const probe = COMPOSITE_PROBES.find((each) => each === compositeProbe) ?? null;
+  const probe = COMPOSITE_PROBE_NAMES.find((each) => each === compositeProbe) ?? null;
   const march = MARCH_PROBE_NAMES.find((each) => each === marchProbe) ?? null;
   if (
     (compositeProbe !== undefined && probe === null) ||

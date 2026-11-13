@@ -55,7 +55,7 @@ import {
   SKY_VIEW_THICK_THERMAL_KERNEL,
   THICK_LIMB_KERNELS,
 } from "../atmosphere/hillaire";
-import { MARCH_CENSUS_KERNEL } from "../atmosphere/marchProbe";
+import { COMPOSITE_CENSUS_KERNEL, MARCH_CENSUS_KERNEL } from "../atmosphere/marchProbe";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import { CLOUD_LAYER_MATERIAL } from "../clouds/cloudLayer";
 import { CLOUD_PROBE_MATERIAL } from "../clouds/cloudProbe";
@@ -233,6 +233,8 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
     COMPOSITE_BEHIND_KERNEL,
     // The inspection profile's census of the march's far limb (R08.T8.d), check-only.
     MARCH_CENSUS_KERNEL,
+    // Its census of the composite's pixels (perf-composite-close), check-only.
+    COMPOSITE_CENSUS_KERNEL,
   ].map((spec): CatalogueEntry => ({ kind: "compute", spec })),
   { kind: "material", spec: COMPOSITE_MATERIAL },
 ];

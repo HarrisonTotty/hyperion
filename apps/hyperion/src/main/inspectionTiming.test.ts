@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   InspectionGpuAttachment,
   InspectionLongTasks,
+  InspectionTimingCompositeCensus,
   InspectionTimingMarchCensus,
   InspectionTimingRecord,
   InspectionTimingWindow,
@@ -186,8 +187,24 @@ describe("the frame profile's trace (the owner's report)", () => {
 });
 
 /**
+ * The composite's census of a frame of 4,000 pixels (perf-composite-close): 1,000 kept at once,
+ * 1,000 sky (800 of them behind read at the march's resolution), 2,000 surface, 80 edges searched.
+ */
+const COMPOSITE_CENSUS: InspectionTimingCompositeCensus = {
+  pixels: 4_000,
+  outside: 1_000,
+  sky: 1_000,
+  skyFromMarch: 800,
+  skyPerPixel: 200,
+  surface: 2_000,
+  aerial: 0,
+  edges: 80,
+  discs: 0,
+};
+
+/**
  * A march's census (R08.T8.d): 1,000 texels, 900 of them its centre ray alone, 60 with 2 nodes and
- * 40 with 10, 30 of those at w_L 1; 4 of 20 tiles hold a node ray.
+ * 40 with 10, 30 of those at w_L 1; 4 of 20 tiles hold a node ray; and the composite's beside it.
  */
 const CENSUS: InspectionTimingMarchCensus = {
   kernel: "atmosphere ray march",
@@ -198,6 +215,7 @@ const CENSUS: InspectionTimingMarchCensus = {
   limbTiles: 4,
   rays: 1_150,
   laneRays: 2_300,
+  composite: COMPOSITE_CENSUS,
 };
 
 /** A kind of attachment two passes of 100 × 50 px took, as the counter tallies it. */
@@ -505,8 +523,18 @@ describe("the frame profile's timing file (the owner's report)", () => {
         { ...CENSUS, laneRays: 1_000 },
         { ...CENSUS, rays: 0.5 },
         { ...CENSUS, kernel: "" },
+        { ...CENSUS, composite: { ...COMPOSITE_CENSUS, skyPerPixel: 201 } },
+        { ...CENSUS, composite: { ...COMPOSITE_CENSUS, surface: 2_001 } },
+        { ...CENSUS, composite: { ...COMPOSITE_CENSUS, discs: 1_001 } },
+        { ...CENSUS, composite: "composite" },
       ].map((census) => takenWindow(withCensus(census))),
-    ).toEqual([null, null, null, null, null]);
+    ).toEqual([null, null, null, null, null, null, null, null, null]);
+    // A census of a record before the composite's (perf-composite-close) holds none.
+    const { composite: _, ...before } = CENSUS;
+    expect(
+      readInspectionTimingRecord(withCensus(before))?.windows[0]?.marchCensus?.composite,
+    ).toBeNull();
+    expect(readInspectionTimingRecord(withCensus(CENSUS))?.windows[0]?.marchCensus).toEqual(CENSUS);
     expect(takenWindow({ ...RECORD, windows: [{ ...window, marchCensus: undefined }] })).toBeNull();
   });
 
@@ -1136,6 +1164,12 @@ describe("the frame profile's timing file (the owner's report)", () => {
   it("writes each window's march census: its texels by node rays and the tiles that wait (R08.T8.d)", () => {
     expect(inspectionTimingMarkdown(results())).toContain(
       "The march's far limb, the frame after the window (`atmosphere ray march`): texels by node rays 0: 900, 2: 60, 10: 40; 30 at w_L 1, with no centre ray; 600 centre rays in the air; 4 of 20 tiles hold a node ray; 1150 rays in the air, 2300 as each tile waits on its slowest texel (2.00 times).",
+    );
+  });
+
+  it("writes each window's composite census: its pixels by the terms formed for each (perf-composite-close)", () => {
+    expect(inspectionTimingMarkdown(results())).toContain(
+      "The composite's pixels, the same frame: 4000 in the output; 1000 (25.0%) outside the march's area from above the top, kept at once; sky 1000 (25.0%), of which behind read at the march's resolution 800 (20.0%), per pixel 200 (5.0%) and within a drawn disc 0 (0.0%); surfaces 2000 (50.0%), of which through the aerial volume 0 (0.0%); a drawn edge searched 80 (2.0%).",
     );
   });
 

@@ -128,11 +128,11 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, eighteen pairs at DPR 1 (the terrain's four probes, its selection scale and
-    // the decoration sets' pair among them) and the two shading pairs at 1 and 2, four runs each;
-    // then two counted settings and the occlusion's, figure-shading's and both shading pairs' two
-    // counted sides each.
-    expect(matrix).toHaveLength(4 + 18 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
+    // Four own runs, 23 pairs at DPR 1 (the terrain's four probes, its selection scale, the
+    // decoration sets' pair and the composite's five among them) and the two shading pairs at 1 and
+    // 2, four runs each; then two counted settings and the occlusion's, figure-shading's and both
+    // shading pairs' two counted sides each.
+    expect(matrix).toHaveLength(4 + 23 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -184,6 +184,8 @@ describe("the Mac batch's matrix", () => {
     expect(args("low-dpr2")).toEqual(["--device-pixel-ratio", "2"]);
     expect(args("limb-rays-high-dpr1-a2")).toEqual([]);
     expect(args("limb-rays-high-dpr1-b2")).toEqual(["--limb-rays", "per-texel"]);
+    expect(args("composite-scene-only-high-dpr1-a1")).toEqual([]);
+    expect(args("composite-scene-only-high-dpr1-b1")).toEqual(["--composite-probe", "scene-only"]);
     expect(args("occlusion-high-dpr1-b1")).toEqual(["--geometry", "occlusion=hzb"]);
     expect(args("shading-high-dpr2-a1")).toEqual([
       "--device-pixel-ratio",
@@ -520,7 +522,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 102 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 122 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(

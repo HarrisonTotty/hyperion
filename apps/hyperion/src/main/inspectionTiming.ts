@@ -38,6 +38,7 @@ import type {
   InspectionLongTasks,
   InspectionReactCommits,
   InspectionTimingCompile,
+  InspectionTimingCompositeCensus,
   InspectionTimingFirstFrame,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
@@ -1540,6 +1541,24 @@ function censusMarkdown(census: InspectionTimingMarchCensus | null): string[] {
   const waiting = census.rays > 0 ? (census.laneRays / census.rays).toFixed(2) : "—";
   return [
     `The march's far limb, the frame after the window (\`${cell(census.kernel)}\`): texels by node rays ${counted.length === 0 ? "—" : counted.join(", ")}; ${String(census.wholeMeans)} at w_L 1, with no centre ray; ${String(census.centresInAir)} centre rays in the air; ${String(census.limbTiles)} of ${String(census.tiles)} tiles hold a node ray; ${String(census.rays)} rays in the air, ${String(census.laneRays)} as each tile waits on its slowest texel (${waiting} times).`,
+    "",
+    ...compositeCensusMarkdown(census.composite),
+  ];
+}
+
+/**
+ * A window's composite census as lines of the summary (perf-composite-close): its pixels by the
+ * terms the composite forms for each, as counts and shares of the output; nothing where none was
+ * taken.
+ */
+function compositeCensusMarkdown(census: InspectionTimingCompositeCensus | null): string[] {
+  if (census === null) {
+    return [];
+  }
+  const share = (count: number): string =>
+    `${String(count)} (${census.pixels > 0 ? ((100 * count) / census.pixels).toFixed(1) : "—"}%)`;
+  return [
+    `The composite's pixels, the same frame: ${String(census.pixels)} in the output; ${share(census.outside)} outside the march's area from above the top, kept at once; sky ${share(census.sky)}, of which behind read at the march's resolution ${share(census.skyFromMarch)}, per pixel ${share(census.skyPerPixel)} and within a drawn disc ${share(census.discs)}; surfaces ${share(census.surface)}, of which through the aerial volume ${share(census.aerial)}; a drawn edge searched ${share(census.edges)}.`,
     "",
   ];
 }

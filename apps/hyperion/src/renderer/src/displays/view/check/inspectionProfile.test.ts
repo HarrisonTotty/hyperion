@@ -49,6 +49,7 @@ const CENSUS: MarchCensus = {
   limbTiles: 1,
   rays: 63,
   laneRays: 704,
+  composite: null,
 };
 
 /**

@@ -5,13 +5,14 @@ import { countingRenderEngine } from "../../../test/countingRenderEngine";
 import { FakeRenderEngine } from "../../../test/fakeRenderEngine";
 import {
   COMPOSITE_MATERIAL,
+  type CompositeProbe,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_FILL_KERNEL,
   RAY_MARCH_KERNEL,
   RAY_MARCH_SLOTS_KERNEL,
   SKY_VIEW_KERNEL,
 } from "../../../view/atmosphere/hillaire";
-import { MARCH_CENSUS_KERNEL } from "../../../view/atmosphere/marchProbe";
+import { COMPOSITE_CENSUS_KERNEL, MARCH_CENSUS_KERNEL } from "../../../view/atmosphere/marchProbe";
 import { type LitProbe, litProbedWgsl } from "../../../view/atmosphere/surfaceLighting";
 import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS } from "../../../view/bodies/draw";
 import type {
@@ -84,7 +85,7 @@ describe("a probed engine's depth layers (R10.T9.b)", () => {
 describe("a probed engine's composite probe (the owner's priority, 2026-11-01)", () => {
   /** The WGSL each material was made with through `engine`, by name, in order. */
   async function madeWith(
-    probe: "sky-off" | "transmittance-off" | "per-pixel" | "surface-grey" | null,
+    probe: CompositeProbe | null,
   ): Promise<ReadonlyArray<readonly [string, string]>> {
     const device = await new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] }).requestDevice();
     const inner = new FakeRenderEngine(device);
@@ -112,6 +113,11 @@ describe("a probed engine's composite probe (the owner's priority, 2026-11-01)",
     ["transmittance-off", "2"],
     ["per-pixel", "3"],
     ["surface-grey", "4"],
+    ["edge-off", "5"],
+    ["limb-off", "6"],
+    ["aerial-off", "7"],
+    ["discs-off", "8"],
+    ["scene-only", "9"],
   ] as const)("makes the composite alone under %s", async (probe, value) => {
     expect(await madeWith(probe)).toEqual([
       ["atmosphere composite", value],
@@ -207,6 +213,7 @@ describe("a probed engine's march probe and census (plan R08, R08.T8.d)", () => 
       limbTiles: 1,
       rays: 17,
       laneRays: 64,
+      composite: null,
     });
     expect({
       dispatched: dispatched.mock.calls.map(([kernel, , workgroups, pass]) => [
@@ -227,6 +234,91 @@ describe("a probed engine's march probe and census (plan R08, R08.T8.d)", () => 
       counted: ["medium", "view", "marchArea"],
       released: [MARCH_CENSUS_KERNEL.name, MARCH_CENSUS_KERNEL.name],
     });
+  });
+
+  it("takes the composite's census over the output beside the march's where its view holds the output's size (perf-composite-close)", async () => {
+    const { engine, inner, dispatched } = await probed();
+    const census = engine.marchCensus(new AbortController().signal);
+    const march = marchBindings(engine);
+    // `view.wgsl`'s AtmosphereView: `output`, its tenth member, x and y the output's pixels.
+    const view = new Float32Array(40);
+    view.set([20, 9, 0.5, 0], 36);
+    const bindings = { ...march, uniforms: { ...march.uniforms, view } };
+    engine.dispatch(engine.createCompute(RAY_MARCH_KERNEL), bindings, [2, 3, 1], "atmosphere view");
+    expect((await census).composite).toEqual({
+      pixels: 5,
+      outside: 0,
+      sky: 2,
+      skyFromMarch: 0,
+      skyPerPixel: 0,
+      surface: 0,
+      aerial: 0,
+      edges: 0,
+      discs: 0,
+    });
+    const counted = dispatched.mock.calls[2];
+    expect({
+      kernel: counted?.[0].name,
+      workgroups: counted?.[2],
+      uniforms: Object.keys(counted?.[1].uniforms ?? {}),
+      sampled: Object.keys(counted?.[1].sampled ?? {}),
+      released: inner.released.map((handle) => handle.name),
+    }).toEqual({
+      kernel: COMPOSITE_CENSUS_KERNEL.name,
+      workgroups: [3, 2, 1],
+      uniforms: ["medium", "view", "marchArea"],
+      sampled: ["sceneDepth"],
+      released: [
+        MARCH_CENSUS_KERNEL.name,
+        MARCH_CENSUS_KERNEL.name,
+        COMPOSITE_CENSUS_KERNEL.name,
+        COMPOSITE_CENSUS_KERNEL.name,
+      ],
+    });
+  });
+
+  it("keeps the march's census where the composite's fails, with none of the composite's, and releases both", async () => {
+    const { engine, inner } = await probed();
+    // The fake's own `readBuffer` refuses; its interface's, which `probed` answers, is the one read.
+    const asEngine: RenderEngine = inner;
+    const read = vi.spyOn(asEngine, "readBuffer");
+    const words = new Uint32Array(17);
+    read.mockResolvedValueOnce(words.buffer).mockRejectedValueOnce(new Error("read refused"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const census = engine.marchCensus(new AbortController().signal);
+    const march = marchBindings(engine);
+    const view = new Float32Array(40);
+    view.set([20, 9, 0.5, 0], 36);
+    const bindings = { ...march, uniforms: { ...march.uniforms, view } };
+    engine.dispatch(engine.createCompute(RAY_MARCH_KERNEL), bindings, [2, 3, 1], "atmosphere view");
+    expect({
+      composite: (await census).composite,
+      warned: warn.mock.calls.map(([text]) => text),
+      released: inner.released.map((handle) => handle.name),
+    }).toEqual({
+      composite: null,
+      warned: ["views check: the composite's census failed:"],
+      released: [
+        MARCH_CENSUS_KERNEL.name,
+        MARCH_CENSUS_KERNEL.name,
+        COMPOSITE_CENSUS_KERNEL.name,
+        COMPOSITE_CENSUS_KERNEL.name,
+      ],
+    });
+  });
+
+  it("rejects a census whose buffer cannot be made, as on a lost device, and draws on", async () => {
+    const { engine, inner } = await probed();
+    const census = engine.marchCensus(new AbortController().signal);
+    const bindings = marchBindings(engine);
+    const march = engine.createCompute(RAY_MARCH_KERNEL);
+    vi.spyOn(inner, "createBuffer").mockImplementation(() => {
+      throw new Error("no device");
+    });
+    expect(() => {
+      engine.dispatch(march, bindings, [2, 3, 1], "atmosphere view");
+    }).not.toThrow();
+    await expect(census).rejects.toThrow("no device");
   });
 
   it("takes no census its ask's signal withdrew", async () => {

@@ -14,7 +14,8 @@
  * 2026-11-01), `--march-probe` (plan R08, R08.T8.d) and `--lit-probe` (R08.T9.b's measurement) are
  * the changes it makes: the atmosphere's composite, or its march, made under the probe, and every
  * lit material and kernel under the lit one. It also takes the march's far-limb census beside a
- * march's dispatch when asked ({@link ProbedEngine.marchCensus}), a dispatch of its own after it.
+ * march's dispatch when asked ({@link ProbedEngine.marchCensus}), a dispatch of its own after it,
+ * and the composite's census of the same frame after that (perf-composite-close).
  */
 
 import type {
@@ -27,8 +28,15 @@ import {
   COMPOSITE_MATERIAL,
   type CompositeProbe,
   compositeProbedMaterial,
+  viewOutputPxOf,
 } from "../../../view/atmosphere/hillaire";
 import {
+  COMPOSITE_CENSUS_BUFFER,
+  COMPOSITE_CENSUS_KERNEL,
+  type CompositeCensus,
+  compositeCensusBindingsOf,
+  compositeCensusOf,
+  compositeCensusWorkgroupsOf,
   MARCH_CENSUS_BUFFER,
   MARCH_CENSUS_KERNEL,
   type MarchCensus,
@@ -327,7 +335,8 @@ export class ProbedEngine implements RenderEngine {
 
   /**
    * The census asked for beside the dispatch of `kernel` over `workgroups` with `bindings`, where
-   * it is a march's over an area: its kernel and buffer made for it, released once it is read.
+   * it is a march's over an area: its kernel and buffer made for it, released once it is read; and
+   * the composite's census over the frame's output beside it, where the march's view holds its size.
    */
   #takeCensus(
     kernel: string,
@@ -338,40 +347,83 @@ export class ProbedEngine implements RenderEngine {
     if (bound === null) {
       return;
     }
-    const inner = this.#inner;
-    const buffer = inner.createBuffer({
-      name: MARCH_CENSUS_KERNEL.name,
-      ...MARCH_CENSUS_BUFFER,
-      category: "other",
-    });
     const asked = this.#censusesAsked;
     this.#censusesAsked = [];
-    let counter: ComputeHandle | null = null;
-    let read: Promise<MarchCensus>;
-    try {
-      counter = inner.createCompute(MARCH_CENSUS_KERNEL);
-      inner.writeBuffer(buffer, 0, new Uint32Array(MARCH_CENSUS_BUFFER.bytes / 4));
-      inner.dispatch(counter, bound(buffer), workgroups, MARCH_CENSUS_KERNEL.name);
-      read = inner
-        .readBuffer(buffer)
-        .then((bytes) => marchCensusOf(kernel, new Uint32Array(bytes)));
-    } catch (error: unknown) {
-      read = Promise.reject(
-        error instanceof Error ? error : new Error(String(error), { cause: error }),
-      );
-    }
-    // Released once read, so that nothing the dispatch holds goes before it has run.
-    const made = counter;
-    const released = read.finally(() => {
-      inner.releaseBuffer(buffer);
-      if (made !== null) {
-        inner.releaseCompute(made);
-      }
-    });
+    const march = this.#countInto(
+      MARCH_CENSUS_KERNEL,
+      MARCH_CENSUS_BUFFER.bytes,
+      MARCH_CENSUS_BUFFER.usage,
+      bound,
+      workgroups,
+      (words) => marchCensusOf(kernel, words),
+    );
+    const view = bindings.uniforms["view"];
+    const groups = compositeCensusWorkgroupsOf(view === undefined ? [0, 0] : viewOutputPxOf(view));
+    const compositeBound = compositeCensusBindingsOf(bindings);
+    // The composite's census is the check's own addition beside the march's: where it fails, the
+    // march's stands, with none of the composite's, and the failure is said.
+    const composite: Promise<CompositeCensus | null> =
+      compositeBound === null || groups === null
+        ? Promise.resolve(null)
+        : this.#countInto(
+            COMPOSITE_CENSUS_KERNEL,
+            COMPOSITE_CENSUS_BUFFER.bytes,
+            COMPOSITE_CENSUS_BUFFER.usage,
+            compositeBound,
+            groups,
+            compositeCensusOf,
+          ).catch((error: unknown) => {
+            console.warn("views check: the composite's census failed:", error);
+            return null;
+          });
+    const released = Promise.all([march, composite]).then(([census, frame]) => ({
+      ...census,
+      composite: frame,
+    }));
     for (const { resolve, reject, release } of asked) {
       release();
       void released.then(resolve, reject);
     }
+  }
+
+  /**
+   * A census's dispatch of `pair` over `workgroups` with `bound`'s bindings into a buffer of `bytes`
+   * made and zeroed for it, read back as `read` gives it, the buffer and kernel released once read
+   * so that nothing the dispatch holds goes before it has run. It never throws: every failure, its
+   * buffer's making among them (a lost device's), is the promise's rejection.
+   */
+  #countInto<T>(
+    pair: KernelPair,
+    bytes: number,
+    usage: GPUBufferUsageFlags,
+    bound: (census: BufferHandle) => ComputeBindings,
+    workgroups: readonly [number, number, number],
+    read: (words: Uint32Array) => T,
+  ): Promise<T> {
+    const inner = this.#inner;
+    let buffer: BufferHandle | null = null;
+    let counter: ComputeHandle | null = null;
+    let counted: Promise<T>;
+    try {
+      buffer = inner.createBuffer({ name: pair.name, bytes, usage, category: "other" });
+      counter = inner.createCompute(pair);
+      inner.writeBuffer(buffer, 0, new Uint32Array(bytes / 4));
+      inner.dispatch(counter, bound(buffer), workgroups, pair.name);
+      counted = inner.readBuffer(buffer).then((data) => read(new Uint32Array(data)));
+    } catch (error: unknown) {
+      counted = Promise.reject(
+        error instanceof Error ? error : new Error(String(error), { cause: error }),
+      );
+    }
+    const [held, made] = [buffer, counter];
+    return counted.finally(() => {
+      if (held !== null) {
+        inner.releaseBuffer(held);
+      }
+      if (made !== null) {
+        inner.releaseCompute(made);
+      }
+    });
   }
 
   /**

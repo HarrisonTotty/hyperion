@@ -12,6 +12,10 @@ import {
   SKY_VIEW_KERNEL,
 } from "./hillaire";
 import {
+  COMPOSITE_CENSUS_BUFFER,
+  compositeCensusBindingsOf,
+  compositeCensusOf,
+  compositeCensusWorkgroupsOf,
   MARCH_CENSUS_BUFFER,
   MARCH_CENSUS_KERNEL,
   MARCH_CENSUS_NODES,
@@ -130,8 +134,48 @@ describe("the march's far-limb census (plan R08, R08.T8.d)", () => {
       limbTiles: 14,
       rays: 15,
       laneRays: 16,
+      composite: null,
     });
     expect(() => marchCensusOf("atmosphere ray march", words.subarray(1))).toThrow(RangeError);
+  });
+
+  it("reads the composite census's words, its counts in `compositeCensus.wgsl`'s order (perf-composite-close)", () => {
+    const words = Uint32Array.from({ length: COMPOSITE_CENSUS_BUFFER.bytes / 4 }, (_, i) => i);
+    expect(compositeCensusOf(words)).toEqual({
+      pixels: 0,
+      outside: 1,
+      sky: 2,
+      skyFromMarch: 3,
+      skyPerPixel: 4,
+      surface: 5,
+      aerial: 6,
+      edges: 7,
+      discs: 8,
+    });
+    expect(() => compositeCensusOf(words.subarray(1))).toThrow(RangeError);
+  });
+
+  it("dispatches the composite's census over the output in tiles of 8 × 8 pixels, none over no pixels", () => {
+    expect([
+      compositeCensusWorkgroupsOf([20, 9]),
+      compositeCensusWorkgroupsOf([816, 481]),
+      compositeCensusWorkgroupsOf([0, 9]),
+    ]).toEqual([[3, 2, 1], [102, 61, 1], null]);
+  });
+
+  it("takes the composite's census beside the march's with four of its bindings (perf-composite-close)", () => {
+    expect(compositeCensusBindingsOf(MARCH)?.(CENSUS)).toEqual({
+      uniforms: {
+        medium: MARCH.uniforms["medium"],
+        view: MARCH.uniforms["view"],
+        marchArea: MARCH.uniforms["marchArea"],
+      },
+      buffers: { census: CENSUS },
+      sampled: { sceneDepth: TEXTURE },
+      storage: {},
+    });
+    const { sceneDepth: _, ...noDepth } = MARCH.sampled;
+    expect(compositeCensusBindingsOf({ ...MARCH, sampled: noDepth })).toBeNull();
   });
 
   it("is taken beside a march's footprint over an area alone, with its own five bindings", () => {

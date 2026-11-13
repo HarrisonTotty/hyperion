@@ -159,6 +159,11 @@ describe("the views check's launch switch", () => {
       "transmittance-off",
       "per-pixel",
       "surface-grey",
+      "edge-off",
+      "limb-off",
+      "aerial-off",
+      "discs-off",
+      "scene-only",
     ] as const) {
       const launch: ViewsCheckLaunch = { ...profile, compositeProbe };
       expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);

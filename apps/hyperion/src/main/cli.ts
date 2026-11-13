@@ -123,7 +123,9 @@
  * 2026-11-01) that profile draws the atmosphere's composite under the probe, its sky branch off, its
  * transmittance across from above off, that transmittance per pixel as the way back forms it, or
  * every drawn surface dimmed by the channels' mean as the grey way back does (plan R08, R08.T9.c),
- * for an A/B of the composite's cost; it is refused without `--timing`. With `--count-gpu-calls`
+ * or (perf-composite-close) `edge-off|limb-off|aerial-off|discs-off|scene-only`, with no drawn edge
+ * searched, no far-limb footprint, no aerial volume read, no source's disc, or nothing but the
+ * scene's light, for an A/B of the composite's cost; it is refused without `--timing`. With `--count-gpu-calls`
  * too (plan R14, the owner's Mac) that profile counts every WebGPU call each window makes, by kind
  * and by pass, and each render pass's attachments with the bytes their loads and stores move
  * (R14.T2.e), at a little of the main thread's time; it is refused without `--timing`.
@@ -201,6 +203,7 @@ import {
   type SpikeLaunch,
 } from "../preload/spikeLaunch";
 import {
+  COMPOSITE_PROBE_NAMES,
   LIT_PROBE_NAMES,
   MARCH_PROBE_NAMES,
   MAX_RANDOMIZE_DRAWS,
@@ -615,8 +618,8 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--composite-probe <PROBE>",
-        "the frame profile's composite probe (the owner's priority): its sky branch, or its transmittance from above, off, that per pixel, or its surfaces grey",
-      ).choices(["sky-off", "transmittance-off", "per-pixel", "surface-grey"]),
+        "the frame profile's composite probe (the owner's priority): its sky branch, or its transmittance from above, off, that per pixel, or its surfaces grey; or one term off: the edge's search, the far limb's footprint, the aerial volume, the discs, or all but the scene",
+      ).choices(COMPOSITE_PROBE_NAMES),
     )
     .addOption(
       new Option(
@@ -1169,13 +1172,8 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
 function compositeProbeOf(
   options: Readonly<Record<string, unknown>>,
 ): { readonly compositeProbe: CompositeProbeName } | Record<string, never> {
-  const probe = options["compositeProbe"];
-  return probe === "sky-off" ||
-    probe === "transmittance-off" ||
-    probe === "per-pixel" ||
-    probe === "surface-grey"
-    ? { compositeProbe: probe }
-    : {};
+  const probe = COMPOSITE_PROBE_NAMES.find((each) => each === options["compositeProbe"]);
+  return probe === undefined ? {} : { compositeProbe: probe };
 }
 
 /** The march's probe `--march-probe` names where it is given, else nothing (plan R08, R08.T8.d). */

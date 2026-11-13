@@ -166,8 +166,13 @@ const HALF_MAX : f32 = 65504.0;
 // scene's light (no sky branch); 2, the sky drawn with no transmittance across from above, 1 in its
 // place (neither the far-limb footprint nor the sliced lookups it takes); 3, that transmittance
 // formed per pixel whatever `levers.x`, the way back's composite; or 4, every drawn surface dimmed by
-// the channels' mean whatever `levers.y`, the grey way back's (R08.T9.c). A constant, so that the
-// composite every player draws compiles none of them.
+// the channels' mean whatever `levers.y`, the grey way back's (R08.T9.c). Since perf-composite-close
+// (plan R08), each term `fragmentMain` forms a pixel alone: 5, no drawn edge searched, every pixel
+// reading `rayMarchTexelOf`'s texel (`rayMarchEdgeOf`); 6, from above the top no far-limb footprint,
+// each transmittance across the centre ray's alone; 7, a drawn surface within the volume's reach
+// reading no volume, its light kept; 8, no source's disc tested or drawn, the sky's light slot 0's;
+// or 9, every pixel the scene's light with nothing else read, the pass's own floor. A constant, so
+// that the composite every player draws compiles none of them.
 const COMPOSITE_PROBE : u32 = 0u;
 
 struct VertexOut {
@@ -434,7 +439,8 @@ const MARCH_EDGE_SAME_SURFACE_SHARE : f32 = 0.5;
 fn rayMarchEdgeOf(candidates : MarchCandidates, pixel : vec2u, depth : f32) -> MarchEdge {
   let one = rayMarchTexelFrom(candidates, pixel, depth);
   var out = MarchEdge(one.texel, one.texel, 0.0, one.texel, one.texel, 0.0, one.found, false);
-  let across = one.found && one.edge && draw.camera.w * draw.curvature.z >= draw.shell.x;
+  let across = COMPOSITE_PROBE != 5u && one.found && one.edge &&
+    draw.camera.w * draw.curvature.z >= draw.shell.x;
   for (var edge = across; edge; edge = false) {
     let scale = draw.output.z;
     let size = vec2u(ceil(draw.output.xy * scale));
@@ -680,6 +686,13 @@ fn anyDiscAlong(dir : vec3f, count : u32) -> bool {
 @fragment
 fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let pixel = vec2u(position.xy);
+  if (COMPOSITE_PROBE == 9u) {
+    let scene = textureLoad(sceneColour, pixel, 0);
+    let meterClass = scene.a;
+    return vec4f(min(scene.rgb, vec3f(HALF_MAX)), meterClass);
+  }
+  // The sources whose discs the composite tests, every one but under the probe of none.
+  let drawnSources = select(min(u32(draw.sky.x), MAX_SKY_SOURCES), 0u, COMPOSITE_PROBE == 8u);
   // From above the air's top, outside the march's area, a pixel reads no air (R08.T11.d), and with
   // no disc drawn on it keeps the scene's light: the full path's own sum, colour × 1 + 0 × factor,
   // formed here before the view and the body are read (R08.T16.a.2's giant a few pixels across).
@@ -687,7 +700,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     let uv = position.xy / draw.output.xy;
     let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
     let dir = normalize(draw.forward.xyz + ndc.x * draw.right.xyz + ndc.y * draw.upRay.xyz);
-    if (!anyDiscAlong(dir, min(u32(draw.sky.x), MAX_SKY_SOURCES))) {
+    if (!anyDiscAlong(dir, drawnSources)) {
       let scene = textureLoad(sceneColour, pixel, 0);
       let meterClass = scene.a;
       let luminance = scene.rgb * vec3f(1.0) + vec3f(0.0) * draw.sky.w;
@@ -709,7 +722,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   // The ray march's share of the frame (R08.T8): 0 below the march band, 1 from its upper edge up,
   // the same for every pixel, so each branch on it is uniform.
   let marchWeight = v.exact.w;
-  let count = skySourceCount(v);
+  let count = drawnSources;
   // Whether the pixel lies in the march's area (R08.T11.d); outside it, it reads no air.
   let here = marchedHere(pixel);
   // The march's texels the pixel reads, formed once, where the march wrote them (R08.T17):
@@ -767,7 +780,9 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
           }
           behind = fromMarch.behind;
           for (var perPixel = !fromMarch.found; perPixel; perPixel = false) {
-            footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
+            if (COMPOSITE_PROBE != 6u) {
+              footprint = farLimbFootprintOf(farLimbRaysOf(v), body, oblateBody, uv, v.output.xy);
+            }
             behind = transmittanceAcrossFromAbove(v, body, &footprint, dir, slotHere);
           }
         }
@@ -843,9 +858,12 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   // (R08.T8); beyond it, from the band's upper edge up (above the air included), and past a deck's
   // datum (`deckFirst`), the ray march.
   if (distance <= reach && marchWeight < 1.0 && !deckFirst) {
-    let aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
+    var aerialAt = vec4f(0.0, 0.0, 0.0, 1.0);
+    if (COMPOSITE_PROBE != 7u) {
+      aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
+    }
     var through = vec3f(aerialAt.a);
-    if (channels) {
+    if (channels && COMPOSITE_PROBE != 7u) {
       through = aerialTransmittanceAt(aerialTransmittance, linearClamp, uv, distance, reach);
     }
     var luminance = colour * through + aerialAt.rgb * factor;
