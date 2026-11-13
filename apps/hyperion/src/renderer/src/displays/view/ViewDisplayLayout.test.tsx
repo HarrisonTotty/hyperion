@@ -302,6 +302,7 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
         ["CAMERA", "true"],
         ["STYLE", "false"],
         ["EXPOSURE", "false"],
+        ["STILLS", "false"],
       ],
       true,
       true,
@@ -346,8 +347,8 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
     await chooseScene(view, "PHASE TEST");
     await toggleStyle(view);
     expect([wireframe, disclosures().map(([name]) => name)]).toEqual([
-      ["Instruments", "CAMERA", "STYLE", "EXPOSURE"],
-      ["Instruments", "CAMERA", "STYLE", "EXPOSURE", "EXPOSURE METER"],
+      ["Instruments", "CAMERA", "STYLE", "EXPOSURE", "STILLS"],
+      ["Instruments", "CAMERA", "STYLE", "EXPOSURE", "STILLS", "EXPOSURE METER"],
     ]);
   });
 
@@ -536,6 +537,17 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
     ]);
   });
 
+  it("folds STILLS behind its disclosure, and opens it alone (R11.T10.c)", async () => {
+    const view = await compact();
+    const folded = region("Stills PRIMARY");
+    await view.user.click(disclosure("STILLS"));
+    expect([folded, region("Stills PRIMARY") !== null, region("Camera PRIMARY")]).toEqual([
+      null,
+      true,
+      null,
+    ]);
+  });
+
   it("offers STYLE while no view can be drawn too, so that the row changes by the meter alone", async () => {
     await compact(new GraphicsStatusStore(initialGraphicsStatus("safe", false)));
     expect(disclosures().map(([name]) => name)).toEqual([
@@ -543,6 +555,7 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
       "CAMERA",
       "STYLE",
       "EXPOSURE",
+      "STILLS",
     ]);
   });
 });
@@ -587,6 +600,7 @@ describe("an instrument's place's tabs in both layouts (R10.T12.d; guide draft D
       "CAMERA (fold)",
       "STYLE (fold)",
       "EXPOSURE (fold)",
+      "STILLS (fold)",
       "CAMERA",
       "1 SEAT",
     ]);

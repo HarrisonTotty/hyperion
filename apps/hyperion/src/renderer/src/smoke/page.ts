@@ -44,8 +44,9 @@
  * survey edge, R10.T11's wireframe terrain and R10.T9.b's cascades, part 21 R10.T16.b's shared pass
  * (on an engine of its own, whose device it destroys), part 15 R10.T16.c's frame with relief and
  * R14's levers' frames on it, and part 20 its surfaces on the datum and its symbology; part 27
- * plan R11's far ocean (R11.T8.b), its kernels and its twin. Three groups
- * of part 1 run only when asked:
+ * plan R11's far ocean (R11.T8.b), its kernels and its twin; part 28 R11.T10.c's PNG round trip
+ * through the harness's main process and VIEW's still mount, which draw nothing on the GPU. Three
+ * groups of part 1 run only when asked:
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
  * the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's eclipse
@@ -197,6 +198,7 @@ import { checkDecorationTwin } from "./decoration";
 import { checkDetailSets } from "./detailSets";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
+import { checkStills, smokeStills } from "./stills";
 import { checkWireframe } from "./wireframe";
 import { checkShadowCascades, checkSharedPass, checkVisibilityCascades } from "./sharedPass";
 import {
@@ -341,7 +343,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * part 26, alone (2026-11-13). Plan R11's far ocean (R11.T8.b), its kernels and its twin, took part
  * 27, its own (2026-11-14). Part 12 stood at 324 to 336 s of its 360 s under a pod's load and ended
  * gates on its watchdog, so R08.T18.b's thermal forms, their twins and R08.T11's (T) row, which
- * draws by them, took part 30 (2026-11-14; parts 28 and 29 are other lanes').
+ * draws by them, took part 30 (2026-11-14; parts 28 and 29 then other lanes'). Plan R11's still
+ * mount and its PNG round trip through the harness's main process (R11.T10.c) took part 28, alone
+ * (2026-11-13).
  */
 type PagePart =
   | 1
@@ -371,6 +375,7 @@ type PagePart =
   | 25
   | 26
   | 27
+  | 28
   | 30;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
@@ -433,6 +438,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 26;
     case "27":
       return 27;
+    case "28":
+      return 28;
     case "30":
       return 30;
     default:
@@ -491,7 +498,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 27, 30 or all");
+    return failed("the part asked for is not 1 to 28, 30 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -820,6 +827,11 @@ async function run(
     () => checkCloudTwins(engine, checks),
   );
   await group(26, "R11.T7.b the cloud layer drawn", () => checkCloudLayerDraw(engine, checks));
+  // In part 28, alone: R11.T10.c's PNG round trip through the harness's main process and VIEW's
+  // still mount, which draw nothing on the GPU (parts 25 to 27 are other lanes').
+  await group(28, "R11.T10.c the still mount and the PNG round trip", () =>
+    checkStills(checks, smokeStills()),
+  );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),
   );

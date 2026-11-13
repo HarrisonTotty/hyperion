@@ -54,7 +54,7 @@ import {
   SOFTWARE_MODE_SWITCH,
 } from "./graphics/switches";
 import { reduceProfileFile } from "./inspectionTiming";
-import { isOwnPage } from "./ipcSender";
+import { isOwnPage, isWindowsOwnPage } from "./ipcSender";
 import { PageProfiler } from "./pageProfile";
 import { reduceTraceFile } from "./reduceTrace";
 import {
@@ -74,6 +74,7 @@ import {
 } from "./spike";
 import { workerPartials } from "./spikePartialsWorker";
 import { SpikeSession } from "./spikeSession";
+import { registerStillHandlers, StillFolder, STILLS_DIR_NAME } from "./stills";
 import {
   INSPECTION_TIMING_DIR,
   reduceWindowFile,
@@ -305,6 +306,29 @@ function pageUrl(): string {
   return !app.isPackaged && devServerUrl !== undefined
     ? devServerUrl
     : pathToFileURL(join(__dirname, "../renderer/index.html")).href;
+}
+
+/**
+ * Registers the stills' handlers (plan R11, R11.T10.c), once a process, before any window: each
+ * call is checked against the main frame of the window it came from, at the window's own page.
+ */
+function registerStills(): void {
+  const page = pageUrl();
+  registerStillHandlers<IpcMainInvokeEvent>({
+    handle: (channel, listener) => {
+      ipcMain.handle(channel, listener);
+    },
+    isSender: (event) =>
+      isWindowsOwnPage(
+        event.senderFrame,
+        page,
+        BrowserWindow.fromWebContents(event.sender)?.webContents.mainFrame ?? null,
+      ),
+    folder: new StillFolder(join(app.getPath("userData"), STILLS_DIR_NAME)),
+    logError: (message, error) => {
+      console.error(message, error);
+    },
+  });
 }
 
 /** Writes one line of a spike run's or a views check's log to stdout, where the recipe reads it. */
@@ -719,6 +743,7 @@ async function main(): Promise<void> {
 
   await app.whenReady();
   denyPermissionRequests(session.defaultSession);
+  registerStills();
   const spike = args.spike;
   if (spike !== undefined) {
     const hidden = spike.smoke || process.env[SPIKE_HIDDEN_ENV] === "1";

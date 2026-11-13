@@ -6,8 +6,10 @@ import type {
   QualitySettingName,
   SpikeApi,
   SpikeLaunch,
+  StillsApi,
   ViewsCheckApi,
 } from "../../../preload/api";
+import { FakeStillsApi } from "./fakeStills";
 
 /** The server the stubbed preload reports the client was launched to link to. */
 export const TEST_SERVER_URL = "ws://127.0.0.1:7878/ws";
@@ -50,6 +52,7 @@ export const TEST_SPIKE_LAUNCH: SpikeLaunch = {
  *   default.
  * @param setting - The launch's quality setting (`--setting`): the spike's or the check's own,
  *   else `high`, as the main process gives it.
+ * @param stills - The still functions (plan R11, R11.T10.c): a fresh store over memory by default.
  */
 export function stubHyperionApi(
   serverUrl: string = TEST_SERVER_URL,
@@ -57,6 +60,7 @@ export function stubHyperionApi(
   spike?: SpikeApi,
   viewsCheck?: ViewsCheckApi,
   setting: QualitySettingName = spike?.launch.setting ?? viewsCheck?.launch.setting ?? "high",
+  stills: StillsApi = new FakeStillsApi(),
 ): void {
   const api: HyperionApi = {
     platform: "linux",
@@ -69,6 +73,7 @@ export function stubHyperionApi(
     versions: { electron: "44.4.3", chrome: "142.0.0.0", node: "22.21.1" },
     ...(spike === undefined ? {} : { spike }),
     ...(viewsCheck === undefined ? {} : { viewsCheck }),
+    stills,
   };
   vi.stubGlobal("hyperion", api);
 }

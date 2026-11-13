@@ -8,10 +8,11 @@
 #   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
 #                 [--drop-adapter-switches] [--captures=DIR] [--geometry=FIELD=VALUE[,...]]
 #
-# The page's groups are in twenty-eight parts (`src/renderer/src/smoke/page.ts`), each a run of its
-# own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6, 8
-# to 14 and 30 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3
-# R08.T6.g and R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's far limb, 5 R08.T6.f's
+# The page's groups are in twenty-nine parts, 1 to 28 and 30 (`src/renderer/src/smoke/page.ts`),
+# each a run of its own under its own watchdog, the harness's hang detector (perf-smoke,
+# 2026-10-13): parts 2 to 6, 8 to 14 and 30 hold the atmosphere's CPU-twin groups (2 R08.T6.b but
+# its four absorbers, 3 R08.T6.g and R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's
+# far limb, 5 R08.T6.f's
 # Saturn-class figure and R08.T6.i, 6 R08.T6.b's four absorbers, 8 R08.T6.f's Earth and
 # R07.T8.e–f's cell pass, 9 R08.T8.a's march band, R08.T11.e's giant, R08.T18.a's thermal
 # emission and R08.T16.b's disc air, 10 R08.T7 and R08.T8.e's
@@ -30,7 +31,8 @@
 # buffer with the two-pass occlusion, part 23 R14.T2's frames by the visibility buffer through the
 # renderer, part 24 plan R07's packed disc cells' kernels, part 25 plan R11's decoration library
 # against its reference, its kernels' catalogue and the generated detail sets, part 26 plan R11's
-# clouds (R11.T7.b), part 27 plan R11's far ocean (R11.T8.b), and part 1 every other group.
+# clouds (R11.T7.b), part 27 plan R11's far ocean (R11.T8.b), part 28 plan R11's stills (R11.T10),
+# and part 1 every other group.
 # SwiftShader's GPU process and the twins together took some 940 CPU-seconds for the two variants
 # (measured 2026-10-13), so on a machine busy with other work, with about 4 cores left to the
 # smoke, a run of the whole page outlasted the 180 s watchdog however its work overlapped. Three
@@ -73,6 +75,8 @@
 # 30 (2026-11-14; parts 28 and 29 are other lanes'). Alone on a pod (48 vCPU), part 12 took 274 s
 # before and 110 s after, and part 30 197 s, (T)'s row 124 s of it (95 s beside part 12's shared
 # read).
+# Plan R11's still mount and its PNG round trip through the harness's main process, which draw
+# nothing on the GPU, took part 28 (2026-11-13; parts 25 to 27 are other lanes').
 # --part=N runs that part alone (every part by default).
 #
 # --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R08.T8.b's
@@ -128,7 +132,7 @@ geometry=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=[1-9] | --part=1[0-9] | --part=2[0-7] | --part=30) parts+=("${arg#--part=}") ;;
+        --part=[1-9] | --part=1[0-9] | --part=2[0-8] | --part=30) parts+=("${arg#--part=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
@@ -140,7 +144,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 ]]; then
-    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 30)
+    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 30)
 fi
 
 # Each run's outer limit, s: 120 s (`outer_margin_s`) over its watchdog (`src/smoke/result.ts`'s

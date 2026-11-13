@@ -1,0 +1,138 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { describedText } from "../../test/statusLine";
+import {
+  STILL_CONTROL_IDLE,
+  StillControl,
+  type StillControlState,
+  type StillStep,
+} from "./StillControl";
+
+/** A still running at `step`. */
+function running(step: StillStep): StillControlState {
+  return { ...STILL_CONTROL_IDLE, activity: { kind: "running", step } };
+}
+
+/** The control in `state`, and its `TAKE STILL`'s calls. */
+function renderControl(state: StillControlState) {
+  const onTake = vi.fn<() => void>();
+  const user = userEvent.setup();
+  const view = render(<StillControl state={state} onTake={onTake} />);
+  return { onTake, user, view };
+}
+
+describe("the view's still control (R11.T10.c)", () => {
+  it("takes a still from the keyboard: Tab to TAKE STILL, then Enter or Space", async () => {
+    const { onTake, user } = renderControl(STILL_CONTROL_IDLE);
+    await user.tab();
+    expect(screen.getByRole("button", { name: "TAKE STILL" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.keyboard(" ");
+    expect(onTake).toHaveBeenCalledTimes(2);
+  });
+
+  it("holds TAKE STILL back while a still runs, focusable and saying why", async () => {
+    const { onTake, user } = renderControl(
+      running({ kind: "rendering", donePasses: 3, totalPasses: 12 }),
+    );
+    await user.tab();
+    const take = screen.getByRole("button", { name: "TAKE STILL" });
+    await user.keyboard("{Enter}");
+    expect([take.getAttribute("aria-disabled"), onTake.mock.calls.length]).toEqual(["true", 0]);
+    expect(take).toHaveFocus();
+    expect(describedText(take)).toBe("NOT AVAILABLE: a still is in progress");
+  });
+
+  it("shows the still's progress as a progress element of its passes, with their count", () => {
+    renderControl(running({ kind: "rendering", donePasses: 3, totalPasses: 12 }));
+    const bar = screen.getByRole("progressbar", { name: "PROGRESS" });
+    expect([
+      bar.getAttribute("value"),
+      bar.getAttribute("max"),
+      screen.getByText(/^PASSES/u).textContent,
+      screen.getByRole("status").textContent,
+    ]).toEqual(["3", "12", "PASSES 3 OF 12", "RENDERING"]);
+  });
+
+  it("keeps the passes done in a field as wide as the total, so that the bar holds still", () => {
+    renderControl(running({ kind: "rendering", donePasses: 7, totalPasses: 12_480 }));
+    const done = screen.getByText("7");
+    expect([done.style.minWidth, screen.getByText(/^PASSES/u).textContent]).toEqual([
+      "6ch",
+      "PASSES 7 OF 12,480",
+    ]);
+  });
+
+  it("says TERRAIN: STREAMING while the still waits for its frustum's terrain", () => {
+    renderControl(running({ kind: "streaming", donePasses: 0, totalPasses: 12 }));
+    expect(screen.getByRole("status").textContent).toBe("TERRAIN: STREAMING");
+  });
+
+  it("has no progress element while no still runs", () => {
+    renderControl({ ...STILL_CONTROL_IDLE, activity: { kind: "idle", last: { kind: "saved" } } });
+    expect([screen.queryByRole("progressbar"), screen.getByRole("status").textContent]).toEqual([
+      null,
+      "STILL SAVED",
+    ]);
+  });
+
+  it("says why the last still was not saved, and what to do once a loss abandoned one", () => {
+    const { view } = renderControl({
+      ...STILL_CONTROL_IDLE,
+      activity: { kind: "idle", last: { kind: "not-saved", reason: "the disk is full" } },
+    });
+    const first = screen.getByRole("status").textContent;
+    view.rerender(
+      <StillControl
+        state={{
+          standing: "suspended",
+          activity: { kind: "idle", last: { kind: "abandoned" } },
+          heldBack: null,
+        }}
+        onTake={() => undefined}
+      />,
+    );
+    const statuses = screen.getAllByRole("status").map((status) => status.textContent);
+    expect([first, statuses]).toEqual([
+      "STILL NOT SAVED: the disk is full",
+      ["STILLS SUSPENDED", "STILL ABANDONED: the graphics device was lost, TAKE STILL to retry"],
+    ]);
+  });
+
+  it("says STILLS SUSPENDED and still offers TAKE STILL, the explicit request", async () => {
+    const { onTake, user } = renderControl({ ...STILL_CONTROL_IDLE, standing: "suspended" });
+    await user.click(screen.getByRole("button", { name: "TAKE STILL" }));
+    expect([screen.getByText("STILLS SUSPENDED"), onTake.mock.calls.length]).toEqual([
+      expect.anything(),
+      1,
+    ]);
+  });
+
+  it("says STILLS DISABLED and holds TAKE STILL back once a second loss disabled them", async () => {
+    const { onTake, user } = renderControl({
+      standing: "disabled",
+      activity: { kind: "idle", last: { kind: "abandoned" } },
+      heldBack: null,
+    });
+    const take = screen.getByRole("button", { name: "TAKE STILL" });
+    await user.click(take);
+    expect([
+      screen.getAllByRole("status").map((status) => status.textContent),
+      onTake.mock.calls.length,
+      describedText(take),
+    ]).toEqual([
+      ["STILLS DISABLED", "STILL ABANDONED: the graphics device was lost, relaunch to retry"],
+      0,
+      "NOT AVAILABLE: stills disabled by a second device loss, relaunch to retry",
+    ]);
+  });
+
+  it("holds TAKE STILL back with the reason it is given", () => {
+    renderControl({ ...STILL_CONTROL_IDLE, heldBack: "NOT AVAILABLE: no WebGPU" });
+    expect(describedText(screen.getByRole("button", { name: "TAKE STILL" }))).toBe(
+      "NOT AVAILABLE: no WebGPU",
+    );
+  });
+});

@@ -9,7 +9,7 @@
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
  * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`, and the part of
- * its groups to run as `--smoke-part=1` to `27` or `30` (every group without it), and
+ * its groups to run as `--smoke-part=1` to `28` or `30` (every group without it), and
  * `--smoke-twin-workers=<n>` the atmosphere twins' workers, at most 4 (a quarter of the hardware
  * threads, at most 4, without it);
  * `--smoke-gpu-timing=1` says the run lifted timestamp quantization (the hardware runs of T11),
@@ -43,7 +43,15 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { app, BrowserWindow, ipcMain, nativeImage, screen, session } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  type IpcMainInvokeEvent,
+  nativeImage,
+  screen,
+  session,
+} from "electron";
 
 import {
   type CancelledRequest,
@@ -60,6 +68,7 @@ import {
   transferSocketUrl,
 } from "./result";
 import { isOwnPage } from "../main/ipcSender";
+import { registerStillHandlers, StillFolder, STILLS_DIR_NAME } from "../main/stills";
 import { describeMachine, nodeMachineSources } from "../main/results";
 import { applyGraphicsSwitches, graphicsSwitches, launchModeOf } from "../main/graphics/switches";
 import {
@@ -369,6 +378,18 @@ void app
             resize,
           })
         : (): Promise<void> => Promise.resolve();
+    // The client's still handlers (plan R11, R11.T10.c), over the run's own user-data directory,
+    // which part 28 saves and reads back through.
+    registerStillHandlers<IpcMainInvokeEvent>({
+      handle: (channel, listener) => {
+        ipcMain.handle(channel, listener);
+      },
+      isSender: (event) => isOwnPage(event.senderFrame, PAGE_URL, window.webContents.mainFrame),
+      folder: new StillFolder(join(app.getPath("userData"), STILLS_DIR_NAME)),
+      logError: (message, error) => {
+        process.stderr.write(`${message} ${String(error)}\n`);
+      },
+    });
     ipcMain.handle(SMOKE_RESULT_CHANNEL, async (event, report: unknown) => {
       if (!isOwnPage(event.senderFrame, PAGE_URL)) {
         return;

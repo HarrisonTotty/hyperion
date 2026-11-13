@@ -5225,6 +5225,147 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   min-width: 22ch;
 }
 
+/*
+ * VIEW's stills (plan R11, R11.T10.c): the still control, then the saved stills. The panel is the
+ * second column's last and the first to give way: its list scrolls within the room left, so that
+ * it never pushes the exposure's panels out of the column.
+ */
+.view-stills {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.still-control__standing,
+.still-control__status {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* An empty status line keeps no room: the live region stays, holding nothing. */
+.still-control__status:has(output:empty) {
+  margin: 0;
+}
+
+.still-control__command {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+}
+
+/* As the exposure's commands: the button keeps its label's width and its reason wraps beside it. */
+.still-control__command > .control {
+  flex: none;
+}
+
+.still-control__reason {
+  flex: 1 1 0;
+  contain: inline-size;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.still-control__progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+}
+
+.still-control__progress-label {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+/* A plain bar in the console's own colours, never the platform's: progress is neutral. */
+.still-control__bar {
+  flex: 1 1 0;
+  height: 0.5rem;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-0);
+  appearance: none;
+}
+
+.still-control__bar::-webkit-progress-bar {
+  background: var(--surface-0);
+}
+
+.still-control__bar::-webkit-progress-value {
+  background: var(--text);
+}
+
+.still-control__count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The passes done, right-aligned in a field as wide as the total's, so that the bar never moves. */
+.still-control__done {
+  display: inline-block;
+  text-align: right;
+}
+
+/* The saved stills and their labels, all in B612 Mono (Design note 17). */
+.still-list {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  list-style: none;
+}
+
+.still-list__entry + .still-list__entry {
+  border-top: 1px solid var(--line);
+}
+
+.still-list__still {
+  width: 100%;
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  text-align: left;
+}
+
+.still-list__label {
+  margin: 0.25rem 0 0.5rem;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+}
+
+.still-list__label[hidden] {
+  display: none;
+}
+
+.still-list__row {
+  display: contents;
+}
+
+.still-list__label dt {
+  font-family: var(--font-mono);
+}
+
+.still-list__label dd {
+  overflow-wrap: anywhere;
+}
+
+.still-list__line {
+  display: block;
+}
+
+.still-list__annunciations {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.still-list__empty {
+  font-family: var(--font-mono);
+}
+
 /* The exposure meter beside the exposure panel (plan R07, T13.b). */
 .view-meter__reading,
 .view-meter__value {

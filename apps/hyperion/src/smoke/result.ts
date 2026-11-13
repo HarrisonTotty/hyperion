@@ -34,6 +34,18 @@ export interface CancelledRequest {
 /** The one IPC channel the page reports on, fixed on both sides of the bridge. */
 export const SMOKE_RESULT_CHANNEL = "smoke:result";
 
+/**
+ * The client's still channels (`main/stills.ts`'s `STILLS_CHANNELS`, which `result.test.ts` holds
+ * equal), on which the smoke's preload calls the main process's still handlers for part 28 (plan
+ * R11, R11.T10.c). Repeated here, since the smoke's preload may share no module with the client's:
+ * a module both imported would be bundled as a chunk, which a sandboxed preload cannot `require`.
+ */
+export const SMOKE_STILLS_CHANNELS = {
+  save: "hyperion:stills:save",
+  list: "hyperion:stills:list",
+  read: "hyperion:stills:read",
+} as const;
+
 /** The exit codes of Design note 17. */
 export const SMOKE_EXIT = { pass: 0, failed: 1, setup: 2, watchdog: 3 } as const;
 
@@ -130,7 +142,7 @@ export const TRANSFER_WATCHDOG_MS = 660_000;
 
 /** What sets a run's watchdog: the main process's switches. */
 export interface SmokeWatchdogInputs {
-  /** `--smoke-part`'s value: `1` to `27`, `30`, or `all`. */
+  /** `--smoke-part`'s value: `1` to `28`, `30`, or `all`. */
   readonly part: string;
   /** Whether `--smoke-captures` asks for the capture frames. */
   readonly captures: boolean;

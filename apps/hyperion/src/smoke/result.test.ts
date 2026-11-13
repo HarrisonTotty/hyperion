@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { STILLS_CHANNELS } from "../main/stills";
 import {
   CAPTURES_WATCHDOG_MS,
   GPU_TIMING_WATCHDOG_MS,
@@ -15,6 +16,7 @@ import {
   readSmokeResult,
   readWatchdogScale,
   SMOKE_EXIT,
+  SMOKE_STILLS_CHANNELS,
   SMOKE_WATCHDOG_BASE_MS,
   SMOKE_WATCHDOG_SCALE_MAX,
   type SmokeResult,
@@ -32,6 +34,12 @@ const PASSING: SmokeResult = {
   checks: [{ name: "T9.a", pass: true, detail: "ok" }],
   setupError: null,
 };
+
+describe("the smoke's still channels (R11.T10.c)", () => {
+  it("are the client's own", () => {
+    expect(SMOKE_STILLS_CHANNELS).toEqual(STILLS_CHANNELS);
+  });
+});
 
 describe("the smoke run's verdict", () => {
   it("passes when every check passes and nothing left the page", () => {
@@ -133,10 +141,10 @@ describe("readSmokeImages", () => {
 const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
 
 /**
- * The parts after the first, 2 to 27 and 30 (28 and 29 left to other lanes, 2026-11-14), which take
+ * The parts after the first, 2 to 28 and 30 (29 left to another lane, 2026-11-14), which take
  * neither part 1's captures nor its timings.
  */
-const LATER_PARTS = [...Array.from({ length: 26 }, (_, k) => String(k + 2)), "30"];
+const LATER_PARTS = [...Array.from({ length: 27 }, (_, k) => String(k + 2)), "30"];
 
 describe("smokeWatchdogMs", () => {
   const plain = {
@@ -316,18 +324,18 @@ describe.runIf(process.platform !== "win32")("testRender.sh's scale", () => {
 });
 
 describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
-  it("takes every part from 1 to 27 and 30 as --part= and refuses 0, 28, 29 and 31, before any run", () => {
+  it("takes every part from 1 to 28 and 30 as --part= and refuses 0, 29 and 31, before any run", () => {
     for (const part of ["1", ...LATER_PARTS]) {
       expect(runScriptAtScale("1", [`--part=${part}`]).stderr).not.toContain("unknown argument");
     }
-    for (const part of ["0", "28", "29", "31"]) {
+    for (const part of ["0", "29", "31"]) {
       const refused = runScriptAtScale("1", [`--part=${part}`]);
       expect(refused.status).toBe(2);
       expect(refused.stderr).toContain(`unknown argument --part=${part}`);
     }
   });
 
-  it("runs every part from 1 to 27 and 30 when none is asked for", () => {
+  it("runs every part from 1 to 28 and 30 when none is asked for", () => {
     const parts = /^ {4}parts=\(([\d ]+)\)$/mu.exec(script())?.[1];
     expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
   });

@@ -196,6 +196,7 @@ import { measureRoom, NOT_MEASURED, type RoomMeasures, sameRoomMeasures } from "
 import type { PlacePage } from "./PlaceTabs";
 import { useGroundPage } from "./useGroundPage";
 import { BESIDE_CLASS, COLUMNS_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
+import { ViewStills } from "./ViewStills";
 import { useReasonFolds } from "./reasonFolds";
 import { surveyPassStatement } from "./surveyPassStatement";
 import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
@@ -377,6 +378,7 @@ const FOLD_PANELS: ReadonlyArray<FoldPanel> = [
   "style",
   "exposure",
   "meter",
+  "stills",
 ];
 
 /** No statement of a scene's opening. */
@@ -2180,6 +2182,7 @@ function ViewStage({
     style: `${legendId}-style`,
     exposure: `${legendId}-exposure`,
     meter: `${legendId}-meter`,
+    stills: `${legendId}-stills`,
   };
   // The operated instrument's GROUND page in the camera panel's place (plan R10, R10.T12.d).
   const groundPage = useGroundPage({
@@ -2819,6 +2822,7 @@ function ViewStage({
               hidden={folded("meter")}
             />
           ) : null}
+          <ViewStills designator={PRIMARY_NAME} id={foldIds.stills} hidden={folded("stills")} />
         </div>
       </div>
     </div>

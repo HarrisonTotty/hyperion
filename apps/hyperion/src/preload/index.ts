@@ -10,6 +10,7 @@ import { planetViewerFromArgv } from "./planetViewerLaunch";
 import { qualityFromArgv } from "./qualityLaunch";
 import { serverUrlFromArgv } from "./serverUrl";
 import { spikeMember } from "./spikeApi";
+import { stillsApi } from "./stillsApi";
 import { viewsCheckMember } from "./viewsCheckApi";
 
 const graphicsLaunch = graphicsLaunchFromArgv(process.argv, process.platform);
@@ -49,6 +50,8 @@ const api: HyperionApi = {
   ...viewsCheckMember(process.argv, {
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
   }),
+  // Every launch keeps its stills (plan R11, R11.T10.c); no channel name crosses the bridge.
+  stills: stillsApi({ invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args) }),
 };
 
 contextBridge.exposeInMainWorld("hyperion", api);

@@ -1345,6 +1345,7 @@ on it.
   the PNG's `iTXt` label parses back equal to the sidecar; a still whose frustum had not streamed is
   labelled `TERRAIN: STREAMING`; the handlers refuse a foreign sender, an oversized image and a
   malformed label; the control and list by keyboard, through `getByRole`.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.c.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.c.md).
 - **R11.T10.d The soak, by hand, recorded.** On the otherwise idle development machine (RTX 3080)
   and, by the owner, on an otherwise idle UHD 620, whose i915 preemption limit is the one the cap
   guards, at the batch cap: repeated

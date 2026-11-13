@@ -239,6 +239,174 @@ export interface HyperionApi {
   readonly spike?: SpikeApi;
   /** The several-views check's functions, present only on a `--views-check` launch (R07.T20). */
   readonly viewsCheck?: ViewsCheckApi;
+  /** The still images' store under `userData/stills/` (plan R11, R11.T10.c), on every launch. */
+  readonly stills: StillsApi;
+}
+
+/**
+ * An instant on the universe clock as the wire gives it (`@hyperion/protocol`'s `UniverseTime`):
+ * whole seconds since the epoch, rounded towards negative infinity, and the nanoseconds after them.
+ */
+export interface StillTime {
+  readonly seconds: number;
+  /** 0 to 999,999,999. */
+  readonly nanos: number;
+}
+
+/** A point in the `GALACTIC` frame as the wire gives it (`@hyperion/protocol`'s `GalacticPosition`). */
+export interface StillGalacticPosition {
+  /** The 1 ly cell's lower corner, whole light-years along x, y and z. */
+  readonly cell_ly: readonly [number, number, number];
+  /** The offset from that corner, m along x, y and z, each in [0, 1 ly). */
+  readonly offset_m: readonly [number, number, number];
+}
+
+/** The frame a still's camera position is held in: the renderer's `CameraFrame`, as recorded. */
+export type StillCameraFrame =
+  | { readonly kind: "galactic"; readonly origin: StillGalacticPosition }
+  | { readonly kind: "system"; readonly system: string }
+  | { readonly kind: "body"; readonly body: string }
+  | { readonly kind: "craft"; readonly craft: string };
+
+/** The camera a still was rendered from (plan R11, Design note 17). */
+export interface StillCamera {
+  readonly frame: StillCameraFrame;
+  /** The camera's position, m from the frame's origin along the galactic axes. */
+  readonly positionM: readonly [number, number, number];
+  /** The unit quaternion that rotates camera axes into the frame's (the renderer's `Quaternion`). */
+  readonly orientation: {
+    readonly w: number;
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  /** The horizontal field of view, degrees, in (0, 180). */
+  readonly fovXDeg: number;
+}
+
+/**
+ * The exposure a still was rendered at: the view's at the request, never metered per tile (Design
+ * note 17), with its automation level as the renderer's `ExposureControl` has it, and for an
+ * inhibit who or what inhibited it, in the reading's words after its middle dot (`OPERATOR`,
+ * `NO IMAGE TO METER`).
+ */
+export type StillExposure =
+  | { readonly kind: "manual" | "auto"; readonly ev100: number }
+  | { readonly kind: "inhibited"; readonly ev100: number; readonly cause: string };
+
+/** A body's survey coverage at a still's request: the cells the still could use. */
+export interface StillSurveyCoverage {
+  /** The body's ID in its wire form (`BodyIdHex`). */
+  readonly body: string;
+  /** The body's name as the view gave it, in upper case (`TEST EARTH`). */
+  readonly name: string;
+  /** The coarse field's level, 5 to 8. */
+  readonly level: number;
+  /** The fraction of the level's cells surveyed, in [0, 1]. */
+  readonly surveyedFraction: number;
+  /** The finest resolution of any surveyed cell, m, or `null` where none is surveyed. */
+  readonly bestResolutionM: number | null;
+}
+
+/**
+ * A reading of the view's label block at a still's request, as it stood there: its label and its
+ * value in the view's own words and formats (`FRAME` `BODY TEST EARTH`, `TIME` `UT +12 yr …`).
+ */
+export interface StillReading {
+  readonly label: string;
+  readonly value: string;
+}
+
+/** A still's size, px. */
+export interface StillSize {
+  readonly widthPx: number;
+  readonly heightPx: number;
+}
+
+/**
+ * A still image's label (plan R11, R11.T10.c, Design note 17): the record that is its JSON sidecar
+ * and its PNG's `iTXt` chunk `hyperion-still`, which the main process checks against its schema
+ * (`view/stills/stillLabel.ts`) before it writes either.
+ */
+export interface StillLabel {
+  /** The label's form. */
+  readonly schema: "hyperion-still/1";
+  /** The scene's time, at which the still was frozen. */
+  readonly time: StillTime;
+  readonly camera: StillCamera;
+  readonly exposure: StillExposure;
+  /**
+   * The view's label block's readings at the request, in its order: its frame, time, camera, field
+   * of view, exposure and place as the view stated them, which the list of stills shows.
+   */
+  readonly readings: ReadonlyArray<StillReading>;
+  /** The quality setting of the view that asked for the still. */
+  readonly setting: QualitySettingName;
+  /** Whether decoration was drawn (`DECORATION ON`). */
+  readonly decoration: boolean;
+  /** Each body's survey coverage at the request, in the scene's order; none for no survey. */
+  readonly survey: ReadonlyArray<StillSurveyCoverage>;
+  /**
+   * Every annunciation that held, in the words the view stated it in, `TERRAIN: STREAMING` among
+   * them where the still's frustum had not streamed in time.
+   */
+  readonly annunciations: ReadonlyArray<string>;
+  readonly size: StillSize;
+}
+
+/** A saved still: its ID, which names its files, and its label as its sidecar has it. */
+export interface SavedStill {
+  /** `YYYYMMDDTHHMMSSmmmZ-xxxxxxxx`: when the main process saved it, and eight hex digits. */
+  readonly id: string;
+  readonly label: StillLabel;
+}
+
+/** Why the main process refused a still: what it checks before it writes anything. */
+export type StillRefusal =
+  /** The PNG is over the bound for the label's size, or over the largest still's. */
+  | "oversized"
+  /** The label is not one of the schema's. */
+  | "malformed-label"
+  /** Another still is being written: one is written at a time. */
+  | "busy"
+  /** The bytes are not a PNG the main process can read. */
+  | "not-png"
+  /** The PNG's own size is not the label's. */
+  | "size-mismatch"
+  /** The PNG's `hyperion-still` chunk is missing or is not the sidecar's label. */
+  | "label-mismatch";
+
+/** What the main process did with a still it was handed. */
+export type StillSaveAnswer =
+  | { readonly kind: "saved"; readonly still: SavedStill }
+  | { readonly kind: "refused"; readonly reason: StillRefusal }
+  /** The write failed: `reason` is the system's error code, such as `ENOSPC`, or `write failed`. */
+  | { readonly kind: "failed"; readonly reason: string };
+
+/** A saved still's files, as read back. */
+export interface StillFile {
+  readonly id: string;
+  /** The PNG's bytes, its `hyperion-still` chunk among them. */
+  readonly png: Uint8Array;
+  /** The label as its sidecar has it. */
+  readonly label: StillLabel;
+}
+
+/**
+ * The still images' store (plan R11, R11.T10.c): the main process keeps each still as a PNG and its
+ * JSON sidecar under `userData/stills/`, a player's artefact rather than ship state, checking each
+ * call's sender and arguments (`main/stills.ts`).
+ */
+export interface StillsApi {
+  /**
+   * Saves a still: `png`, its label already embedded (`view/stills/pngLabel.ts`), and `label`, its
+   * sidecar, each written atomically.
+   */
+  saveStill(png: Uint8Array, label: StillLabel): Promise<StillSaveAnswer>;
+  /** The saved stills, newest first, at most the main process's listing bound. */
+  listStills(): Promise<ReadonlyArray<SavedStill>>;
+  /** A saved still's files, or `null` where `id` names none. */
+  readStill(id: string): Promise<StillFile | null>;
 }
 
 /**

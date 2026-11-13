@@ -101,7 +101,7 @@ export function viewLayout(size: ElementSize | null): ViewLayout {
 }
 
 /** A side panel that folds in the compact layout. */
-export type FoldPanel = "instruments" | "camera" | "style" | "exposure" | "meter";
+export type FoldPanel = "instruments" | "camera" | "style" | "exposure" | "meter" | "stills";
 
 /** The panel open when the display mounts, and again when the one open folds. */
 export const DEFAULT_FOLD: FoldPanel = "camera";
@@ -115,13 +115,15 @@ export function toggledFold(open: FoldPanel, panel: FoldPanel): FoldPanel {
 }
 
 /**
- * The row of disclosure buttons under the list, by the panels' own names, in the panels' order;
- * `EXPOSURE METER` stands only while its panel would, last, so that nothing moves.
+ * The row of disclosure buttons under the list, by the panels' own names, in the panels' order but
+ * for `STILLS` (plan R11, R11.T10.c), whose panel stands after the meter's: `EXPOSURE METER`
+ * stands only while its panel would, last, so that nothing moves.
  */
 export const FOLD_BUTTONS: ReadonlyArray<{ readonly panel: FoldPanel; readonly label: string }> = [
   { panel: "camera", label: "CAMERA" },
   { panel: "style", label: "STYLE" },
   { panel: "exposure", label: "EXPOSURE" },
+  { panel: "stills", label: "STILLS" },
   { panel: "meter", label: "EXPOSURE METER" },
 ];
 

@@ -15,6 +15,11 @@
     "src/renderer/src/lib/pinnedMath.ts",
     "src/renderer/src/lib/vsyncPacing.ts",
     "src/renderer/src/lib/wholeBodySurvey.ts",
+    "src/renderer/src/test/pngFixtures.ts",
+    "src/renderer/src/test/stillFixtures.ts",
+    "src/renderer/src/view/stills/pngLabel.ts",
+    "src/renderer/src/view/stills/stillAnswers.ts",
+    "src/renderer/src/view/stills/stillLabel.ts",
     "electron.vite.config.mts",
     "vitest.config.mts",
     "package.json"

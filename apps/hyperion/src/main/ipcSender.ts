@@ -12,10 +12,26 @@ export interface SenderFrame {
   readonly url: string;
 }
 
-/** A page's URL without its query or fragment, which a reload or the smoke page's options vary. */
+/**
+ * A page's URL without its query or fragment, which a reload or the smoke page's options vary, in
+ * the WHATWG URL parser's form: so the development server's `http://localhost:5173`, as
+ * electron-vite gives it, and the `http://localhost:5173/` its frame reports are one page (plan R11,
+ * R11.T10.c's security review). A URL the parser refuses is cut at its query as written.
+ */
 export function pageOf(url: string): string {
-  const cut = url.search(/[?#]/);
-  return cut < 0 ? url : url.slice(0, cut);
+  let parsed: URL | null;
+  try {
+    parsed = new URL(url);
+  } catch {
+    parsed = null;
+  }
+  if (parsed === null) {
+    const cut = url.search(/[?#]/);
+    return cut < 0 ? url : url.slice(0, cut);
+  }
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.href;
 }
 
 /**
@@ -38,4 +54,21 @@ export function isOwnPage(
     return false;
   }
   return pageOf(frame.url) === pageOf(pageUrl);
+}
+
+/**
+ * Whether `frame` is the main frame of the window it came from, at the page `pageUrl`: the check of
+ * a handler every window of the app shares, such as the stills' (plan R11, R11.T10.c), which takes
+ * the window from the event's sender.
+ *
+ * @param frame - `event.senderFrame`, `null` once the frame has gone.
+ * @param owner - The main frame of the window whose page sent the event, or `null` where no window
+ *   owns its sender (`BrowserWindow.fromWebContents` found none).
+ */
+export function isWindowsOwnPage(
+  frame: SenderFrame | null | undefined,
+  pageUrl: string,
+  owner: SenderFrame | null,
+): boolean {
+  return owner !== null && isOwnPage(frame, pageUrl, owner);
 }
