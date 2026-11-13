@@ -93,6 +93,24 @@ fn the_binary_xrb_smoke_run_is_the_same_on_any_thread_count() {
     assert_smoke_block(&one, "binary_xrb");
 }
 
+/// The X-ray binaries' smoke run for generator version 32 (P11.T8.b's fix, task `binary_xrb_32`)
+/// writes its sampler's block, its header in the grammar and its items the task's, with its
+/// high-mass kinds pinned at its manifest's 152 hosts of the row's 10⁴.
+#[test]
+fn the_binary_xrb_32_smoke_run_pins_the_high_mass_side() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = smoke("binary_xrb_32", "4", dir.path());
+    assert_smoke_block(&text, "binary_xrb_32");
+    let block = TableText::of_block(&text, "binary_xrb_32")
+        .unwrap()
+        .unwrap();
+    let acceptance = block.header().unwrap().acceptance.unwrap_or_default();
+    assert!(
+        acceptance.contains("high-mass hosts 152;"),
+        "binary_xrb_32 --smoke: {acceptance}"
+    );
+}
+
 /// On the smoke manifest's censuses each donor kind's rows give its cited figure to 1%, read as
 /// the class reads a row: each component's hosts a system its population's hosts per solar mass
 /// formed × the mass formed × its born fraction, times its density at the Sun-like point or its

@@ -26,6 +26,7 @@ use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::imf::{BandShares, MassBand};
 use crate::galaxy::params::GalaxyParams;
+use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
 use crate::math;
 use crate::orbit::Eccentricity;
@@ -41,7 +42,7 @@ use crate::stellar::binary::testing::{
 use crate::tables::binary::{
     AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark, AwdPick, BLACK_HOLE_TRANSIENT_SHARE,
     CLASS_SHARES, CLASS_SHARES_31, ClassSamplerTable, ClassShareTable, SCRATCH_CLASS_SHARES,
-    SamplerKey, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
+    SamplerKey, XRB_SAMPLER, XRB_SAMPLER_32, XrbHostKind, XrbMark, XrbPick,
 };
 use crate::time::LIGHT_CROSSING_L;
 use crate::units::consts::SECONDS_PER_DAY;
@@ -677,7 +678,9 @@ fn the_accreting_white_dwarf_samplers_against_the_engine() {
 const AWD_MISSES: [(AwdSide, usize, f64); 0] = [];
 
 /// Fortin et al.'s (2023, A&A 671, A149) catalogue of the Galaxy's high-mass X-ray binaries: 152
-/// (recalled; the pod reads no web, so not read at source).
+/// (recalled; the pod reads no web, so not read at source). It makes no cut by environment, a young
+/// cluster or association or not, so the galaxy's like quantity is the class's high-mass hosts
+/// and the young features' lists' together.
 const CATALOGUED_HIGH_MASS: f64 = 152.0;
 
 /// The catalogue's high-mass hosts under the tables refitted at 29 on the generator's own pairs
@@ -686,41 +689,75 @@ const CATALOGUED_HIGH_MASS: f64 = 152.0;
 /// blocks fitted before P11.T12's wind reach the class held 2.89, under train 27's refit on its
 /// engine, which 28 kept, 4.10, and under 27's first refit 27.6. Re-pinned at 30 on v30's refit of
 /// `binary_xrb`: 3.03 (2.85 at 29; landing round 4). The merger step at 31 moves no X-ray binary's
-/// row, so it is beyond that step's fits.
-const PINNED_HIGH_MASS_HOSTS: f64 = 3.026_043_732_450_046_4;
+/// row, so it is beyond that step's fits. Re-pinned at 31 on 31's refit of `binary_xrb`: 3.026038
+/// (3.026044 at 30), at which this test failed at its 31 base. A wrong state that the hold at 32
+/// fixes (P11.T8.b, `hmxb_hold`): the 31 arm keeps it until the bump deletes the arm.
+const PINNED_HIGH_MASS_HOSTS: f64 = 3.026_038_288_957_461_3;
 
 /// Corral-Santana et al.'s (2016, A&A 587, A61) black-hole transients, as P11.T8.b takes them:
 /// 1,300, ± 400 its tolerance (theirs 1,280 ± 120, a lower limit; recalled).
 const BLACK_HOLE_TRANSIENTS: (f64, f64) = (1_300.0, 400.0);
 
-/// The fitted X-ray binaries at Milky Way parameters (slow): over ten Milky
-/// Way seeds, the class's expected hosts inside P11.T8.b's 0.7–1.5 × 10⁴, its black-hole
-/// transients inside 1,300 ± 400 ([`BLACK_HOLE_TRANSIENTS`]), and its high-mass hosts, the young
-/// thin disc's, at least the catalogued ([`CATALOGUED_HIGH_MASS`]), pinned where they miss
-/// ([`PINNED_HIGH_MASS_HOSTS`]).
+/// The galaxy's expected high-mass hosts under `process`, before the class's test and the young
+/// lists' thinning by their members' ages: the class's and the young features' lists' together,
+/// each high-mass component's catalogue hosts over the share of them the catalogue keeps.
+fn galaxy_high_mass_hosts(galaxy: &Galaxy, process: &XrayBinaries) -> f64 {
+    let row = CLASS_SHARES.row(CarvedClass::XrayBinary);
+    process
+        .components()
+        .iter()
+        .filter(|c| c.side() == XrbSide::HighMass)
+        .map(|c| {
+            let component = galaxy.fields().component(c.id());
+            c.hosts_per_system() * component.count_with_unborn()
+                / feature::catalogue_share(galaxy, row, component)
+        })
+        .sum()
+}
+
+/// The fitted X-ray binaries at Milky Way parameters (slow): over ten Milky Way seeds, under the
+/// version's rules and under every 32 hold, the class's expected hosts inside P11.T8.b's 0.7–1.5 ×
+/// 10⁴ and its black-hole transients inside 1,300 ± 400 ([`BLACK_HOLE_TRANSIENTS`]); the galaxy's
+/// high-mass hosts, the young thin disc's, the catalogued ([`CATALOGUED_HIGH_MASS`]) from 32
+/// (P11.T8.b's fix), where 31's class holds [`PINNED_HIGH_MASS_HOSTS`].
 #[test]
 #[ignore = "slow: ten galaxies built"]
 fn the_fitted_x_ray_binaries_give_the_milky_way_counts() {
     for k in 0..10_u64 {
-        let galaxy = milky_way(Seed::new(0x0b17_08a0_0000_0100 | k));
-        let process = XrayBinaries::new(&galaxy);
-        let total = process.expected_hosts(&galaxy);
-        let transients = process.expected_hosts_of(&galaxy, XrbHostKind::BlackHoleTransient);
-        let high = process.expected_hosts_on(&galaxy, XrbSide::HighMass);
-        println!(
-            "Milky Way seed {k}: {total:.4e} hosts, {transients:.1} black-hole transients, \
-             {high:.1} high-mass against Fortin et al.'s {CATALOGUED_HIGH_MASS}"
-        );
-        assert!((0.7e4..=1.5e4).contains(&total), "{k}: {total}");
-        let (transients_wanted, spread) = BLACK_HOLE_TRANSIENTS;
-        assert!(
-            (transients - transients_wanted).abs() <= spread,
-            "{k}: {transients}"
-        );
-        assert!(
-            high >= CATALOGUED_HIGH_MASS || (high / PINNED_HIGH_MASS_HOSTS - 1.0).abs() < 1e-6,
-            "{k}: {high}"
-        );
+        let seed = Seed::new(0x0b17_08a0_0000_0100 | k);
+        let galaxy = milky_way(seed);
+        // No memo of the galaxy reads the X-ray binaries' tables, so one build serves both arms.
+        let sided = galaxy.clone().with_rules(GalaxyRules::every_32_hold());
+        for (arm, galaxy) in [(31, galaxy), (32, sided)] {
+            let process = XrayBinaries::new(&galaxy);
+            let total = process.expected_hosts(&galaxy);
+            let transients = process.expected_hosts_of(&galaxy, XrbHostKind::BlackHoleTransient);
+            let high = process.expected_hosts_on(&galaxy, XrbSide::HighMass);
+            let galaxy_high = galaxy_high_mass_hosts(&galaxy, &process);
+            println!(
+                "Milky Way seed {k} at {arm}: {total:.4e} hosts, {transients:.1} black-hole \
+                 transients, {galaxy_high:.2} high-mass ({high:.2} in the catalogue) against \
+                 Fortin et al.'s {CATALOGUED_HIGH_MASS}"
+            );
+            assert!((0.7e4..=1.5e4).contains(&total), "{k} at {arm}: {total}");
+            let (transients_wanted, spread) = BLACK_HOLE_TRANSIENTS;
+            assert!(
+                (transients - transients_wanted).abs() <= spread,
+                "{k} at {arm}: {transients}"
+            );
+            if arm == 31 {
+                assert!(
+                    (high / PINNED_HIGH_MASS_HOSTS - 1.0).abs() < 1e-6,
+                    "{k} at 31: {high}"
+                );
+            } else {
+                assert!(
+                    (galaxy_high / CATALOGUED_HIGH_MASS - 1.0).abs() < 1e-6,
+                    "{k} at 32: {galaxy_high}"
+                );
+                assert!(high > 0.0 && high < galaxy_high, "{k} at 32: {high}");
+            }
+        }
     }
 }
 
@@ -845,11 +882,11 @@ fn xrb_index(kind: XrbHostKind) -> usize {
         .expect("every kind is in `XrbHostKind::ALL`")
 }
 
-/// The fitted table's kind weights, in [`XrbHostKind::ALL`]'s order.
-fn xrb_table_weights() -> [f64; 9] {
+/// The fitted `table`'s kind weights, in [`XrbHostKind::ALL`]'s order.
+fn xrb_table_weights(table: &ClassSamplerTable<XrbMark, XrbPick>) -> [f64; 9] {
     let mut weights = [0.0; 9];
-    let low = XRB_SAMPLER.pick(XrbPick::LowMassKind).weights();
-    let high = XRB_SAMPLER.pick(XrbPick::HighMassKind).weights();
+    let low = table.pick(XrbPick::LowMassKind).weights();
+    let high = table.pick(XrbPick::HighMassKind).weights();
     for (kind, &w) in XrbHostKind::LOW_MASS.iter().zip(low) {
         weights[xrb_index(*kind)] = w;
     }
@@ -868,11 +905,15 @@ fn xrb_weighted(pool: &[XrayMarks], mark: XrbMark, weights: &[f64; 9]) -> Vec<(f
     weighted_to(&of_kind, weights)
 }
 
-/// [`DRAWS`] values of `mark` drawn through the fitted sampler at evenly spread ranks, given
+/// [`DRAWS`] values of `mark` drawn through the fitted `table` at evenly spread ranks, given
 /// `conditions` drawn the same way for the low-mass donor's mass: hosts drawn through the table,
 /// as the class's scan draws the mark.
-fn table_draws(mark: XrbMark, conditions: &[f64]) -> Vec<(f64, f64)> {
-    let sampler = ClassSampler::new(&XRB_SAMPLER);
+fn table_draws(
+    table: &'static ClassSamplerTable<XrbMark, XrbPick>,
+    mark: XrbMark,
+    conditions: &[f64],
+) -> Vec<(f64, f64)> {
+    let sampler = ClassSampler::new(table);
     (0..DRAWS)
         .map(|i| {
             let rank = (f64::from(i) + 0.5) / f64::from(DRAWS);
@@ -889,7 +930,9 @@ fn table_draws(mark: XrbMark, conditions: &[f64]) -> Vec<(f64, f64)> {
         .collect()
 }
 
-/// The fitted X-ray binaries' sampler against the engine at 27 (P15.T10.b's acceptance; slow):
+/// The fitted X-ray binaries' samplers against the engine at 27 (P15.T10.b's acceptance; slow),
+/// [`XRB_SAMPLER`] and from 32 `XRB_SAMPLER_32` (P11.T8.b's fix, its marks refitted on the same
+/// census with its kinds in their new weights), each on the same censuses:
 /// for each mark fitted from the engine, values drawn through the table against the engine's
 /// members of the kinds the class draws it for, weighted so that their kinds are in the table's
 /// weights, the slab's for the low-mass and history marks and the young thin disc's for the
@@ -901,6 +944,10 @@ fn table_draws(mark: XrbMark, conditions: &[f64]) -> Vec<(f64, f64)> {
 #[test]
 #[ignore = "slow: two censuses of 1.3 × 10⁷ records through the binary engine"]
 fn the_x_ray_binary_sampler_against_the_engine() {
+    let tables: [XrbTableCase; 2] = [
+        ("XRB_SAMPLER", &XRB_SAMPLER, &XRB_MISSES),
+        ("XRB_SAMPLER_32", &XRB_SAMPLER_32, &XRB_32_MISSES),
+    ];
     let of_class = |members: Vec<ClassMember>| -> Vec<XrayMarks> {
         members
             .iter()
@@ -939,24 +986,53 @@ fn the_x_ray_binary_sampler_against_the_engine() {
     };
     println!("held-out slab members by kind: {}", kinds(&slab));
     println!("held-out young members by kind: {}", kinds(&young));
-    let weights = xrb_table_weights();
-    let periods: Vec<f64> = table_draws(XrbMark::LowMassPeriod, &[])
+    let mut misses = Vec::new();
+    for (label, table, pinned_misses) in tables {
+        println!("{label}:");
+        misses.extend(xrb_table_misses(
+            table,
+            pinned_misses,
+            [&slab, &slab_fitted],
+            [&young, &young_fitted],
+        ));
+    }
+    assert!(misses.is_empty(), "{misses:#?}");
+}
+
+/// One X-ray binary sampler the engine test compares: its name, the table and its pinned misses.
+type XrbTableCase = (
+    &'static str,
+    &'static ClassSamplerTable<XrbMark, XrbPick>,
+    &'static [(usize, f64)],
+);
+
+/// The misses of `table`'s marks against the engine's held-out and fitted halves of the slab and
+/// of the young thin disc (the K–S loop of
+/// [`the_x_ray_binary_sampler_against_the_engine`]), those pinned in `pinned_misses` apart.
+fn xrb_table_misses(
+    table: &'static ClassSamplerTable<XrbMark, XrbPick>,
+    pinned_misses: &[(usize, f64)],
+    [slab, slab_fitted]: [&[XrayMarks]; 2],
+    [young, young_fitted]: [&[XrayMarks]; 2],
+) -> Vec<String> {
+    let weights = xrb_table_weights(table);
+    let periods: Vec<f64> = table_draws(table, XrbMark::LowMassPeriod, &[])
         .into_iter()
         .map(|d| d.0)
         .collect();
     let mut misses = Vec::new();
     for (k, mark) in XrbMark::ALL.into_iter().enumerate() {
-        let high_mass = XRB_SAMPLER.mark(mark).name().contains("bex")
-            || XRB_SAMPLER.mark(mark).name().contains("supergiant")
-            || XRB_SAMPLER.mark(mark).name().contains("high_mass");
+        let high_mass = table.mark(mark).name().contains("bex")
+            || table.mark(mark).name().contains("supergiant")
+            || table.mark(mark).name().contains("high_mass");
         let (pool, pool_fitted) = if high_mass {
-            (&young, &young_fitted)
+            (young, young_fitted)
         } else {
-            (&slab, &slab_fitted)
+            (slab, slab_fitted)
         };
         let held_out = xrb_weighted(pool, mark, &weights);
         let fitted_half = xrb_weighted(pool_fitted, mark, &weights);
-        let name = XRB_SAMPLER.mark(mark).name();
+        let name = table.mark(mark).name();
         if held_out.len() < MIN_MEMBERS || fitted_half.len() < MIN_MEMBERS {
             println!(
                 "  {name}: {} and {} engine members, not compared",
@@ -970,7 +1046,11 @@ fn the_x_ray_binary_sampler_against_the_engine() {
         } else {
             &[]
         };
-        let r = Resolved::of(&table_draws(mark, conditions), &held_out, &fitted_half);
+        let r = Resolved::of(
+            &table_draws(table, mark, conditions),
+            &held_out,
+            &fitted_half,
+        );
         println!(
             "  {name}: {} engine members, D {} (p {:.3e}) against {:.6} + in-sample {:.6}",
             held_out.len(),
@@ -979,7 +1059,7 @@ fn the_x_ray_binary_sampler_against_the_engine() {
             r.critical,
             r.in_sample
         );
-        let pinned = XRB_MISSES.iter().find(|m| m.0 == k);
+        let pinned = pinned_misses.iter().find(|m| m.0 == k);
         let held_as_pinned = pinned.is_some_and(|m| (r.held_out.statistic - m.1).abs() < 1e-6);
         if (pinned.is_none() && !r.passes()) || (pinned.is_some() && !held_as_pinned) {
             misses.push(format!(
@@ -988,10 +1068,13 @@ fn the_x_ray_binary_sampler_against_the_engine() {
             ));
         }
     }
-    assert!(misses.is_empty(), "{misses:#?}");
+    misses
 }
 
 /// The X-ray binaries' marks whose Kolmogorov–Smirnov test misses at the shape's resolution, each
 /// a finding: the mark's place in [`XrbMark`]'s order and its held-out distance, as measured to a
 /// millionth.
 const XRB_MISSES: [(usize, f64); 0] = [];
+
+/// [`XRB_MISSES`] for `XRB_SAMPLER_32`.
+const XRB_32_MISSES: [(usize, f64); 0] = [];

@@ -139,10 +139,21 @@ const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(31);
 /// If the Milky Way fixture does not build.
 #[must_use]
 fn fingerprint_galaxy() -> Galaxy {
+    fingerprint_galaxy_at(FINGERPRINT_VERSION)
+}
+
+/// [`fingerprint_galaxy`] at `version`'s rules in place of [`FINGERPRINT_VERSION`]'s: a held
+/// task's, whose manifest fits at a later version (`xrb::BinaryXrb32Task`, at 32).
+///
+/// # Panics
+///
+/// If the Milky Way fixture does not build.
+#[must_use]
+fn fingerprint_galaxy_at(version: GeneratorVersion) -> Galaxy {
     Galaxy::from_params_for_binary_refit(
         Seed::new(FINGERPRINT_SEED),
         GalaxyParams::milky_way_like(),
-        FINGERPRINT_VERSION,
+        version,
     )
     .expect("the Milky Way fixture builds")
 }
@@ -1235,10 +1246,25 @@ mod tests {
         refused("min_members = 50", "min_members = 5", "min_members");
     }
 
-    /// The four binary manifests fit at the fingerprints' version, so that `check`'s probes are
-    /// the census galaxy's.
+    /// The binary manifests fit at their fingerprints' version, so that `check`'s probes are the
+    /// census galaxy's: the four at [`FINGERPRINT_VERSION`], and `binary_xrb_32`'s two at
+    /// [`xrb::XRB_32_FINGERPRINT_VERSION`].
     #[test]
     fn the_manifests_fit_at_the_fingerprints_version() {
+        for (path, text) in [
+            (
+                "binary_xrb_32.toml",
+                include_str!("../../manifests/binary_xrb_32.toml"),
+            ),
+            (
+                "binary_xrb_32.smoke.toml",
+                include_str!("../../manifests/binary_xrb_32.smoke.toml"),
+            ),
+        ] {
+            let manifest = Manifest::from_bytes(path.as_ref(), text.as_bytes().to_vec()).unwrap();
+            let params = CensusParams::of(&manifest).unwrap();
+            assert_eq!(params.version, xrb::XRB_32_FINGERPRINT_VERSION, "{path}");
+        }
         for (path, text) in [
             (
                 "binary_awd.toml",

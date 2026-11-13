@@ -200,6 +200,12 @@ pub const MANIFEST: &[TableInfo] = &[
         provisional: false,
     },
     TableInfo {
+        name: "binary_xrb_32",
+        revision: 0,
+        since_generator_version: 31,
+        provisional: false,
+    },
+    TableInfo {
         name: "chabrier",
         revision: 1,
         since_generator_version: 14,

@@ -21,12 +21,15 @@
 //! engine, on the census of the pairs the generator itself draws (refitted at generator version
 //! 29): `tables::binary`'s samplers, one for each accreting class and the X-ray binaries', and
 //! their rows of the share table, read where the galaxy is built (the share matrix's class shares)
-//! and where a class's process is built.
+//! and where a class's process is built. From generator version 32 the X-ray binaries' sampler is
+//! one whose high-mass side is pinned to its observed count (P11.T8.b's fix, held at 32 in
+//! `hmxb_hold`).
 
 mod awd;
 pub(crate) mod feature;
 #[cfg(test)]
 mod fitted_tables;
+mod hmxb_hold;
 mod hosts;
 mod merger;
 mod nsm;
@@ -38,6 +41,7 @@ pub use awd::{
     HELIUM_DONOR_TEMPERATURE_K, LIFETIME_MARGIN, OXYGEN_NEON_MIN_MASS,
 };
 pub use feature::{BinaryHost, HostPlace, ListedBinary, ListedHost, is_listed_binary};
+pub(crate) use hmxb_hold::XrbTableRules;
 pub use hosts::{ClassHosts, HostComponent};
 pub use merger::{MergerCandidate, MergerEntry, MergerPair, StellarMergers};
 pub use nsm::{Inspiral, NeutronStarMergers, NsmCandidate, NsmEntry};

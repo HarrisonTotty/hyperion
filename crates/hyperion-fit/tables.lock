@@ -122,6 +122,18 @@ provisional = false
 acceptance = "slab members by kind 388/9725/4/91/7/0/239/4/0; young members by kind 543/400/108/169/873/4/97/0/5; census kinds 0.0375/0.9385/0.0007/0.0070/0.0009/0.0000/0.0150/0.0003/0.0000; weights 0.0329/0.8223/0.0006/0.1300/0.0132/0.0002 and 0.0007/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 70); high-mass hosts 8; donor mass's own nodes 14; layers C 0.000 D 0.147 E 0.853; rates a system 1.54e-4/2.29e-4/1.67e-4/1.30e-4/1.98e-4/1.21e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
 
 [[table]]
+name = "binary_xrb_32"
+path = "binary.rs"
+task = "binary_xrb_32"
+revision = 0
+inputs_sha256 = "3a90200ff8d2c3bf25f069d1ef2e69005ceddbf12580af520b34ecf25347ed7f"
+body_sha256 = "b38209c58564a15707867207a2ead38b0b232ef5d0f1bfeb49ccfc337b3b4f71"
+fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 25.0, 1.0, 1.55261502182327, 1.3396048261069489, -1.5866839897114011]
+since_generator_version = 31
+provisional = false
+acceptance = "slab members by kind 388/9725/4/91/7/0/239/4/0; young members by kind 543/400/108/169/873/4/97/0/5; census kinds 0.0375/0.9385/0.0007/0.0070/0.0009/0.0000/0.0150/0.0003/0.0000; weights 0.0323/0.8086/0.0006/0.1300/0.0130/0.0002 and 0.0151/0.0001/0.0001; black-hole transients 1300 of 1e4 (the census's 70); high-mass hosts 152; donor mass's own nodes 14; layers C 0.000 D 0.147 E 0.853; rates a system 1.54e-4/2.29e-4/1.67e-4/1.30e-4/1.98e-4/1.21e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
+
+[[table]]
 name = "bowl_permanent_shadow"
 path = "bowl_permanent_shadow.rs"
 task = "bowl_permanent_shadow"

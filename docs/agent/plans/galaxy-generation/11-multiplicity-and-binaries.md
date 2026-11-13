@@ -7788,3 +7788,23 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     star collapses too: the golden pair above, a bump mover. Movers were not surveyed.
   - _For the bump to 30._ Delete `Held`, the field, the brief's read and the tripwire; the 30
     refit of the pair-light tables then takes the channel (P11.T17.b's two slow tests at 30).
+- **P11.T8.b: the high-mass side pinned to its observed count, held at 32** (lane
+  `fix-p11-hmxb-hosts`, 2026-11-10; nothing moves at 31). The cause: `binary_xrb` scaled the whole
+  class to 10⁴ by the engine's kind shares, 1,158 low-mass members per high-mass one, which left
+  7.56 high-mass hosts, 3.03 in the catalogue and the rest in the young features' lists.
+  - _The hold._ `HIGH_MASS_SIDE_VERSION` = 32 (`catalogue_classes/binary/hmxb_hold.rs`),
+    `GalaxyRules::xrb_tables` (`XrbTableRules::{Joint, Sided}`), read by `XrayBinaries::new`;
+    `every_32_hold()`.
+  - _The table._ A second task, `binary_xrb_32` (`manifests/binary_xrb_32{,.smoke}.toml`,
+    `high_mass_hosts = 152.0`, `sided_kind_weights`), since 31 reads `binary_xrb`'s block: the
+    sampler alone, block `binary_xrb_32`, read as `tables::binary::XRB_SAMPLER_32`; the row stays
+    `binary_xrb`'s. Its marks are refitted too: the pooled low-mass marks move by up to 0.01.
+  - _At 32._ The 152 is expected, before the class's test and the young lists' age thinning
+    (the class's part 60.8); the low-mass kinds but the transients fall 1.7%.
+  - _Lean (2026-11-10): the count is Fortin et al.'s 152 catalogued_, class and young features'
+    lists together, uncorrected for completeness, so a lower limit; no intrinsic total was read.
+  - _For the bump to 32._ Delete the hold, the field, `every_32_hold`, `XRB_SAMPLER_32` and task `binary_xrb_32` with its manifests, block and lock entry; add
+    `high_mass_hosts = 152.0` to `binary_xrb.toml` and refit it `--since 32`; drop the slow counts
+    test's 31 arm; re-pin `tests/binary_xrb.rs`' `HIGH_MASS_HOSTS` and the class's pins. Movers
+    were not surveyed: expect the X-ray binaries' and the alerts' X-ray goldens and
+    `tests/binary_xrb.rs`' scanned counts.
