@@ -788,6 +788,8 @@ Files: `packages/perf/**`, `apps/hyperion/package.json`, the root `package.json`
 
 ### R12.T2 Machine, power and thermal state
 
+Records: [12-measurements-and-settings-ladder/records/R12.T2.md](12-measurements-and-settings-ladder/records/R12.T2.md).
+
 `src/main/perf/machine.ts` (`describeMachine`: CPU from `os.cpus()`, `app.getGPUInfo("complete")`,
 kernel from `os.release()`, the display from `screen`, the window manager, compositor and X11 or
 XWayland from the environment, versions from `process.versions`, R01's `AdapterSummary` from the
@@ -853,6 +855,7 @@ battery. Acceptance: `pnpm test`, `just ci`.
   a delegated decision, hardware item 2). Acceptance: `pnpm test`, and by hand on the
   development machine a sample of the running client's GPU process shows a non-zero resident figure
   (from `nvidia-smi`), and on the UHD 620, by the owner, the same from fdinfo with Xorg's line.
+  Records: [12-measurements-and-settings-ladder/records/R12.T3.b.md](12-measurements-and-settings-ladder/records/R12.T3.b.md).
 
 Files: `apps/hyperion/src/renderer/src/view/perf/ledger.ts`, R01's `view/engine/memory.ts`, R05's
 tally call sites, `apps/hyperion/src/main/perf/samplers.ts`, R05's `main/fdinfo.ts`, tests and
@@ -867,6 +870,7 @@ fixtures.
   not in `@hyperion/perf`'s `PERF_SCENE_IDS`; the switch list in perf mode is R01's with `gpuTiming`
   and nothing more, never `--enable-webgpu-developer-features` or `--enable-unsafe-webgpu`; a
   control run's list lacks `timestamp_quantization`. Acceptance: `pnpm test`, `just ci`.
+  Records: [12-measurements-and-settings-ladder/records/R12.T4.a.md](12-measurements-and-settings-ladder/records/R12.T4.a.md).
 - **R12.T4.b The main process's half.** `src/main/perf/runner.ts` and the preload's
   `window.hyperion.perf` (Design note 14): `checkQuiet` first, refusing unless `--force`, which the
   record carries; the local server's launch with the scene's `--num-workers` and its restart with a
@@ -1160,3 +1164,8 @@ Task records as built: [12-measurements-and-settings-ladder/records/](12-measure
   WebGPU; `--disable-vulkan-surface` avoids it but is unchecked on screen. R12's runs, which
   record the switch set, follow the outcome of the visible-window check, pending by hand for the
   owner.
+- **The owner's Mac as a third machine (lean, pending the owner, 2026-11-13).** The README's
+  Target hardware entry, the M5 MacBook Air, joins the UHD 620 laptop and the RTX 3080 as a machine
+  whose records count: its records name it, the table writer adds its measured columns once it has
+  records, and `main/macProfile.ts`'s batches are a later source for a fold beside R05's results
+  files. Reversible: its columns are one entry of `table.ts`'s list.
