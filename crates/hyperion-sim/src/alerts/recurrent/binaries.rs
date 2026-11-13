@@ -218,6 +218,8 @@ pub(in crate::alerts) fn xray_binary_host_detections(
             TransientKind::XrayTransient
         }
         XrbHostKind::NeutronStarPersistent => TransientKind::XrayBurst,
+        // From 32 a Be/X host that is not active has no giant outbursts (P11.T8.b's fix).
+        XrbHostKind::BeX if !marks.is_bex_active() => return,
         XrbHostKind::BeX => TransientKind::BeXOutburst,
         // The carving's three kinds have no events until P11.T9's.
         XrbHostKind::BlackHolePersistent

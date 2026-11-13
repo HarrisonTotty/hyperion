@@ -22,7 +22,7 @@
 //! 29): `tables::binary`'s samplers, one for each accreting class and the X-ray binaries', and
 //! their rows of the share table, read where the galaxy is built (the share matrix's class shares)
 //! and where a class's process is built. From generator version 32 the X-ray binaries' sampler is
-//! one whose high-mass side is pinned to its observed count (P11.T8.b's fix, held at 32 in
+//! one whose high-mass side is pinned to its intrinsic count (P11.T8.b's fix, held at 32 in
 //! `hmxb_hold`).
 
 mod awd;

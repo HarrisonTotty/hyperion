@@ -15,7 +15,8 @@
 //! The holds, each a field:
 //!
 //! - [`xrb_tables`](GalaxyRules::xrb_tables), the X-ray binaries' high-mass side pinned to its
-//!   observed count from 32 (P11.T8.b's fix, [`XrbTableRules`]);
+//!   intrinsic count and a Be/X host's giant outbursts to its active mark from 32 (P11.T8.b's
+//!   fix, [`XrbTableRules`]);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -53,7 +54,8 @@ pub(crate) struct GalaxyRules {
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
     /// The X-ray binaries' sampler (P11.T8.b's fix, held at 32, [`XrbTableRules`]): from 32 the
-    /// one whose high-mass side is pinned to its observed count. The class reads it where its
+    /// one whose high-mass side is pinned to its intrinsic count, and a Be/X host active by its
+    /// mark (`XrbTableRules::marks_active_bex`). The class reads it where its
     /// process is built, and no memo of the galaxy holds a process, so `Galaxy::with_rules` may
     /// change it.
     pub(crate) xrb_tables: XrbTableRules,

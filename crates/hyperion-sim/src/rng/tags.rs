@@ -1326,6 +1326,16 @@ domain_tags! {
     /// its other `class.lbv.*` draws are: word 0 the mark that thins it on the grid's alive law at
     /// its mass against its node's bound (`lbv::AliveLaw`); the other words are reserved.
     CLASS_LBV_ALIVE: System = "class.lbv.alive";
+
+    // Plan 11, P11.T8.b's fix at 32 (research-leans-51): a Be/X host's active mark, beside
+    // P11.T8.b's `class.xrb.*` tags above. Appended here, after P09.T43's `class.lbv.alive`,
+    // because the macro's order fixes `ALL`.
+
+    /// A Be/X host's active mark (P11.T8.b's fix, from generator version 32), keyed as its other
+    /// `class.xrb.*` draws are: word 0 the mark that decides whether its Be star's disc feeds
+    /// giant outbursts, at `stellar::binary::events::BEX_ACTIVE_SHARE`; the other words are
+    /// reserved.
+    CLASS_XRB_ACTIVE: System = "class.xrb.active";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1859,6 +1869,7 @@ mod tests {
             CLASS_XRB_ORBIT,
             CLASS_XRB_HISTORY,
             CLASS_XRB_METALLICITY,
+            CLASS_XRB_ACTIVE,
         ] {
             assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
             assert!(tag.name().starts_with("class.xrb."));

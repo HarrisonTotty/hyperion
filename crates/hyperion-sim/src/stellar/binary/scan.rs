@@ -83,7 +83,7 @@ use crate::galaxy::fields::ComponentId;
 use crate::id::{BodyId, CatalogueSystemId, SystemId, event_tags};
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation, roche_lobe_radius};
-use crate::rng::{Seed, Stream, tags};
+use crate::rng::{ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::draws::isotropic;
 use crate::tables::binary::{AwdMark, XrbHostKind, XrbMark, XrbPick};
 use crate::time::{SourceHorizon, Span, UniverseTime};
@@ -100,6 +100,7 @@ use super::classify::{
     BinaryClass, SYMBIOTIC_XRB_MIN_LUMINOSITY, XrbKind, nova_recurrence_period, recurrence_class,
     wind_fed_luminosity, xrb_line,
 };
+use super::events::BEX_ACTIVE_SHARE;
 use super::light_curves::{XrayAccretor, eddington_luminosity};
 use super::params::BinaryParams;
 use super::sampler::ClassSampler;
@@ -286,8 +287,9 @@ impl AwdScanMarks {
 }
 
 /// What a galaxy-wide scan reads of an X-ray binary host (plan 11's Provides; P11.T8.b): its kind,
-/// its place and motion, a high-mass host's recoil from its supernova, and a low-mass transient's
-/// outburst recurrence. The transients' and the Be/X outbursts' events are P11.T9's.
+/// its place and motion, a high-mass host's recoil from its supernova, a low-mass transient's
+/// outburst recurrence, and whether a Be/X host is active, with giant outbursts. The transients'
+/// and the Be/X outbursts' events are P11.T9's.
 ///
 /// # Examples
 ///
@@ -331,6 +333,7 @@ pub struct XrbScanMarks {
     accretor_mass: SolarMasses,
     shape: XrbShape,
     transfer_rate: Option<SolarMassesPerYear>,
+    bex_active: bool,
 }
 
 impl XrbScanMarks {
@@ -451,6 +454,32 @@ impl XrbScanMarks {
     pub(crate) const fn shape(&self) -> XrbShape {
         self.shape
     }
+
+    /// Whether the host is an active Be/X host, whose Be star's disc feeds giant outbursts
+    /// (`events::BEX_GIANT_OUTBURST_RATE_PER_YEAR`): from generator version 32 one Be/X host in a
+    /// hundred by its active mark (`bex_active_mark`, at [`BEX_ACTIVE_SHARE`]; P11.T8.b's fix),
+    /// and below it every Be/X host. False for a host of any other kind.
+    #[must_use]
+    pub const fn is_bex_active(&self) -> bool {
+        self.bex_active
+    }
+
+    /// The same marks with the active mark `active`, for the events' test of a Be/X host that is
+    /// not active.
+    #[cfg(test)]
+    pub(crate) const fn with_bex_active(mut self, active: bool) -> Self {
+        self.bex_active = active;
+        self
+    }
+}
+
+/// A Be/X host's active mark, keyed `key` in the universe of `seed` (P11.T8.b's fix, from
+/// generator version 32): word 0 of its own stream, `class.xrb.active`, below
+/// [`BEX_ACTIVE_SHARE`]. A stream of its own, so that no other mark of the host moves.
+#[must_use]
+pub(crate) fn bex_active_mark(seed: Seed, key: ObjectKey) -> bool {
+    Stream::open(seed, tags::CLASS_XRB_ACTIVE, key)
+        .decide(Threshold::from_probability(BEX_ACTIVE_SHARE))
 }
 
 /// A high-mass X-ray binary's recoil (P11.T8.b): the systemic velocity its compact star's
@@ -892,8 +921,9 @@ fn xrb_scan_marks(
 
 /// The scan marks of an X-ray binary on `host_side` at `host`, after its site: its kind and a
 /// transient's recurrence, its compact star's mass and its binary's shape, a catalogue high-mass
-/// host's recoil, and its place and velocity at the epoch. A catalogue candidate's
-/// ([`scan_marks`]) and a feature's list entry's (P11.T8.f), on the same draws keyed by each one's
+/// host's recoil, its place and velocity at the epoch, and from 32 a Be/X host's active mark. A
+/// catalogue candidate's ([`scan_marks`]) and a feature's list entry's (P11.T8.f), on the same
+/// draws keyed by each one's
 /// system; a list entry takes no recoil and moves with its feature. `None` from 27 for a pair fed
 /// under the floor of P11.T8.b's fix, and for a symbiotic host whose neutron star takes its
 /// giant's wind under [`SYMBIOTIC_XRB_MIN_LUMINOSITY`], which the class's test refuses.
@@ -987,6 +1017,10 @@ pub(crate) fn xrb_marks_at(
         ),
         None => (site, drawn),
     };
+    // From 32 a Be/X host's giant outbursts are its active mark's; below, every Be/X host has
+    // them, and no mark is drawn.
+    let bex_active = matches!(kind, XrbHostKind::BeX)
+        && (!galaxy.rules().xrb_tables.marks_active_bex() || bex_active_mark(seed, key));
     Some(XrbScanMarks {
         host,
         kind,
@@ -997,6 +1031,7 @@ pub(crate) fn xrb_marks_at(
         accretor_mass,
         shape,
         transfer_rate,
+        bex_active,
     })
 }
 

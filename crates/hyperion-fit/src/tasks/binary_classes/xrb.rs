@@ -93,15 +93,35 @@ pub struct XrbParams {
     /// The galaxy's X-ray binaries at Milky Way parameters: the observed count the row is scaled
     /// to.
     pub total_hosts: f64,
-    /// The galaxy's high-mass X-ray binaries at Milky Way parameters, the observed count the
-    /// high-mass kinds' weights are pinned to (task `binary_xrb_32`, P11.T8.b's fix, read from
-    /// generator version 32): the manifest's `high_mass_hosts`. `None` without it, task
-    /// `binary_xrb`'s, whose high-mass kinds take the engine's share of the whole class
-    /// ([`kind_weights`]).
-    pub high_mass_hosts: Option<f64>,
+    /// The high-mass side's own count and its pinned kinds (task `binary_xrb_32`, P11.T8.b's fix,
+    /// read from generator version 32), from the manifest's `high_mass_hosts` and pins. `None`
+    /// without them, task `binary_xrb`'s, whose high-mass kinds take the engine's share of the
+    /// whole class ([`kind_weights`]).
+    pub high_mass: Option<HighMassPins>,
     /// The least members a mark, or a node's law, is fitted to.
     pub min_members: usize,
 }
+
+/// The X-ray binaries' high-mass side pinned to its own count (P11.T8.b's fix,
+/// research-leans-51): what [`sided_kind_weights`] reads, as checked by [`XrbParams::of`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct HighMassPins {
+    /// The galaxy's high-mass X-ray binaries at Milky Way parameters, the count the high-mass
+    /// kinds' weights are pinned to together: the manifest's `high_mass_hosts`.
+    pub hosts: f64,
+    /// The high-mass kinds pinned to their own counts inside [`hosts`](Self::hosts), each with
+    /// its hosts at Milky Way parameters, in [`PINNED_HIGH_MASS_KEYS`]' order: the manifest's
+    /// `supergiant_hosts` and `black_hole_high_mass_hosts`, each where given. The high-mass kinds
+    /// left unpinned, the Be/X hosts, take the rest of the side.
+    pub kinds: Vec<(XrbHostKind, f64)>,
+}
+
+/// The manifest's keys that pin a high-mass kind's hosts ([`HighMassPins::kinds`]), each with its
+/// kind.
+pub const PINNED_HIGH_MASS_KEYS: [(&str, XrbHostKind); 2] = [
+    ("supergiant_hosts", XrbHostKind::Supergiant),
+    ("black_hole_high_mass_hosts", XrbHostKind::BlackHoleHighMass),
+];
 
 impl XrbParams {
     /// The parameters of `manifest`.
@@ -110,33 +130,56 @@ impl XrbParams {
     ///
     /// [`ManifestParamError`] as [`CensusParams::of`], or if the total is not positive, if the
     /// high-mass hosts are given but are not positive or leave the low-mass kinds besides the
-    /// pinned black-hole transients no share of the total ([`sided_kind_weights`]), or if the
-    /// least members are under 20.
+    /// pinned black-hole transients no share of the total ([`sided_kind_weights`]), if a pinned
+    /// high-mass kind's hosts are given without the high-mass hosts, are not positive, or together
+    /// leave the Be/X hosts none of the side, or if the least members are under 20.
     pub fn of(manifest: &Manifest) -> Result<Self, ManifestParamError> {
-        let high_mass_hosts = if manifest.params().contains_key("high_mass_hosts") {
-            Some(manifest.f64("high_mass_hosts")?)
-        } else {
-            None
+        let given = |key: &str| -> Result<Option<f64>, ManifestParamError> {
+            if manifest.params().contains_key(key) {
+                manifest.f64(key).map(Some)
+            } else {
+                Ok(None)
+            }
         };
+        let high_mass_hosts = given("high_mass_hosts")?;
+        let mut kinds = Vec::new();
+        for (key, kind) in PINNED_HIGH_MASS_KEYS {
+            if let Some(hosts) = given(key)? {
+                if high_mass_hosts.is_none() || !(hosts.is_finite() && hosts > 0.0) {
+                    return Err(ManifestParamError::new(
+                        key,
+                        "positive, and given with `high_mass_hosts`",
+                    ));
+                }
+                kinds.push((kind, hosts));
+            }
+        }
         let params = Self {
             census: CensusParams::of(manifest)?,
             total_hosts: manifest.f64("total_hosts")?,
-            high_mass_hosts,
+            high_mass: high_mass_hosts.map(|hosts| HighMassPins { hosts, kinds }),
             min_members: usize::try_from(manifest.u64("min_members")?)
                 .map_err(|_| ManifestParamError::new("min_members", "a count"))?,
         };
         if !(params.total_hosts.is_finite() && params.total_hosts > 0.0) {
             return Err(ManifestParamError::new("total_hosts", "positive"));
         }
-        let room = 1.0 - BLACK_HOLE_TRANSIENT_SHARE;
-        if params
-            .high_mass_hosts
-            .is_some_and(|h| !(h.is_finite() && h > 0.0 && h / params.total_hosts < room))
-        {
-            return Err(ManifestParamError::new(
-                "high_mass_hosts",
-                "positive and under the share of `total_hosts` the black-hole transients leave",
-            ));
+        if let Some(pins) = &params.high_mass {
+            let room = 1.0 - BLACK_HOLE_TRANSIENT_SHARE;
+            let h = pins.hosts;
+            if !(h.is_finite() && h > 0.0 && h / params.total_hosts < room) {
+                return Err(ManifestParamError::new(
+                    "high_mass_hosts",
+                    "positive and under the share of `total_hosts` the black-hole transients leave",
+                ));
+            }
+            let pinned: f64 = pins.kinds.iter().map(|&(_, hosts)| hosts).sum();
+            if pinned >= h {
+                return Err(ManifestParamError::new(
+                    "high_mass_hosts",
+                    "over the pinned high-mass kinds' hosts, so that the Be/X hosts keep a share",
+                ));
+            }
         }
         if params.min_members < 20 {
             return Err(ManifestParamError::new("min_members", "at least 20"));
@@ -335,48 +378,80 @@ pub fn kind_weights(census: &[f64; 9]) -> [f64; 9] {
 }
 
 /// The kinds' weights the class draws from generator version 32 (task `binary_xrb_32`, P11.T8.b's
-/// fix), in [`XrbHostKind::ALL`]'s order: the black-hole transients' [`BLACK_HOLE_TRANSIENT_SHARE`],
+/// fix), in [`XrbHostKind::ALL`]'s order: the black-hole transients' [`BLACK_HOLE_TRANSIENT_SHARE`];
 /// the high-mass kinds' together `high_mass_share`, the observed high-mass hosts' share of the
-/// class's, each in its `census` share of them, and the other low-mass kinds' the rest, each in its
-/// `census` share of them.
+/// class's, of which each kind in `pinned` takes its own share of the class's hosts and the
+/// high-mass kinds left unpinned (the Be/X hosts) the rest, each in its `census` share of them;
+/// and the other low-mass kinds' the rest of the class, each in its `census` share of them.
 ///
 /// Each side is pinned to its own observed count, as the black-hole transients are (plan 11's
 /// design note 11: counts are observed, the engine gives their shape). [`kind_weights`] gives the
 /// high-mass kinds the engine's share of the whole class instead, about 7.6 × 10⁻⁴ at 31, since the
 /// engine makes over a thousand low-mass members for each high-mass one, so that the row's 10⁴
-/// leave the high-mass side some eight hosts.
+/// leave the high-mass side some eight hosts. The persistent high-mass kinds are pinned too
+/// (research-leans-51): at the engine's shares of the side, a supergiant host is some 0.4% of it,
+/// against the third of the catalogued systems that are supergiant ones.
 ///
 /// # Panics
 ///
-/// If the census holds no high-mass kind or no low-mass kind besides the pinned one, or
-/// `high_mass_share` is not positive or leaves the low-mass kinds besides the pinned one nothing.
+/// If a kind of `pinned` is not a high-mass kind, is pinned twice or at a share that is not
+/// positive; if the census holds no unpinned high-mass kind or no low-mass kind besides the
+/// black-hole transients; or if `high_mass_share` leaves the unpinned high-mass kinds or the other
+/// low-mass kinds nothing.
 #[must_use]
-pub fn sided_kind_weights(census: &[f64; 9], high_mass_share: f64) -> [f64; 9] {
-    let pinned = kind_index(XrbHostKind::BlackHoleTransient);
+pub fn sided_kind_weights(
+    census: &[f64; 9],
+    high_mass_share: f64,
+    pinned: &[(XrbHostKind, f64)],
+) -> [f64; 9] {
+    for (i, &(kind, share)) in pinned.iter().enumerate() {
+        assert!(
+            kind.is_high_mass() && share > 0.0 && pinned[..i].iter().all(|&(k, _)| k != kind),
+            "a pinned kind is a high-mass kind, pinned once at a positive share: {kind:?} {share}"
+        );
+    }
+    let transients = kind_index(XrbHostKind::BlackHoleTransient);
+    let pin = |k: usize| {
+        pinned
+            .iter()
+            .find(|&&(kind, _)| kind_index(kind) == k)
+            .map(|&(_, share)| share)
+    };
     let is_high = |k: usize| XrbHostKind::ALL[k].is_high_mass();
     let (high, low) = (0..census.len()).fold((0.0, 0.0), |(high, low), k| {
         if is_high(k) {
-            (high + census[k], low)
-        } else if k == pinned {
+            if pin(k).is_some() {
+                (high, low)
+            } else {
+                (high + census[k], low)
+            }
+        } else if k == transients {
             (high, low)
         } else {
             (high, low + census[k])
         }
     });
+    let unpinned = pinned
+        .iter()
+        .fold(high_mass_share, |left, &(_, share)| left - share);
     let rest = 1.0 - BLACK_HOLE_TRANSIENT_SHARE - high_mass_share;
     assert!(
         high > 0.0 && low > 0.0,
-        "the census holds high-mass kinds and low-mass kinds besides the pinned one"
+        "the census holds unpinned high-mass kinds and low-mass kinds besides the black-hole \
+         transients"
     );
     assert!(
-        high_mass_share > 0.0 && rest > 0.0,
-        "the high-mass share {high_mass_share} leaves the other low-mass kinds a share"
+        high_mass_share > 0.0 && unpinned > 0.0 && rest > 0.0,
+        "the high-mass share {high_mass_share} leaves the unpinned high-mass kinds {unpinned} and \
+         the other low-mass kinds {rest}"
     );
     std::array::from_fn(|k| {
-        if k == pinned {
+        if k == transients {
             BLACK_HOLE_TRANSIENT_SHARE
+        } else if let Some(share) = pin(k) {
+            share
         } else if is_high(k) {
-            census[k] * high_mass_share / high
+            census[k] * unpinned / high
         } else {
             census[k] * rest / low
         }
@@ -418,8 +493,8 @@ fn by_kind(members: &[XrayMarks]) -> [usize; 9] {
 /// # Panics
 ///
 /// As [`census_kind_shares`], and as [`kind_weights`], or with the manifest's high-mass hosts as
-/// [`sided_kind_weights`]: a census with no high-mass member or no low-mass one besides the
-/// black-hole transients.
+/// [`sided_kind_weights`]: a census with no member of an unpinned high-mass kind or no low-mass
+/// one besides the black-hole transients.
 #[must_use]
 pub fn xrb_sampler(galaxy: &Galaxy, censuses: &Censuses, params: &XrbParams) -> XrbSampler {
     let slab = xray_members(censuses.slab.iter().flat_map(|c| &c.members));
@@ -430,9 +505,16 @@ pub fn xrb_sampler(galaxy: &Galaxy, censuses: &Censuses, params: &XrbParams) -> 
             .flat_map(|c| &c.members),
     );
     let census = census_kind_shares(galaxy, censuses);
-    let weights = match params.high_mass_hosts {
+    let weights = match &params.high_mass {
         None => kind_weights(&census),
-        Some(high) => sided_kind_weights(&census, high / params.total_hosts),
+        Some(pins) => {
+            let pinned: Vec<(XrbHostKind, f64)> = pins
+                .kinds
+                .iter()
+                .map(|&(kind, hosts)| (kind, hosts / params.total_hosts))
+                .collect();
+            sided_kind_weights(&census, pins.hosts / params.total_hosts, &pinned)
+        }
     };
     let mut sources = [MarkSource::Scratch; 30];
     let marks = std::array::from_fn(|k| {
@@ -672,10 +754,10 @@ scaled to {total:e} hosts at Milky Way parameters (plan 11's design note 11).",
     text.lines().map(str::to_owned).collect()
 }
 
-/// Task `binary_xrb_32`'s block's notes after its header, for `fit` with its high-mass hosts
-/// `high`.
+/// Task `binary_xrb_32`'s block's notes after its header, for `fit` with its high-mass side
+/// `pins`.
 #[must_use]
-fn xrb_32_notes(fit: &XrbFit, high: f64) -> Vec<String> {
+fn xrb_32_notes(fit: &XrbFit, pins: &HighMassPins) -> Vec<String> {
     let p = &fit.params;
     let text = format!(
         "\
@@ -684,18 +766,37 @@ row is `binary_xrb`'s, whose census and total this task shares. The marks are fi
 `binary_xrb`'s are, to the engine's members of the nine kinds `XrbHostKind` holds at generator
 version {version}'s rules, the high-mass marks to the young thin disc's own census of {young}
 records; a mark with under {min} members keeps `XRB_SAMPLER`'s law. Each side of the class is
-pinned to its own observed count (plan 11's design note 11): the high-mass kinds' weights
-together {high} of the row's {total:e} hosts, the count Fortin et al. (2023, A&A 671, A149;
-recalled) catalogue, uncorrected for completeness; the black-hole transients'
-`BLACK_HOLE_TRANSIENT_SHARE`; and the other low-mass kinds the rest, each kind in its share of
-its side's hosts in the galaxy's census. Each mark's members are weighted so that their kinds
-are in those shares.",
+pinned to its own count (plan 11's design note 11): the high-mass kinds' weights together {high}
+of the row's {total:e} hosts, about the log-centre of the Galaxy's intrinsic 10^3-10^4 Be/X-ray
+binaries (Rappaport and van den Heuvel 1982, IAU Symp. 98, 327; recalled), quiescent ones
+included (research-leans-51), of which {pins}, about the catalogued systems (Liu et al. 2006,
+A&A 455, 1165, about 36 supergiant ones; Cyg X-1 and a second allowed; recalled), and the Be/X
+hosts the rest; the
+black-hole transients' `BLACK_HOLE_TRANSIENT_SHARE`; and the other low-mass kinds the rest of the
+row, each unpinned kind in its share of its side's hosts in the galaxy's census. Each mark's
+members are weighted so that their kinds are in those shares.",
         version = p.census.version.get(),
         young = p.census.young_records,
         min = p.min_members,
         total = p.total_hosts,
+        high = pins.hosts,
+        pins = pinned_high_mass_text(&pins.kinds),
     );
     text.lines().map(str::to_owned).collect()
+}
+
+/// The pinned high-mass kinds and their hosts as the notes and the acceptance name them, or
+/// "none pinned".
+#[must_use]
+fn pinned_high_mass_text(pinned: &[(XrbHostKind, f64)]) -> String {
+    if pinned.is_empty() {
+        return "none pinned".to_owned();
+    }
+    pinned
+        .iter()
+        .map(|(kind, hosts)| format!("{kind:?} {hosts}"))
+        .collect::<Vec<_>>()
+        .join(" and ")
 }
 
 /// The acceptance's figures for `fit`.
@@ -854,7 +955,7 @@ impl FitTask for BinaryXrbTask {
 }
 
 /// Task `binary_xrb_32`'s revision.
-pub const XRB_32_VERSION: u32 = 0;
+pub const XRB_32_VERSION: u32 = 1;
 
 /// The generator version task `binary_xrb_32`'s manifests fit at and its fingerprint's galaxy is
 /// built at: 32, the hold's (a test holds its two manifests to it).
@@ -872,26 +973,37 @@ pub const XRB_32_ITEMS: [&str; 7] = [
     "XRB_HIGH_MASS_KINDS_32",
 ];
 
-/// Task `binary_xrb_32`'s block for `fit`, whose manifest gives its high-mass hosts `high`: the
-/// sampler alone, the row being `binary_xrb`'s.
+/// Task `binary_xrb_32`'s block for `fit`: the sampler alone, the row being `binary_xrb`'s.
+///
+/// # Panics
+///
+/// If `fit`'s parameters pin no high-mass side ([`XrbParams::high_mass`]), as task
+/// `binary_xrb_32`'s manifest always does.
 #[must_use]
-pub fn render_xrb_32(fit: &XrbFit, high: f64) -> RustTable {
+pub fn render_xrb_32(fit: &XrbFit) -> RustTable {
+    let pins = fit
+        .params
+        .high_mass
+        .as_ref()
+        .expect("task `binary_xrb_32`'s parameters pin the high-mass side");
     RustTable {
         summary: vec![
             "The X-ray binaries' sampler refitted against plan 11's engine with each side pinned to its"
                 .to_owned(),
             "observed count, read from generator version 32 (P11.T8.b's fix; plan 15, P15.T10.b).".to_owned(),
         ],
-        notes: xrb_32_notes(fit, high),
+        notes: xrb_32_notes(fit, pins),
         items: sampler_items(fit, &XRB_32_ITEMS),
     }
 }
 
 /// The task: P11.T8.b's fix of the X-ray binaries' high-mass side, read from generator version 32
 /// (`galaxy::catalogue_classes::binary`'s hold), slow: `binary_xrb`'s fit with its manifest's
-/// `high_mass_hosts`, the high-mass kinds' weights pinned to them ([`sided_kind_weights`]). The 32
-/// bump folds it into `binary_xrb`, whose manifest takes `high_mass_hosts` and whose items the
-/// class then reads, and deletes this task with its manifests, block and lock entry.
+/// `high_mass_hosts`, the high-mass kinds' weights pinned to them, and its `supergiant_hosts` and
+/// `black_hole_high_mass_hosts`, those kinds' weights pinned inside the side
+/// ([`sided_kind_weights`]). The 32 bump folds it into `binary_xrb`, whose manifest takes the three
+/// keys and whose items the class then reads, and deletes this task with its manifests, block and
+/// lock entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct BinaryXrb32Task;
 
@@ -930,24 +1042,28 @@ impl FitTask for BinaryXrb32Task {
     fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
         check_manifest(self, manifest)?;
         let params = XrbParams::of(manifest)?;
-        let Some(high) = params.high_mass_hosts else {
+        let Some(pins) = &params.high_mass else {
             return Err(RunTaskError::Param(ManifestParamError::new(
                 "high_mass_hosts",
                 "given, for task `binary_xrb_32`",
             )));
         };
+        let pinned = pinned_high_mass_text(&pins.kinds);
         let fit = fit_xrb(&params, threads).map_err(|e| census_error("binary_xrb_32", e))?;
         Ok(TaskOutput {
-            table: render_xrb_32(&fit, high),
+            table: render_xrb_32(&fit),
             source:
                 "plan 11's binary engine (Hurley, Tout and Pols 2002, MNRAS 329, 897, as P11.T4 \
                      builds it) and classes (P11.T5), over plan 06's tracks, at the manifest's \
-                     generator version's rules; the high-mass kinds pinned at the 152 Fortin et al. \
-                     (2023, A&A 671, A149; recalled) catalogue, the black-hole transients at \
-                     Corral-Santana et al.'s (2016, A&A 587, A61; recalled) estimated 1,300, of the \
-                     brainstorm's 10⁴"
+                     generator version's rules; the high-mass kinds pinned at the Galaxy's \
+                     intrinsic Be/X-ray binaries, 10³–10⁴ (Rappaport and van den Heuvel 1982, IAU \
+                     Symp. 98, 327; recalled), the supergiant and black-hole high-mass hosts \
+                     about the catalogued systems (Liu et al. 2006, A&A 455, 1165; Cyg X-1; \
+                     recalled), \
+                     the black-hole transients at Corral-Santana et al.'s (2016, A&A 587, A61; \
+                     recalled) estimated 1,300, of the brainstorm's 10⁴"
                     .to_owned(),
-            acceptance: xrb_acceptance(&fit),
+            acceptance: format!("{}; pinned high-mass kinds {pinned}", xrb_acceptance(&fit)),
             provisional: None,
         })
     }
@@ -1070,7 +1186,7 @@ mod tests {
     fn from_32_the_weights_pin_the_high_mass_side_to_its_share() {
         let census = [0.005, 0.58, 0.002, 0.02, 0.008, 0.0001, 0.38, 0.001, 0.0039];
         let high_kinds = [4, 5, 8];
-        let weights = sided_kind_weights(&census, 0.0152);
+        let weights = sided_kind_weights(&census, 0.0152, &[]);
         assert!((weights.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         assert!((weights[3] - BLACK_HOLE_TRANSIENT_SHARE).abs() < 1e-15);
         let high: f64 = high_kinds.iter().map(|&k| weights[k]).sum();
@@ -1087,9 +1203,63 @@ mod tests {
         );
     }
 
-    /// The manifest's `high_mass_hosts`: none without the key (task `binary_xrb`'s), and refused
-    /// where it leaves the low-mass kinds besides the pinned transients no share; task
-    /// `binary_xrb_32` refuses a manifest without it before any census runs.
+    /// The pinned high-mass kinds take their own shares (research-leans-51's supergiant 40 and
+    /// black-hole high-mass 2 of 3,000 on the row's 10⁴), the Be/X hosts the rest of the side, and
+    /// the low-mass side is as without the pins; the weights sum to one.
+    #[test]
+    fn from_32_the_persistent_high_mass_kinds_take_their_pinned_shares() {
+        let census = [0.005, 0.58, 0.002, 0.02, 0.008, 0.0001, 0.38, 0.001, 0.0039];
+        let pinned = [
+            (XrbHostKind::Supergiant, 40.0e-4),
+            (XrbHostKind::BlackHoleHighMass, 2.0e-4),
+        ];
+        let weights = sided_kind_weights(&census, 0.3, &pinned);
+        assert!((weights.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        assert!((weights[5] - 40.0e-4).abs() < 1e-18, "{}", weights[5]);
+        assert!((weights[8] - 2.0e-4).abs() < 1e-18, "{}", weights[8]);
+        assert!(
+            (weights[4] - (0.3 - 42.0e-4)).abs() < 1e-15,
+            "{}",
+            weights[4]
+        );
+        let unpinned = sided_kind_weights(&census, 0.3, &[]);
+        for k in [0, 1, 2, 3, 6, 7] {
+            assert!(weights[k].total_cmp(&unpinned[k]).is_eq(), "{k}");
+        }
+        assert!(
+            ((1.0 - 0.13 - 0.3) - [0, 1, 2, 6, 7].map(|k| weights[k]).iter().sum::<f64>()).abs()
+                < 1e-15
+        );
+    }
+
+    /// A pin must be a high-mass kind's.
+    #[test]
+    #[should_panic(expected = "a pinned kind is a high-mass kind")]
+    fn a_pinned_kind_is_a_high_mass_kind() {
+        let census = [0.005, 0.58, 0.002, 0.02, 0.008, 0.0001, 0.38, 0.001, 0.0039];
+        let _ = sided_kind_weights(&census, 0.3, &[(XrbHostKind::Symbiotic, 1.0e-4)]);
+    }
+
+    /// Pins that take the whole side leave the Be/X hosts nothing.
+    #[test]
+    #[should_panic(expected = "leaves the unpinned high-mass kinds")]
+    fn the_pins_leave_the_be_x_hosts_a_share() {
+        let census = [0.005, 0.58, 0.002, 0.02, 0.008, 0.0001, 0.38, 0.001, 0.0039];
+        let _ = sided_kind_weights(
+            &census,
+            0.004,
+            &[
+                (XrbHostKind::Supergiant, 0.003),
+                (XrbHostKind::BlackHoleHighMass, 0.001),
+            ],
+        );
+    }
+
+    /// The manifest's `high_mass_hosts` and pins: none without the keys (task `binary_xrb`'s);
+    /// the high-mass hosts refused where they leave the low-mass kinds besides the pinned
+    /// transients no share, or the Be/X hosts none past the pins; a pin refused without the
+    /// high-mass hosts or where it is not positive; and task `binary_xrb_32` refuses a manifest
+    /// without the high-mass hosts before any census runs.
     #[test]
     fn the_high_mass_hosts_are_read_and_checked() {
         let text = include_str!("../../../manifests/binary_xrb_32.smoke.toml");
@@ -1098,21 +1268,29 @@ mod tests {
                 .expect("the smoke manifest parses")
         };
         let given = XrbParams::of(&manifest(text.to_owned())).expect("the smoke manifest's");
-        assert_eq!(given.high_mass_hosts, Some(152.0));
-        let without = text.replace("high_mass_hosts = 152.0\n", "");
         assert_eq!(
-            XrbParams::of(&manifest(without.clone()))
-                .expect("a manifest without the key")
-                .high_mass_hosts,
-            None
+            given.high_mass,
+            Some(HighMassPins {
+                hosts: 3_000.0,
+                kinds: vec![
+                    (XrbHostKind::Supergiant, 40.0),
+                    (XrbHostKind::BlackHoleHighMass, 2.0)
+                ],
+            })
         );
+        let pins = "supergiant_hosts = 40.0\nblack_hole_high_mass_hosts = 2.0\n";
+        assert!(text.contains(pins), "the smoke manifest pins both kinds");
+        let unpinned = text.replace(pins, "");
+        let without = unpinned.replace("high_mass_hosts = 3000.0\n", "");
+        let read = XrbParams::of(&manifest(without.clone())).expect("a manifest without the keys");
+        assert_eq!(read.high_mass, None);
         let refused = ManifestParamError::new(
             "high_mass_hosts",
             "positive and under the share of `total_hosts` the black-hole transients leave",
         );
         for bad in ["9000.0", "0.0", "-1.0"] {
-            let body = text.replace(
-                "high_mass_hosts = 152.0",
+            let body = unpinned.replace(
+                "high_mass_hosts = 3000.0",
                 &format!("high_mass_hosts = {bad}"),
             );
             assert_eq!(
@@ -1121,6 +1299,28 @@ mod tests {
                 "{bad}"
             );
         }
+        assert_eq!(
+            XrbParams::of(&manifest(
+                text.replace("high_mass_hosts = 3000.0", "high_mass_hosts = 42.0")
+            )),
+            Err(ManifestParamError::new(
+                "high_mass_hosts",
+                "over the pinned high-mass kinds' hosts, so that the Be/X hosts keep a share",
+            ))
+        );
+        let pin_refused =
+            |key: &str| ManifestParamError::new(key, "positive, and given with `high_mass_hosts`");
+        assert_eq!(
+            XrbParams::of(&manifest(text.replace("high_mass_hosts = 3000.0\n", ""))),
+            Err(pin_refused("supergiant_hosts"))
+        );
+        assert_eq!(
+            XrbParams::of(&manifest(text.replace(
+                "black_hole_high_mass_hosts = 2.0",
+                "black_hole_high_mass_hosts = 0.0"
+            ))),
+            Err(pin_refused("black_hole_high_mass_hosts"))
+        );
         let run = BinaryXrb32Task.run(&manifest(without), NonZeroUsize::MIN);
         assert!(
             matches!(&run, Err(RunTaskError::Param(e)) if *e == ManifestParamError::new(
@@ -1133,9 +1333,9 @@ mod tests {
 
     /// A census with no high-mass member leaves nothing to pin.
     #[test]
-    #[should_panic(expected = "the census holds high-mass kinds")]
+    #[should_panic(expected = "the census holds unpinned high-mass kinds")]
     fn the_sided_weights_need_high_mass_members() {
         let census = [0.005, 0.58, 0.002, 0.02, 0.0, 0.0, 0.393, 0.0, 0.0];
-        let _ = sided_kind_weights(&census, 0.0152);
+        let _ = sided_kind_weights(&census, 0.0152, &[]);
     }
 }

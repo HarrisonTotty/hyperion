@@ -20,7 +20,7 @@
 //! is its row's, `Σ_c r_c n_c` over every component c, with `r_c` the row's hosts per solar mass
 //! formed in c's population × the mass formed per system × its born fraction; the high-mass side
 //! takes its sampler's high-mass share of it over the young thin disc's components (from
-//! generator version 32 the observed 152 of the row's 10⁴, P11.T8.b's fix, `hmxb_hold`),
+//! generator version 32 the intrinsic 3,000 of the row's 10⁴, P11.T8.b's fix, `hmxb_hold`),
 //! and the low-mass side the rest over every other component, each side's components in
 //! proportion to `r_c n_c` (lean, 2026-10-31). A row equal in every population would give the
 //! young disc, a few tenths of a per cent of the mass formed, about 25 high-mass hosts, fewer
@@ -287,7 +287,7 @@ impl XrayBinaries {
     /// P15.T10.b), and the rank of the instability line in the low-mass rate's law. Its sampler is
     /// [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER), and from generator version 32
     /// `XRB_SAMPLER_32`, whose high-mass side is
-    /// pinned to its observed count (P11.T8.b's fix, the galaxy's rules).
+    /// pinned to its intrinsic count (P11.T8.b's fix, the galaxy's rules).
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
         Self::of_table(galaxy, galaxy.rules().xrb_tables.sampler())

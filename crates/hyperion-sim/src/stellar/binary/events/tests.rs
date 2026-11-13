@@ -543,6 +543,55 @@ fn a_steady_host_lists_no_event() {
     assert_eq!(listing(&system, window_years(-10_000, 0)), []);
 }
 
+/// A Be/X host that is not active lists no giant outburst, where the same host active lists them
+/// (P11.T8.b's fix): below 32 every Be/X host is active, and from 32 a scan's Be/X hosts that are
+/// not active list none over two millennia, where at 0.1 a year an active host lists some 200.
+#[test]
+fn a_be_x_host_that_is_not_active_lists_no_giant_outburst() {
+    let seed = galaxy().seed();
+    let window = window_years(-2_000, 0);
+    let active = xrb_of(XrbHostKind::BeX);
+    assert!(active.is_bex_active(), "below 32 every Be/X host is active");
+    assert!(
+        !listing(&BinarySystem::xray_binary(seed, active), window).is_empty(),
+        "an active Be/X host lists its giant outbursts"
+    );
+    let quiet = active.with_bex_active(false);
+    assert_eq!(
+        listing(&BinarySystem::xray_binary(seed, &quiet), window),
+        []
+    );
+    let galaxy_32 = galaxy()
+        .clone()
+        .with_rules(crate::galaxy::rules::GalaxyRules::every_32_hold());
+    let process = XrayBinaries::new(&galaxy_32);
+    let mut hosts = Vec::new();
+    for x in -16..16 {
+        for y in -16..16 {
+            let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, [x, y, 0]).unwrap();
+            scan_cell(&galaxy_32, &process, key, &mut hosts);
+        }
+    }
+    let quiet_32: Vec<&XrbScanMarks> = hosts
+        .iter()
+        .filter(|h| h.kind() == XrbHostKind::BeX && !h.is_bex_active())
+        .collect();
+    assert!(
+        quiet_32.len() >= 20,
+        "{} Be/X hosts not active",
+        quiet_32.len()
+    );
+    for host in quiet_32 {
+        let events = listing(&BinarySystem::xray_binary(seed, host), window);
+        assert_eq!(events, [], "{host:?}");
+        let active = host.with_bex_active(true);
+        assert!(
+            !listing(&BinarySystem::xray_binary(seed, &active), window).is_empty(),
+            "{host:?}"
+        );
+    }
+}
+
 /// A merger's one-shot is bin 0, number 0 of its tag on its system, at its merger time, with its
 /// curve from its marks: a red nova of the pair's total mass, and two neutron stars' kilonova of
 /// GW170817's ejecta. A window lists it exactly when it holds the merger, and it is active from the

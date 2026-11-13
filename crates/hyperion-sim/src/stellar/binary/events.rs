@@ -27,7 +27,9 @@
 //!   none at or above it, where burning is stable. A transient's bursts in outburst are not
 //!   modelled, nor a persistent black hole's or a supergiant host's events.
 //! - **Be/X giant outbursts** (`0x0304 BEX_GIANT_OUTBURST`): Poisson bins of a Julian year at
-//!   [`BEX_GIANT_OUTBURST_RATE_PER_YEAR`] ([`BeXOutburstCurve`]).
+//!   [`BEX_GIANT_OUTBURST_RATE_PER_YEAR`] ([`BeXOutburstCurve`]), on an active host alone
+//!   ([`XrbScanMarks::is_bex_active`]): from generator version 32 [`BEX_ACTIVE_SHARE`] of the Be/X
+//!   hosts, and every one before.
 //! - **Luminous red novae and kilonovae** (`0x0305`, `0x0306`): one-shot at a merger's time T
 //!   ([`MergerScanMarks::merger_time`], [`NsmScanMarks::merger_time`]), bin 0 and number 0 of
 //!   their tags on the system, as plan 09's `SUPERNOVA` is. A red nova's curve is of the pair's
@@ -113,8 +115,18 @@ pub const BURST_IGNITION_COLUMN_G_CM2: f64 = 1.0e8;
 pub const HELIUM_BURST_SHARES: (f64, f64) = (0.01, 0.1);
 
 /// A Be/X-ray binary's giant (Type II) outbursts a year: 0.1, ours, one a decade, the less
-/// frequent, irregular outbursts of Reig (2011, Ap&SS 332, 1; recalled, not read at source).
+/// frequent, irregular outbursts of Reig (2011, Ap&SS 332, 1; recalled, not read at source). From
+/// generator version 32 only an active host has them ([`BEX_ACTIVE_SHARE`]).
 pub const BEX_GIANT_OUTBURST_RATE_PER_YEAR: f64 = 0.1;
+
+/// The share of the Be/X hosts that are active, whose Be star's disc feeds giant outbursts at
+/// [`BEX_GIANT_OUTBURST_RATE_PER_YEAR`], from generator version 32 (P11.T8.b's fix; lean of
+/// research-leans-51, 2026-11-13): 0.01, ours. The giant outbursts recur on a few systems, 4U
+/// 0115+63, A0535+26 and EXO 2030+375 among them, and MAXI and Swift/BAT see a few a year across
+/// the Galaxy (recalled, not read at source), so that the Galaxy's 3,000 or so Be/X hosts give
+/// about three a year, where every one at the rate would give some 300, nearly one a day. Below
+/// 32 every Be/X host is active.
+pub const BEX_ACTIVE_SHARE: f64 = 0.01;
 
 /// The hydrogen mass fraction of the matter a low-mass or Be donor gives: 0.7, a hydrogen-rich
 /// surface (ruling 132.1's X from the transferred matter). Plan 12's registry bounds the X-ray
@@ -515,9 +527,10 @@ fn dwarf_nova_source(seed: Seed, entry: &AwdEntry) -> Option<Source> {
 }
 
 /// An X-ray binary's source by its kind: a low-mass transient's outbursts, a persistent neutron
-/// star's bursts or a Be/X host's giant outbursts; `None` for a persistent black hole or a
-/// supergiant host, whose X-rays are steady, and for the carving's three kinds, an ultracompact,
-/// symbiotic or black-hole high-mass host, whose events P11.T9 registers.
+/// star's bursts or an active Be/X host's giant outbursts; `None` for a Be/X host that is not
+/// active ([`XrbScanMarks::is_bex_active`]), for a persistent black hole or a supergiant host,
+/// whose X-rays are steady, and for the carving's three kinds, an ultracompact, symbiotic or
+/// black-hole high-mass host, whose events P11.T9 registers.
 ///
 /// # Panics
 ///
@@ -555,6 +568,7 @@ fn xray_source(seed: Seed, scan: &XrbScanMarks) -> Option<Source> {
                 curve.into(),
             ))
         }
+        XrbHostKind::BeX if !scan.is_bex_active() => None,
         XrbHostKind::BeX => {
             let curve = BinaryLightCurve::from(
                 BeXOutburstCurve::of(mass, DONOR_HYDROGEN)

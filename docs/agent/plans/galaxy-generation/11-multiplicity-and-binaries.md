@@ -7808,3 +7808,26 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
     test's 31 arm; re-pin `tests/binary_xrb.rs`' `HIGH_MASS_HOSTS` and the class's pins. Movers
     were not surveyed: expect the X-ray binaries' and the alerts' X-ray goldens and
     `tests/binary_xrb.rs`' scanned counts.
+- **P11.T8.b: the high-mass side at its intrinsic 3,000, held at 32** (lane
+  `fix-p11-hmxb-hosts-2`, 2026-11-13; research-leans-51's ruling; nothing moves at 31). It
+  supersedes the 152 above: same hold, field and tripwire.
+  - _The table._ `binary_xrb_32` revision 1, its manifests `high_mass_hosts = 3000.0`,
+    `supergiant_hosts = 40.0` and `black_hole_high_mass_hosts = 2.0`
+    (`XrbParams::high_mass: Option<HighMassPins>`, `sided_kind_weights(census, share, pinned)`);
+    the Be/X hosts take the rest, 2,958. Re-emitted at since 31 as a new block, since the 152
+    block never landed and `--since 32` is refused at version 31.
+  - _At 32._ The other low-mass kinds fall 33% (8,548 → 5,700); the slow counts test holds the
+    class and the young lists inside 10³–10⁴ (`INTRINSIC_HIGH_MASS_HOSTS`), with 152
+    (`CATALOGUED_HIGH_MASS`) kept as plan 15's T10.b floor. Both counts are expected, before the
+    class's test and the lists' age thinning: the catalogue's part is 1,200.78. The pooled marks
+    move more than at 152, since Be/X hosts now weigh on the neutron star's mass.
+  - _Be/X giant outbursts (P11.T9.b, P12.T5.c)._ From 32 only an active host has them:
+    `XrbScanMarks::is_bex_active`, word 0 of the new tag `class.xrb.active`
+    (`scan::bex_active_mark`) below `events::BEX_ACTIVE_SHARE` = 0.01, switched by
+    `XrbTableRules::marks_active_bex`; 0.1 a year kept on them: 1.18–2.96 a year galaxy-wide,
+    the catalogue's Be/X hosts alone to the lists' added before their thinning.
+  - _Lean (2026-11-13): 40 and 2 as ruled._ Fortin et al.'s split by type was not read (the pod's
+    web is refused).
+  - _For the bump to 32._ As above, but `binary_xrb.toml` takes the three keys, and the scan
+    draws every Be/X host's mark (delete `marks_active_bex`); give `stellar/binary_events` an
+    active Be/X host and pin `bex_active_mark` for a few keys in a golden.
