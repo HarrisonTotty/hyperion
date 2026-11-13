@@ -24,8 +24,9 @@ export interface HostDiscsView {
   /** The discs of the system asked, once answered, or `null`. */
   readonly held: SystemHostDiscs | null;
   /**
-   * Whether the system asked has its discs asked of the server and neither answered nor refused: not
-   * while the link is down, when nothing is asked.
+   * Whether the system asked has its discs neither answered nor refused: asked of the server, or,
+   * through a lost link, to be asked again once it returns, which clears by itself (the guide's
+   * `LIGHTING: PENDING`, ruled 2026-11-13).
    */
   readonly pending: boolean;
 }
@@ -76,7 +77,8 @@ function isBusy(failure: RequestFailure): boolean {
  * asked again for another system or universe, after a link lost before its answer, and after a busy
  * server's answer (`isBusy`). Any other refusal, the server's `unknown_system` or an older server's
  * `unsupported`, is held, and the view waits for its sky's `hosts` as before the kind. The request
- * of a system left is cancelled.
+ * of a system left is cancelled. Discs held are kept through a lost link, and asked nothing again:
+ * the scene stays lit, its staleness the link's to say (`SCENE STALE: NO CARRIER`).
  */
 export function useHostDiscs(ask: HostDiscsAsk | null): HostDiscsView {
   const { status, requests } = useServerLink();
@@ -133,6 +135,6 @@ export function useHostDiscs(ask: HostDiscsAsk | null): HostDiscsView {
 
   return {
     held: current !== null && holdsFor(held, current) ? held : null,
-    pending: current !== null && !answered && connected,
+    pending: current !== null && !answered,
   };
 }

@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { RECONNECT_DELAY_MS } from "../../lib/connection";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { FIELD_RETRY_DELAY_MS } from "../terrain/coarseFieldStore";
@@ -108,7 +109,7 @@ describe("useHostDiscs", () => {
     ]).toEqual([1, 2, false]);
   });
 
-  it("is not pending while the link is down, when nothing is asked", async () => {
+  it("stays pending through a lost link before its answer", async () => {
     vi.useFakeTimers();
     const { socket, result } = renderDiscs(askOf("0200080020000000"));
     act(() => {
@@ -117,7 +118,34 @@ describe("useHostDiscs", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(result.current).toEqual({ held: null, pending: false });
+    expect(result.current).toEqual({ held: null, pending: true });
+  });
+
+  it("keeps its discs through a lost link, asking nothing again", async () => {
+    vi.useFakeTimers();
+    const { socket, result } = renderDiscs(askOf("0200080020000000"));
+    await answer(socket);
+    const held = result.current.held;
+    act(() => {
+      socket.close();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const throughTheLoss = result.current;
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    const reconnected = FakeWebSocket.latest();
+    act(() => {
+      reconnected.serverWelcomes();
+    });
+    expect([
+      throughTheLoss,
+      reconnected === socket,
+      reconnected.requestsOfKind("host_discs").length,
+      result.current,
+    ]).toEqual([{ held, pending: false }, false, 0, { held, pending: false }]);
   });
 
   it("holds a refusal, as an older server's unsupported, and does not ask again", async () => {

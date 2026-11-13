@@ -10247,3 +10247,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   - Check-only `--lit-probe` forms `terrain-unshaded|terrain-no-cascades|terrain-no-horizon|
     terrain-no-maturity` (`LIT_PROBE` 5 to 8, read in `terrainLit.wgsl` and `terrainLitShade.wgsl`),
     each a Mac pair of its own name, for the batch to split the terrain fragment's time.
+- **`LIGHTING: NOT RECEIVED` on a lost link, ruled (2026-11-13, the owner's delegated UX call,
+  ux-calls-and-checklist-gaps):** amended. Discs held keep lighting the scene through a lost link
+  (as built); an ask the link cut off reads `PENDING`, not `NOT RECEIVED`, since it is asked again
+  when the link returns: `useHostDiscs`' `pending` no longer needs the link up.
