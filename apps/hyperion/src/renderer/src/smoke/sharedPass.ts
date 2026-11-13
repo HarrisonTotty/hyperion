@@ -133,6 +133,7 @@ const CATEGORIES: ReadonlyArray<MemoryCategory> = [
   "geometry-clusters",
   "geometry-pages",
   "height-cache",
+  "ocean",
   "shadows",
   "sky-cube",
   "sky-scratch",

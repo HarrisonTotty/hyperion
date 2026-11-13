@@ -110,7 +110,7 @@ pub use header::{
     BodyRef, BuildFieldHeaderError, ClimateModelKind, FieldHeader, FieldHeaderParts,
     PrecipitationSource,
 };
-pub use months::{MonthBlend, month_at, month_blend, month_edges, month_share};
+pub use months::{MonthBlend, month_at, month_blend, month_blend_of, month_edges, month_share};
 pub use palette::{
     BVR_EFFECTIVE_WAVELENGTHS_NM, BuildPaletteError, LIQUID_BIN_CENTRES_NM, LIQUID_BINS,
     LiquidBasis, LiquidProperties, MaterialPalette, MechanicsFamily, NO_ENTRY, PaletteEntry,

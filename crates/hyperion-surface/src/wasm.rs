@@ -189,6 +189,24 @@
 //!   cell c's at `2 c`, the octahedral pair of its unit normal, body-fixed, as a bake's `normals()`
 //!   holds them; and `complete`, `false` where some cell's height read a cell the field does not
 //!   hold yet.
+//! - `oceanMap(system, body)` returns an `OceanMapAnswer`, the body's sea for R11's ocean
+//!   ([`WorkerFields::ocean_map`], plan R11, T8.b), or `undefined` where no field of the body is
+//!   held: its `level`, the field's; `seaLevelM`, the header's sea level above the datum, metres;
+//!   `months` (1 or 12) and `seasonEccentricity`, which `monthBlend` takes; `cells()`, a
+//!   `Uint32Array` of the cell index at `level` of each surveyed cell answered, rising;
+//!   `depthM()` and `levelM()`, `Float32Array`s of each cell's water depth (its water surface less
+//!   its ground, above 0 exactly where it is under water) and its water surface less the sea level,
+//!   metres; `ice()`, a `Uint8Array` of each cell's ice code (255ths of it under ice); `winds()`,
+//!   a `Uint8Array` of 24 a cell, cell c's month k at `24 c + 2 k`: the 10 m wind's azimuth code
+//!   (256ths of a turn clockwise from local north, towards which the air moves) then its speed
+//!   code; `windSpeedsMps()`, a `Float64Array` of 256, speed code c's speed at c, m/s
+//!   ([`Wind::speed`]), which decodes them; and `complete`, `false` where some surveyed cell's
+//!   climate is not held yet.
+//!
+//! `monthBlend(months, seasonEccentricity, meanAnomalyRad)` returns a `MonthBlendAnswer`, R09's
+//! blend of the two nearest months (`from`, `to`, `weight`; [`month_blend_of`]), and throws for a
+//! year of other than 1 or 12 months, an eccentricity outside [0, 1) or a mean anomaly that is not
+//! finite.
 
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Kelvin, Metres, Pascals, Radians};
@@ -197,7 +215,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::bake::{HorizonLayer, NormalsLayer, TerrainBakeOptions, TerrainLayers, WeightsLayer};
 use crate::cube::{Face, FaceUv, PatchKey};
-use crate::field::{BodyRef, FieldView, cell_index};
+use crate::field::{BodyRef, FieldView, Wind, cell_index, month_blend_of};
 use crate::geometry::{BAND_LIMIT_M, FINEST_SPACING_M};
 use crate::material::{MATURITY_NODES, MAX_CLASSES, Material, MaterialClass, MaterialProperties};
 use crate::noise::LatticeCache;
@@ -207,7 +225,7 @@ use crate::synth::BandLevel;
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
     BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, FineLattice, FineTexel, GroundAtSight,
-    GroundProperties, GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap,
+    GroundProperties, GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap, OceanMap,
     QueryBodyError, RefinedTexel, SeasonAnomaly, SigmaSurvey, SlopeBaseline, SurveyChange,
     SurveyedMaterial, WorkerFields,
 };
@@ -259,6 +277,66 @@ pub fn test_planet_version() -> u32 {
 #[must_use]
 pub fn maturity_node_count() -> u32 {
     u32::try_from(MATURITY_NODES).expect("K is a small count")
+}
+
+/// R09's blend of the two months nearest a time ([`month_blend_of`]; see the module
+/// documentation), for the client's TypeScript twin's test (plan R11, R11.T8.b).
+///
+/// # Errors
+///
+/// A `JsError` for a year of other than 1 or 12 months, an eccentricity outside [0, 1), or a mean
+/// anomaly that is not finite.
+#[wasm_bindgen(js_name = monthBlend)]
+pub fn month_blend(
+    months: u8,
+    season_eccentricity: f64,
+    mean_anomaly_rad: f64,
+) -> Result<MonthBlendAnswer, JsError> {
+    month_blend_of(months, season_eccentricity, Radians::new(mean_anomaly_rad))
+        .map(|blend| MonthBlendAnswer {
+            from: blend.from(),
+            to: blend.to(),
+            weight: blend.weight(),
+        })
+        .ok_or_else(|| {
+            JsError::new(&format!(
+                "no blend of a year of {months} months at eccentricity {season_eccentricity} and \
+                 mean anomaly {mean_anomaly_rad}"
+            ))
+        })
+}
+
+/// A time's place between the two nearest months ([`month_blend_of`]'s `MonthBlend`).
+#[wasm_bindgen]
+#[derive(Debug, Clone, Copy)]
+pub struct MonthBlendAnswer {
+    from: u8,
+    to: u8,
+    weight: f64,
+}
+
+#[wasm_bindgen]
+impl MonthBlendAnswer {
+    /// The earlier month, from 0.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn from(&self) -> u8 {
+        self.from
+    }
+
+    /// The later month, from 0.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn to(&self) -> u8 {
+        self.to
+    }
+
+    /// The later month's weight, 0 to 1.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn weight(&self) -> f64 {
+        self.weight
+    }
 }
 
 /// The vertex path, as the client names it.
@@ -1808,6 +1886,18 @@ impl JsSurfaceFields {
             .normal_map(body_ref(system, body)?, DetailSeed::new(seed));
         Ok(unless_unsurveyed(answer).map(|map| NormalMapAnswer { map }))
     }
+
+    /// The body's sea for R11's ocean (see the module documentation), or `undefined` where no
+    /// field of the body is held.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` if the body's index is above 65,535.
+    #[wasm_bindgen(js_name = oceanMap)]
+    pub fn ocean_map(&self, system: u64, body: u32) -> Result<Option<OceanMapAnswer>, JsError> {
+        let answer = self.fields.ocean_map(body_ref(system, body)?);
+        Ok(unless_unsurveyed(answer).map(|map| OceanMapAnswer { map }))
+    }
 }
 
 /// A material's photometry as the `photometry` and `classMap` exports give it: `A_N` in B, V and
@@ -2080,6 +2170,97 @@ impl NormalMapAnswer {
     }
 
     /// Whether every surveyed cell was answered ([`NormalMap::is_complete`]).
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn complete(&self) -> bool {
+        self.map.is_complete()
+    }
+}
+
+/// A body's sea for R11's ocean ([`OceanMap`]; see the module documentation).
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct OceanMapAnswer {
+    map: OceanMap,
+}
+
+#[wasm_bindgen]
+impl OceanMapAnswer {
+    /// The level of the field the map was made from, 5 to 8, whose cells it holds.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn level(&self) -> u8 {
+        self.map.level()
+    }
+
+    /// The sea level above the datum, metres.
+    #[wasm_bindgen(getter, js_name = seaLevelM)]
+    #[must_use]
+    pub fn sea_level_m(&self) -> f64 {
+        self.map.sea_level().value()
+    }
+
+    /// The months of the body's year, 1 or 12.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn months(&self) -> u8 {
+        self.map.months()
+    }
+
+    /// The seasonal orbit's eccentricity.
+    #[wasm_bindgen(getter, js_name = seasonEccentricity)]
+    #[must_use]
+    pub fn season_eccentricity(&self) -> f64 {
+        self.map.season_eccentricity()
+    }
+
+    /// The cell index ([`cell_index`]) at the map's level of each surveyed cell answered, rising.
+    #[must_use]
+    pub fn cells(&self) -> Vec<u32> {
+        self.map.cells().to_vec()
+    }
+
+    /// Each cell's water depth, metres, in [`cells`](Self::cells)' order ([`OceanMap::depth_m`]).
+    #[wasm_bindgen(js_name = depthM)]
+    #[must_use]
+    pub fn depth_m(&self) -> Vec<f32> {
+        self.map.depth_m().to_vec()
+    }
+
+    /// Each cell's water surface less the sea level, metres ([`OceanMap::level_m`]).
+    #[wasm_bindgen(js_name = levelM)]
+    #[must_use]
+    pub fn level_m(&self) -> Vec<f32> {
+        self.map.level_m().to_vec()
+    }
+
+    /// Each cell's ice code ([`OceanMap::ice`]).
+    #[must_use]
+    pub fn ice(&self) -> Vec<u8> {
+        self.map.ice().to_vec()
+    }
+
+    /// Each cell's twelve winds, 24 bytes a cell: month k's azimuth code then its speed code.
+    #[must_use]
+    pub fn winds(&self) -> Vec<u8> {
+        self.map
+            .winds()
+            .iter()
+            .flat_map(|months| months.iter().flat_map(|w| [w.azimuth, w.speed]))
+            .collect()
+    }
+
+    /// The speed of each of [`Wind`]'s 256 speed codes, m/s, code c's at c ([`Wind::speed`]): the
+    /// table the client decodes [`winds`](Self::winds)' speeds by.
+    #[wasm_bindgen(js_name = windSpeedsMps)]
+    #[must_use]
+    pub fn wind_speeds_mps(&self) -> Vec<f64> {
+        (0..=u8::MAX)
+            .map(|speed| Wind { azimuth: 0, speed }.speed().value())
+            .collect()
+    }
+
+    /// Whether every surveyed cell was answered ([`OceanMap::is_complete`]).
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn complete(&self) -> bool {

@@ -153,22 +153,46 @@ pub fn month_at(header: &FieldHeader, mean_anomaly: Radians) -> u8 {
 /// It is continuous in time, across every month's edge and across periapsis, where month 11
 /// blends into month 0, and gives a month alone at its centre. A reader finds the mean anomaly
 /// at the scene's time from the seasonal orbit and blends each monthly field with this (R11's
-/// coverage, wind and sea state).
+/// coverage, wind and sea state). It is [`month_blend_of`] on the header's months and season
+/// eccentricity, bit for bit.
 ///
 /// # Panics
 ///
 /// If `mean_anomaly` is not finite.
 #[must_use]
 pub fn month_blend(header: &FieldHeader, mean_anomaly: Radians) -> MonthBlend {
+    let m = mean_anomaly.value();
+    assert!(m.is_finite(), "a mean anomaly must be finite, got {m}");
+    month_blend_of(header.months(), header.season_eccentricity(), mean_anomaly).expect(
+        "a header's year has 1 or 12 months, its season eccentricity at least 0 and below 1",
+    )
+}
+
+/// [`month_blend`]'s core, without a header (plan R11, R11.T8.b; Design note 19): the blend of a
+/// year of `months` months, 1 or 12, on a seasonal orbit of eccentricity `season_eccentricity`, at
+/// the mean anomaly `mean_anomaly` (radians, any finite angle, 0 at periapsis). The client's wasm
+/// export `monthBlend` calls it, and the client's TypeScript twin is tested against that.
+///
+/// `None` for a count of months other than 1 or 12, an eccentricity outside 0 ≤ e < 1 (of either
+/// count, as the header's), or a mean anomaly that is not finite.
+#[must_use]
+pub fn month_blend_of(
+    months: u8,
+    season_eccentricity: f64,
+    mean_anomaly: Radians,
+) -> Option<MonthBlend> {
+    if !(months == 1 || months == 12) || !mean_anomaly.value().is_finite() {
+        return None;
+    }
+    let edges = month_edges(season_eccentricity)?;
     let m = reduce(mean_anomaly);
-    if header.months() == 1 {
-        return MonthBlend {
+    if months == 1 {
+        return Some(MonthBlend {
             from: 0,
             to: 0,
             weight: 0.0,
-        };
+        });
     }
-    let edges = header_edges(header);
     // `f64::midpoint` of operands this size is (a + b) ÷ 2, two of the four operators.
     let centres: [f64; MONTHS] =
         core::array::from_fn(|k| f64::midpoint(edges[k].value(), edges[k + 1].value()));
@@ -180,14 +204,16 @@ pub fn month_blend(header: &FieldHeader, mean_anomaly: Radians) -> MonthBlend {
         to,
         weight: (at - start) / (end - start),
     };
-    match (0_u8..12).rev().find(|&k| centres[usize::from(k)] <= m) {
-        Some(11) => blend(11, 0, last_before_periapsis, centres[0], m - TAU),
-        Some(k) => {
-            let n = usize::from(k);
-            blend(k, k + 1, centres[n], centres[n + 1], m)
-        }
-        None => blend(11, 0, last_before_periapsis, centres[0], m),
-    }
+    Some(
+        match (0_u8..12).rev().find(|&k| centres[usize::from(k)] <= m) {
+            Some(11) => blend(11, 0, last_before_periapsis, centres[0], m - TAU),
+            Some(k) => {
+                let n = usize::from(k);
+                blend(k, k + 1, centres[n], centres[n + 1], m)
+            }
+            None => blend(11, 0, last_before_periapsis, centres[0], m),
+        },
+    )
 }
 
 /// The edges of `header`'s twelve months.
@@ -349,6 +375,33 @@ mod tests {
             let rise = after.weight() - before.weight();
             assert!((0.0..1e-13).contains(&rise), "e {e}: {rise}");
         }
+    }
+
+    /// The header-free core is the header's blend, bit for bit, at every time the blend test
+    /// sweeps, and refuses what no header holds (plan R11, R11.T8.b).
+    #[test]
+    fn month_blend_of_is_the_header_s_blend_and_refuses_what_no_header_holds() {
+        for e in [0.0, 0.0167, 0.6, 0.95] {
+            let h = header(e);
+            let mut m = -7.0;
+            while m < 14.0 {
+                let a = month_blend(&h, Radians::new(m));
+                let b = month_blend_of(12, e, Radians::new(m)).unwrap();
+                assert_eq!((a.from(), a.to()), (b.from(), b.to()), "e {e}, m {m}");
+                assert_same_bits(a.weight(), b.weight());
+                m += 0.013;
+            }
+        }
+        let flat = synthetic_field(SyntheticWorld::Flat);
+        let one = month_blend_of(1, 0.0, Radians::new(2.0)).unwrap();
+        assert_eq!(one, month_blend(flat.header(), Radians::new(2.0)));
+        assert_eq!(month_blend_of(6, 0.0, Radians::new(1.0)), None);
+        assert_eq!(month_blend_of(12, 1.0, Radians::new(1.0)), None);
+        assert_eq!(month_blend_of(12, -0.1, Radians::new(1.0)), None);
+        assert_eq!(month_blend_of(12, f64::NAN, Radians::new(1.0)), None);
+        assert_eq!(month_blend_of(1, 1.0, Radians::new(1.0)), None);
+        assert_eq!(month_blend_of(12, 0.1, Radians::new(f64::INFINITY)), None);
+        assert_eq!(month_blend_of(12, 0.1, Radians::new(f64::NAN)), None);
     }
 
     /// A one-month year has month 0 alone, the whole period long, at every time.

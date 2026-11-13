@@ -187,6 +187,7 @@ function noRequests(): Record<BakeClockRequestKind, number> {
     "field-chunk": 0,
     "field-release": 0,
     "class-map": 0,
+    "ocean-map": 0,
     "ground-readout": 0,
     "refine-normals": 0,
   };
@@ -201,6 +202,8 @@ function noReplies(): Record<BakeClockReplyKind, number> {
     "field-refused": 0,
     "class-map": 0,
     "class-map-failed": 0,
+    "ocean-map": 0,
+    "ocean-map-failed": 0,
     "ground-readout": 0,
     "ground-readout-failed": 0,
     "normals-refined": 0,
@@ -422,6 +425,8 @@ export class BakeClock {
       case "field-refused":
       case "class-map":
       case "class-map-failed":
+      case "ocean-map":
+      case "ocean-map-failed":
       case "ground-readout":
       case "ground-readout-failed":
       case "normals-refined":

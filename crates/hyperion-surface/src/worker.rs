@@ -116,8 +116,8 @@ use crate::cube::{
     Edge, FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir,
 };
 use crate::field::{
-    BodyRef, FieldHeader, FieldView, InsertBlockError, PartialField, ResolutionCode, cell_at_index,
-    cell_index, month_at,
+    BodyRef, FieldHeader, FieldView, InsertBlockError, PartialField, ResolutionCode, Wind,
+    cell_at_index, cell_index, month_at,
 };
 use crate::geometry::vertex_spacing;
 use crate::material::{
@@ -1160,6 +1160,116 @@ impl NormalMap {
     /// Whether every surveyed cell was answered: `false` where a cell's height read a cell the field
     /// does not hold yet (a survey's margin in a later block), which leaves that cell out until a
     /// later block.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.complete
+    }
+}
+
+/// `x` rounded to the nearest `f32`: a depth or level of metres, far inside its range.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the rounding to the nearest f32 is the map's precision"
+)]
+fn nearest_f32(x: f64) -> f32 {
+    x as f32
+}
+
+/// The months a climate record carries winds for ([`ClimateCell::wind`](crate::field::ClimateCell)).
+pub const OCEAN_MAP_MONTHS: usize = 12;
+
+/// A body's sea for R11's ocean (plan R11, R11.T8.b; its Design note 11): each cell of the field's
+/// level that the field holds as surveyed, with what the ocean reads of it and of its climate.
+///
+/// Each cell gives its water's depth, the water surface less the ground, 0 on dry ground; its water
+/// surface's level against the sea, the water surface less the header's
+/// [`sea_level`](FieldHeader::sea_level), 0 to the step of an `f32` over the sea and a closed
+/// basin's own level otherwise (the ground's height over the sea where it is dry); its ice code, the
+/// record's [`ice`](crate::field::SynthesisCell::ice); and its climate's twelve 10 m winds, months
+/// from periapsis, past the header's months calm. A cell is the sea's or a lake's exactly where its
+/// depth is above 0, as [`SynthesisCell::is_under_water`](crate::field::SynthesisCell::is_under_water)
+/// decides, and open water where the ice code is also at most 127, the classifier's majority rule
+/// for a point under water (`classify.rs`' `ice_placement`): the client's ocean mask decides so,
+/// and no shader decides again. A margin cell, a cell not held and a cell whose climate is not held
+/// are left out, the last making the map not [complete](Self::is_complete).
+///
+/// It reads the field's records alone, with no synthesis, so it takes no detail seed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OceanMap {
+    level: u8,
+    sea_level: Metres,
+    months: u8,
+    season_eccentricity: f64,
+    cells: Vec<u32>,
+    depth_m: Vec<f32>,
+    level_m: Vec<f32>,
+    ice: Vec<u8>,
+    winds: Vec<[Wind; OCEAN_MAP_MONTHS]>,
+    complete: bool,
+}
+
+impl OceanMap {
+    /// The level of the field it was made from, 5 to 8, whose cells it holds.
+    #[must_use]
+    pub const fn level(&self) -> u8 {
+        self.level
+    }
+
+    /// The sea surface's height above the datum ([`FieldHeader::sea_level`]).
+    #[must_use]
+    pub const fn sea_level(&self) -> Metres {
+        self.sea_level
+    }
+
+    /// The months of the body's year, 1 or 12 ([`FieldHeader::months`]), which a reader blends the
+    /// winds over with [`month_blend_of`](crate::field::month_blend_of).
+    #[must_use]
+    pub const fn months(&self) -> u8 {
+        self.months
+    }
+
+    /// The seasonal orbit's eccentricity ([`FieldHeader::season_eccentricity`]).
+    #[must_use]
+    pub const fn season_eccentricity(&self) -> f64 {
+        self.season_eccentricity
+    }
+
+    /// The [`cell_index`] at [`level`](Self::level) of each surveyed cell answered, rising.
+    #[must_use]
+    pub fn cells(&self) -> &[u32] {
+        &self.cells
+    }
+
+    /// Each cell's water depth, its water surface less its ground, metres, at least 0, in
+    /// [`cells`](Self::cells)' order: the difference of the record's two millimetre heights, exact,
+    /// rounded once to an `f32`, so that it is above 0 exactly where the cell is under water.
+    #[must_use]
+    pub fn depth_m(&self) -> &[f32] {
+        &self.depth_m
+    }
+
+    /// Each cell's water surface less the sea level, metres, in [`cells`](Self::cells)' order.
+    #[must_use]
+    pub fn level_m(&self) -> &[f32] {
+        &self.level_m
+    }
+
+    /// Each cell's ice code, its share under ice in steps of 1 ÷ 255, in [`cells`](Self::cells)'
+    /// order.
+    #[must_use]
+    pub fn ice(&self) -> &[u8] {
+        &self.ice
+    }
+
+    /// Each cell's climate's 10 m winds, month by month from periapsis, in
+    /// [`cells`](Self::cells)' order.
+    #[must_use]
+    pub fn winds(&self) -> &[[Wind; OCEAN_MAP_MONTHS]] {
+        &self.winds
+    }
+
+    /// Whether every surveyed cell was answered: `false` where a cell's climate record is not held
+    /// yet, which leaves that cell out until a later block.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         self.complete
@@ -2778,6 +2888,65 @@ impl WorkerFields {
             pairs,
             complete,
         })
+    }
+
+    /// `body`'s sea for R11's ocean ([`OceanMap`]): each cell of the field's level that it holds as
+    /// surveyed, rising, with its depth, its level against the sea, its ice code and its climate's
+    /// winds, read from the records alone.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryBodyError::NotStarted`] if no field of `body` is held.
+    ///
+    /// # Panics
+    ///
+    /// If a cell the field holds as surveyed has no record (a bug of the field's).
+    pub fn ocean_map(&self, body: BodyRef) -> Result<OceanMap, QueryBodyError> {
+        let field = &self
+            .bodies
+            .get(&body)
+            .ok_or(QueryBodyError::NotStarted(body))?
+            .field;
+        let header = field.header();
+        let level = header.level();
+        let sea_level = header.sea_level();
+        let mut map = OceanMap {
+            level: level.get(),
+            sea_level,
+            months: header.months(),
+            season_eccentricity: header.season_eccentricity(),
+            cells: Vec::new(),
+            depth_m: Vec::new(),
+            level_m: Vec::new(),
+            ice: Vec::new(),
+            winds: Vec::new(),
+            complete: true,
+        };
+        for index in 0..level.cell_count() {
+            let cell = cell_at_index(level.get(), index)
+                .expect("an index below the level's count is a cell");
+            if !field.is_surveyed(cell) {
+                continue;
+            }
+            let record = field
+                .cell(cell)
+                .expect("a cell the field holds as surveyed has its record");
+            let Some(climate) = field.climate(cell) else {
+                // A climate record still to come, in a later block.
+                map.complete = false;
+                continue;
+            };
+            // Both heights' millimetres are `i32`s, so their difference is exact in an `f64`.
+            let depth_mm = f64::from(record.water_surface_mm) - f64::from(record.elevation_mm);
+            map.depth_m.push(nearest_f32(depth_mm / MM_PER_M));
+            map.level_m.push(nearest_f32(
+                record.water_surface().value() - sea_level.value(),
+            ));
+            map.cells.push(index);
+            map.ice.push(record.ice);
+            map.winds.push(climate.wind);
+        }
+        Ok(map)
     }
 
     /// A class map's classes on `body`, the materials `kept`, each with its photometry and its

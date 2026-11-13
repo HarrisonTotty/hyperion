@@ -203,6 +203,9 @@ async function bakeOverField(
           // No class map is asked here (R10.T10.d).
           case "class-map":
           case "class-map-failed":
+          // No ocean map is asked here (R11.T8.b).
+          case "ocean-map":
+          case "ocean-map-failed":
           // No readout is asked here (R10.T12).
           case "ground-readout":
           case "ground-readout-failed":

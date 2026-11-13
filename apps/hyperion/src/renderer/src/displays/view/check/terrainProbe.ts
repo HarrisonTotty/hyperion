@@ -225,6 +225,8 @@ export function countedWorker(inner: WorkerLike, traffic: MutableWorkerTraffic):
       case "field-refused":
       case "class-map":
       case "class-map-failed":
+      case "ocean-map":
+      case "ocean-map-failed":
       case "ground-readout":
       case "ground-readout-failed":
         break;
@@ -251,6 +253,7 @@ export function countedWorker(inner: WorkerLike, traffic: MutableWorkerTraffic):
           refining.add(message.id);
           break;
         case "class-map":
+        case "ocean-map":
         case "ground-readout":
           break;
       }

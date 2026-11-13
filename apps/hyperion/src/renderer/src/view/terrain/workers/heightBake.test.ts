@@ -10,6 +10,7 @@ import {
   type WasmFieldBlock,
   type WasmGroundReadout,
   type WasmNormalMap,
+  type WasmOceanMap,
   type WasmSurfaceFields,
   WASM_SIGMA_SURVEY,
   WorkerFields,
@@ -80,6 +81,27 @@ function oneCellNormals(freed: string[]): WasmNormalMap {
     complete: true,
     free: () => {
       freed.push("normal map");
+    },
+  };
+}
+
+/** The fake module's ocean map: two cells, one under 12.5 m of open water and one dry. */
+function twoCellOcean(freed: string[]): WasmOceanMap {
+  return {
+    level: 6,
+    seaLevelM: -2.5,
+    months: 12,
+    seasonEccentricity: 0.0167,
+    cells: () => Uint32Array.from([7, 9]),
+    depthM: () => Float32Array.from([12.5, 0]),
+    levelM: () => Float32Array.from([0, 40]),
+    ice: () => Uint8Array.from([3, 0]),
+    winds: () => Uint8Array.from({ length: 48 }, (_, k) => k),
+    windSpeedsMps: () =>
+      Float64Array.from({ length: 256 }, (_, c) => (c === 0 ? 0 : 0.01 * 2 ** ((c - 1) / 16))),
+    complete: true,
+    free: () => {
+      freed.push("ocean map");
     },
   };
 }
@@ -249,6 +271,16 @@ function fakeModule(
     // A held body's normal map of the class map's cell; seed 0xbeef, a broken module's, none.
     normalMap: (system, body, seed) =>
       held.has(key(system, body)) && seed !== 0xbeefn ? oneCellNormals(freed) : undefined,
+    // A held body's sea of two cells; body 3 the module's refusal, body 4 a trap.
+    oceanMap: (system, body) => {
+      if (body === 3) {
+        throw new Error("a body index above 65,535");
+      }
+      if (body === 4) {
+        throw new WebAssembly.RuntimeError("unreachable");
+      }
+      return held.has(key(system, body)) ? twoCellOcean(freed) : undefined;
+    },
     // A held body's readout on the ground at the season's anomaly as its temperature, kelvin, and
     // `not-surveyed` with none held; seed 0xdead the module's refusal, 0xffff a trap.
     groundReadout: (system, body, seed, ...rest) => {
@@ -691,6 +723,89 @@ describe("a height worker's fields", () => {
     expect(() => askClassMap([[MOON, "payload"]], MOON, "000000000000ffff")).toThrow(
       WebAssembly.RuntimeError,
     );
+  });
+
+  describe("an ocean-map query (R11.T8.b)", () => {
+    /** An ocean-map query of `body`, the worker holding `held`'s fields. */
+    function askOceanMap(
+      held: ReadonlyArray<readonly [string, "stand-in" | "payload"]>,
+      body: string,
+    ): ReturnType<typeof answerRequest> & { readonly freed: ReadonlyArray<string> } {
+      const { module, freed } = fakeModule();
+      const fields = new WorkerFields(module);
+      held.forEach(([each, form], n) => {
+        answerRequest(
+          module,
+          {
+            kind: "field-init",
+            id: n + 1,
+            body: each,
+            block: new ArrayBuffer(8),
+            form,
+            sigma: "skipped",
+          },
+          fields,
+        );
+      });
+      return { ...answerRequest(module, { kind: "ocean-map", id: 5, body }, fields), freed };
+    }
+
+    it("answers the module's map, copied out, its arrays transferred and the answer freed", () => {
+      const { reply, transfer, freed } = askOceanMap([[MOON, "payload"]], MOON);
+      if (reply.kind !== "ocean-map" || reply.map === null) {
+        throw new Error(`no ocean map: ${JSON.stringify(reply)}`);
+      }
+      const map = reply.map;
+      expect([map.level, map.seaLevelM, map.months, map.seasonEccentricity, map.complete]).toEqual([
+        6,
+        -2.5,
+        12,
+        0.0167,
+        true,
+      ]);
+      expect([[...map.cells], [...map.depthM], [...map.levelM], [...map.ice]]).toEqual([
+        [7, 9],
+        [12.5, 0],
+        [0, 40],
+        [3, 0],
+      ]);
+      expect(map.winds.length).toBe(48);
+      expect(map.windSpeedsMps.length).toBe(256);
+      expect(transfer).toEqual([
+        map.cells.buffer,
+        map.depthM.buffer,
+        map.levelM.buffer,
+        map.ice.buffer,
+        map.winds.buffer,
+        map.windSpeedsMps.buffer,
+      ]);
+      expect(freed).toEqual(["ocean map"]);
+    });
+
+    it("answers no map of a body with no field, or a stand-in's", () => {
+      expect(askOceanMap([], MOON).reply).toEqual({
+        kind: "ocean-map",
+        id: 5,
+        body: MOON,
+        map: null,
+      });
+      expect(askOceanMap([[PLANET, "stand-in"]], PLANET).reply).toMatchObject({
+        kind: "ocean-map",
+        map: null,
+      });
+    });
+
+    it("answers the module's refusal as ocean-map-failed, and rethrows a trap", () => {
+      const refused = keptBody(3);
+      expect(askOceanMap([[refused, "payload"]], refused).reply).toEqual({
+        kind: "ocean-map-failed",
+        id: 5,
+        body: refused,
+        message: "a body index above 65,535",
+      });
+      const trapped = keptBody(4);
+      expect(() => askOceanMap([[trapped, "payload"]], trapped)).toThrow(WebAssembly.RuntimeError);
+    });
   });
 
   /** A ground-readout query of `body` by `detailSeed`, the worker holding `held`'s fields. */

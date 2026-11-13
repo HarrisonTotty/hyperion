@@ -44,6 +44,7 @@ import type {
   HeightWorkerRequest,
   HorizonLayerSetting,
   NormalsLayerSetting,
+  OceanMapAnswer,
   RefinedNormals,
   SigmaSurveySetting,
   SurfaceGroundReadout,
@@ -60,6 +61,7 @@ import {
   bakeTransferables,
   blockTransferables,
   classMapTransferables,
+  oceanMapTransferables,
   refinedTransferables,
 } from "./messages";
 
@@ -259,6 +261,26 @@ export interface WasmNormalMap {
 }
 
 /**
+ * The module's `OceanMapAnswer`, `WorkerFields::ocean_map`'s (plan R11, R11.T8.b): the field's
+ * level and header figures, each surveyed cell answered with its water, ice and winds, and the
+ * speed codes' table; its getters copy out.
+ */
+export interface WasmOceanMap {
+  readonly level: number;
+  readonly seaLevelM: number;
+  readonly months: number;
+  readonly seasonEccentricity: number;
+  cells(): Uint32Array;
+  depthM(): Float32Array;
+  levelM(): Float32Array;
+  ice(): Uint8Array;
+  winds(): Uint8Array;
+  windSpeedsMps(): Float64Array;
+  readonly complete: boolean;
+  free(): void;
+}
+
+/**
  * The module's `GroundReadoutAnswer`, `WorkerFields::ground_readout`'s (R10.T12): its `kind` a
  * {@link WASM_LINE_OF_SIGHT} value, and on the ground the sight's, the reading's, the material's and
  * the properties' getters, `undefined` (or `false`) off it and where not computed.
@@ -414,6 +436,10 @@ export interface WasmSurfaceFields {
    * held.
    */
   normalMap(system: bigint, body: number, seed: bigint): WasmNormalMap | undefined;
+  /**
+   * The body's sea for R11's ocean (R11.T8.b); `undefined` where no field of the body is held.
+   */
+  oceanMap(system: bigint, body: number): WasmOceanMap | undefined;
   free(): void;
 }
 
@@ -939,6 +965,37 @@ export class WorkerFields {
   }
 
   /**
+   * `body`'s sea for R11's ocean over its field (R11.T8.b, `WorkerFields::ocean_map`), copied out;
+   * `null` where no payload field of it is held (none, or a stand-in's, which holds no ground).
+   */
+  oceanMap(body: BodyIdHex): OceanMapAnswer | null {
+    if (this.#forms.get(body) !== "payload") {
+      return null;
+    }
+    const map = this.#module.oceanMap(...bodyArgs(body));
+    if (map === undefined) {
+      return null;
+    }
+    try {
+      return {
+        level: map.level,
+        seaLevelM: map.seaLevelM,
+        months: map.months,
+        seasonEccentricity: map.seasonEccentricity,
+        cells: map.cells(),
+        depthM: map.depthM(),
+        levelM: map.levelM(),
+        ice: map.ice(),
+        winds: map.winds(),
+        windSpeedsMps: map.windSpeedsMps(),
+        complete: map.complete,
+      };
+    } finally {
+      map.free();
+    }
+  }
+
+  /**
    * `body`'s coarse class map for R07's disc over its field, with its detail seed (R10.T10.d,
    * `WorkerFields::class_map`), and its normal map (R10.T10.g, `WorkerFields::normal_map`), its
    * pairs rounded to half floats as a bake's are ({@link packNormals}), with the texels' maturity
@@ -1249,6 +1306,8 @@ export function answerRequest(
       return fieldAnswer(request.id, request.body, fields, { kind: "taken", block: null });
     case "class-map":
       return answerClassMap(request, fields);
+    case "ocean-map":
+      return answerOceanMap(request, fields);
     case "ground-readout":
       return answerGroundReadout(request, fields);
   }
@@ -1296,6 +1355,29 @@ function answerClassMap(
     }
     return {
       reply: { kind: "class-map-failed", id, body, message: messageOf(error) },
+      transfer: [],
+    };
+  }
+}
+
+/**
+ * Answers an ocean-map query: the map, `null` where no payload field of the body is held, or the
+ * module's refusal; a trap is rethrown, as a bake's is.
+ */
+function answerOceanMap(
+  request: Extract<HeightWorkerRequest, { kind: "ocean-map" }>,
+  fields: WorkerFields,
+): HeightAnswer {
+  const { id, body } = request;
+  try {
+    const map = fields.oceanMap(body);
+    return { reply: { kind: "ocean-map", id, body, map }, transfer: oceanMapTransferables(map) };
+  } catch (error: unknown) {
+    if (isTrap(error)) {
+      throw error;
+    }
+    return {
+      reply: { kind: "ocean-map-failed", id, body, message: messageOf(error) },
       transfer: [],
     };
   }

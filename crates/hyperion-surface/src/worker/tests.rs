@@ -4582,3 +4582,99 @@ fn worker_drawn_albedo_at_a_vertex_is_the_material_query_s() {
         );
     }
 }
+
+/// The ocean map over the Earth-like world's coast (plan R11, R11.T8.b): every surveyed cell once,
+/// rising, each with its record's depth, level against the sea and ice, and its climate's winds,
+/// the margin left out; under water exactly where its depth is above 0.
+#[test]
+fn worker_ocean_map_holds_each_surveyed_cell_s_water_ice_and_winds() {
+    let field = world(SyntheticWorld::EarthLike);
+    let (cells, _) = coast_cells();
+    let fields = worker_over(field, &cells);
+    let body = field.header().body();
+    let map = fields.ocean_map(body).unwrap();
+    let header = field.header();
+    assert_eq!(map.level(), header.level().get());
+    assert_eq!(
+        bits(map.sea_level().value()),
+        bits(header.sea_level().value())
+    );
+    assert_eq!(map.months(), header.months());
+    assert_eq!(
+        bits(map.season_eccentricity()),
+        bits(header.season_eccentricity())
+    );
+    assert!(map.is_complete());
+    assert_eq!(map.cells(), indices(&cells).as_slice());
+    let count = map.cells().len();
+    assert_eq!(
+        (
+            map.depth_m().len(),
+            map.level_m().len(),
+            map.ice().len(),
+            map.winds().len()
+        ),
+        (count, count, count, count)
+    );
+    let (mut wet, mut dry) = (0, 0);
+    for (k, &index) in map.cells().iter().enumerate() {
+        let cell = cell_at_index(map.level(), index).unwrap();
+        let record = field.cell(cell).unwrap();
+        let depth = (f64::from(record.water_surface_mm) - f64::from(record.elevation_mm)) / 1000.0;
+        assert_eq!(
+            bits_f32(map.depth_m()[k]),
+            bits_f32(nearest_f32(depth)),
+            "{cell:?}"
+        );
+        assert_eq!(map.depth_m()[k] > 0.0, record.is_under_water(), "{cell:?}");
+        let level = record.water_surface().value() - header.sea_level().value();
+        assert_eq!(
+            bits_f32(map.level_m()[k]),
+            bits_f32(nearest_f32(level)),
+            "{cell:?}"
+        );
+        assert_eq!(map.ice()[k], record.ice, "{cell:?}");
+        assert_eq!(
+            map.winds()[k],
+            field.climate(cell).unwrap().wind,
+            "{cell:?}"
+        );
+        if record.is_under_water() {
+            wet += 1;
+            // The sea's cells stand at its level, to the step of their millimetres.
+            assert!(
+                map.level_m()[k].abs() < 1e-3,
+                "{cell:?}: {}",
+                map.level_m()[k]
+            );
+        } else {
+            dry += 1;
+        }
+    }
+    assert!(
+        wet > 0 && dry > 0,
+        "the coast holds sea and land: {wet} wet, {dry} dry"
+    );
+    // The same map again, from the same worker and a fresh one.
+    assert_eq!(fields.ocean_map(body).unwrap(), map);
+    assert_eq!(worker_over(field, &cells).ocean_map(body).unwrap(), map);
+}
+
+/// No ocean map of a body whose field is not held.
+#[test]
+fn worker_ocean_map_of_a_body_not_held_is_not_started() {
+    let f = fixture();
+    let fields = WorkerFields::new();
+    assert_eq!(
+        fields.ocean_map(f.body),
+        Err(QueryBodyError::NotStarted(f.body))
+    );
+    // The Moon-like world holds no water: every surveyed cell is dry.
+    let map = f.worker().ocean_map(f.body).unwrap();
+    assert_ne!(map.cells().len(), 0);
+    assert!(
+        map.depth_m().iter().all(|&d| bits_f32(d) == bits_f32(0.0)),
+        "{:?}",
+        map.depth_m()
+    );
+}

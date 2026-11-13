@@ -61,6 +61,7 @@ import type {
   GroundReadoutQuery,
   HeightWorkerReply,
   HeightWorkerRequest,
+  OceanMapAnswer,
   SigmaSurveySetting,
   SurfaceGroundReadout,
   TerrainLayers,
@@ -315,13 +316,22 @@ interface InFlight {
   readonly blocksAtSend: number;
 }
 
-/** A query posted to a worker and not yet answered: a class map, or a view's terrain readout. */
+/**
+ * A query posted to a worker and not yet answered: a class map, an ocean map, or a view's terrain
+ * readout.
+ */
 type PendingQuery =
   | {
       readonly kind: "class-map";
       readonly body: BodyIdHex;
       readonly detailSeed: DetailSeedHex;
       readonly resolve: (map: ClassMapAnswer | null) => void;
+      readonly reject: (error: Error) => void;
+    }
+  | {
+      readonly kind: "ocean-map";
+      readonly body: BodyIdHex;
+      readonly resolve: (map: OceanMapAnswer | null) => void;
       readonly reject: (error: Error) => void;
     }
   | {
@@ -960,6 +970,27 @@ export class HeightWorkerPool {
   }
 
   /**
+   * `body`'s sea for R11's ocean (plan R11, R11.T8.b), answered by one worker over the field it
+   * holds of the body, as {@link HeightWorkerPool.classMap} is: the least loaded running bake
+   * worker, posted after every block posted so far, and asked again of a failed worker's
+   * replacement.
+   *
+   * @returns The map, or `null` where the pool keeps no field of `body`, no worker runs, the worker
+   *   holds no payload field of it, or the pool is terminated before the answer; rejected with the
+   *   module's message where the module refused the query.
+   * @throws Error once the pool is terminated.
+   */
+  oceanMap(body: BodyIdHex): Promise<OceanMapAnswer | null> {
+    this.assertLive();
+    if (!this.fields.has(body)) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve, reject) => {
+      this.postQuery({ kind: "ocean-map", body, resolve, reject });
+    });
+  }
+
+  /**
    * A view's terrain readout of `body` where `query`'s line of sight meets its ground (plan R10,
    * T12), answered by one worker over the field it holds of the body with the body's detail seed
    * `detailSeed`, as {@link HeightWorkerPool.classMap} is: the readout worker where the pool runs one
@@ -1466,6 +1497,20 @@ export class HeightWorkerPool {
         }
         return;
       }
+      case "ocean-map": {
+        const query = this.answered(slot, reply);
+        if (query?.kind === "ocean-map") {
+          query.resolve(reply.map);
+        }
+        return;
+      }
+      case "ocean-map-failed": {
+        const query = this.answered(slot, reply);
+        if (query?.kind === "ocean-map") {
+          query.reject(new Error(`the ocean map of ${reply.body} was refused: ${reply.message}`));
+        }
+        return;
+      }
       case "class-map-failed": {
         const query = this.answered(slot, reply);
         if (query?.kind === "class-map") {
@@ -1506,7 +1551,15 @@ export class HeightWorkerPool {
     slot: Slot,
     reply: Extract<
       HeightWorkerReply,
-      { kind: "class-map" | "class-map-failed" | "ground-readout" | "ground-readout-failed" }
+      {
+        kind:
+          | "class-map"
+          | "class-map-failed"
+          | "ocean-map"
+          | "ocean-map-failed"
+          | "ground-readout"
+          | "ground-readout-failed";
+      }
     >,
   ): PendingQuery | undefined {
     const query = slot.queries.get(reply.id);
@@ -1562,9 +1615,10 @@ export class HeightWorkerPool {
   }
 
   /**
-   * Posts a class-map or readout query, or answers `null` with no worker running: a readout to the
-   * running readout worker where there is one (R10.T12.c), else, as a class map always, to the
-   * least loaded running bake worker; the readout worker where it alone runs.
+   * Posts a class-map, ocean-map or readout query, or answers `null` with no worker running: a
+   * readout to the running readout worker where there is one (R10.T12.c), else, as a class map and
+   * an ocean map always, to the least loaded running bake worker; the readout worker where it alone
+   * runs.
    */
   private postQuery(query: PendingQuery): void {
     const running = this.slots.filter((each) => !each.lost);
@@ -1584,14 +1638,17 @@ export class HeightWorkerPool {
     }
     const id = this.takeId();
     slot.queries.set(id, query);
-    const { body, detailSeed } = query;
+    const { body } = query;
     switch (query.kind) {
       case "class-map":
-        slot.worker.postMessage({ kind: "class-map", id, body, detailSeed }, []);
+        slot.worker.postMessage({ kind: "class-map", id, body, detailSeed: query.detailSeed }, []);
+        return;
+      case "ocean-map":
+        slot.worker.postMessage({ kind: "ocean-map", id, body }, []);
         return;
       case "ground-readout":
         slot.worker.postMessage(
-          { ...query.query, kind: "ground-readout", id, body, detailSeed },
+          { ...query.query, kind: "ground-readout", id, body, detailSeed: query.detailSeed },
           [],
         );
         return;

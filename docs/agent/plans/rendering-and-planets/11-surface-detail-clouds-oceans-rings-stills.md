@@ -1244,6 +1244,7 @@ _Re-validated 2026-11-02 (the names T8 calls, as built):_
   is a water surface above coarse elevation and never an ice-covered cell; a closed basin is drawn
   at its own level; no sea over unsurveyed cells; the specular point on the sphere against a CPU
   reflection solution for three geometries; the smoke harness.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.b.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.b.md).
 - **R11.T8.c Near the surface.** `oceanNear.wgsl`: below 20 km (Bruneton et al. 2010's switch) the
   projected grid under the camera, displaced by the Gerstner set, 32 components on the high setting
   and about 8 on the low, refraction on the high setting only, the unresolved variance kept in the

@@ -429,6 +429,53 @@ export interface ClassMapMaturityAnswer {
   readonly nodes: Float32Array;
 }
 
+/** The months a climate record carries 10 m winds for, from periapsis (R09's `ClimateCell::wind`). */
+export const OCEAN_MAP_MONTHS = 12;
+
+/** The bytes of one cell's winds in {@link OceanMapAnswer.winds}: an azimuth and a speed code a month. */
+export const OCEAN_MAP_WIND_BYTES = 2 * OCEAN_MAP_MONTHS;
+
+/**
+ * A body's sea for R11's ocean, as a worker answers it (plan R11, R11.T8.b; `src/wasm.rs`'s
+ * `OceanMapAnswer`, the crate's `WorkerFields::ocean_map`): each surveyed cell of the field's
+ * level with its water, its ice and its climate's winds, read from the field's records with no
+ * synthesis.
+ */
+export interface OceanMapAnswer {
+  /** The level, 5 to 8, of the field it was made from, whose cells it holds. */
+  readonly level: number;
+  /** The sea level above the datum, m (`FieldHeader::sea_level`). */
+  readonly seaLevelM: number;
+  /** The months of the body's year, 1 or 12, which the winds are blended over (`monthBlend`). */
+  readonly months: number;
+  /** The seasonal orbit's eccentricity, 0 to below 1. */
+  readonly seasonEccentricity: number;
+  /** The cell index at {@link OceanMapAnswer.level} (`fieldCellIndex`'s) of each cell, rising. */
+  readonly cells: Uint32Array;
+  /**
+   * Each cell's water depth, its water surface less its ground, m: above 0 exactly where the cell
+   * is under water (`SynthesisCell::is_under_water`), 0 on dry ground.
+   */
+  readonly depthM: Float32Array;
+  /**
+   * Each cell's water surface less the sea level, m: 0 to the millimetre over the sea, a closed
+   * basin's own level over a lake, the ground's height above the sea where it is dry.
+   */
+  readonly levelM: Float32Array;
+  /** Each cell's ice code, its share under ice in 255ths (`SynthesisCell::ice`). */
+  readonly ice: Uint8Array;
+  /**
+   * Each cell's climate's 10 m winds, {@link OCEAN_MAP_WIND_BYTES} bytes a cell, cell c's month k
+   * at `24 c + 2 k`: the azimuth code (256ths of a turn clockwise from local north, towards which
+   * the air moves), then the speed code, which {@link OceanMapAnswer.windSpeedsMps} decodes.
+   */
+  readonly winds: Uint8Array;
+  /** Each speed code's speed, m/s, code c's at c: 256 values (`Wind::speed`, the module's table). */
+  readonly windSpeedsMps: Float64Array;
+  /** Whether every surveyed cell was answered: `false` where a climate record is still to come. */
+  readonly complete: boolean;
+}
+
 /** A point of a face, in the cube's face coordinates (`hyperion_surface::cube::FaceUv`). */
 export interface FacePoint {
   readonly face: Face;
@@ -638,6 +685,8 @@ export type HeightWorkerRequest =
       readonly body: BodyIdHex;
       readonly detailSeed: DetailSeedHex;
     }
+  /** Answer `body`'s sea for R11's ocean over the field the worker holds of it (R11.T8.b). */
+  | { readonly kind: "ocean-map"; readonly id: number; readonly body: BodyIdHex }
   | GroundReadoutRequest;
 
 /** A message from a height worker to the pool. */
@@ -690,6 +739,23 @@ export type HeightWorkerReply =
   /** Class-map query `id` was refused by the module, which names why. */
   | {
       readonly kind: "class-map-failed";
+      readonly id: number;
+      readonly body: BodyIdHex;
+      readonly message: string;
+    }
+  /**
+   * Ocean-map query `id`'s answer: `body`'s sea, or `null` where the worker holds no payload field
+   * of it.
+   */
+  | {
+      readonly kind: "ocean-map";
+      readonly id: number;
+      readonly body: BodyIdHex;
+      readonly map: OceanMapAnswer | null;
+    }
+  /** Ocean-map query `id` was refused by the module, which names why. */
+  | {
+      readonly kind: "ocean-map-failed";
       readonly id: number;
       readonly body: BodyIdHex;
       readonly message: string;
@@ -795,4 +861,18 @@ export function classMapTransferables(map: ClassMapAnswer | null): Transferable[
     );
   }
   return buffers;
+}
+
+/** The buffers a worker transfers with an ocean map. */
+export function oceanMapTransferables(map: OceanMapAnswer | null): Transferable[] {
+  return map === null
+    ? []
+    : [
+        map.cells.buffer,
+        map.depthM.buffer,
+        map.levelM.buffer,
+        map.ice.buffer,
+        map.winds.buffer,
+        map.windSpeedsMps.buffer,
+      ];
 }

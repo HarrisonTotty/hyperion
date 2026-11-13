@@ -115,6 +115,12 @@ export class ScriptedHeightWorker implements WorkerLike {
     return this.received.flatMap((m) => (m.kind === "class-map" && !answered.has(m.id) ? [m] : []));
   }
 
+  /** The ocean-map queries still awaiting an answer, oldest first (R11.T8.b). */
+  get pendingOceanMaps(): Extract<HeightWorkerRequest, { kind: "ocean-map" }>[] {
+    const answered = new Set(this.answered);
+    return this.received.flatMap((m) => (m.kind === "ocean-map" && !answered.has(m.id) ? [m] : []));
+  }
+
   /** The ground-readout queries still awaiting an answer, oldest first (R10.T12). */
   get pendingGroundReadouts(): Extract<HeightWorkerRequest, { kind: "ground-readout" }>[] {
     const answered = new Set(this.answered);

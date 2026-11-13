@@ -12,6 +12,7 @@ import type {
   ClassMapAnswer,
   GroundReadoutQuery,
   HeightSourceSetting,
+  OceanMapAnswer,
   SurfaceGroundReadout,
   TerrainLayers,
 } from "./messages";
@@ -734,6 +735,66 @@ function answerClassMap(worker: ScriptedHeightWorker, map: ClassMapAnswer | null
   }
   worker.reply({ kind: "class-map", id: query.id, body: query.body, map });
 }
+
+/** An ocean map of no cell. */
+function emptyOcean(): OceanMapAnswer {
+  return {
+    level: 6,
+    seaLevelM: 0,
+    months: 1,
+    seasonEccentricity: 0,
+    cells: new Uint32Array(),
+    depthM: new Float32Array(),
+    levelM: new Float32Array(),
+    ice: new Uint8Array(),
+    winds: new Uint8Array(),
+    windSpeedsMps: new Float64Array(256),
+    complete: true,
+  };
+}
+
+describe("the height-worker pool's ocean maps (R11.T8.b)", () => {
+  it("asks the least loaded worker after the body's blocks, answers its map, and rejects a refusal", async () => {
+    const { pool, created } = poolOf(2);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    const asked = pool.oceanMap(MOON);
+    const second = workerAt(created, 1);
+    expect(second.received.map((m) => m.kind)).toEqual(["field-init", "ocean-map"]);
+    const query = second.pendingOceanMaps[0];
+    if (query === undefined) {
+      throw new Error("no ocean map is asked");
+    }
+    const map = emptyOcean();
+    second.reply({ kind: "ocean-map", id: query.id, body: MOON, map });
+    await expect(asked).resolves.toBe(map);
+    const refused = pool.oceanMap(MOON);
+    const again = workerAt(created, 0).pendingOceanMaps[0] ?? second.pendingOceanMaps[0];
+    if (again === undefined) {
+      throw new Error("no ocean map is asked again");
+    }
+    const answering =
+      workerAt(created, 0).pendingOceanMaps.length > 0 ? workerAt(created, 0) : second;
+    answering.reply({ kind: "ocean-map-failed", id: again.id, body: MOON, message: "no" });
+    await expect(refused).rejects.toThrow(/ocean map of .* was refused: no/u);
+  });
+
+  it("answers null at once for a body whose field it does not keep, and asks a failed worker's replacement again", async () => {
+    const { pool, created } = poolOf(1);
+    await expect(pool.oceanMap(MOON)).resolves.toBeNull();
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const asked = pool.oceanMap(MOON);
+    workerAt(created, 0).fail();
+    const replacement = workerAt(created, 1);
+    expect(replacement.received.map((m) => m.kind)).toEqual(["field-init", "ocean-map"]);
+    const query = replacement.pendingOceanMaps[0];
+    if (query === undefined) {
+      throw new Error("no ocean map is asked of the replacement");
+    }
+    replacement.reply({ kind: "ocean-map", id: query.id, body: MOON, map: null });
+    await expect(asked).resolves.toBeNull();
+  });
+});
 
 describe("the height-worker pool's class maps (R10.T10.d)", () => {
   const SEED = "0123456789abcdef";
