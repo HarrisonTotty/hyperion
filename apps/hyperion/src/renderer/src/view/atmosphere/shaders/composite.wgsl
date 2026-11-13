@@ -683,6 +683,15 @@ fn anyDiscAlong(dir : vec3f, count : u32) -> bool {
     (count > 5u && discAlong(dir, draw.sourceDirection5, draw.sourceDisc5));
 }
 
+// Each of `fragmentMain`'s terms is formed inside a loop of at most one pass, not an `if`, wherever
+// a pixel may not take it (plan R08, perf-composite-close): the sky's and the surfaces' paths, the
+// camera's above the top and inside the air, the march's read, the sky view, the deck's column,
+// the aerial volume's read and each disc's light. On a GPU the two are the same, a branch no thread
+// of a group takes being skipped; but SwiftShader, the checks' software adapter, runs both sides of
+// an `if` under its lanes' mask whatever they take, and a loop only while a lane is in it, so that
+// every pixel paid every path: from above the top the inside air's sky view and transmittance to
+// space, and each drawn source's two disc lookups, at every sky and surface pixel alike, with no
+// disc in view. Each pixel's bits are unchanged.
 @fragment
 fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let pixel = vec2u(position.xy);
@@ -696,7 +705,9 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   // From above the air's top, outside the march's area, a pixel reads no air (R08.T11.d), and with
   // no disc drawn on it keeps the scene's light: the full path's own sum, colour × 1 + 0 × factor,
   // formed here before the view and the body are read (R08.T16.a.2's giant a few pixels across).
-  if (draw.camera.w * draw.curvature.z >= draw.shell.x && draw.exact.w >= 1.0 && !marchedHere(pixel)) {
+  let outside =
+    draw.camera.w * draw.curvature.z >= draw.shell.x && draw.exact.w >= 1.0 && !marchedHere(pixel);
+  for (var early = outside; early; early = false) {
     let uv = position.xy / draw.output.xy;
     let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
     let dir = normalize(draw.forward.xyz + ndc.x * draw.right.xyz + ndc.y * draw.upRay.xyz);
@@ -717,7 +728,6 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let dir = rayThrough(v, uv);
   let factor = v.sky.w;
   let topM = draw.shell.x;
-  let body = oblateBodyOf(oblateBody);
   let aboveTop = v.camera.w * v.curvature.z >= topM;
   // The ray march's share of the frame (R08.T8): 0 below the march band, 1 from its upper edge up,
   // the same for every pixel, so each branch on it is uniform.
@@ -732,15 +742,18 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   // Its march candidates too, read once a pixel for `behindAtMarch` as well (plan R07).
   var candidates : MarchCandidates;
   var at = MarchEdge(vec2u(0u), vec2u(0u), 0.0, vec2u(0u), vec2u(0u), 0.0, false, false);
-  if (here) {
+  for (var wrote = here; wrote; wrote = false) {
     candidates = marchCandidatesOf(pixel);
     at = rayMarchEdgeOf(candidates, pixel, depth);
   }
 
-  if (depth == 0.0) {
+  // A depth is the sky's or not, NaN among the latter: one test, its two sides each a loop.
+  let skyPixel = depth == 0.0;
+  for (var sky = skyPixel; sky; sky = false) {
     if (COMPOSITE_PROBE == 1u) {
       return vec4f(min(colour, vec3f(HALF_MAX)), meterClass);
     }
+    let body = oblateBodyOf(oblateBody);
     // The source whose disc the ray falls in, the last such, whose light slot dims what lies behind
     // it; slot 0's elsewhere.
     var slotHere = 0u;
@@ -755,27 +768,24 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     var behind : vec3f;
     // The pixel's far-limb footprint from above the top (R08.T8.c), w_L 0 elsewhere.
     var footprint = farLimbNone();
-    if (aboveTop) {
+    for (var above = aboveTop; above; above = false) {
       // What lies behind takes its transmittance to space per channel from the ray's entry into the
       // air (R08.T8.b), not the march's mean over the channels, and across the pixel's footprint
       // (R08.T8.c); outside the march's area, where the ray misses the air, 1 (R08.T11.d).
       behind = vec3f(1.0);
       inscattered = vec3f(0.0);
-      if (here) {
+      for (var inArea = here; inArea; inArea = false) {
         inscattered = rayMarched(at).rgb;
         if (COMPOSITE_PROBE != 2u) {
           // From the march's resolution where the frame formed it and the read stands for the
           // pixel's own (the owner's priority, 2026-11-01; `behindAtMarch`): neither the footprint
           // nor a lookup is formed for the pixel. Per pixel elsewhere, as before, and within a
-          // source's disc, whose light slot and own transmittance the disc takes. Each is a loop of
-          // at most one pass, not an `if`: on a GPU the two are the same, a branch that no thread
-          // of a group takes is skipped, but SwiftShader, the checks' software adapter, runs both
-          // sides of a branch under its lanes' mask whatever they take, and a loop only while a
-          // lane is in it; as an `if` the pod's composite paid the per-pixel term at every pixel
-          // (468 ms against 225 ms with it compiled out, at low from orbit).
+          // source's disc, whose light slot and own transmittance the disc takes. As an `if` the
+          // pod's composite paid the per-pixel term at every pixel (468 ms against 225 ms with it
+          // compiled out, at low from orbit).
           var fromMarch = MarchBehind(vec3f(1.0), false);
           let reads = draw.levers.x > 0.5 && COMPOSITE_PROBE != 3u && !inDisc;
-          for (var read = reads; read; read = false) {
+          for (var fromTexels = reads; fromTexels; fromTexels = false) {
             fromMarch = behindAtMarch(pixel, colour, inscattered * factor, candidates);
           }
           behind = fromMarch.behind;
@@ -787,11 +797,12 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
           }
         }
       }
-    } else {
+    }
+    for (var inside = !aboveTop; inside; inside = false) {
       // Inside the air: from the march band's upper edge up the march's sky, below its lower edge
       // the sky view's, and between them the two blended by the march's share (R08.T8). What lies
       // behind takes the camera's own transmittance to space either way.
-      if (marchWeight < 1.0) {
+      for (var viewed = marchWeight < 1.0; viewed; viewed = false) {
         // The sky view's sphere at the ray's own azimuth, R_alpha, its horizon split, and the
         // camera's height on it (R08.T6.f).
         let heightM = skyViewHeight(v.camera.w, v.curvature.w);
@@ -806,7 +817,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
         let skyUv = skyViewParamsToUv(ground, viewZenith, azimuthUnit, size, column.y);
         inscattered = textureSampleLevel(skyView, linearClamp, skyUv, 0.0).rgb;
       }
-      if (marchWeight > 0.0) {
+      for (var marchedSky = marchWeight > 0.0; marchedSky; marchedSky = false) {
         let marched = marchedLightAt(at);
         if (marchWeight < 1.0) {
           inscattered = mix(inscattered, marched.rgb, marchWeight);
@@ -815,9 +826,11 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
         }
       }
       // Beneath a deck (`shell.w` above 0, R08.T15.b.2), through the deck's column.
-      if (draw.shell.w > 0.0) {
+      let beneath = draw.shell.w > 0.0;
+      for (var deck = beneath; deck; deck = false) {
         behind = belowDeckBehind(v, dir);
-      } else {
+      }
+      for (var open = !beneath; open; open = false) {
         behind = transmittanceToSpace(v, body, dir, slotHere);
       }
     }
@@ -826,16 +839,17 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     // pre-exposure.
     for (var k = 0u; k < count; k++) {
       let source = v.sources[k];
-      if (withinDisc(dir, source) && dot(source.disc.rgb, vec3f(1.0)) > 0.0) {
-        var toSpace : vec3f;
-        if (aboveTop) {
-          toSpace = vec3f(1.0);
-          if (here && COMPOSITE_PROBE != 2u) {
-            toSpace = transmittanceAcrossFromAbove(v, body, &footprint, dir, skySlotOf(source));
-          }
-        } else if (draw.shell.w > 0.0) {
+      let drawn = withinDisc(dir, source) && dot(source.disc.rgb, vec3f(1.0)) > 0.0;
+      for (var disc = drawn; disc; disc = false) {
+        var toSpace = vec3f(1.0);
+        for (var fromAbove = aboveTop && here && COMPOSITE_PROBE != 2u; fromAbove; fromAbove = false) {
+          toSpace = transmittanceAcrossFromAbove(v, body, &footprint, dir, skySlotOf(source));
+        }
+        let beneath = !aboveTop && draw.shell.w > 0.0;
+        for (var deck = beneath; deck; deck = false) {
           toSpace = belowDeckBehind(v, dir);
-        } else {
+        }
+        for (var open = !aboveTop && !beneath; open; open = false) {
           toSpace = transmittanceToSpace(v, body, dir, skySlotOf(source));
         }
         luminance += min(source.disc.rgb * toSpace * factor, vec3f(HALF_MAX));
@@ -844,40 +858,47 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
   }
 
-  let distance = distanceAtDepth(v, uv, depth);
-  let reach = v.tables.y;
-  // The surface's light through the air per channel (R08.T9.c), or by the channels' mean, the way
-  // back; the same for every pixel, so each branch on it is uniform.
-  let channels = draw.levers.y > 0.5 && COMPOSITE_PROBE != 4u;
-  // Under a deck's route from above its split, whether the ray meets the deck's datum before the
-  // surface (R08.T15.b.2): the march reads the deck there, and the volume no deck. `levers.z` is the
-  // same for every pixel, and 0 for every other body, whose composite is as before.
-  let deckFirst = draw.levers.z > 0.5 && datumWithin(v, dir, distance);
-  // Within the volume's reach, the volume, through the read every reader of it takes
-  // (`aerialRead.wgsl`, R08.T9.a), blended with the ray march by its share in the march band
-  // (R08.T8); beyond it, from the band's upper edge up (above the air included), and past a deck's
-  // datum (`deckFirst`), the ray march.
-  if (distance <= reach && marchWeight < 1.0 && !deckFirst) {
-    var aerialAt = vec4f(0.0, 0.0, 0.0, 1.0);
-    if (COMPOSITE_PROBE != 7u) {
-      aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
+  for (var surface = !skyPixel; surface; surface = false) {
+    let distance = distanceAtDepth(v, uv, depth);
+    let reach = v.tables.y;
+    // The surface's light through the air per channel (R08.T9.c), or by the channels' mean, the
+    // way back; the same for every pixel, so each branch on it is uniform.
+    let channels = draw.levers.y > 0.5 && COMPOSITE_PROBE != 4u;
+    // Under a deck's route from above its split, whether the ray meets the deck's datum before the
+    // surface (R08.T15.b.2): the march reads the deck there, and the volume no deck. `levers.z` is
+    // the same for every pixel, and 0 for every other body, whose composite is as before.
+    let deckFirst = draw.levers.z > 0.5 && datumWithin(v, dir, distance);
+    // Within the volume's reach, the volume, through the read every reader of it takes
+    // (`aerialRead.wgsl`, R08.T9.a), blended with the ray march by its share in the march band
+    // (R08.T8); beyond it, from the band's upper edge up (above the air included), and past a
+    // deck's datum (`deckFirst`), the ray march.
+    let inReach = distance <= reach && marchWeight < 1.0 && !deckFirst;
+    for (var aerialRead = inReach; aerialRead; aerialRead = false) {
+      var aerialAt = vec4f(0.0, 0.0, 0.0, 1.0);
+      if (COMPOSITE_PROBE != 7u) {
+        aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
+      }
+      var through = vec3f(aerialAt.a);
+      if (channels && COMPOSITE_PROBE != 7u) {
+        through = aerialTransmittanceAt(aerialTransmittance, linearClamp, uv, distance, reach);
+      }
+      var luminance = colour * through + aerialAt.rgb * factor;
+      for (var blend = marchWeight > 0.0; blend; blend = false) {
+        let marched = marchedAt(at);
+        luminance = mix(
+          luminance,
+          colour * marchedThrough(marched, channels) + marched.light.rgb * factor,
+          marchWeight,
+        );
+      }
+      return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
     }
-    var through = vec3f(aerialAt.a);
-    if (channels && COMPOSITE_PROBE != 7u) {
-      through = aerialTransmittanceAt(aerialTransmittance, linearClamp, uv, distance, reach);
-    }
-    var luminance = colour * through + aerialAt.rgb * factor;
-    if (marchWeight > 0.0) {
+    for (var beyond = !inReach; beyond; beyond = false) {
       let marched = marchedAt(at);
-      luminance = mix(
-        luminance,
-        colour * marchedThrough(marched, channels) + marched.light.rgb * factor,
-        marchWeight,
-      );
+      let luminance = colour * marchedThrough(marched, channels) + marched.light.rgb * factor;
+      return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
     }
-    return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
   }
-  let marched = marchedAt(at);
-  let luminance = colour * marchedThrough(marched, channels) + marched.light.rgb * factor;
-  return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
+  // Unreached: a pixel is the sky's or not (`skyPixel`), and each path returns.
+  return vec4f(min(colour, vec3f(HALF_MAX)), meterClass);
 }

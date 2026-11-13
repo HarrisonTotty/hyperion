@@ -25316,3 +25316,15 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   `powFromLog2Parts`, pow's main path split at y) and the last 256 solved exponents per template by
   q; every law bit for bit (`phase.test.ts`). Pod, no CPU quota: a cold colour law 14–45 → 7–24 ms,
   a repeated one 44 → 0.001 ms, and the app's twelve Lambert q 1.5 laws 542 → 21 ms.
+- **The composite's cost, as built** (2026-11-13; lane `perf-composite-close`; figures in the
+  lane's outbox). Renderer only; every pixel's bits unchanged.
+  - `CompositeProbe` adds `edge-off`, `limb-off`, `aerial-off`, `discs-off` and `scene-only`
+    (`COMPOSITE_PROBE` 5–9; `COMPOSITE_PROBE_NAMES`), paired in `macProfile.ts` as
+    `composite-<probe>`.
+  - `MarchCensus.composite` (`CompositeCensus`, `compositeCensus.wgsl`,
+    `COMPOSITE_CENSUS_KERNEL`): the composite's pixels by term, beside the march's census;
+    `viewOutputPxOf`, `compositeCensusWorkgroupsOf`.
+  - `fragmentMain` forms each term in a loop of at most one pass, and `transmittanceFromAbove` takes
+    one lookup from either start; `severalSuns.test.ts` counts seven returns.
+  - Pending, the owner's Mac pairs: the M5's composite figure stood at the march's passes before it
+    plus about 0.5 ms in every run of the 11-08 batch, so `composite-scene-only` decides its own cost.

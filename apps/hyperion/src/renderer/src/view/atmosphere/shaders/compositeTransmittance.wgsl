@@ -94,34 +94,37 @@ fn topEntryOf(v : AtmosphereView, body : OblateBody, dir : vec3f) -> f32 {
 // (a H_p - c H_e) / (c (c + H_p)), which no difference of radii forms (Design note 18); its
 // height and normal are its datum point's, s and h* there, and, on a body of several bands, the
 // local scale height the body's table holds at that h*, since the composite declares no medium.
+// One lookup from either start (perf-composite-close; `transmittanceToSpace`'s from the camera's),
+// the entry's formed in a loop of at most one pass: SwiftShader runs both sides of an `if` under
+// its lanes' mask, and paid both lookups at every call, the camera's start but at its shell's edge.
 fn transmittanceFromAbove(v : AtmosphereView, body : OblateBody, dir : vec3f, slot : u32) -> vec3f {
   let entryM = topEntryOf(v, body, dir);
   if (entryM < 0.0) {
     return vec3f(1.0);
   }
-  if (entryM == 0.0) {
-    return transmittanceToSpace(v, body, dir, slot);
+  var start = cameraLookupStart(v, body);
+  for (var entering = !(entryM == 0.0); entering; entering = false) {
+    let a = v.figure.x;
+    let c = v.figure.y;
+    let topA = draw.shell.x * body.scales.z;
+    let topC = draw.shell.x * body.scales.w;
+    let k = body.scales.x;
+    let kTop = (a + topA) / (c + topC);
+    let kGap = (a * topC - c * topA) / (c * (c + topC));
+    let p = v.camera.xyz + entryM * dir;
+    let quadricM2 = topA * (2.0 * a + topA) + kGap * (k + kTop) * p.z * p.z;
+    let datum = datumPointOf(body, p, quadricM2);
+    let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
+    let z = s * datum.heightM;
+    var scaleM = 0.0;
+    if (oblateBandCount(body) > 1u) {
+      scaleM = oblateScaleHeightAt(body, oblateBody, z);
+    }
+    start = LookupStart(
+      p, oblateScaled(body, p), quadricM2, datum.heightM, datum.normal, datum.normal.z,
+      length(datum.normal.xy), s, z, scaleM
+    );
   }
-  let a = v.figure.x;
-  let c = v.figure.y;
-  let topA = draw.shell.x * body.scales.z;
-  let topC = draw.shell.x * body.scales.w;
-  let k = body.scales.x;
-  let kTop = (a + topA) / (c + topC);
-  let kGap = (a * topC - c * topA) / (c * (c + topC));
-  let p = v.camera.xyz + entryM * dir;
-  let quadricM2 = topA * (2.0 * a + topA) + kGap * (k + kTop) * p.z * p.z;
-  let datum = datumPointOf(body, p, quadricM2);
-  let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
-  let z = s * datum.heightM;
-  var scaleM = 0.0;
-  if (oblateBandCount(body) > 1u) {
-    scaleM = oblateScaleHeightAt(body, oblateBody, z);
-  }
-  let start = LookupStart(
-    p, oblateScaled(body, p), quadricM2, datum.heightM, datum.normal, datum.normal.z,
-    length(datum.normal.xy), s, z, scaleM
-  );
   return transmittanceFrom(body, start, dir, slot);
 }
 
@@ -141,7 +144,7 @@ fn transmittanceAcrossFromAbove(
   // One call site, as the march keeps one (`rayMarchFootprint.wgsl`): SwiftShader inlines every
   // call, and its GPU process segfaulted with the lookup emitted once more here.
   var centre = vec3f(1.0);
-  if (!(blend >= 1.0)) {
+  for (var formed = !(blend >= 1.0); formed; formed = false) {
     centre = transmittanceFromAbove(v, body, dir, slot);
   }
   if (!(blend > 0.0)) {
