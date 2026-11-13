@@ -7831,3 +7831,9 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   - _For the bump to 32._ As above, but `binary_xrb.toml` takes the three keys, and the scan
     draws every Be/X host's mark (delete `marks_active_bex`); give `stellar/binary_events` an
     active Be/X host and pin `bex_active_mark` for a few keys in a golden.
+- **P11.T8.b's high-mass side folded at the 32 bump (train 32).** `hmxb_hold`, `XrbTableRules`,
+  `GalaxyRules::xrb_tables` and `every_32_hold` are gone; the class reads `XRB_SAMPLER`, which
+  task `binary_xrb` (revision 1, the three keys; `binary_xrb_32` deleted) refits `--since 32`, and
+  every Be/X host draws its active mark. The tests are `high_mass_side_tests`. Leans as recorded:
+  the outburst rate is counted before the young lists' age thinning; `binary_xrb.toml` stays at
+  generator version 31's rules, which 32's census shares (lean, 2026-11-13).

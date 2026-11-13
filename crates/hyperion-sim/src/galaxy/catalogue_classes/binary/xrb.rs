@@ -13,14 +13,14 @@
 //! The low-mass kinds (a neutron star or a black hole, persistent or transient, and from 27 an
 //! ultracompact or a symbiotic one) are the old populations' and the high-mass kinds (Be/X and
 //! supergiant, and from 27 a black hole beside a supergiant) the young disc's. The class draws all
-//! nine kinds the carving counts from 27 ([`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER),
+//! nine kinds the carving counts from 27 ([`XRB_SAMPLER`],
 //! fitted at 27), each in its share of the engine's members but the black-hole transients, pinned
 //! at the observed share, so that the hosts its row counts are the hosts it draws (P11.T8.b's
 //! fix). The class's total
 //! is its row's, `Σ_c r_c n_c` over every component c, with `r_c` the row's hosts per solar mass
 //! formed in c's population × the mass formed per system × its born fraction; the high-mass side
 //! takes its sampler's high-mass share of it over the young thin disc's components (from
-//! generator version 32 the intrinsic 3,000 of the row's 10⁴, P11.T8.b's fix, `hmxb_hold`),
+//! generator version 32 the intrinsic 3,000 of the row's 10⁴, P11.T8.b's fix: below),
 //! and the low-mass side the rest over every other component, each side's components in
 //! proportion to `r_c n_c` (lean, 2026-10-31). A row equal in every population would give the
 //! young disc, a few tenths of a per cent of the mass formed, about 25 high-mass hosts, fewer
@@ -132,7 +132,7 @@ use crate::stellar::sse::{Track, ZCoeffs, turn_off_mass, zams};
 use crate::stellar::system::{StarModel, SystemStars, track_mass_of};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts, lifetime};
 use crate::tables::binary::{
-    AwdDonorKind, CLASS_SHARES, ClassSamplerTable, XrbHostKind, XrbMark, XrbPick,
+    AwdDonorKind, CLASS_SHARES, ClassSamplerTable, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
 };
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
 use crate::units::consts::SOLAR_RADIUS_M;
@@ -285,12 +285,11 @@ impl XrayBinaries {
     /// The class in `galaxy`: its components, from its row of [`CLASS_SHARES`] and its sampler's
     /// high-mass share, plan 15's fitted tables (refitted on the generator's own pairs,
     /// P15.T10.b), and the rank of the instability line in the low-mass rate's law. Its sampler is
-    /// [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER), and from generator version 32
-    /// `XRB_SAMPLER_32`, whose high-mass side is
-    /// pinned to its intrinsic count (P11.T8.b's fix, the galaxy's rules).
+    /// [`XRB_SAMPLER`], whose high-mass side is pinned to its intrinsic count from generator
+    /// version 32 (P11.T8.b's fix).
     #[must_use]
     pub fn new(galaxy: &Galaxy) -> Self {
-        Self::of_table(galaxy, galaxy.rules().xrb_tables.sampler())
+        Self::of_table(galaxy, &XRB_SAMPLER)
     }
 
     /// The class in `galaxy` drawing from `table`, its row [`CLASS_SHARES`]'.
@@ -379,9 +378,7 @@ impl XrayBinaries {
         &self.components
     }
 
-    /// The sampler the class draws from: the fitted
-    /// [`XRB_SAMPLER`](crate::tables::binary::XRB_SAMPLER), or from generator version 32
-    /// `XRB_SAMPLER_32` (P11.T8.b's fix).
+    /// The sampler the class draws from: the fitted [`XRB_SAMPLER`].
     #[must_use]
     pub const fn sampler(&self) -> ClassSampler<XrbMark, XrbPick> {
         self.sampler

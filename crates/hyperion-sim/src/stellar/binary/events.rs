@@ -28,8 +28,8 @@
 //!   modelled, nor a persistent black hole's or a supergiant host's events.
 //! - **Be/X giant outbursts** (`0x0304 BEX_GIANT_OUTBURST`): Poisson bins of a Julian year at
 //!   [`BEX_GIANT_OUTBURST_RATE_PER_YEAR`] ([`BeXOutburstCurve`]), on an active host alone
-//!   ([`XrbScanMarks::is_bex_active`]): from generator version 32 [`BEX_ACTIVE_SHARE`] of the Be/X
-//!   hosts, and every one before.
+//!   ([`XrbScanMarks::is_bex_active`]): [`BEX_ACTIVE_SHARE`] of the Be/X hosts, from generator
+//!   version 32.
 //! - **Luminous red novae and kilonovae** (`0x0305`, `0x0306`): one-shot at a merger's time T
 //!   ([`MergerScanMarks::merger_time`], [`NsmScanMarks::merger_time`]), bin 0 and number 0 of
 //!   their tags on the system, as plan 09's `SUPERNOVA` is. A red nova's curve is of the pair's
@@ -115,8 +115,8 @@ pub const BURST_IGNITION_COLUMN_G_CM2: f64 = 1.0e8;
 pub const HELIUM_BURST_SHARES: (f64, f64) = (0.01, 0.1);
 
 /// A Be/X-ray binary's giant (Type II) outbursts a year: 0.1, ours, one a decade, the less
-/// frequent, irregular outbursts of Reig (2011, Ap&SS 332, 1; recalled, not read at source). From
-/// generator version 32 only an active host has them ([`BEX_ACTIVE_SHARE`]).
+/// frequent, irregular outbursts of Reig (2011, Ap&SS 332, 1; recalled, not read at source). Only
+/// an active host has them ([`BEX_ACTIVE_SHARE`]; from generator version 32).
 pub const BEX_GIANT_OUTBURST_RATE_PER_YEAR: f64 = 0.1;
 
 /// The share of the Be/X hosts that are active, whose Be star's disc feeds giant outbursts at
@@ -124,8 +124,9 @@ pub const BEX_GIANT_OUTBURST_RATE_PER_YEAR: f64 = 0.1;
 /// research-leans-51, 2026-11-13): 0.01, ours. The giant outbursts recur on a few systems, 4U
 /// 0115+63, A0535+26 and EXO 2030+375 among them, and MAXI and Swift/BAT see a few a year across
 /// the Galaxy (recalled, not read at source), so that the Galaxy's 3,000 or so Be/X hosts give
-/// about three a year, where every one at the rate would give some 300, nearly one a day. Below
-/// 32 every Be/X host is active.
+/// about three a year, where every one at the rate would give some 300, nearly one a day (counted
+/// before the young lists' thinning by their members' ages: a lean, 2026-11-13). Before 32 every
+/// Be/X host was active.
 pub const BEX_ACTIVE_SHARE: f64 = 0.01;
 
 /// The hydrogen mass fraction of the matter a low-mass or Be donor gives: 0.7, a hydrogen-rich

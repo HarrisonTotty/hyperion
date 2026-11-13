@@ -20,9 +20,10 @@ use crate::galaxy::catalogue_classes::binary::{
 use crate::galaxy::catalogue_classes::testing::HIGH_MASS_XRB;
 use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell, ClassId};
 use crate::galaxy::params::GalaxyParams;
+use crate::rng::ObjectKey;
 use crate::stellar::binary::light_curves::GW170817_EJECTA_MASS;
 use crate::stellar::binary::scan::{
-    NsbhOutflow, engine_calls, scan_cell, scan_merger_cell, scan_nsm_cell,
+    NsbhOutflow, bex_active_mark, engine_calls, scan_cell, scan_merger_cell, scan_nsm_cell,
 };
 use crate::tables::binary::NsmPairKind;
 use crate::time::SourceHorizon;
@@ -141,6 +142,13 @@ fn xrb_of(kind: XrbHostKind) -> &'static XrbScanMarks {
         .unwrap_or_else(|| panic!("the sample holds a {kind:?} host"))
 }
 
+/// The sample's first Be/X host made active (P11.T8.b's fix: one Be/X host in a hundred is, by its
+/// mark), so that the samples list giant outbursts.
+fn active_bex() -> &'static XrbScanMarks {
+    static HOST: OnceLock<XrbScanMarks> = OnceLock::new();
+    HOST.get_or_init(|| xrb_of(XrbHostKind::BeX).with_bex_active(true))
+}
+
 /// The first accreting white dwarf entry that is a dwarf nova at the epoch.
 fn dwarf_nova() -> &'static AwdEntry {
     awd_entries()
@@ -216,7 +224,7 @@ fn systems() -> Vec<(&'static str, BinarySystem<'static>, TimeWindow)> {
         ),
         (
             "Be/X giant outbursts",
-            BinarySystem::xray_binary(seed, xrb_of(XrbHostKind::BeX)),
+            BinarySystem::xray_binary(seed, active_bex()),
             window_years(-2_000, 0),
         ),
         (
@@ -544,14 +552,13 @@ fn a_steady_host_lists_no_event() {
 }
 
 /// A Be/X host that is not active lists no giant outburst, where the same host active lists them
-/// (P11.T8.b's fix): below 32 every Be/X host is active, and from 32 a scan's Be/X hosts that are
-/// not active list none over two millennia, where at 0.1 a year an active host lists some 200.
+/// (P11.T8.b's fix): a scan's Be/X hosts that are not active list none over two millennia, where
+/// at 0.1 a year an active host lists some 200.
 #[test]
 fn a_be_x_host_that_is_not_active_lists_no_giant_outburst() {
     let seed = galaxy().seed();
     let window = window_years(-2_000, 0);
-    let active = xrb_of(XrbHostKind::BeX);
-    assert!(active.is_bex_active(), "below 32 every Be/X host is active");
+    let active = active_bex();
     assert!(
         !listing(&BinarySystem::xray_binary(seed, active), window).is_empty(),
         "an active Be/X host lists its giant outbursts"
@@ -561,27 +568,20 @@ fn a_be_x_host_that_is_not_active_lists_no_giant_outburst() {
         listing(&BinarySystem::xray_binary(seed, &quiet), window),
         []
     );
-    let galaxy_32 = galaxy()
-        .clone()
-        .with_rules(crate::galaxy::rules::GalaxyRules::every_32_hold());
-    let process = XrayBinaries::new(&galaxy_32);
+    let process = XrayBinaries::new(galaxy());
     let mut hosts = Vec::new();
     for x in -16..16 {
         for y in -16..16 {
             let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, [x, y, 0]).unwrap();
-            scan_cell(&galaxy_32, &process, key, &mut hosts);
+            scan_cell(galaxy(), &process, key, &mut hosts);
         }
     }
-    let quiet_32: Vec<&XrbScanMarks> = hosts
+    let quiet: Vec<&XrbScanMarks> = hosts
         .iter()
         .filter(|h| h.kind() == XrbHostKind::BeX && !h.is_bex_active())
         .collect();
-    assert!(
-        quiet_32.len() >= 20,
-        "{} Be/X hosts not active",
-        quiet_32.len()
-    );
-    for host in quiet_32 {
+    assert!(quiet.len() >= 20, "{} Be/X hosts not active", quiet.len());
+    for host in quiet {
         let events = listing(&BinarySystem::xray_binary(seed, host), window);
         assert_eq!(events, [], "{host:?}");
         let active = host.with_bex_active(true);
@@ -739,6 +739,20 @@ fn binary_events_golden() {
             pin(&mut w, name, event);
         }
     }
+    // The Be/X hosts' active marks (P11.T8.b's fix): the sample's first hosts', and which of 2,000
+    // keys' marks are active.
+    let be_x = xrb_hosts().iter().filter(|h| h.kind() == XrbHostKind::BeX);
+    for host in be_x.take(8) {
+        w.line(&format!(
+            "Be/X host {:?} active {}",
+            host.host().key(),
+            host.is_bex_active()
+        ));
+    }
+    let active: Vec<u64> = (0..2_000_u64)
+        .filter(|&k| bex_active_mark(galaxy().seed(), ObjectKey::system(0x1234_0000_0000 + k)))
+        .collect();
+    w.line(&format!("active marks of 2000 keys: {active:?}"));
     // A black hole's outflow (P11.T9.b), bit for bit, and the torn pair's kilonova.
     let m = SolarMasses::new;
     for (hole, star) in [(3.0, 1.2), (3.6, 1.2), (7.0, 1.33)] {

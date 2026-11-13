@@ -93,23 +93,20 @@ fn the_binary_xrb_smoke_run_is_the_same_on_any_thread_count() {
     assert_smoke_block(&one, "binary_xrb");
 }
 
-/// The X-ray binaries' smoke run for generator version 32 (P11.T8.b's fix, task `binary_xrb_32`)
-/// writes its sampler's block, its header in the grammar and its items the task's, with its
-/// high-mass kinds pinned at its manifest's 3,000 hosts of the row's 10⁴, the supergiant and
+/// The X-ray binaries' smoke run pins the high-mass side (P11.T8.b's fix, from generator version
+/// 32): its high-mass kinds at its manifest's 3,000 hosts of the row's 10⁴, the supergiant and
 /// black-hole high-mass hosts at its 40 and 2 of them.
 #[test]
-fn the_binary_xrb_32_smoke_run_pins_the_high_mass_side() {
+fn the_binary_xrb_smoke_run_pins_the_high_mass_side() {
     let dir = tempfile::tempdir().unwrap();
-    let text = smoke("binary_xrb_32", "4", dir.path());
-    assert_smoke_block(&text, "binary_xrb_32");
-    let block = TableText::of_block(&text, "binary_xrb_32")
-        .unwrap()
-        .unwrap();
+    let text = smoke("binary_xrb", "4", dir.path());
+    assert_smoke_block(&text, "binary_xrb");
+    let block = TableText::of_block(&text, "binary_xrb").unwrap().unwrap();
     let acceptance = block.header().unwrap().acceptance.unwrap_or_default();
     assert!(
         acceptance.contains("high-mass hosts 3000;")
             && acceptance.ends_with("pinned high-mass kinds Supergiant 40 and BlackHoleHighMass 2"),
-        "binary_xrb_32 --smoke: {acceptance}"
+        "binary_xrb --smoke: {acceptance}"
     );
 }
 

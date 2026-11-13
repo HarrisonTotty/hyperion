@@ -14,9 +14,6 @@
 //!
 //! The holds, each a field:
 //!
-//! - [`xrb_tables`](GalaxyRules::xrb_tables), the X-ray binaries' high-mass side pinned to its
-//!   intrinsic count and a Be/X host's giant outbursts to its active mark from 32 (P11.T8.b's
-//!   fix, [`XrbTableRules`]);
 //! - [`stellar`](GalaxyRules::stellar), the stellar stage's holds ([`StellarRules`]), which the
 //!   galaxy hands to the stellar stage's entry points as an argument.
 //!
@@ -26,7 +23,6 @@
 
 use crate::GeneratorVersion;
 use crate::galaxy::ages::FieldShareRules;
-use crate::galaxy::catalogue_classes::binary::XrbTableRules;
 use crate::galaxy::displaced::DisplacedRules;
 use crate::galaxy::displaced::site::CarveOutRules;
 use crate::galaxy::features::members::recent::FeatureClassesRules;
@@ -53,12 +49,6 @@ pub(crate) struct GalaxyRules {
     /// Whether layers D and E hold plan 08's displaced classes (P08.T12), which the galaxy's build
     /// reads: every version's do, and only the tests' field alone ([`DisplacedRules`]) does not.
     pub(crate) displaced: DisplacedRules,
-    /// The X-ray binaries' sampler (P11.T8.b's fix, held at 32, [`XrbTableRules`]): from 32 the
-    /// one whose high-mass side is pinned to its intrinsic count, and a Be/X host active by its
-    /// mark (`XrbTableRules::marks_active_bex`). The class reads it where its
-    /// process is built, and no memo of the galaxy holds a process, so `Galaxy::with_rules` may
-    /// change it.
-    pub(crate) xrb_tables: XrbTableRules,
     /// The stellar stage's holds, which `SystemStars`' builders and the galaxy-side readers of the
     /// stellar law read from the galaxy and hand down as an argument.
     pub(crate) stellar: StellarRules,
@@ -73,18 +63,8 @@ impl GalaxyRules {
             carve_out: CarveOutRules::Claimed,
             feature_classes: FeatureClassesRules::Listed,
             displaced: DisplacedRules::Displaced,
-            xrb_tables: XrbTableRules::of_version(version),
             stellar: StellarRules::of_version(version),
         }
-    }
-
-    /// Every galaxy and stellar hold at 32 in force, for a test that asserts a 32 figure: the
-    /// X-ray binaries' high-mass side (P11.T8.b, [`XrbTableRules::Sided`]). The 32 bump deletes it
-    /// with it.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn every_32_hold() -> Self {
-        Self::of_version(GeneratorVersion::new(32))
     }
 }
 
@@ -168,15 +148,5 @@ mod tests {
                 StellarRules::of_version(GeneratorVersion::new(v))
             );
         }
-        for (v, xrb_tables) in [(31, XrbTableRules::Joint), (32, XrbTableRules::Sided)] {
-            assert_eq!(
-                GalaxyRules::of_version(GeneratorVersion::new(v)).xrb_tables,
-                xrb_tables
-            );
-        }
-        assert_eq!(
-            GalaxyRules::every_32_hold().xrb_tables,
-            XrbTableRules::Sided
-        );
     }
 }

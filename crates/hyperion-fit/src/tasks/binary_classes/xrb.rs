@@ -23,7 +23,6 @@
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 
-use hyperion_sim::GeneratorVersion;
 use hyperion_sim::galaxy::imf::{BandShares, MassBand};
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
 use hyperion_sim::math;
@@ -39,15 +38,16 @@ use hyperion_sim::units::consts::SECONDS_PER_DAY;
 
 use super::{
     CensusParams, Censuses, FittedMark, MarkPoint, MarkSource, RunCensusError, ShareRow,
-    census_error, conditional, fingerprint_galaxy, fingerprint_galaxy_at, run_censuses, share_rows,
-    unconditional, weighted_to_shares,
+    census_error, conditional, fingerprint_galaxy, run_censuses, share_rows, unconditional,
+    weighted_to_shares,
 };
 use crate::emit::{RustTable, TableItem, literal};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
-/// The X-ray binaries' task's revision.
-pub const XRB_VERSION: u32 = 0;
+/// The X-ray binaries' task's revision: 1 from generator version 32, whose manifest pins the
+/// high-mass side to its own count (P11.T8.b's fix, folded from task `binary_xrb_32`).
+pub const XRB_VERSION: u32 = 1;
 
 /// The X-ray binaries' block's items, in its order: the sampler, then the share row.
 pub const XRB_ITEMS: [&str; 9] = [
@@ -93,10 +93,10 @@ pub struct XrbParams {
     /// The galaxy's X-ray binaries at Milky Way parameters: the observed count the row is scaled
     /// to.
     pub total_hosts: f64,
-    /// The high-mass side's own count and its pinned kinds (task `binary_xrb_32`, P11.T8.b's fix,
-    /// read from generator version 32), from the manifest's `high_mass_hosts` and pins. `None`
-    /// without them, task `binary_xrb`'s, whose high-mass kinds take the engine's share of the
-    /// whole class ([`kind_weights`]).
+    /// The high-mass side's own count and its pinned kinds (P11.T8.b's fix, read from generator
+    /// version 32), from the manifest's `high_mass_hosts` and pins, which task `binary_xrb` needs.
+    /// `None` without them, whose high-mass kinds would take the engine's share of the whole class
+    /// ([`kind_weights`]), as before 32.
     pub high_mass: Option<HighMassPins>,
     /// The least members a mark, or a node's law, is fitted to.
     pub min_members: usize,
@@ -377,7 +377,7 @@ pub fn kind_weights(census: &[f64; 9]) -> [f64; 9] {
     })
 }
 
-/// The kinds' weights the class draws from generator version 32 (task `binary_xrb_32`, P11.T8.b's
+/// The kinds' weights the class draws from generator version 32 (task `binary_xrb`, P11.T8.b's
 /// fix), in [`XrbHostKind::ALL`]'s order: the black-hole transients' [`BLACK_HOLE_TRANSIENT_SHARE`];
 /// the high-mass kinds' together `high_mass_share`, the observed high-mass hosts' share of the
 /// class's, of which each kind in `pinned` takes its own share of the class's hosts and the
@@ -697,8 +697,18 @@ fn sampler_items(fit: &XrbFit, names: &[&str; 7]) -> Vec<TableItem> {
 }
 
 /// The block's contents for `fit`.
+///
+/// # Panics
+///
+/// If `fit`'s parameters pin no high-mass side ([`XrbParams::high_mass`]), as task `binary_xrb`'s
+/// manifest always does from generator version 32.
 #[must_use]
 pub fn render_xrb(fit: &XrbFit) -> RustTable {
+    let pins = fit
+        .params
+        .high_mass
+        .as_ref()
+        .expect("task `binary_xrb`'s parameters pin the high-mass side");
     let sampler_names: [&str; 7] = std::array::from_fn(|k| XRB_ITEMS[k]);
     let mut items = sampler_items(fit, &sampler_names);
     items.extend([
@@ -720,18 +730,20 @@ pub fn render_xrb(fit: &XrbFit) -> RustTable {
     ]);
     RustTable {
         summary: vec![
-            "The X-ray binaries' sampler and share row refitted against plan 11's engine at generator"
+            "The X-ray binaries' sampler and share row refitted against plan 11's engine on the"
                 .to_owned(),
-            "version 29 on the generator's own pairs (plan 15, P15.T10.b).".to_owned(),
+            "generator's own pairs, each side pinned to its observed count from generator version 32"
+                .to_owned(),
+            "(plan 15, P15.T10.b; P11.T8.b's fix).".to_owned(),
         ],
-        notes: xrb_notes(fit),
+        notes: xrb_notes(fit, pins),
         items,
     }
 }
 
-/// The block's notes after its header.
+/// The block's notes after its header, for `fit` with its high-mass side `pins`.
 #[must_use]
-fn xrb_notes(fit: &XrbFit) -> Vec<String> {
+fn xrb_notes(fit: &XrbFit, pins: &HighMassPins) -> Vec<String> {
     let p = &fit.params;
     let text = format!(
         "\
@@ -741,46 +753,23 @@ engine's members of the nine kinds `XrbHostKind` holds at generator version {ver
 low-mass and history marks to the solar circle's slab, the high-mass marks to the young thin
 disc's own census of {young} records, each unconditional but the low-mass donor's mass, which
 follows the period with a law at each node, from the members under the node's triangle where
-their Kish size is {min} or more. A mark with under {min} members keeps `XRB_SAMPLER`'s law. The
-kinds' weights are the galaxy's shares of its hosts of each kind, the black-hole transients'
-pinned at `BLACK_HOLE_TRANSIENT_SHARE` and the rest keeping their ratios; each mark's members
-are weighted so that their kinds are in those shares. The row counts every member of the class and is
-scaled to {total:e} hosts at Milky Way parameters (plan 11's design note 11).",
-        version = p.census.version.get(),
-        young = p.census.young_records,
-        min = p.min_members,
-        total = p.total_hosts,
-    );
-    text.lines().map(str::to_owned).collect()
-}
-
-/// Task `binary_xrb_32`'s block's notes after its header, for `fit` with its high-mass side
-/// `pins`.
-#[must_use]
-fn xrb_32_notes(fit: &XrbFit, pins: &HighMassPins) -> Vec<String> {
-    let p = &fit.params;
-    let text = format!(
-        "\
-Read by `XRB_SAMPLER_32`, before the block, from generator version 32 (P11.T8.b's fix); the
-row is `binary_xrb`'s, whose census and total this task shares. The marks are fitted as
-`binary_xrb`'s are, to the engine's members of the nine kinds `XrbHostKind` holds at generator
-version {version}'s rules, the high-mass marks to the young thin disc's own census of {young}
-records; a mark with under {min} members keeps `XRB_SAMPLER`'s law. Each side of the class is
-pinned to its own count (plan 11's design note 11): the high-mass kinds' weights together {high}
-of the row's {total:e} hosts, about the log-centre of the Galaxy's intrinsic 10^3-10^4 Be/X-ray
-binaries (Rappaport and van den Heuvel 1982, IAU Symp. 98, 327; recalled), quiescent ones
-included (research-leans-51), of which {pins}, about the catalogued systems (Liu et al. 2006,
-A&A 455, 1165, about 36 supergiant ones; Cyg X-1 and a second allowed; recalled), and the Be/X
-hosts the rest; the
-black-hole transients' `BLACK_HOLE_TRANSIENT_SHARE`; and the other low-mass kinds the rest of the
-row, each unpinned kind in its share of its side's hosts in the galaxy's census. Each mark's
-members are weighted so that their kinds are in those shares.",
+their Kish size is {min} or more. A mark with under {min} members keeps `XRB_SAMPLER`'s law. Each
+side of the class is pinned to its own count (plan 11's design note 11; P11.T8.b's fix, from
+generator version 32): the high-mass kinds' weights together {high} of the row's {total:e} hosts,
+about the log-centre of the Galaxy's intrinsic 10^3-10^4 Be/X-ray binaries (Rappaport and van den
+Heuvel 1982, IAU Symp. 98, 327; recalled), quiescent ones included (research-leans-51), of which
+{pinned}, about the catalogued systems (Liu et al. 2006, A&A 455, 1165, about 36 supergiant ones;
+Cyg X-1 and a second allowed; recalled), and the Be/X hosts the rest; the black-hole transients'
+`BLACK_HOLE_TRANSIENT_SHARE`; and the other low-mass kinds the rest of the row, each unpinned kind
+in its share of its side's hosts in the galaxy's census. Each mark's members are weighted so that
+their kinds are in those shares. The row counts every member of the class and is scaled to
+{total:e} hosts at Milky Way parameters.",
         version = p.census.version.get(),
         young = p.census.young_records,
         min = p.min_members,
         total = p.total_hosts,
         high = pins.hosts,
-        pins = pinned_high_mass_text(&pins.kinds),
+        pinned = pinned_high_mass_text(&pins.kinds),
     );
     text.lines().map(str::to_owned).collect()
 }
@@ -856,8 +845,7 @@ fn xrb_acceptance(fit: &XrbFit) -> String {
     out
 }
 
-/// Both X-ray binary tasks' fingerprint, on `galaxy`, the fingerprints' galaxy at their
-/// manifests' version: the galaxy's band shares of layers D and E and its systems born by
+/// The X-ray binaries' task's fingerprint, on `galaxy`, the fingerprints' galaxy: the galaxy's band shares of layers D and E and its systems born by
 /// population, which the row and the kinds' weights read; and the engine on one layer-E cell's
 /// records: its records, its members, and each X-ray member's compact star's mass, donor's mass
 /// and rate over the line.
@@ -938,130 +926,25 @@ impl FitTask for BinaryXrbTask {
     fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
         check_manifest(self, manifest)?;
         let params = XrbParams::of(manifest)?;
+        let Some(pins) = &params.high_mass else {
+            return Err(RunTaskError::Param(ManifestParamError::new(
+                "high_mass_hosts",
+                "given, for task `binary_xrb`",
+            )));
+        };
+        let pinned = pinned_high_mass_text(&pins.kinds);
         let fit = fit_xrb(&params, threads).map_err(|e| census_error("binary_xrb", e))?;
         Ok(TaskOutput {
             table: render_xrb(&fit),
             source:
                 "plan 11's binary engine (Hurley, Tout and Pols 2002, MNRAS 329, 897, as P11.T4 \
                      builds it) and classes (P11.T5), over plan 06's tracks, at the manifest's \
-                     generator version's rules; the total against the brainstorm's 10⁴, the \
-                     black-hole transients pinned at Corral-Santana et al.'s (2016, A&A 587, A61) \
-                     observed 1,300"
-                    .to_owned(),
-            acceptance: xrb_acceptance(&fit),
-            provisional: None,
-        })
-    }
-}
-
-/// Task `binary_xrb_32`'s revision.
-pub const XRB_32_VERSION: u32 = 1;
-
-/// The generator version task `binary_xrb_32`'s manifests fit at and its fingerprint's galaxy is
-/// built at: 32, the hold's (a test holds its two manifests to it).
-pub const XRB_32_FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(32);
-
-/// Task `binary_xrb_32`'s block's items, in its order: the sampler's, as [`XRB_ITEMS`]' first
-/// seven.
-pub const XRB_32_ITEMS: [&str; 7] = [
-    "XRB_RESIDUALS_32",
-    "XRB_DONOR_MASS_NODE_RESIDUALS_32",
-    "XRB_MEDIAN_SPANS_32",
-    "XRB_MEDIANS_32",
-    "XRB_LIMITS_32",
-    "XRB_LOW_MASS_KINDS_32",
-    "XRB_HIGH_MASS_KINDS_32",
-];
-
-/// Task `binary_xrb_32`'s block for `fit`: the sampler alone, the row being `binary_xrb`'s.
-///
-/// # Panics
-///
-/// If `fit`'s parameters pin no high-mass side ([`XrbParams::high_mass`]), as task
-/// `binary_xrb_32`'s manifest always does.
-#[must_use]
-pub fn render_xrb_32(fit: &XrbFit) -> RustTable {
-    let pins = fit
-        .params
-        .high_mass
-        .as_ref()
-        .expect("task `binary_xrb_32`'s parameters pin the high-mass side");
-    RustTable {
-        summary: vec![
-            "The X-ray binaries' sampler refitted against plan 11's engine with each side pinned to its"
-                .to_owned(),
-            "observed count, read from generator version 32 (P11.T8.b's fix; plan 15, P15.T10.b).".to_owned(),
-        ],
-        notes: xrb_32_notes(fit, pins),
-        items: sampler_items(fit, &XRB_32_ITEMS),
-    }
-}
-
-/// The task: P11.T8.b's fix of the X-ray binaries' high-mass side, read from generator version 32
-/// (`galaxy::catalogue_classes::binary`'s hold), slow: `binary_xrb`'s fit with its manifest's
-/// `high_mass_hosts`, the high-mass kinds' weights pinned to them, and its `supergiant_hosts` and
-/// `black_hole_high_mass_hosts`, those kinds' weights pinned inside the side
-/// ([`sided_kind_weights`]). The 32 bump folds it into `binary_xrb`, whose manifest takes the three
-/// keys and whose items the class then reads, and deletes this task with its manifests, block and
-/// lock entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct BinaryXrb32Task;
-
-impl FitTask for BinaryXrb32Task {
-    fn name(&self) -> &'static str {
-        "binary_xrb_32"
-    }
-
-    fn class(&self) -> TaskClass {
-        TaskClass::Slow
-    }
-
-    fn table_path(&self) -> &'static str {
-        "binary.rs"
-    }
-
-    fn shares_its_file(&self) -> bool {
-        true
-    }
-
-    fn revision(&self) -> u32 {
-        XRB_32_VERSION
-    }
-
-    fn items(&self) -> &'static [&'static str] {
-        &XRB_32_ITEMS
-    }
-
-    /// [`BinaryXrbTask`]'s probes on the fingerprints' galaxy at its manifests' version, 32
-    /// ([`XRB_32_FINGERPRINT_VERSION`]), so that a later hold at 32 that reaches the census moves
-    /// them.
-    fn fingerprint(&self) -> SimFingerprint {
-        xrb_fingerprint(&fingerprint_galaxy_at(XRB_32_FINGERPRINT_VERSION))
-    }
-
-    fn run(&self, manifest: &Manifest, threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
-        check_manifest(self, manifest)?;
-        let params = XrbParams::of(manifest)?;
-        let Some(pins) = &params.high_mass else {
-            return Err(RunTaskError::Param(ManifestParamError::new(
-                "high_mass_hosts",
-                "given, for task `binary_xrb_32`",
-            )));
-        };
-        let pinned = pinned_high_mass_text(&pins.kinds);
-        let fit = fit_xrb(&params, threads).map_err(|e| census_error("binary_xrb_32", e))?;
-        Ok(TaskOutput {
-            table: render_xrb_32(&fit),
-            source:
-                "plan 11's binary engine (Hurley, Tout and Pols 2002, MNRAS 329, 897, as P11.T4 \
-                     builds it) and classes (P11.T5), over plan 06's tracks, at the manifest's \
-                     generator version's rules; the high-mass kinds pinned at the Galaxy's \
-                     intrinsic Be/X-ray binaries, 10³–10⁴ (Rappaport and van den Heuvel 1982, IAU \
-                     Symp. 98, 327; recalled), the supergiant and black-hole high-mass hosts \
-                     about the catalogued systems (Liu et al. 2006, A&A 455, 1165; Cyg X-1; \
-                     recalled), \
-                     the black-hole transients at Corral-Santana et al.'s (2016, A&A 587, A61; \
-                     recalled) estimated 1,300, of the brainstorm's 10⁴"
+                     generator version's rules; the total against the brainstorm's 10⁴; the \
+                     high-mass kinds pinned at the Galaxy's intrinsic Be/X-ray binaries, 10³–10⁴ \
+                     (Rappaport and van den Heuvel 1982, IAU Symp. 98, 327; recalled), the \
+                     supergiant and black-hole high-mass hosts about the catalogued systems (Liu \
+                     et al. 2006, A&A 455, 1165; Cyg X-1; recalled), the black-hole transients at \
+                     Corral-Santana et al.'s (2016, A&A 587, A61) observed 1,300"
                     .to_owned(),
             acceptance: format!("{}; pinned high-mass kinds {pinned}", xrb_acceptance(&fit)),
             provisional: None,
@@ -1183,7 +1066,7 @@ mod tests {
     /// same census gives the high-mass kinds their census share, 0.012, scaled with every unpinned
     /// kind's to make room for the transients.
     #[test]
-    fn from_32_the_weights_pin_the_high_mass_side_to_its_share() {
+    fn the_sided_weights_pin_the_high_mass_side_to_its_share() {
         let census = [0.005, 0.58, 0.002, 0.02, 0.008, 0.0001, 0.38, 0.001, 0.0039];
         let high_kinds = [4, 5, 8];
         let weights = sided_kind_weights(&census, 0.0152, &[]);
@@ -1207,7 +1090,7 @@ mod tests {
     /// black-hole high-mass 2 of 3,000 on the row's 10⁴), the Be/X hosts the rest of the side, and
     /// the low-mass side is as without the pins; the weights sum to one.
     #[test]
-    fn from_32_the_persistent_high_mass_kinds_take_their_pinned_shares() {
+    fn the_persistent_high_mass_kinds_take_their_pinned_shares() {
         let census = [0.005, 0.58, 0.002, 0.02, 0.008, 0.0001, 0.38, 0.001, 0.0039];
         let pinned = [
             (XrbHostKind::Supergiant, 40.0e-4),
@@ -1258,13 +1141,13 @@ mod tests {
     /// The manifest's `high_mass_hosts` and pins: none without the keys (task `binary_xrb`'s);
     /// the high-mass hosts refused where they leave the low-mass kinds besides the pinned
     /// transients no share, or the Be/X hosts none past the pins; a pin refused without the
-    /// high-mass hosts or where it is not positive; and task `binary_xrb_32` refuses a manifest
+    /// high-mass hosts or where it is not positive; and task `binary_xrb` refuses a manifest
     /// without the high-mass hosts before any census runs.
     #[test]
     fn the_high_mass_hosts_are_read_and_checked() {
-        let text = include_str!("../../../manifests/binary_xrb_32.smoke.toml");
+        let text = include_str!("../../../manifests/binary_xrb.smoke.toml");
         let manifest = |body: String| {
-            Manifest::from_bytes("binary_xrb_32.smoke.toml".as_ref(), body.into_bytes())
+            Manifest::from_bytes("binary_xrb.smoke.toml".as_ref(), body.into_bytes())
                 .expect("the smoke manifest parses")
         };
         let given = XrbParams::of(&manifest(text.to_owned())).expect("the smoke manifest's");
@@ -1321,11 +1204,11 @@ mod tests {
             ))),
             Err(pin_refused("black_hole_high_mass_hosts"))
         );
-        let run = BinaryXrb32Task.run(&manifest(without), NonZeroUsize::MIN);
+        let run = BinaryXrbTask.run(&manifest(without), NonZeroUsize::MIN);
         assert!(
             matches!(&run, Err(RunTaskError::Param(e)) if *e == ManifestParamError::new(
                 "high_mass_hosts",
-                "given, for task `binary_xrb_32`",
+                "given, for task `binary_xrb`",
             )),
             "{run:?}"
         );

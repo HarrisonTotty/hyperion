@@ -26,7 +26,6 @@ use crate::galaxy::catalogue_classes::{CatalogueCellKey, CatalogueClassCell};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::imf::{BandShares, MassBand};
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::rules::GalaxyRules;
 use crate::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
 use crate::math;
 use crate::orbit::Eccentricity;
@@ -42,7 +41,7 @@ use crate::stellar::binary::testing::{
 use crate::tables::binary::{
     AWD_FAST_SAMPLER, AWD_SLOW_SAMPLER, AwdDonorKind, AwdMark, AwdPick, BLACK_HOLE_TRANSIENT_SHARE,
     CLASS_SHARES, CLASS_SHARES_31, ClassSamplerTable, ClassShareTable, SCRATCH_CLASS_SHARES,
-    SamplerKey, XRB_SAMPLER, XRB_SAMPLER_32, XrbHostKind, XrbMark, XrbPick,
+    SamplerKey, XRB_SAMPLER, XrbHostKind, XrbMark, XrbPick,
 };
 use crate::time::LIGHT_CROSSING_L;
 use crate::units::consts::SECONDS_PER_DAY;
@@ -680,77 +679,54 @@ const AWD_MISSES: [(AwdSide, usize, f64); 0] = [];
 /// The Galaxy's intrinsic high-mass X-ray binaries, the band the high-mass hosts are held in from
 /// 32: 10³–10⁴, the Be/X-ray binaries of Rappaport and van den Heuvel (1982, IAU Symp. 98, 327;
 /// recalled, not read at source), quiescent ones included (research-leans-51's ruling,
-/// 2026-11-13), about whose log-centre, at 3,000, task `binary_xrb_32` pins the side. It is above
-/// plan 15's T10.b floor, the 152 Fortin et al. (2023, A&A 671, A149; recalled) catalogue. An
-/// intrinsic count makes no cut by environment, a young cluster or association or not, so the
-/// galaxy's like quantity is the class's high-mass hosts and the young features' lists' together.
+/// 2026-11-13), about whose log-centre, at 3,000, task `binary_xrb` pins the side. It is above plan
+/// 15's T10.b floor, the 152 Fortin et al. (2023, A&A 671, A149; recalled) catalogue. An intrinsic
+/// count makes no cut by environment, a young cluster or association or not, so the galaxy's like
+/// quantity is the class's high-mass hosts and the young features' lists' together.
 const INTRINSIC_HIGH_MASS_HOSTS: (f64, f64) = (1.0e3, 1.0e4);
 
 /// Fortin et al.'s (2023, A&A 671, A149; recalled) catalogue of the Galaxy's high-mass X-ray
 /// binaries, 152: plan 15's T10.b floor under the intrinsic band.
 const CATALOGUED_HIGH_MASS: f64 = 152.0;
 
-/// The catalogue's high-mass hosts under the tables refitted at 29 on the generator's own pairs
-/// (P15.T10.b), as measured (the same at every seed): 2.85, a finding, under Fortin et al.'s 152
-/// catalogued (main's ruling of 2026-11-01 took the high-mass hosts for research). Under the 29
-/// blocks fitted before P11.T12's wind reach the class held 2.89, under train 27's refit on its
-/// engine, which 28 kept, 4.10, and under 27's first refit 27.6. Re-pinned at 30 on v30's refit of
-/// `binary_xrb`: 3.03 (2.85 at 29; landing round 4). The merger step at 31 moves no X-ray binary's
-/// row, so it is beyond that step's fits. Re-pinned at 31 on 31's refit of `binary_xrb`: 3.026038
-/// (3.026044 at 30), at which this test failed at its 31 base. A wrong state that the hold at 32
-/// fixes (P11.T8.b, `hmxb_hold`): the 31 arm keeps it until the bump deletes the arm.
-const PINNED_HIGH_MASS_HOSTS: f64 = 3.026_038_288_957_461_3;
-
 /// Corral-Santana et al.'s (2016, A&A 587, A61) black-hole transients, as P11.T8.b takes them:
 /// 1,300, ± 400 its tolerance (theirs 1,280 ± 120, a lower limit; recalled).
 const BLACK_HOLE_TRANSIENTS: (f64, f64) = (1_300.0, 400.0);
 
-/// The fitted X-ray binaries at Milky Way parameters (slow): over ten Milky Way seeds, under the
-/// version's rules and under every 32 hold, the class's expected hosts inside P11.T8.b's 0.7–1.5 ×
-/// 10⁴ and its black-hole transients inside 1,300 ± 400 ([`BLACK_HOLE_TRANSIENTS`]); the galaxy's
-/// high-mass hosts, the young thin disc's, the class's and the young lists' together, inside the
-/// intrinsic band ([`INTRINSIC_HIGH_MASS_HOSTS`]) from 32 (P11.T8.b's fix), and so above the
-/// catalogued ([`CATALOGUED_HIGH_MASS`]), where 31's class holds [`PINNED_HIGH_MASS_HOSTS`].
+/// The fitted X-ray binaries at Milky Way parameters (slow): over ten Milky Way seeds, the class's
+/// expected hosts inside P11.T8.b's 0.7–1.5 × 10⁴ and its black-hole transients inside 1,300 ± 400
+/// ([`BLACK_HOLE_TRANSIENTS`]); the galaxy's high-mass hosts, the young thin disc's, the class's and
+/// the young lists' together, inside the intrinsic band ([`INTRINSIC_HIGH_MASS_HOSTS`]; P11.T8.b's
+/// fix, from 32), and so above the catalogued ([`CATALOGUED_HIGH_MASS`]).
 #[test]
 #[ignore = "slow: ten galaxies built"]
 fn the_fitted_x_ray_binaries_give_the_milky_way_counts() {
     for k in 0..10_u64 {
         let seed = Seed::new(0x0b17_08a0_0000_0100 | k);
         let galaxy = milky_way(seed);
-        // No memo of the galaxy reads the X-ray binaries' tables, so one build serves both arms.
-        let sided = galaxy.clone().with_rules(GalaxyRules::every_32_hold());
-        for (arm, galaxy) in [(31, galaxy), (32, sided)] {
-            let process = XrayBinaries::new(&galaxy);
-            let total = process.expected_hosts(&galaxy);
-            let transients = process.expected_hosts_of(&galaxy, XrbHostKind::BlackHoleTransient);
-            let high = process.expected_hosts_on(&galaxy, XrbSide::HighMass);
-            let galaxy_high =
-                super::hmxb_hold::galaxy_hosts_on(&galaxy, &process, XrbSide::HighMass);
-            println!(
-                "Milky Way seed {k} at {arm}: {total:.4e} hosts, {transients:.1} black-hole \
-                 transients, {galaxy_high:.2} high-mass ({high:.2} in the catalogue) against \
-                 the intrinsic {INTRINSIC_HIGH_MASS_HOSTS:?}"
-            );
-            assert!((0.7e4..=1.5e4).contains(&total), "{k} at {arm}: {total}");
-            let (transients_wanted, spread) = BLACK_HOLE_TRANSIENTS;
-            assert!(
-                (transients - transients_wanted).abs() <= spread,
-                "{k} at {arm}: {transients}"
-            );
-            if arm == 31 {
-                assert!(
-                    (high / PINNED_HIGH_MASS_HOSTS - 1.0).abs() < 1e-6,
-                    "{k} at 31: {high}"
-                );
-            } else {
-                let (least, most) = INTRINSIC_HIGH_MASS_HOSTS;
-                assert!(
-                    (least..=most).contains(&galaxy_high) && galaxy_high >= CATALOGUED_HIGH_MASS,
-                    "{k} at 32: {galaxy_high}"
-                );
-                assert!(high > 0.0 && high < galaxy_high, "{k} at 32: {high}");
-            }
-        }
+        let process = XrayBinaries::new(&galaxy);
+        let total = process.expected_hosts(&galaxy);
+        let transients = process.expected_hosts_of(&galaxy, XrbHostKind::BlackHoleTransient);
+        let high = process.expected_hosts_on(&galaxy, XrbSide::HighMass);
+        let galaxy_high =
+            super::high_mass_side_tests::galaxy_hosts_on(&galaxy, &process, XrbSide::HighMass);
+        println!(
+            "Milky Way seed {k}: {total:.4e} hosts, {transients:.1} black-hole transients, \
+             {galaxy_high:.2} high-mass ({high:.2} in the catalogue) against the intrinsic \
+             {INTRINSIC_HIGH_MASS_HOSTS:?}"
+        );
+        assert!((0.7e4..=1.5e4).contains(&total), "{k}: {total}");
+        let (transients_wanted, spread) = BLACK_HOLE_TRANSIENTS;
+        assert!(
+            (transients - transients_wanted).abs() <= spread,
+            "{k}: {transients}"
+        );
+        let (least, most) = INTRINSIC_HIGH_MASS_HOSTS;
+        assert!(
+            (least..=most).contains(&galaxy_high) && galaxy_high >= CATALOGUED_HIGH_MASS,
+            "{k}: {galaxy_high}"
+        );
+        assert!(high > 0.0 && high < galaxy_high, "{k}: {high}");
     }
 }
 
@@ -923,9 +899,9 @@ fn table_draws(
         .collect()
 }
 
-/// The fitted X-ray binaries' samplers against the engine at 27 (P15.T10.b's acceptance; slow),
-/// [`XRB_SAMPLER`] and from 32 `XRB_SAMPLER_32` (P11.T8.b's fix, its marks refitted on the same
-/// census with its kinds in their new weights), each on the same censuses:
+/// The fitted X-ray binaries' sampler against the engine at 27 (P15.T10.b's acceptance; slow),
+/// [`XRB_SAMPLER`], its kinds in their weights with the high-mass side at its intrinsic count from
+/// 32 (P11.T8.b's fix), on the censuses:
 /// for each mark fitted from the engine, values drawn through the table against the engine's
 /// members of the kinds the class draws it for, weighted so that their kinds are in the table's
 /// weights, the slab's for the low-mass and history marks and the young thin disc's for the
@@ -937,10 +913,7 @@ fn table_draws(
 #[test]
 #[ignore = "slow: two censuses of 1.3 × 10⁷ records through the binary engine"]
 fn the_x_ray_binary_sampler_against_the_engine() {
-    let tables: [XrbTableCase; 2] = [
-        ("XRB_SAMPLER", &XRB_SAMPLER, &XRB_MISSES),
-        ("XRB_SAMPLER_32", &XRB_SAMPLER_32, &XRB_32_MISSES),
-    ];
+    let tables: [XrbTableCase; 1] = [("XRB_SAMPLER", &XRB_SAMPLER, &XRB_MISSES)];
     let of_class = |members: Vec<ClassMember>| -> Vec<XrayMarks> {
         members
             .iter()
@@ -1068,6 +1041,3 @@ fn xrb_table_misses(
 /// a finding: the mark's place in [`XrbMark`]'s order and its held-out distance, as measured to a
 /// millionth.
 const XRB_MISSES: [(usize, f64); 0] = [];
-
-/// [`XRB_MISSES`] for `XRB_SAMPLER_32`.
-const XRB_32_MISSES: [(usize, f64); 0] = [];

@@ -1,6 +1,6 @@
 # The X-ray binaries' smoke run: censuses of a five-hundredth of the full run's records at
-# generator version 30, whose few members leave most marks the scratch table's; some seconds on
-# four threads.
+# generator version 31, whose few members leave most marks the scratch table's, with the full run's
+# high-mass side; some seconds on four threads.
 task = "binary_xrb"
 
 [params]
@@ -18,3 +18,6 @@ nuclear_disc_site = [0, 0, 0, 800, 800, 200]
 halo_site = [0, 0, 10_000, 10_000, 10_000, 5_000]
 total_hosts = 1.0e4
 min_members = 20
+high_mass_hosts = 3000.0
+supergiant_hosts = 40.0
+black_hole_high_mass_hosts = 2.0
