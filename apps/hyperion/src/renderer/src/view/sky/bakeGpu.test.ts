@@ -11,7 +11,14 @@ import type {
   TexelRect,
   TextureHandle,
 } from "../engine/types";
-import { BAKE_TILE_PX, bakeSkyCube, bakeTiling } from "./bake";
+import {
+  BAKE_TILE_PX,
+  bakeSkyCube,
+  bakeTiling,
+  type SolidAnglesWorker,
+  warmTexelSolidAngles,
+} from "./bake";
+import { texelSolidAnglesLowerF32 } from "./cube";
 
 /** What the recording engine saw of a GPU bake. */
 interface Seen {
@@ -109,6 +116,11 @@ async function gpuEngine(
   return { engine, seen };
 }
 
+/** The solid angles a bake wrote. */
+function anglesOf(seen: Seen): Float32Array | undefined {
+  return seen.writes.find((each) => each.name.endsWith("solid angles"))?.values;
+}
+
 const INPUT = {
   directions: Float32Array.from([1, 0, 0, 0, -1, 0]),
   illuminanceLx: Float32Array.from([1e-6, 1e-6, 1e-6, 2e-6, 2e-6, 2e-6]),
@@ -125,6 +137,36 @@ describe("bakeSkyCube on the GPU", () => {
     expect(points?.values.slice(4)).toStrictEqual(
       Float32Array.of(1, 0, 0, 0, 1e-6, 1e-6, 1e-6, 1, 0, -1, 0, 0, 2e-6, 2e-6, 2e-6, 1),
     );
+  });
+
+  it("forms its own solid angles when it comes before the worker, stops it and keeps them past its late reply (perf-long-tasks-2)", async () => {
+    const sizePx = 16;
+    const replies: Array<(angles: Float32Array) => void> = [];
+    let terminated = 0;
+    const worker: SolidAnglesWorker = {
+      addEventListener: (type: string, listener: (event: MessageEvent<unknown>) => void) => {
+        if (type === "message") {
+          replies.push((angles) => {
+            listener(new MessageEvent("message", { data: angles }));
+          });
+        }
+      },
+      postMessage: () => undefined,
+      terminate: () => {
+        terminated += 1;
+      },
+    };
+    warmTexelSolidAngles(sizePx, () => worker);
+    const expected = texelSolidAnglesLowerF32(sizePx);
+    const first = await gpuEngine();
+    bakeSkyCube(first.engine, { ...INPUT, faceSizePx: sizePx });
+    expect(anglesOf(first.seen)).toStrictEqual(expected);
+    expect(terminated).toBe(1);
+    // A late reply of the right length but other values is not taken over the bake's own.
+    replies[0]?.(new Float32Array(expected.length).fill(7));
+    const second = await gpuEngine();
+    bakeSkyCube(second.engine, { ...INPUT, faceSizePx: sizePx });
+    expect(anglesOf(second.seen)).toStrictEqual(expected);
   });
 
   it("splats each face twice and copies every level of each face, one face at a time", async () => {

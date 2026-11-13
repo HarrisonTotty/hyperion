@@ -240,6 +240,9 @@ const SOLID_ANGLES_F32 = new Map<number, Float32Array>();
 function texelSolidAnglesF32(sizePx: number): Float32Array {
   let angles = SOLID_ANGLES_F32.get(sizePx);
   if (angles === undefined) {
+    // A worker still forming them is stopped: its table would be this one, dropped.
+    WARMING.get(sizePx)?.terminate();
+    WARMING.delete(sizePx);
     angles = texelSolidAnglesLowerF32(sizePx);
     SOLID_ANGLES_F32.set(sizePx, angles);
   }
@@ -267,8 +270,11 @@ function startSolidAnglesWorker(): SolidAnglesWorker | null {
       });
 }
 
-/** The face sizes whose solid angles a worker is forming. */
-const WARMING = new Set<number>();
+/**
+ * The workers forming a face size's solid angles, by size: each ends as it answers, fails, or a
+ * bake forms the size's table first. They belong to the page, as the tables they fill do.
+ */
+const WARMING = new Map<number, SolidAnglesWorker>();
 
 /**
  * Has a worker form a face size's solid angles ahead of its first bake (lane perf-long-tasks-2):
@@ -279,8 +285,8 @@ const WARMING = new Set<number>();
  * @remarks
  * The worker runs the same function on the same engine's `Math` (V8's `atan2` and the IEEE `sqrt`),
  * so its table is the one the page would form, to the bit. A bake that comes first forms its own,
- * as before, and the worker's is then dropped; so is a reply of the wrong length, or none (a worker
- * that fails to load or to answer leaves the bake to form it).
+ * as before, and stops the worker; a reply of the wrong length is dropped, and a worker that fails
+ * to load or never answers leaves the bake to form it and stop it.
  *
  * @param start - Starts the worker; the module worker's by default.
  */
@@ -295,9 +301,11 @@ export function warmTexelSolidAngles(
   if (worker === null) {
     return;
   }
-  WARMING.add(sizePx);
+  WARMING.set(sizePx, worker);
   const settle = (angles: Float32Array | null): void => {
-    WARMING.delete(sizePx);
+    if (WARMING.get(sizePx) === worker) {
+      WARMING.delete(sizePx);
+    }
     worker.terminate();
     if (angles !== null && !SOLID_ANGLES_F32.has(sizePx)) {
       SOLID_ANGLES_F32.set(sizePx, angles);

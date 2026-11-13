@@ -1883,6 +1883,12 @@ function keyOf(
   return JSON.stringify({ medium, bottomRadiusM, curves, body });
 }
 
+/** What a build of the tables was made from, and its {@link keyOf} once formed. */
+interface KeyedBuild {
+  readonly of: Parameters<typeof keyOf>;
+  text: string | null;
+}
+
 /** A 2D array texture the tables made, with the shape it was made at. */
 interface LayeredTexture {
   readonly texture: TextureHandle;
@@ -2292,7 +2298,7 @@ export class AtmosphereTables {
    * first build on the pod, where nothing compares it until a second medium is set
    * (perf-long-tasks-2). `null` until a build ends, and from a restore.
    */
-  #keyed: { readonly of: Parameters<typeof keyOf>; text: string | null } | null = null;
+  #keyed: KeyedBuild | null = null;
   #builds = 0;
   /** Whether {@link AtmosphereTables.dispose} has released the resources. */
   #disposed = false;
@@ -3206,7 +3212,8 @@ export class AtmosphereTables {
 
   /**
    * Rebuilds the tables if `medium`, `bottomRadiusM`, `curves` or `body` differs from what they were
-   * built for.
+   * built for. The tables hold what they are given, as their restore does, and compare it when the
+   * next medium is set: a caller never changes a medium, curves or body in place after the call.
    *
    * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium
    *   with no absorber. The multiple-scattering table has one layer a band and light slot under an

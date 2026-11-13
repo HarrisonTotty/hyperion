@@ -35,9 +35,15 @@ const TABLE_ENTRIES = 33;
  * table took 608,256 of each (perf-long-tasks-2: 312 to 416 ms of the page's thread on the pod as
  * an oblate body's disc was first drawn), of only {@link PHI_STEPS} angles.
  */
-let azimuths: { readonly cos: Float64Array; readonly sin: Float64Array } | null = null;
+let azimuths: Azimuths | null = null;
 
-function azimuthsOf(): { readonly cos: Float64Array; readonly sin: Float64Array } {
+/** The quadrature's azimuths' cosines and sines, by index. */
+interface Azimuths {
+  readonly cos: Float64Array;
+  readonly sin: Float64Array;
+}
+
+function azimuthsOf(): Azimuths {
   if (azimuths === null) {
     const cos = new Float64Array(PHI_STEPS);
     const sin = new Float64Array(PHI_STEPS);
