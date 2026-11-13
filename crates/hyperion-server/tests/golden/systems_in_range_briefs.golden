@@ -1,4 +1,4 @@
-# generator_version = 31
+# generator_version = 32
 {
   "type": "response",
   "id": 2,
@@ -54,7 +54,7 @@
           "layer": "d",
           "mass_min_msun": 2.5,
           "mass_max_msun": 8.0,
-          "expected": 39.248156404375685,
+          "expected": 39.267764986496616,
           "returned": 41,
           "status": "included"
         },
@@ -62,7 +62,7 @@
           "layer": "e",
           "mass_min_msun": 8.0,
           "mass_max_msun": 150.0,
-          "expected": 7.982675489221847,
+          "expected": 8.002284071342771,
           "returned": 3,
           "status": "included"
         }

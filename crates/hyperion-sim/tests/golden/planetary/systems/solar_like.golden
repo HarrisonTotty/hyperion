@@ -1,4 +1,4 @@
-# generator_version = 31
+# generator_version = 32
 solar_like 0x42006cba00000009: OldThinDisc, 1 stars
 fe_h = 0x3fc6a07c81f7d043  # 0.17677265497298053
 age_at_epoch_yr = 0x41f933962dc857e6  # 6764978908.52146
@@ -496,7 +496,7 @@ iron = 0x3f9f8c3ae843c209  # 0.03080837290412045
 rock = 0x3faf40f6032e9642  # 0.06104248799173863
 water = 0x3fbb74f30587b73c  # 0.1072532547475164
 envelope = 0x3fe9a0f067da01a4  # 0.8008958843566245
-t_eq_k = 0x405ccefcb69ea911  # 115.23417439932042
+t_eq_k = 0x405cbe7a19d326fc  # 114.97620244617787
 moons: [0501, 0502, 0503, 0504, 0505, 0506, 0507]
 rings: [0580]
 population: NotApplicable
@@ -534,9 +534,9 @@ figure_pole_y = 0xbfec56d745e5925b  # -0.8856006970568829
 figure_pole_z = 0x3fd4ebe218227fc2  # 0.32689716679487557
 moment_of_inertia_factor = 0x3fcf3526e6f07dba  # 0.2438095691331748
 photometry: Jupiter, provisional false
-geometric_albedo_b = 0x3fdab7876d6754e5  # 0.4174517219920076
-geometric_albedo_v = 0x3fe0391f61a34bd3  # 0.5069729716291199
-geometric_albedo_r = 0x3fddda5cf5556943  # 0.4664528270565322
+geometric_albedo_b = 0x3fdb016b3e840af1  # 0.4219616041665822
+geometric_albedo_v = 0x3fe065fd826beae8  # 0.5124499842925987
+geometric_albedo_r = 0x3fde2ced2456497b  # 0.47149208591977015
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -544,7 +544,7 @@ phase_integral_b = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_v = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_r = 0x3ff4fccd045b90a7  # 1.3117189569684713
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fdcf3e202dd90e1  # 0.45238542823632427
+bond_albedo = 0x3fdd43f4c3bc150c  # 0.45727271189419194
 bond_ratio = 0x3ff7851d829b2126  # 1.4699988462253457
 envelope: Ok
 body 0501 A f I: Moon(Regular) about Some(Body(BodyIndex(1280))), Present
@@ -2519,7 +2519,7 @@ iron = 0x3f9f8c3ae843c209  # 0.03080837290412045
 rock = 0x3faf40f6032e9642  # 0.06104248799173863
 water = 0x3fbb74f30587b73c  # 0.1072532547475164
 envelope = 0x3fe9a0f067da01a4  # 0.8008958843566245
-t_eq_k = 0x405ccefcc0005915  # 115.23417663606627
+t_eq_k = 0x405cbe7a23253767  # 114.97620466837326
 moons: [0501, 0502, 0503, 0504, 0505, 0506, 0507]
 rings: [0580]
 population: NotApplicable
@@ -2557,9 +2557,9 @@ figure_pole_y = 0xbfec56d745e5925b  # -0.8856006970568829
 figure_pole_z = 0x3fd4ebe218227fc2  # 0.32689716679487557
 moment_of_inertia_factor = 0x3fcf3526e6f07dba  # 0.2438095691331748
 photometry: Jupiter, provisional false
-geometric_albedo_b = 0x3fdab787666025c6  # 0.4174517154466141
-geometric_albedo_v = 0x3fe0391f5d5eca15  # 0.5069729636800867
-geometric_albedo_r = 0x3fddda5ced7b0945  # 0.46645281974283065
+geometric_albedo_b = 0x3fdb016b37ba9ed8  # 0.42196159784587683
+geometric_albedo_v = 0x3fe065fd7e4ce9fe  # 0.5124499766164374
+geometric_albedo_r = 0x3fde2ced1cc0ec6f  # 0.471492078857131
 phase_exponent_b = 0x3ff0000000000000  # 1.0
 phase_exponent_v = 0x3ff0000000000000  # 1.0
 phase_exponent_r = 0x3ff0000000000000  # 1.0
@@ -2567,7 +2567,7 @@ phase_integral_b = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_v = 0x3ff4fccd045b90a7  # 1.3117189569684713
 phase_integral_r = 0x3ff4fccd045b90a7  # 1.3117189569684713
 lunar_lambert_share = 0x0000000000000000  # 0.0
-bond_albedo = 0x3fdcf3e1fb3fd201  # 0.4523854211431911
+bond_albedo = 0x3fdd43f4bc614452  # 0.45727270504454964
 bond_ratio = 0x3ff7851d829b2126  # 1.4699988462253457
 envelope: Ok
 body 0501 A f I: Moon(Regular) about Some(Body(BodyIndex(1280))), Present
