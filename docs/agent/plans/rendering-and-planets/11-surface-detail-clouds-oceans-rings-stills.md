@@ -1208,6 +1208,22 @@ Files: `clouds/*`, R10's hooks, R01's `WGSL_CATALOGUE`, tests. Acceptance: `pnpm
 
 ### R11.T8 Oceans and glint
 
+_Re-validated 2026-11-02 (the names T8 calls, as built):_
+
+- R08: `HillaireAtmosphere.skyView(view: AtmosphereCamera): SkyViewTable`
+  (`atmosphere/hillaire.ts`) as named; `surfaceLighting.wgsl`'s two lookups each take a last
+  `curve : u32`, the light's curve slot (R08.T6.c).
+- R07: `GlareSource` (`post/glare.ts`: `direction`, `angularRadiusRad`, `excessLuminance` above
+  the bloom threshold, `luminance`) rides `PhotorealFrame.glareSources` into `post/tonemap.wgsl`
+  through `post/bloomChain.ts`' `packGlareSources`; `METER_CLASS` (`post/meter.ts`) as named.
+- R10: `MaterialClass::SeaIce` (9) and `Seabed` (12) as named; `main_liquid` is
+  `SurfaceHeaderDto.main_liquid`, its record `PaletteEntryDto.liquid: LiquidDto` (the surface
+  crate's `LiquidProperties`); the bathymetry, `water_surface_mm` and `ice` stay in the workers.
+- R09: `ClimateCell.wind: [Wind; 12]` and `month_blend(header, mean_anomaly) -> MonthBlend`
+  (`field/months.rs`) as named; neither has a client export.
+- R01: `WGSL_CATALOGUE` (`engine/catalogue.ts`) as named; `MemoryCategory` (`engine/memory.ts`)
+  has no `ocean` yet.
+
 - **R11.T8.a Sea state.** `seaState.ts`, `gerstner.ts` and `liquids.ts` (Design note 12); the
   figures the notes mark "from memory" (Pierson–Moskowitz and JONSWAP constants, Monahan and
   O'Muircheartaigh, the liquids' indices, the Titan threshold) are re-checked first. Tests: σ_u² and
@@ -1219,6 +1235,7 @@ Files: `clouds/*`, R10's hooks, R01's `WGSL_CATALOGUE`, tests. Acceptance: `pnpm
   kA²); the fetch limit caps H_s for a basin and reaches Pierson–Moskowitz at full development;
   `equivalentWind` is the identity at Earth's parameters; a Titan-like sea at 0.3 m/s is at the
   floor and glints as a mirror.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.a.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.a.md).
 - **R11.T8.b From space.** `oceanMask.ts` and `oceanFar.wgsl`: the sea-level sphere where the mask
   says ocean, the anisotropic Cox–Munk BRDF filtered per pixel, Fresnel at the liquid's index, the
   sky reflected from R08's per-view sky-view table (`skyView`), the upwelling colour by Pope and
