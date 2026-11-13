@@ -3140,3 +3140,8 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   - _Lean (2026-11-05)._ Streaming, the server's cache keeping as many places a cell as a quarter
     of its budget holds (174,762 at 32 MiB): past a quarter a cell evicts most of the cache, and the
     cells of 8–32 MiB about the centre, made side by side, held 0.6 GB more at the peak.
+- **P12.T5.e, a glitch's alert hold, ruled (2026-11-13, the owner's delegated UX call,
+  ux-calls-and-checklist-gaps):** the lean stands: a detection with no light clears at its arrival
+  plus 3.1 d (`RECOVERY_TIME_DAYS`, Crab-like τ_d and Vela-like `LARGE_GLITCH_DURATION` alike),
+  as the guide's sensor bullet now says. The alert list read its 0 flux as `0.00 W/m²`; it now
+  reads `FLUX RADIO —`, Missing (`AlertList.tsx`'s `fluxReading`). Server and wire unchanged.

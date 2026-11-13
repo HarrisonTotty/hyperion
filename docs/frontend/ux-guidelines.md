@@ -507,7 +507,9 @@ Four classes, shared by the whole ship:
 - A sensor detection is an Advisory alert raised by the server. It names the sensor system, the
   kind of event, its direction and whether its source is resolved:
   `SENSORS TRANSIENT 047° +12°: unresolved`. It clears when the event's flux at the ship falls
-  below the sensor's detection limit.
+  below the sensor's detection limit. An event seen with no flux, such as a pulsar glitch timed
+  in the radio, clears instead once the recovery time the simulation gives it has passed since
+  its light arrived, 3.1 d for every glitch; its flux is Missing, `FLUX RADIO —`, never `0`.
 - The header strip shows the count of active emergency, warning and caution alerts and the
   number that are unacknowledged. The newest unacknowledged alert is shown in full.
 - An alert names the system, says what is wrong and, where known, the cause and the

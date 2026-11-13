@@ -207,9 +207,41 @@ export function alertText(contact: ContactDto): string {
   return `${SENSORS_SYSTEM} ${TRANSIENT_WORD} ${direction}: ${resolution}`;
 }
 
-/** A contact's flux in its band: `FLUX V 3.20E-12 W/m²`, the unit written beside it. */
-function fluxReading(contact: ContactDto): string {
-  return `FLUX ${alertBandWords(contact.band)} ${formatSignificant(contact.flux_w_m2)} W/m²`;
+/**
+ * A contact's flux in its band, its label and its value with the unit written beside it:
+ * `FLUX V`, `3.20E-12 W/m²`; the value `null`, which reads Missing, for an event seen with no
+ * light, a pulsar's glitch timed in the radio, whose flux the server sends as 0 (plan 12,
+ * P12.T5.e; the guide's Missing: never `0`).
+ */
+function fluxReading(contact: ContactDto): {
+  readonly label: string;
+  readonly value: string | null;
+} {
+  return {
+    label: `FLUX ${alertBandWords(contact.band)}`,
+    value: contact.kind === "glitch" ? null : `${formatSignificant(contact.flux_w_m2)} W/m²`,
+  };
+}
+
+/** {@link fluxReading} in words, for a row's accessible name: the unit spelled, `—` for Missing. */
+function fluxWords(contact: ContactDto): string {
+  const { label, value } = fluxReading(contact);
+  return `${label} ${value?.replace("W/m²", "watts per square metre") ?? "—"}`;
+}
+
+/** Props of {@link FluxReading}. */
+interface FluxReadingProps {
+  readonly contact: ContactDto;
+}
+
+/** A row's {@link fluxReading}, its Missing value the muted em dash. */
+function FluxReading({ contact }: FluxReadingProps) {
+  const { label, value } = fluxReading(contact);
+  return (
+    <>
+      {label} {value ?? <span className="readout__missing">—</span>}
+    </>
+  );
 }
 
 /** When a contact was first seen, the time its alert was raised: `UT +0.52 yr`. */
@@ -311,7 +343,7 @@ function rowName(contact: ContactDto, ack: string | null, stale: boolean): strin
     whatReading(contact),
     contact.phase === "onset" ? "ONSET" : "IN PROGRESS",
     raisedReading(contact),
-    fluxReading(contact).replace("W/m²", "watts per square metre"),
+    fluxWords(contact),
     ack,
     stale ? "stale" : null,
   ]
@@ -617,7 +649,7 @@ export function AlertList({
                   <span className="alert-list__line">
                     <span className="alert-list__number">{raisedReading(contact)}</span>
                     <span className="alert-list__number alert-list__flux">
-                      {fluxReading(contact)}
+                      <FluxReading contact={contact} />
                       <StaleSlot stale={stale} />
                     </span>
                   </span>

@@ -264,6 +264,18 @@ describe("AlertList (plan 12, P12.T12)", () => {
     expect(row).toHaveTextContent("FLUX V 3.20E-12 W/m²");
   });
 
+  it("reads a glitch's radio flux as Missing, never 0", () => {
+    renderList({
+      contacts: [aBearingContact({ kind: "glitch", band: "radio", flux_w_m2: 0 })],
+    });
+    const row = screen.getByRole("option", { name: /GLITCH/u });
+
+    expect(row).toHaveTextContent("FLUX RADIO —");
+    expect(row).not.toHaveTextContent("W/m²");
+    expect(within(row).getByText("—")).toHaveClass("readout__missing");
+    expect(row.getAttribute("aria-label")).toContain("FLUX RADIO —");
+  });
+
   it("trails each stale row with one S and names it stale", () => {
     renderList({ stale: true });
 
