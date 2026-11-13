@@ -777,6 +777,7 @@ outcome in the task it falls on.
   a `virtual` record; `budget.md` agrees with `runs.v1.jsonl` (the sync test, in the package's
   suite, which `pnpm test` runs). Acceptance: `pnpm test`, `just ci`, and `just perf-table` leaves
   the tree unchanged.
+  Records: [12-measurements-and-settings-ladder/records/R12.T1.b.md](12-measurements-and-settings-ladder/records/R12.T1.b.md).
 - **R12.T1.c The documentation layout.** Draft the line `docs/measurements/` —
   recorded measurements of the product, one directory per run family — for `.claude/CLAUDE.md`'s
   "Documentation Layout", in this plan's Risks and in the commit message of T1.b, ruled 2026-10-19

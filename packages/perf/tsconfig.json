@@ -1,11 +1,4 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "lib": ["es2023"],
-    "types": [],
-    "allowImportingTsExtensions": true,
-    "erasableSyntaxOnly": true
-  },
-  "include": ["src"],
-  "exclude": ["src/cli", "src/test", "src/**/*.test.ts"]
+  "files": [],
+  "references": [{ "path": "./tsconfig.lib.json" }, { "path": "./tsconfig.node.json" }]
 }

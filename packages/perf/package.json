@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "node ../../tools/node-floor/check.cjs && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "node ../../tools/node-floor/check.cjs && tsc --noEmit -p tsconfig.lib.json && tsc --noEmit -p tsconfig.node.json",
     "test": "node ../../tools/node-floor/check.cjs && vitest run"
   },
   "devDependencies": {

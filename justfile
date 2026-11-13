@@ -278,6 +278,24 @@ child-window-check *args: gen-surface
     pnpm --filter hyperion build
     bash apps/hyperion/scripts/childWindowCheck.sh "$@"
 
+# R12's consolidated record (R12.T1.b): validates a perf run's record (one record as JSON, or JSON
+# lines as `--perf-out` appends them), or folds one of R05's descent-spike results files, appends
+# it to `docs/measurements/rendering/runs.v1.jsonl` under the first free ID and regenerates
+# `budget.md`'s generated sections. `<file>` is relative to the repository's root. Options:
+# `--store <path>`, `--budget <path>`. Run under Node's type stripping; not part of `ci`, whose
+# sync test checks that `budget.md` agrees with the store.
+# Add a record to the store, e.g. `just perf-record docs/measurements/descent-spike/<file>.json`.
+[positional-arguments]
+perf-record file *args:
+    node packages/perf/src/cli/record.ts "$@"
+
+# Regenerates `docs/measurements/rendering/budget.md`'s generated sections from `runs.v1.jsonl`
+# (R12.T1.b), leaving its prose as it is; `--check` writes nothing and fails if they are stale.
+# Regenerate the measured budget's tables, e.g. `just perf-table` or `just perf-table --check`.
+[positional-arguments]
+perf-table *args:
+    node packages/perf/src/cli/table.ts "$@"
+
 # Build the client and run the headless smoke harness on SwiftShader, once per capability path
 # (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back
 # frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a

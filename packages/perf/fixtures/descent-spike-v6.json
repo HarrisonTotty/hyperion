@@ -1,0 +1,900 @@
+{
+  "schema": "hyperion.descent-spike.results",
+  "version": 6,
+  "run": {
+    "startedAt": "2026-10-07T18:11:21.613Z",
+    "machine": {
+      "name": "rtx3080-desktop",
+      "cpu": "AMD Ryzen 7 3700X 8-Core Processor",
+      "logicalCores": 16,
+      "memoryBytes": 33555202048,
+      "governor": {
+        "value": "schedutil",
+        "reason": null
+      },
+      "loadAverage": {
+        "value": [2.69, 6.67, 12.53],
+        "reason": null
+      },
+      "gpu": {
+        "value": {
+          "vendorId": 4318,
+          "deviceId": 8710,
+          "driverVersion": "615.71.09",
+          "description": null
+        },
+        "reason": null
+      }
+    },
+    "versions": {
+      "app": "0.1.0",
+      "electron": "44.4.3",
+      "chromium": "152.0.7977.130",
+      "node": "24.21.0",
+      "v8": "15.2.124.28-electron.0"
+    },
+    "platform": "linux",
+    "launchMode": "vulkan",
+    "setting": "low",
+    "seed": "7",
+    "options": {
+      "setting": "low",
+      "seed": "7",
+      "smoke": false,
+      "ridged": "off",
+      "dawnSafety": "on",
+      "traceProfile": "off",
+      "terrainVertexPath": "face-differences",
+      "terrainNormals": "mesh"
+    },
+    "switches": [
+      "--use-angle=vulkan",
+      "--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan",
+      "--enable-dawn-features=enable_subgroups_intel_gen9",
+      "--disable-dawn-features=timestamp_quantization"
+    ],
+    "timer": "full",
+    "shown": true,
+    "periodMs": {
+      "value": 33.333333333333336,
+      "reason": null
+    },
+    "warmupS": 10,
+    "canvas": {
+      "widthPx": 1509,
+      "heightPx": 821
+    },
+    "quiet": {
+      "provisional": true,
+      "note": "load average 2.69 at the start (Design note 27 asks under 1): provisional"
+    },
+    "trace": {
+      "value": {
+        "format": "perfetto-proto",
+        "profiled": false,
+        "categories": [
+          "devtools.timeline",
+          "disabled-by-default-devtools.timeline",
+          "disabled-by-default-devtools.timeline.frame",
+          "disabled-by-default-v8.gc",
+          "blink.user_timing"
+        ],
+        "recordingMode": "record-until-full",
+        "bufferKb": 786432,
+        "guardS": 1,
+        "windows": [
+          {
+            "index": 0,
+            "fromS": 0.04320399999850997,
+            "toS": 120.01350400000298,
+            "figures": {
+              "value": {
+                "spanMs": 120047.92198899841,
+                "bytes": 93245282,
+                "bufferPercent": 9.491946548223495
+              },
+              "reason": null
+            }
+          }
+        ],
+        "boundaries": [
+          {
+            "afterWindow": 0,
+            "stopRequestedS": 120.01350400000298,
+            "resumedS": 122.11010399999702,
+            "excludedToS": 123.11010399999702,
+            "excludedFrames": 182,
+            "maxRafIntervalMs": 33.30000000000291
+          }
+        ],
+        "tracedS": 1195.2686000000087
+      },
+      "reason": null
+    }
+  },
+  "levels": [
+    {
+      "level": 0,
+      "epsilonM": 7114.442849314585,
+      "k": 0.39888908269447654
+    },
+    {
+      "level": 1,
+      "epsilonM": 4962.531695386634,
+      "k": 0.5564735729111233
+    }
+  ],
+  "frames": {
+    "source": "presentation",
+    "presentation": {
+      "value": {
+        "count": 70715,
+        "p50Ms": 16.871,
+        "p95Ms": 21.62,
+        "p99Ms": 47.828,
+        "maxMs": 83.145,
+        "missed": 424,
+        "missedFraction": 0.005995899031322916,
+        "hitches": 0
+      },
+      "reason": null
+    },
+    "raf": {
+      "value": {
+        "count": 70732,
+        "p50Ms": 16.699999999953434,
+        "p95Ms": 16.79999999998836,
+        "p99Ms": 33.29999999998836,
+        "maxMs": 83.39999999999782,
+        "missed": 3,
+        "missedFraction": 4.241361759882373e-5,
+        "hitches": 0
+      },
+      "reason": null
+    },
+    "segments": [
+      {
+        "segment": "orbit coast",
+        "presentation": {
+          "value": {
+            "count": 2948,
+            "p50Ms": 16.878,
+            "p95Ms": 23.33,
+            "p99Ms": 47.637,
+            "maxMs": 83.145,
+            "missed": 23,
+            "missedFraction": 0.007801899592944369,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "raf": {
+          "value": {
+            "count": 2947,
+            "p50Ms": 16.69999999999709,
+            "p95Ms": 16.799999999999272,
+            "p99Ms": 33.30000000000291,
+            "maxMs": 83.39999999999782,
+            "missed": 3,
+            "missedFraction": 0.0010179843909060061,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "excludedFrames": 0
+      },
+      {
+        "segment": "descent arc",
+        "presentation": {
+          "value": {
+            "count": 51810,
+            "p50Ms": 16.874,
+            "p95Ms": 21.521,
+            "p99Ms": 47.672,
+            "maxMs": 69.523,
+            "missed": 289,
+            "missedFraction": 0.005578073730939973,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "raf": {
+          "value": {
+            "count": 51827,
+            "p50Ms": 16.699999999953434,
+            "p95Ms": 16.79999999998836,
+            "p99Ms": 33.29999999998836,
+            "maxMs": 50,
+            "missed": 0,
+            "missedFraction": 0,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "excludedFrames": 1462
+      },
+      {
+        "segment": "approach and flare",
+        "presentation": {
+          "value": {
+            "count": 7096,
+            "p50Ms": 16.807,
+            "p95Ms": 21.438,
+            "p99Ms": 48.139,
+            "maxMs": 63.094,
+            "missed": 45,
+            "missedFraction": 0.006341600901916573,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "raf": {
+          "value": {
+            "count": 7096,
+            "p50Ms": 16.699999999953434,
+            "p95Ms": 16.800000000046566,
+            "p99Ms": 33.300000000046566,
+            "maxMs": 33.4000000001397,
+            "missed": 0,
+            "missedFraction": 0,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "excludedFrames": 0
+      },
+      {
+        "segment": "low fast pass",
+        "presentation": {
+          "value": {
+            "count": 1764,
+            "p50Ms": 16.808,
+            "p95Ms": 21.42,
+            "p99Ms": 51.134,
+            "maxMs": 62.774,
+            "missed": 20,
+            "missedFraction": 0.011337868480725623,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "raf": {
+          "value": {
+            "count": 1764,
+            "p50Ms": 16.699999999953434,
+            "p95Ms": 16.800000000046566,
+            "p99Ms": 33.39999999990687,
+            "maxMs": 33.5,
+            "missed": 0,
+            "missedFraction": 0,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "excludedFrames": 0
+      },
+      {
+        "segment": "slowdown",
+        "presentation": {
+          "value": {
+            "count": 3535,
+            "p50Ms": 16.794,
+            "p95Ms": 20.361,
+            "p99Ms": 49.102,
+            "maxMs": 61.585,
+            "missed": 28,
+            "missedFraction": 0.007920792079207921,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "raf": {
+          "value": {
+            "count": 3535,
+            "p50Ms": 16.699999999953434,
+            "p95Ms": 16.800000000046566,
+            "p99Ms": 33.300000000046566,
+            "maxMs": 33.4000000001397,
+            "missed": 0,
+            "missedFraction": 0,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "excludedFrames": 0
+      },
+      {
+        "segment": "vertical descent",
+        "presentation": {
+          "value": {
+            "count": 597,
+            "p50Ms": 16.9,
+            "p95Ms": 19.737,
+            "p99Ms": 46.045,
+            "maxMs": 59.87,
+            "missed": 2,
+            "missedFraction": 0.0033500837520938024,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "raf": {
+          "value": {
+            "count": 597,
+            "p50Ms": 16.699999999953434,
+            "p95Ms": 16.700000000186265,
+            "p99Ms": 16.800000000046566,
+            "maxMs": 33.300000000046566,
+            "missed": 0,
+            "missedFraction": 0,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "excludedFrames": 0
+      },
+      {
+        "segment": "hover and touchdown",
+        "presentation": {
+          "value": {
+            "count": 2965,
+            "p50Ms": 16.875,
+            "p95Ms": 22.077,
+            "p99Ms": 46.919,
+            "maxMs": 61.97,
+            "missed": 17,
+            "missedFraction": 0.005733558178752108,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "raf": {
+          "value": {
+            "count": 2965,
+            "p50Ms": 16.699999999953434,
+            "p95Ms": 16.800000000046566,
+            "p99Ms": 33.300000000046566,
+            "maxMs": 33.4000000001397,
+            "missed": 0,
+            "missedFraction": 0,
+            "hitches": 0
+          },
+          "reason": null
+        },
+        "excludedFrames": 0
+      }
+    ],
+    "dropped": {
+      "value": 990,
+      "reason": null
+    },
+    "excludedFrames": 1462
+  },
+  "gpu": {
+    "timer": "full",
+    "tolerancePerPassMs": 0,
+    "untimedPasses": 0,
+    "passes": {
+      "value": [
+        {
+          "label": "terrain",
+          "row": "terrain",
+          "frames": 70732,
+          "p50Ms": 0.828,
+          "p95Ms": 1.453984,
+          "p99Ms": 1.569696
+        },
+        {
+          "label": "atmosphere view",
+          "row": "atmosphere",
+          "frames": 70732,
+          "p50Ms": 1.429504,
+          "p95Ms": 2.675712,
+          "p99Ms": 3.001344
+        },
+        {
+          "label": "atmosphere composite",
+          "row": "atmosphere",
+          "frames": 70732,
+          "p50Ms": 0.46832,
+          "p95Ms": 0.517568,
+          "p99Ms": 0.863488
+        },
+        {
+          "label": "spike display",
+          "row": "other",
+          "frames": 70732,
+          "p50Ms": 0.187008,
+          "p95Ms": 0.233216,
+          "p99Ms": 0.481184
+        },
+        {
+          "label": "view:wireframe",
+          "row": "other",
+          "frames": 70732,
+          "p50Ms": 0.108096,
+          "p95Ms": 0.132832,
+          "p99Ms": 0.179872
+        }
+      ],
+      "reason": null
+    },
+    "sumP95Ms": {
+      "value": 4.272192,
+      "reason": null
+    },
+    "rows": {
+      "terrain": {
+        "estimateMs": 14,
+        "p50Ms": {
+          "value": 0.828,
+          "reason": null
+        },
+        "p95Ms": {
+          "value": 1.453984,
+          "reason": null
+        },
+        "p99Ms": {
+          "value": 1.569696,
+          "reason": null
+        },
+        "overEstimate": false
+      },
+      "atmosphere": {
+        "estimateMs": 4,
+        "p50Ms": {
+          "value": 1.919008,
+          "reason": null
+        },
+        "p95Ms": {
+          "value": 3.160032,
+          "reason": null
+        },
+        "p99Ms": {
+          "value": 3.471648,
+          "reason": null
+        },
+        "overEstimate": false
+      }
+    },
+    "incompleteFrames": {
+      "value": {
+        "dropped": 0,
+        "partial": 0,
+        "frames": 70732
+      },
+      "reason": null
+    },
+    "gpuProcess": {
+      "value": {
+        "pid": 2620769,
+        "tid": 2620769,
+        "busyMs": 526647.8355859985,
+        "slices": [
+          {
+            "name": "GPUTask",
+            "count": 1098306,
+            "totalMs": 376807.42370896833,
+            "maxMs": 58.643
+          }
+        ]
+      },
+      "reason": null
+    },
+    "clocks": {
+      "value": {
+        "source": "nvidia-smi",
+        "maxGraphicsMHz": {
+          "value": 2115,
+          "reason": null
+        },
+        "graphicsMHz": {
+          "value": {
+            "samples": [210, 255, 270, 270, 255, 240],
+            "gaps": []
+          },
+          "reason": null
+        },
+        "memoryMHz": {
+          "value": {
+            "samples": [405, 405, 405, 405, 405, 405],
+            "gaps": []
+          },
+          "reason": null
+        },
+        "performanceState": {
+          "value": {
+            "samples": [8, 8, 8, 8, 8, 8],
+            "gaps": []
+          },
+          "reason": null
+        }
+      },
+      "reason": null
+    }
+  },
+  "mainThread": {
+    "ourCodeP95Ms": {
+      "value": 2.2000000029802322,
+      "reason": null
+    },
+    "split": {
+      "value": {
+        "pid": 2620792,
+        "tid": 1,
+        "wallMs": 2105594.748009003,
+        "busyMs": 167563.5264000473,
+        "ourCodeMs": 103011.327,
+        "idleMs": 1938031.2216089554
+      },
+      "reason": null
+    },
+    "engine": {
+      "value": null,
+      "reason": "the CPU profiler is off (--trace-profile off; decision-r05-trace-windows.md)"
+    },
+    "gc": {
+      "value": [
+        {
+          "process": "Browser",
+          "thread": "CrBrowserMain",
+          "count": 5093,
+          "totalMs": 1167.3707140045167,
+          "maxMs": 6.377
+        },
+        {
+          "process": "Browser",
+          "thread": "V8Worker",
+          "count": 3871,
+          "totalMs": 1585.2195050048824,
+          "maxMs": 5.535
+        }
+      ],
+      "reason": null
+    }
+  },
+  "streaming": [
+    {
+      "segment": "orbit coast",
+      "requestedPerS": 2.783333333333333,
+      "bakedPerS": 2.783333333333333,
+      "residentPerS": 2.783333333333333,
+      "predictedHardPerS": 0.7407866754285524,
+      "predictedCalibratedPerS": 0.013895476275089804,
+      "patchesHard": 59.291594703511805,
+      "patchesCalibrated": 20.941278065630396,
+      "streamingS": 1.333304000000044,
+      "sustainedFractionHard": 3.757267005002685,
+      "sustainedFractionCalibrated": 200.30499698113766
+    },
+    {
+      "segment": "descent arc",
+      "requestedPerS": 2.1255555555555556,
+      "bakedPerS": 2.1255555555555556,
+      "residentPerS": 2.1255555555555556,
+      "predictedHardPerS": 2.633893963829488,
+      "predictedCalibratedPerS": 0.28750506620577115,
+      "patchesHard": 96.47739683612002,
+      "patchesCalibrated": 34.81360130608569,
+      "streamingS": 16.498700000000774,
+      "sustainedFractionHard": 0.8070011871188445,
+      "sustainedFractionCalibrated": 7.393106436720206
+    },
+    {
+      "segment": "approach and flare",
+      "requestedPerS": 27.166666666666668,
+      "bakedPerS": 26.558333333333334,
+      "residentPerS": 26.558333333333334,
+      "predictedHardPerS": 34.83358940223504,
+      "predictedCalibratedPerS": 5.423313688360423,
+      "patchesHard": 167.23858511837656,
+      "patchesCalibrated": 51.226042841037206,
+      "streamingS": 36.72449600000073,
+      "sustainedFractionHard": 0.7624345865324249,
+      "sustainedFractionCalibrated": 4.897067523557253
+    },
+    {
+      "segment": "low fast pass",
+      "requestedPerS": 86.7,
+      "bakedPerS": 84.36666666666666,
+      "residentPerS": 84.36666666666666,
+      "predictedHardPerS": 63.13346662825482,
+      "predictedCalibratedPerS": 12.915950711270343,
+      "patchesHard": 146.35487528344672,
+      "patchesCalibrated": 52.525510204081634,
+      "streamingS": 25.366400000000112,
+      "sustainedFractionHard": 1.336322416182816,
+      "sustainedFractionCalibrated": 6.531974962791478
+    },
+    {
+      "segment": "slowdown",
+      "requestedPerS": 69.41666666666667,
+      "bakedPerS": 65.86666666666666,
+      "residentPerS": 65.86666666666666,
+      "predictedHardPerS": 41.03512443790112,
+      "predictedCalibratedPerS": 8.507148604859495,
+      "patchesHard": 119.47241867043847,
+      "patchesCalibrated": 79.97934936350778,
+      "streamingS": 45.75400400000058,
+      "sustainedFractionHard": 1.6051289613205237,
+      "sustainedFractionCalibrated": 7.74250806304735
+    },
+    {
+      "segment": "vertical descent",
+      "requestedPerS": 0,
+      "bakedPerS": 0,
+      "residentPerS": 0,
+      "predictedHardPerS": 25.256242003156082,
+      "predictedCalibratedPerS": 13.632038600299392,
+      "patchesHard": 76.01340033500837,
+      "patchesCalibrated": 78.1892797319933,
+      "streamingS": 0,
+      "sustainedFractionHard": 0,
+      "sustainedFractionCalibrated": 0
+    },
+    {
+      "segment": "hover and touchdown",
+      "requestedPerS": 0,
+      "bakedPerS": 0,
+      "residentPerS": 0,
+      "predictedHardPerS": 0.029326736586226917,
+      "predictedCalibratedPerS": 0.029326736586226917,
+      "patchesHard": 67,
+      "patchesCalibrated": 69,
+      "streamingS": 0,
+      "sustainedFractionHard": 0,
+      "sustainedFractionCalibrated": 0
+    }
+  ],
+  "uploads": {
+    "bytes": 3927703156
+  },
+  "pipelines": {
+    "late": []
+  },
+  "memory": {
+    "series": {
+      "tMs": [195, 1245, 2210, 3207],
+      "appKiB": {
+        "value": {
+          "samples": [699260, 813328, 824156, 828548],
+          "gaps": []
+        },
+        "reason": null
+      },
+      "gpuProcessKiB": {
+        "value": {
+          "samples": [231600, 244796, 248212, 248676],
+          "gaps": []
+        },
+        "reason": null
+      },
+      "tracingKiB": {
+        "value": {
+          "samples": [40924, 44308, 44488, 45140],
+          "gaps": []
+        },
+        "reason": null
+      },
+      "rendererPrivateKiB": {
+        "value": {
+          "samples": [-1, 82060, 188372, 188372],
+          "gaps": [
+            {
+              "from": 0,
+              "to": 0,
+              "reason": "the renderer reported no memory"
+            }
+          ]
+        },
+        "reason": null
+      },
+      "drmResidentKiB": {
+        "value": null,
+        "reason": "no DRM client in the process's fdinfo (NVIDIA's driver writes none)"
+      },
+      "drmTotalKiB": {
+        "value": null,
+        "reason": "no DRM client in the process's fdinfo (NVIDIA's driver writes none)"
+      },
+      "nvidiaDeviceKiB": {
+        "value": {
+          "samples": [451584, 465920, 465920, 465920],
+          "gaps": []
+        },
+        "reason": null
+      },
+      "nvidiaGpuProcessKiB": {
+        "value": {
+          "samples": [178176, 192512, 192512, 192512],
+          "gaps": []
+        },
+        "reason": null
+      }
+    },
+    "gpuHeadline": {
+      "value": {
+        "bytes": 275775488,
+        "source": "nvidia-smi"
+      },
+      "reason": null
+    },
+    "peakAppBytes": {
+      "value": 1080975360,
+      "reason": null
+    },
+    "peakTracingBytes": {
+      "value": 255496192,
+      "reason": null
+    },
+    "peakRendererPrivateBytes": {
+      "value": 317718528,
+      "reason": null
+    },
+    "peakDrmResidentBytes": {
+      "value": null,
+      "reason": "no DRM client in the process's fdinfo (NVIDIA's driver writes none)"
+    },
+    "peakNvidiaDeviceLessBaselineBytes": {
+      "value": 275775488,
+      "reason": null
+    },
+    "peakNvidiaGpuProcessBytes": {
+      "value": 197132288,
+      "reason": null
+    },
+    "adapterPeakBytes": 95738080
+  },
+  "criteria": {
+    "whole": [
+      {
+        "id": "p50",
+        "criterion": "50th percentile ≤ T + 0.5 ms",
+        "limit": 33.833333333333336,
+        "unit": "ms",
+        "value": 16.871,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": null
+      },
+      {
+        "id": "p95",
+        "criterion": "95th percentile ≤ 35 ms",
+        "limit": 35,
+        "unit": "ms",
+        "value": 21.62,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": null
+      },
+      {
+        "id": "p99",
+        "criterion": "99th percentile ≤ 2T",
+        "limit": 66.66666666666667,
+        "unit": "ms",
+        "value": 47.828,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": null
+      },
+      {
+        "id": "missed",
+        "criterion": "≤ 1% of intervals above 1.5 T",
+        "limit": 0.01,
+        "unit": "fraction",
+        "value": 0.005995899031322916,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": null
+      },
+      {
+        "id": "hitches",
+        "criterion": "none above 3 T",
+        "limit": 0,
+        "unit": "count",
+        "value": 0,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": null
+      },
+      {
+        "id": "headroom-main",
+        "criterion": "main thread ≤ 0.8 T at the 95th percentile",
+        "limit": 26.66666666666667,
+        "unit": "ms",
+        "value": 2.2000000029802322,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": null
+      },
+      {
+        "id": "headroom-gpu",
+        "criterion": "GPU pass sum ≤ 0.8 T at the 95th percentile",
+        "limit": 26.66666666666667,
+        "unit": "ms",
+        "value": 4.272192,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": "measured at a median 270 of 2115 MHz (the driver's choice at this load)"
+      },
+      {
+        "id": "terrain-atmosphere",
+        "criterion": "terrain and atmosphere GPU time, summed per frame, ≤ 18 ms (14 + 4) at the 95th percentile",
+        "limit": 18,
+        "unit": "ms",
+        "value": 3.979616,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": "measured at a median 270 of 2115 MHz (the driver's choice at this load)"
+      },
+      {
+        "id": "memory",
+        "criterion": "GPU resident ≤ 1 GB",
+        "limit": 1000000000,
+        "unit": "bytes",
+        "value": 275775488,
+        "tolerance": 0,
+        "verdict": "pass",
+        "note": null
+      }
+    ],
+    "segments": [
+      {
+        "segment": "orbit coast",
+        "criteria": [
+          {
+            "id": "p50",
+            "criterion": "50th percentile ≤ T + 0.5 ms",
+            "limit": 33.833333333333336,
+            "unit": "ms",
+            "value": 16.878,
+            "tolerance": 0,
+            "verdict": "pass",
+            "note": null
+          },
+          {
+            "id": "p95",
+            "criterion": "95th percentile ≤ 35 ms",
+            "limit": 35,
+            "unit": "ms",
+            "value": 23.33,
+            "tolerance": 0,
+            "verdict": "pass",
+            "note": null
+          },
+          {
+            "id": "p99",
+            "criterion": "99th percentile ≤ 2T",
+            "limit": 66.66666666666667,
+            "unit": "ms",
+            "value": 47.637,
+            "tolerance": 0,
+            "verdict": "pass",
+            "note": null
+          },
+          {
+            "id": "missed",
+            "criterion": "≤ 1% of intervals above 1.5 T",
+            "limit": 0.01,
+            "unit": "fraction",
+            "value": 0.007801899592944369,
+            "tolerance": 0,
+            "verdict": "pass",
+            "note": null
+          },
+          {
+            "id": "hitches",
+            "criterion": "none above 3 T",
+            "limit": 0,
+            "unit": "count",
+            "value": 0,
+            "tolerance": 0,
+            "verdict": "pass",
+            "note": null
+          }
+        ]
+      }
+    ],
+    "overall": "fail"
+  }
+}

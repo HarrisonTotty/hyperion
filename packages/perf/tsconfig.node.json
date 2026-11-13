@@ -1,10 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsc/node.tsbuildinfo",
     "lib": ["es2023"],
     "types": ["node"],
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["src/cli", "src/test", "src/**/*.test.ts", "vitest.config.mts"]
+  "include": ["src", "vitest.config.mts", "package.json"]
 }
