@@ -41,14 +41,25 @@ export function blueNoiseTile(side: number = BLUE_NOISE_SIDE): Float32Array {
   }
   const energy = new Float64Array(n);
   const ones = new Uint8Array(n);
+  // Each texel takes one term a splat, in the splats' order, so its sums are the same however a
+  // splat walks the texels: the row's two runs either side of the kernel's wrap, with no modulo a
+  // texel (perf-long-tasks-2: the tile held the page's thread some 270 to 430 ms on the pod as the
+  // photorealistic renderer was first made).
   const splat = (index: number, sign: number): void => {
     const ix = index % side;
     const iy = Math.floor(index / side);
     for (let y = 0; y < side; y += 1) {
-      const ky = (y - iy + side) % side;
-      for (let x = 0; x < side; x += 1) {
-        const kx = (x - ix + side) % side;
-        energy[y * side + x] = (energy[y * side + x] ?? 0) + sign * (kernel[ky * side + kx] ?? 0);
+      const ky = y >= iy ? y - iy : y - iy + side;
+      const row = y * side;
+      const kernelRow = ky * side;
+      // x < ix reads the kernel's column x − ix + side, and x ≥ ix its column x − ix.
+      const wrapped = kernelRow + side - ix;
+      for (let x = 0; x < ix; x += 1) {
+        energy[row + x] = (energy[row + x] ?? 0) + sign * (kernel[wrapped + x] ?? 0);
+      }
+      const straight = kernelRow - ix;
+      for (let x = ix; x < side; x += 1) {
+        energy[row + x] = (energy[row + x] ?? 0) + sign * (kernel[straight + x] ?? 0);
       }
     }
   };
