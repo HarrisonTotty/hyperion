@@ -17,6 +17,8 @@
 //!   a coarse crater's ejecta, every input one both sides hold.
 //! - [`place`]: where the rocks lie, drawn by hash in cells per diameter octave.
 //! - [`shape`]: each rock's superquadric, half buried on the ground, and its top along a normal.
+//! - [`contact`]: the rocks near a point, and the ground with its rocks there, which collision
+//!   reads.
 //! - [`hold`]: the rocks are placed from generator version 27 ([`ROCKS_VERSION`]); below it the
 //!   crate places none.
 //!
@@ -26,6 +28,7 @@
 //! the same bake and cache before R11 lands; R11 owns the module and gives the type its variants
 //! (its `Rocks(Vec<Rock>)`, R11.T4.a) and the hook its implementation (`RockBakeHook`).
 
+pub mod contact;
 #[cfg(test)]
 mod golden;
 pub mod hold;
@@ -36,6 +39,7 @@ pub mod site;
 
 use hyperion_base::units::Metres;
 
+pub use contact::{RockCache, rocks_near, surface_height_with_rocks};
 pub use hold::{ROCKS_VERSION, RockRules};
 #[cfg(any(test, feature = "testing"))]
 pub use hold::{with_rock_rules, with_rocks_placed};

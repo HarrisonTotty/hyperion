@@ -1053,6 +1053,7 @@ _The names T3 calls, re-validated against the code (2026-11-02): `QueryHeightErr
   or at a cube corner is found from the neighbouring face; a query over a cell that is not surveyed
   on a `PartialField` returns `Err(RockError::Query(NotSurveyed))`, never a height without rocks;
   `hyperion_testkit::order::assert_order_independent` over the cache.
+  _Built 2026-11-02._
 - **R11.T3.d Goldens on three targets and the bump.** `.golden` files, under
   `crates/hyperion-surface/tests/golden/`, of `rocks_in_cell` and
   `surface_height_with_rocks` at pinned points, asserted equal on native, `wasm32-wasip1` and
