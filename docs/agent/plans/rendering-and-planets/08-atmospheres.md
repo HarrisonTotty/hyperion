@@ -25328,3 +25328,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     one lookup from either start; `severalSuns.test.ts` counts seven returns.
   - Pending, the owner's Mac pairs: the M5's composite figure stood at the march's passes before it
     plus about 0.5 ms in every run of the 11-08 batch, so `composite-scene-only` decides its own cost.
+  - No `AtmosphereSettings` lever (lean, 2026-11-13). On SwiftShader from orbit, `limb-off` and
+    `discs-off` each take about half the composite, though 0.3% of the pixels form a footprint and
+    none lies in a disc, so the cost is likely the code's size. On the M5 the composite's own work
+    is about 0.5 ms, and the footprint is R08.T8.c's limb. The owner's `composite-limb-off` and
+    `composite-discs-off` pairs decide.
