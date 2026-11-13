@@ -96,6 +96,7 @@ import { tableOnlyKernel, tableOnlyMaterial } from "../atmosphere/surfaceLightin
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
+import { DECORATION_TWIN_KERNEL } from "../surface/decoration/decorationTwin";
 import { OVERLAY_SCENE_DEPTH_MATERIAL } from "../photoreal/overlayDepth";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { BAKE_KERNELS, BAKE_SPLAT } from "../sky/bake";
@@ -371,6 +372,8 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   })),
   // Its resolve and the resolve's emissive form (plan R14, R14.T2.d), into the scene target.
   ...TERRAIN_RESOLVE_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
+  // Plan R11's decoration library and the detail textures' projection, in their twin (R11.T2.a).
+  { kind: "compute", spec: DECORATION_TWIN_KERNEL },
   // Plan R14's cluster path (R14.T1.b): its cull, the copy of its counters and its stable
   // compaction (R14.T2.a); the cull with the two-pass occlusion and the depth pyramid (R14.T3.d).
   { kind: "compute", spec: CLUSTER_CULL_KERNEL },

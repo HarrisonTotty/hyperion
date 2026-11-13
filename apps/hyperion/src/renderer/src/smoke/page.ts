@@ -14,8 +14,8 @@
  * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7, 15, 20
  * and 21 R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 17 R08.T8.d's
  * packed far limb's kernels and their general forms' check, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
- * R08.T15.a.2's deck, part 26 R11.T7.b's clouds, and part 1 every other; with no part given the
- * page runs them all, in its order.
+ * R08.T15.a.2's deck, part 25 R11.T2.a's decoration library, part 26 R11.T7.b's clouds, and part 1
+ * every other; with no part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -188,6 +188,7 @@ import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./ter
 import { checkTonemap } from "./tonemap";
 import { TwinPool, twinWorkerCount } from "./twinPool";
 import { checkTwins } from "./twins";
+import { checkDecorationTwin } from "./decoration";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
@@ -327,9 +328,10 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * part 22 composes its frames as the renderer does (2026-11-06; parts 20 and 21 on their lane).
  * Plan R07's packed `disc cells` kernels, every form with its table-only twin (some 63 s on a pod),
  * took parts 9, 16 and 17 past their watchdogs under a pod's load (2026-11-05), so they took part
- * 24, alone (their lane's part 20). Plan R11's clouds (R11.T7.b), their kernels' catalogue, their
- * field, optics and ground's tap against their twins and their layer's draw, took part 26, alone
- * (2026-11-13; part 25 left to a lane beside it).
+ * 24, alone (their lane's part 20). Plan R11's decoration library against its reference (R11.T2.a)
+ * took part 25, alone, so that no part near its watchdog grows (2026-11-13). Plan R11's clouds
+ * (R11.T7.b), their kernels' catalogue, their field, optics and ground's tap against their twins
+ * and their layer's draw, took part 26, alone (2026-11-13).
  */
 type PagePart =
   | 1
@@ -356,6 +358,7 @@ type PagePart =
   | 22
   | 23
   | 24
+  | 25
   | 26;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
@@ -412,6 +415,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 23;
     case "24":
       return 24;
+    case "25":
+      return 25;
     case "26":
       return 26;
     default:
@@ -470,7 +475,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 24, 26 or all");
+    return failed("the part asked for is not 1 to 26 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -923,6 +928,11 @@ async function run(
   );
   await group(12, "R08.T11 (T) a self-luminous medium's row and its twins", () =>
     routedRow("(T)", () => Promise.resolve(selfLuminousEarthMedium())),
+  );
+  // R11.T2.a's decoration library against its reference, one dispatch, in part 25, alone (part 7,
+  // the terrain's, stands near its watchdog, and part 12 holds the atmosphere's twins).
+  await group(25, "R11.T2.a the decoration library against its reference", () =>
+    checkDecorationTwin(engine, checks),
   );
   // In part 13, last: in part 6 it took the part to its watchdog (180 s), and beside the thin one
   // in part 12 to 166 to 172 s under load.

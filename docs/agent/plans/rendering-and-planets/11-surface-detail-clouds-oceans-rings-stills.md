@@ -925,6 +925,8 @@ the label is text in the DOM, not canvas. Acceptance: `pnpm test`, `just ci`.
 
 ### R11.T2 GPU decoration
 
+Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T2.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T2.md).
+
 - **R11.T2.a The decoration library.** `decorationLattice.ts` and `decoration.wgsl`: an integer
   lattice hash of (face, level, cell, lattice point) in `u32`, band-limited gradient noise for
   normal perturbation at wavelengths below the 2 m band limit, sand ripples keyed by material class

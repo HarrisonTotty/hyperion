@@ -37,6 +37,7 @@ import {
   tileLimitPx,
   tileProjection,
 } from "./stillPlan";
+import { decorationPxPerRad, octaveFade } from "../surface/decoration/decorationLattice";
 
 /** `maxTextureDimension2D`: WebGPU's default (the specification's Limits table), the UHD 620's. */
 const LIMITS = [8192, 16_384] as const;
@@ -599,6 +600,73 @@ describe("a tile's terrain", () => {
       return leaf !== null && leaf.level < p.key.level;
     });
     expect(coarser.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The distance, m, along the ray through the still's pixel (x, y) from the still's camera to the
+ * datum's sphere of the equatorial radius, or `null` where the ray passes above it.
+ */
+function groundDistanceM(xPx: number, yPx: number): number | null {
+  const fovXRad = Math.PI / 3;
+  const s = 1 / Math.tan(fovXRad / 2);
+  const aspect = STILL.widthPx / STILL.heightPx;
+  const ndcX = (2 * xPx) / STILL.widthPx - 1;
+  const ndcY = 1 - (2 * yPx) / STILL.heightPx;
+  const ray = normalise(rotate(STILL_ORIENTATION, vec3(ndcX / s, ndcY / (s * aspect), -1)));
+  const radius = WGS84_FIGURE.equatorialRadiusM;
+  const b = dot(STILL_CAMERA_M, ray);
+  const c = dot(STILL_CAMERA_M, STILL_CAMERA_M) - radius * radius;
+  const disc = b * b - c;
+  return disc < 0 ? null : -b - Math.sqrt(disc);
+}
+
+describe("a tile's decoration fade (R11.T2.a; T10.a's deferred test)", () => {
+  // At each pixel, cells that span 1.5 px and 3 px of the full still at the ground's distance there:
+  // the first fades part way (log₂ 1.5) and the second is whole, so each comparison is of a fade
+  // the footprint decides.
+  const SPANS_PX = [1.5, 3];
+
+  it("chooses for each pixel of each tile the fade the untiled still chooses", () => {
+    const untiled = decorationPxPerRad(stillView(STILL));
+    let partial = 0;
+    for (const tile of STILL_TILES) {
+      // The tile's view, as the still's job makes it: its texture's size, through footprintView.
+      const tiled = decorationPxPerRad(footprintView(stillView(tile.texture), STILL));
+      for (const [xPx, yPx] of nearCorners(tile)) {
+        const distanceM = groundDistanceM(xPx, yPx);
+        if (distanceM === null) {
+          continue;
+        }
+        for (const spanPx of SPANS_PX) {
+          const cellM = (spanPx * distanceM) / untiled;
+          const fade = octaveFade(cellM, distanceM, untiled);
+          expect(octaveFade(cellM, distanceM, tiled)).toBe(fade);
+          partial += fade > 0 && fade < 1 ? 1 : 0;
+        }
+      }
+    }
+    expect(partial).toBeGreaterThan(20);
+  });
+
+  it("would fade each octave sooner with a tile-sized viewport (the negative control)", () => {
+    const untiled = decorationPxPerRad(stillView(STILL));
+    let compared = 0;
+    for (const tile of STILL_TILES) {
+      const tileSized = decorationPxPerRad(stillView(tile.texture));
+      for (const [xPx, yPx] of nearCorners(tile)) {
+        const distanceM = groundDistanceM(xPx, yPx);
+        if (distanceM === null) {
+          continue;
+        }
+        const cellM = (1.5 * distanceM) / untiled;
+        expect(octaveFade(cellM, distanceM, tileSized)).toBeLessThan(
+          octaveFade(cellM, distanceM, untiled),
+        );
+        compared += 1;
+      }
+    }
+    expect(compared).toBeGreaterThan(20);
   });
 });
 
