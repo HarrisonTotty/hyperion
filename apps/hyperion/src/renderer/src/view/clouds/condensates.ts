@@ -51,6 +51,19 @@ export interface CloudDeck {
   readonly optics: CloudOptics | null;
 }
 
+/**
+ * What of a body's record its clouds read (R11.T7.b), carried with its atmosphere's entry: plan
+ * 14's cloud fraction, its air's surface pressure and its decks.
+ */
+export interface BodyClouds {
+  /** The share of the sky its clouds cover, P14.T24.b's, in [0, 1]. */
+  readonly cloudFraction: number;
+  /** The air's surface pressure, Pa, which picks a water-ice stand-in. */
+  readonly surfacePressurePa: number;
+  /** Its decks, in its inventory's order. */
+  readonly decks: ReadonlyArray<CloudDeck>;
+}
+
 /** Where a layer's optics or optical depth came from. */
 export type CloudSource = "record" | "stand-in";
 

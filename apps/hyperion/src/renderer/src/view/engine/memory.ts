@@ -18,6 +18,8 @@
  *   the medium's terms and density and phase tables that they and the per-frame kernels read
  *   (R08.T6.b), and the absorber-column table and the lights' curves of growth (R08.T6.c).
  * - `atmosphere-view`: the per-frame sky-view, aerial-perspective and ray-march tables (R05.T12.c).
+ * - `clouds`: plan R11's clouds: the noise tile, each body's coverage texture and rows (R11.T7.b),
+ *   and the volume's maps (R11.T7.c).
  * - `geometry-clusters`: plan R14's cluster path: each terrain slot's cluster records, each view's
  *   buckets (their lists and indirect arguments), its cull inputs and its counters' read-back ring
  *   (R14.T1.b).
@@ -37,6 +39,7 @@ export type MemoryCategory =
   | "other"
   | "atmosphere-tables"
   | "atmosphere-view"
+  | "clouds"
   | "coarse-field-gpu"
   | "geometry-clusters"
   | "geometry-pages"

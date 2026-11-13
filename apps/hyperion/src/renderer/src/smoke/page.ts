@@ -14,8 +14,8 @@
  * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7, 15, 20
  * and 21 R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 17 R08.T8.d's
  * packed far limb's kernels and their general forms' check, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
- * R08.T15.a.2's deck, and part 1 every other; with no part given the page runs them all, in its
- * order.
+ * R08.T15.a.2's deck, part 26 R11.T7.b's clouds, and part 1 every other; with no part given the
+ * page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -68,6 +68,7 @@ import {
   TABLE_ONLY_ENTRIES,
   MARCH_TABLE_ONLY_ENTRIES,
   PACKED_CELL_ENTRIES,
+  CLOUD_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -152,6 +153,7 @@ import {
 } from "./frameTimingScene";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
+import { checkCloudCatalogue, checkCloudLayerDraw, checkCloudTwins } from "./clouds";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { checkIdTarget } from "./idTarget";
 import { checkDepthLayers } from "./depthLayers";
@@ -325,7 +327,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * part 22 composes its frames as the renderer does (2026-11-06; parts 20 and 21 on their lane).
  * Plan R07's packed `disc cells` kernels, every form with its table-only twin (some 63 s on a pod),
  * took parts 9, 16 and 17 past their watchdogs under a pod's load (2026-11-05), so they took part
- * 24, alone (their lane's part 20).
+ * 24, alone (their lane's part 20). Plan R11's clouds (R11.T7.b), their kernels' catalogue, their
+ * field, optics and ground's tap against their twins and their layer's draw, took part 26, alone
+ * (2026-11-13; part 25 left to a lane beside it).
  */
 type PagePart =
   | 1
@@ -351,7 +355,8 @@ type PagePart =
   | 21
   | 22
   | 23
-  | 24;
+  | 24
+  | 26;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -407,6 +412,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 23;
     case "24":
       return 24;
+    case "26":
+      return 26;
     default:
       return null;
   }
@@ -463,7 +470,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 24 or all");
+    return failed("the part asked for is not 1 to 24, 26 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -546,6 +553,7 @@ async function run(
       !TABLE_ONLY_ENTRIES.includes(entry) &&
       !MARCH_TABLE_ONLY_ENTRIES.includes(entry) &&
       !PACKED_CELL_ENTRIES.includes(entry) &&
+      !CLOUD_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
@@ -773,6 +781,15 @@ async function run(
   await group(24, "T9.b catalogue: the packed disc cells' kernels", () =>
     checkCatalogue(engine, status, PACKED_CELL_ENTRIES, checks),
   );
+  // Plan R11's clouds (R11.T7.b), in part 26, alone: their kernels compiled, then their field,
+  // optics and ground's tap against their twins, and their layer drawn from above and below.
+  await group(26, "T9.b catalogue: the clouds' kernels", () =>
+    checkCloudCatalogue(engine, status, checks),
+  );
+  await group(26, "R11.T7.b the clouds' field, optics and ground light against their twins", () =>
+    checkCloudTwins(engine, checks),
+  );
+  await group(26, "R11.T7.b the cloud layer drawn", () => checkCloudLayerDraw(engine, checks));
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),
   );

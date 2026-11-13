@@ -1164,6 +1164,7 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   `cloudShadows` off neither hook is written; the smoke harness; every texel finite. Bench on the
   UHD 620 at 720p, by the owner, against about 1 ms and under 16 MB, with the development machine's
   figure beside it.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T7.b.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T7.b.md).
   - _The `f32` twin of `deltaEddington`_ (R11.T7.a.1's notes, 2026-10-20). The shader's
     δ-Eddington follows `clouds/cloudOptics.ts`'s `f64` one, with these changes for `f32`:
     - only decaying exponentials: e^(−kτ′), e^(−2kτ′) as (e^(−kτ′))², and e^(−τ′ ÷ μ₀); the

@@ -22,6 +22,11 @@ import {
 const EQUINOX = { subsolarLatitudeRad: 0 };
 const DEG = Math.PI / 180;
 
+/** A universe time of whole `seconds` and `nanos`. */
+function at(seconds: number, nanos = 0): { seconds: number; nanos: number } {
+  return { seconds, nanos };
+}
+
 const zonalInput = (season = EQUINOX): CoverageInput => ({
   zonal: PROVISIONAL_ZONAL_CLIMATE,
   surveyed: null,
@@ -178,11 +183,11 @@ describe("the flow map", () => {
 
   it("weighs its phases to 1, each weightless where it restarts", () => {
     for (let t = 0; t < 2 * FLOW_MAP_PERIOD_S; t += 997) {
-      const [a, b] = flowMapPhases(t, FLOW_MAP_PERIOD_S);
+      const [a, b] = flowMapPhases(at(t), FLOW_MAP_PERIOD_S);
       expect(a.weight + b.weight).toBeCloseTo(1, 14);
     }
-    const before = flowMapPhases(FLOW_MAP_PERIOD_S - 1e-6, FLOW_MAP_PERIOD_S);
-    const after = flowMapPhases(FLOW_MAP_PERIOD_S, FLOW_MAP_PERIOD_S);
+    const before = flowMapPhases(at(FLOW_MAP_PERIOD_S - 1, 999_999_999), FLOW_MAP_PERIOD_S);
+    const after = flowMapPhases(at(FLOW_MAP_PERIOD_S), FLOW_MAP_PERIOD_S);
     // Phase 0 restarts at the period: its weight is 0 on both sides, phase 1's 1 and continuous.
     expect(before[0].weight).toBeLessThan(1e-9);
     expect(after[0].weight).toBe(0);
@@ -191,12 +196,25 @@ describe("the flow map", () => {
     expect(Math.abs(after[1].advectionS - before[1].advectionS)).toBeLessThan(1e-5);
   });
 
+  it("keeps a millisecond's step at the far end of the clock's window", () => {
+    const far = 8e12;
+    const [a] = flowMapPhases(at(far, 0), FLOW_MAP_PERIOD_S);
+    const [b] = flowMapPhases(at(far, 1_000_000), FLOW_MAP_PERIOD_S);
+    expect(b.advectionS - a.advectionS).toBeCloseTo(1e-3, 9);
+  });
+
   it("is a function of the scene's time alone", () => {
-    const t = 123_456.75;
+    const t = at(123_456, 750_000_000);
     expect(flowMapPhases(t, FLOW_MAP_PERIOD_S)).toEqual(flowMapPhases(t, FLOW_MAP_PERIOD_S));
     const [a] = flowMapPhases(t, FLOW_MAP_PERIOD_S);
     expect(a.advectionS).toBeGreaterThanOrEqual(-FLOW_MAP_PERIOD_S / 2);
     expect(a.advectionS).toBeLessThan(FLOW_MAP_PERIOD_S / 2);
+  });
+
+  it("counts its cycles before the epoch as after it", () => {
+    const [a] = flowMapPhases(at(-1, 500_000_000), FLOW_MAP_PERIOD_S);
+    expect(a.cycle).toBe(-1);
+    expect(a.advectionS).toBeCloseTo(0.5 * FLOW_MAP_PERIOD_S - 0.5, 9);
   });
 
   it("calms the stand-in wind at the poles and blows the trades from the east", () => {

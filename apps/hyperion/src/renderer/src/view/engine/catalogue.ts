@@ -57,6 +57,8 @@ import {
 } from "../atmosphere/hillaire";
 import { MARCH_CENSUS_KERNEL } from "../atmosphere/marchProbe";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
+import { CLOUD_LAYER_MATERIAL } from "../clouds/cloudLayer";
+import { CLOUD_PROBE_MATERIAL } from "../clouds/cloudProbe";
 import {
   BODY_DISC_AIR_MATERIALS,
   BODY_DISC_CELLS_AIR_KERNEL,
@@ -404,6 +406,16 @@ const SKY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...BAKE_KERNELS.map((spec): CatalogueEntry => ({ kind: "compute", spec })),
 ];
 
+/**
+ * Plan R11's clouds (R11.T7.b): the two-dimensional layer, and the probe that runs the field, the
+ * optics and the ground's tap against their twins in an `r32uint` target (`clouds/cloudProbe.ts`).
+ * The smoke harness compiles them in part 26, with the clouds' checks.
+ */
+export const CLOUD_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: CLOUD_LAYER_MATERIAL },
+  { kind: "material", spec: CLOUD_PROBE_MATERIAL, targets: ["r32uint"] },
+];
+
 /** The point splats (R06.T13.h). */
 const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "point-splat", spec: ENGINE_CHECK_SPLAT },
@@ -575,4 +587,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...SKY_ENTRIES,
   ...TABLE_ONLY_ENTRIES,
   ...MARCH_TABLE_ONLY_ENTRIES,
+  ...CLOUD_ENTRIES,
 ];

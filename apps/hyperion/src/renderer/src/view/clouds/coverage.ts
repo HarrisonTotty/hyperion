@@ -30,6 +30,8 @@
  * - Pure: no state, no platform API; `f64`, with `pinnedMath`'s transcendentals, so that two
  *   clients compute the same coverage bit for bit.
  */
+import type { UniverseTime } from "@hyperion/protocol";
+
 import type { Vec3 } from "../../geometry/vec3";
 import { cos, exp, sin } from "../../lib/pinnedMath";
 
@@ -380,24 +382,42 @@ export interface FlowPhase {
 }
 
 /**
- * The flow map's two phases at the scene's time `tS`, half a period apart (Neyret 2003): phase k's
- * p = frac(t ÷ T + k ÷ 2).
+ * The flow map's two phases at the scene's time, half a period apart (Neyret 2003): phase k's
+ * p = frac(t ÷ T + k ÷ 2), t on the universe clock.
  *
- * @param periodS - T, s, above 0.
- * @throws RangeError for a period that is not finite and above 0, or a time that is not finite.
+ * @remarks
+ * The clock's whole seconds are divided by the period exactly, as integers, and only the remainder
+ * with the nanoseconds is a fraction, so that the phases keep sub-millisecond precision at every
+ * time inside the clock window (`UniverseTime`'s ±8.3 × 10¹² s).
+ *
+ * @param periodS - T, s, a whole number of seconds above 0.
+ * @throws RangeError for a period that is not a positive safe integer, or a time whose seconds are
+ *   not a safe integer or whose nanoseconds are not a whole number below 10⁹.
  */
-export function flowMapPhases(tS: number, periodS: number): readonly [FlowPhase, FlowPhase] {
-  if (!(periodS > 0 && Number.isFinite(periodS))) {
-    throw new RangeError(`a flow map's period ${periodS} s must be finite and above 0`);
+export function flowMapPhases(
+  time: Pick<UniverseTime, "seconds" | "nanos">,
+  periodS: number,
+): readonly [FlowPhase, FlowPhase] {
+  if (!(Number.isSafeInteger(periodS) && periodS > 0)) {
+    throw new RangeError(`a flow map's period ${periodS} s must be a positive whole number`);
   }
-  if (!Number.isFinite(tS)) {
-    throw new RangeError(`a flow map's time ${tS} s must be finite`);
+  if (!Number.isSafeInteger(time.seconds)) {
+    throw new RangeError(`${String(time.seconds)} s is not a universe time's whole seconds`);
   }
+  if (!(Number.isInteger(time.nanos) && time.nanos >= 0 && time.nanos < 1e9)) {
+    throw new RangeError(`${String(time.nanos)} ns is not a universe time's nanoseconds`);
+  }
+  const periods = Math.floor(time.seconds / periodS);
+  const remainderS = time.seconds - periods * periodS + time.nanos / 1e9;
   const phase = (shift: number): FlowPhase => {
-    const turns = tS / periodS + shift;
-    const cycle = Math.floor(turns);
-    const p = turns - cycle;
-    return { advectionS: (p - 0.5) * periodS, weight: 1 - Math.abs(2 * p - 1), cycle };
+    const turns = remainderS / periodS + shift;
+    const whole = Math.floor(turns);
+    const p = turns - whole;
+    return {
+      advectionS: (p - 0.5) * periodS,
+      weight: 1 - Math.abs(2 * p - 1),
+      cycle: periods + whole,
+    };
   };
   return [phase(0), phase(0.5)];
 }
