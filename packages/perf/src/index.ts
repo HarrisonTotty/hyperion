@@ -4,6 +4,7 @@
  * tools over `docs/measurements/rendering/runs.v1.jsonl` are under `src/cli/`.
  */
 
+export * from "./compare.ts";
 export * from "./fold.ts";
 export * from "./record.ts";
 export * from "./rows.ts";

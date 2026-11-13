@@ -296,6 +296,17 @@ perf-record file *args:
 perf-table *args:
     node packages/perf/src/cli/table.ts "$@"
 
+# States a record of `runs.v1.jsonl` against the last comparable one (R12.T6, Design note 7): same
+# scene and version, machine, power profile and setting, or a refusal naming the field that
+# differs. Per metric (GPU busy and main-thread time a frame, the missed-frame fraction) it prints
+# both medians and ranges, the effect and the verdict, `SAME`, `BETTER` or `REGRESSION`, then the
+# percentiles for reading. Options: `--against <id>`, `--store <path>`. A regression is a finding:
+# it exits 0 on any verdict and 1 only on a refusal or a record it cannot find.
+# Compare a record with the last comparable run, e.g. `just perf-compare 2026-11-13-uhd620-cockpit-descent-2`.
+[positional-arguments]
+perf-compare id *args:
+    node packages/perf/src/cli/compare.ts "$@"
+
 # Build the client and run the headless smoke harness on SwiftShader, once per capability path
 # (R01.T9, Design note 17): every catalogued shader offline, then the engine's checks on read-back
 # frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a

@@ -937,6 +937,8 @@ Files: `apps/hyperion/src/main/{cli,index}.ts`, `src/main/perf/`, `src/preload/{
 
 ### R12.T6 The comparison tool
 
+Records: [12-measurements-and-settings-ladder/records/R12.T6.md](12-measurements-and-settings-ladder/records/R12.T6.md).
+
 `packages/perf/src/compare.ts`, `src/cli/compare.ts` and `just perf-compare <id>`: find the
 previous record of the same scene, scene version, machine identity, power profile and setting;
 refuse and name the differing field otherwise; per continuous metric of Design note 7, print the
