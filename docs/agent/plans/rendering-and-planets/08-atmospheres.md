@@ -25333,3 +25333,12 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     none lies in a disc, so the cost is likely the code's size. On the M5 the composite's own work
     is about 0.5 ms, and the footprint is R08.T8.c's limb. The owner's `composite-limb-off` and
     `composite-discs-off` pairs decide.
+- **The disc table under a thin opaque slab** (fix-r08-disc-table-under-slab, 2026-11-13):
+  - `thick/discBake.ts` halves a ground body's view steps where its 48 quadratic steps misjudge a
+    piece, seen through the view above it, by more than `DISC_STEP_DEPTH_TOLERANCE` (0.1), each
+    halved to `DISC_STEP_MOST_DEPTH` (0.05). `viewStepsOf(input, options)` returns `ViewSteps`.
+  - Kept to the bit: Earth, Mars, the oblate Saturn, the served temperate worlds, the hand ice giant
+    and every deck's 768 steps. Halved: `TEST TITAN`, `TEST VENUS`, the closed giants' envelopes and
+    warm sub-Neptunes; `test-titan.json` and `test-venus.json` re-blessed by name (x86_64).
+  - Pending at the 32 bump: re-pin P14.T24.h.b's dark sub-Neptune twin, whose table now meets the
+    march within 0.02 stops inside its disc.

@@ -19,6 +19,16 @@
  * lobes' higher orders are not marched: on a `thick` table they take the analytic term's share,
  * which is 0 wherever the table stands.
  *
+ * **A layer the steps do not resolve** (R08, fix-r08-disc-table-under-slab): a thin opaque layer
+ * high in a tall column, such as a warm sub-Neptune's soot and haze at 0.1–0.27 Pa, falls between
+ * the quadratic steps' midpoints or fills one, so that its optical depth and its light were the
+ * steps' placement's: a layer added under it moved an envelope's floor, the column's length and so
+ * every step, and the table darkened 0.38 stops where the march, which cuts its rays at the layers'
+ * edges, did not move. On a ground, a body whose steps at the table's view cosines misjudge a
+ * piece's optical depth, seen through the view's transmittance above it, by more than
+ * {@link DISC_STEP_DEPTH_TOLERANCE} has each step halved while it holds more than
+ * {@link DISC_STEP_MOST_DEPTH} so seen; any other body keeps its steps, and its bits.
+ *
  * **The thick table.** The kernels' read of J (`read.ts`, `thickRead.wgsl`): the body's routed bake
  * with the polarisation correction summed in where its tables hold one (R08.T14.f), or this bake's
  * own of the same solver (`bake.ts`) for a body not routed, so that the table is the spectral bake's
@@ -65,6 +75,7 @@ import {
   ABSORBER_PRESSURE_FLOOR_PA,
   ABSORBER_PRESSURE_REFERENCE_PA,
   type AtmosphereMedium,
+  columnLengthM,
   densityLookup,
   extinction,
   phaseAt,
@@ -122,9 +133,57 @@ export const DISC_VIEW_STEPS = 48;
  */
 export const DISC_DECK_VIEW_STEPS = 768;
 
-/** A bake's view steps: {@link DISC_DECK_VIEW_STEPS} over a deck, {@link DISC_VIEW_STEPS} on a ground. */
-function viewStepsOf(input: Pick<DiscBakeInput, "deck">): number {
-  return input.deck === undefined ? DISC_VIEW_STEPS : DISC_DECK_VIEW_STEPS;
+/**
+ * The most by which a body's quadratic steps on a ground may misjudge a piece of a view ray before
+ * its steps are halved (the module's remarks, "A layer the steps do not resolve"): 0.1 in any
+ * channel, the piece's midpoint optical depth against its exact columns' times the view's
+ * transmittance from the top to it, the share of the light that lands on its misjudged depth.
+ *
+ * @remarks
+ * Measured on the fixtures, the worst piece of each: the measured Earth 0.0006, Mars and the oblate
+ * Saturn 0.0002, the temperate served worlds of the air switch's fixtures 0.016 and 0.032, the hand
+ * ice giant's closed envelope 0.017, all of which keep their steps; `TEST TITAN`'s haze 0.26 near
+ * the horizontal; the hand Saturn's and Jupiter's closed envelopes 1.6 and 2.8, `TEST VENUS`'s cloud
+ * 6.6–8.2 (58 and 92 bar); and the owner's warm sub-Neptune (`RANDOMIZE` draw 2 of 0x4d2) 1.8 under
+ * its soot, 2.6–4.9 under the two-mode haze held for generator version 32.
+ */
+export const DISC_STEP_DEPTH_TOLERANCE = 0.1;
+
+/**
+ * The most a halved step holds: 0.05 in any channel, its optical depth, its midpoint's or its exact
+ * columns' the larger, times the view's transmittance from the top to it.
+ *
+ * @remarks
+ * Halved to it, the warm sub-Neptune's table meets the routed march inside its disc within 0.02
+ * stops in every channel at a phase of 0° and 90°, with or without the haze's coagulated mode under
+ * its slab; unhalved, with the mode, its disc read 0.35–0.71 stops darker than the march at 0° and
+ * 0.70–1.39 at 90°, the air beyond its limb, which the disc does not draw, 0.09–0.28 stops of it.
+ * At 0.1 it meets it within 0.03, at three quarters of the pieces (`thick/discBakeSlab.test.ts`).
+ */
+export const DISC_STEP_MOST_DEPTH = 0.05;
+
+/** The most halvings of one step: 2¹² pieces. */
+const DISC_STEP_MOST_HALVINGS = 12;
+
+/** How a bake steps its view rays: its quadratic steps, and whether they are halved. */
+interface ViewSteps {
+  readonly count: number;
+  /** Whether each step is halved to {@link DISC_STEP_MOST_DEPTH} (the module's remarks). */
+  readonly halved: boolean;
+}
+
+/**
+ * A bake's view steps: {@link DISC_DECK_VIEW_STEPS} over a deck; {@link DISC_VIEW_STEPS} on a
+ * ground, halved where they misjudge a layer ({@link viewStepsResolve}); or `options.viewSteps`.
+ */
+function viewStepsOf(
+  input: Pick<DiscBakeInput, "deck" | "medium" | "bands">,
+  options: DiscBakeOptions,
+): ViewSteps {
+  if (input.deck !== undefined) {
+    return { count: options.viewSteps ?? DISC_DECK_VIEW_STEPS, halved: false };
+  }
+  return { count: options.viewSteps ?? DISC_VIEW_STEPS, halved: !viewStepsResolve(input) };
 }
 
 /** What the disc's bake takes (the module's remarks). */
@@ -161,6 +220,8 @@ export interface DiscDeck {
 /** A medium term as the bake reads it, in its band's frame. */
 interface BandTerm {
   readonly densityOf: (heightM: number) => number;
+  /** Its column from the band's datum up to a height, ∫₀^h ρ dh, m (`medium.ts`'s `columnLengthM`). */
+  readonly columnLengthMOf: (heightM: number) => number;
   readonly scattering: Rgb;
   readonly extinction: Rgb;
   readonly phase: AtmosphereMedium["terms"][number]["phase"];
@@ -202,8 +263,10 @@ function bandFrameOf(medium: AtmosphereMedium, band: ThickBakeBand): BandFrame {
           ? term.absorber.numberDensityPerM3
           : term.absorber.pairDensityPerM6);
     }
+    const { density } = term;
     return {
-      densityOf: densityLookup(term.density),
+      densityOf: densityLookup(density),
+      columnLengthMOf: (heightM) => columnLengthM(density, heightM),
       scattering: [term.scattering[0] * f, term.scattering[1] * f, term.scattering[2] * f],
       extinction: [sigmaT[0] * f, sigmaT[1] * f, sigmaT[2] * f],
       phase: term.phase,
@@ -481,8 +544,123 @@ function stepFactor(x: number): number {
 }
 
 /**
+ * The optical depth per channel of the view ray's piece from `nearM` to `farM` from the datum along
+ * the view of sine `sinView` and cosine `muView`: by its midpoint, as {@link viewRayOf} takes it,
+ * into `mid`, and by each term's exact column between the piece's ends' heights times the piece's
+ * length over their difference, into `exact`.
+ */
+function pieceDepthsInto(
+  frame: BandFrame,
+  sinView: number,
+  muView: number,
+  nearM: number,
+  farM: number,
+  mid: [number, number, number],
+  exact: [number, number, number],
+): void {
+  const R = frame.shell.bottomRadiusM;
+  const heightAtM = (tM: number): number =>
+    Math.max(Math.hypot(tM * sinView, R + tM * muView) - R, 0);
+  const dtM = farM - nearM;
+  const middleM = heightAtM(0.5 * (nearM + farM));
+  const lowerM = heightAtM(nearM);
+  const upperM = heightAtM(farM);
+  const riseM = upperM - lowerM;
+  mid.fill(0);
+  exact.fill(0);
+  for (const term of frame.terms) {
+    const rho = term.densityOf(middleM);
+    const columnM =
+      riseM > 0
+        ? ((term.columnLengthMOf(upperM) - term.columnLengthMOf(lowerM)) * dtM) / riseM
+        : rho * dtM;
+    for (const c of CHANNELS) {
+      mid[c] += term.extinction[c] * rho * dtM;
+      exact[c] += term.extinction[c] * columnM;
+    }
+  }
+}
+
+/**
+ * Whether a body's {@link DISC_VIEW_STEPS} quadratic steps judge its air: in every band, at each of
+ * the table's view cosines, each step's midpoint optical depth within
+ * {@link DISC_STEP_DEPTH_TOLERANCE} of its exact one in every channel, seen through the exact
+ * transmittance above it.
+ */
+function viewStepsResolve(input: Pick<DiscBakeInput, "medium" | "bands">): boolean {
+  const mid: [number, number, number] = [0, 0, 0];
+  const exact: [number, number, number] = [0, 0, 0];
+  const above: [number, number, number] = [0, 0, 0];
+  for (const band of input.bands) {
+    const frame = bandFrameOf(input.medium, band);
+    for (let v = 0; v < DISC_VIEW_COSINES; v += 1) {
+      const muView = discViewCosineAt(v);
+      const sinView = Math.sqrt(Math.max(1 - muView * muView, 0));
+      const lengthM = distanceToTopM(frame.shell, frame.shell.bottomRadiusM, muView);
+      above.fill(0);
+      for (let i = DISC_VIEW_STEPS - 1; i >= 0; i -= 1) {
+        const nearM = lengthM * (i / DISC_VIEW_STEPS) ** 2;
+        const farM = lengthM * ((i + 1) / DISC_VIEW_STEPS) ** 2;
+        pieceDepthsInto(frame, sinView, muView, nearM, farM, mid, exact);
+        for (const c of CHANNELS) {
+          if (exp(-above[c]) * Math.abs(mid[c] - exact[c]) > DISC_STEP_DEPTH_TOLERANCE) {
+            return false;
+          }
+          above[c] += exact[c];
+        }
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * A view ray's pieces from the camera's side, each its near and far end, m from the datum: its
+ * quadratic steps over its `lengthM` to the top, each halved where `steps` halves them while it
+ * holds more than {@link DISC_STEP_MOST_DEPTH} seen through the exact transmittance above it (the
+ * module's remarks); unhalved, the steps as they were.
+ */
+function viewPiecesOf(
+  frame: BandFrame,
+  sinView: number,
+  muView: number,
+  lengthM: number,
+  steps: ViewSteps,
+): ReadonlyArray<readonly [nearM: number, farM: number]> {
+  const pieces: Array<readonly [number, number]> = [];
+  const { count, halved } = steps;
+  const mid: [number, number, number] = [0, 0, 0];
+  const exact: [number, number, number] = [0, 0, 0];
+  const above: [number, number, number] = [0, 0, 0];
+  const add = (nearM: number, farM: number, halvings: number): void => {
+    if (halved) {
+      pieceDepthsInto(frame, sinView, muView, nearM, farM, mid, exact);
+      let seen = 0;
+      for (const c of CHANNELS) {
+        seen = Math.max(seen, exp(-above[c]) * Math.max(mid[c], exact[c]));
+      }
+      if (halvings < DISC_STEP_MOST_HALVINGS && seen > DISC_STEP_MOST_DEPTH) {
+        const middleM = 0.5 * (nearM + farM);
+        add(middleM, farM, halvings + 1);
+        add(nearM, middleM, halvings + 1);
+        return;
+      }
+      for (const c of CHANNELS) {
+        above[c] += exact[c];
+      }
+    }
+    pieces.push([nearM, farM]);
+  };
+  for (let i = count - 1; i >= 0; i -= 1) {
+    add(lengthM * (i / count) ** 2, lengthM * ((i + 1) / count) ** 2, 0);
+  }
+  return pieces;
+}
+
+/**
  * The view ray of view cosine `muView` down to the band's datum point (0, 0, R_b), its steps
- * quadratic towards the datum from the top's shell, as the march places a drawn surface's.
+ * quadratic towards the datum from the top's shell, as the march places a drawn surface's, halved
+ * where `steps` says ({@link viewPiecesOf}).
  */
 function viewRayOf(
   frame: BandFrame,
@@ -490,7 +668,7 @@ function viewRayOf(
   curves: ReadonlyArray<ReadonlyArray<AbsorberCurve>>,
   slots: number,
   muView: number,
-  steps: number,
+  steps: ViewSteps,
 ): ViewRay {
   const R = frame.shell.bottomRadiusM;
   const sinView = Math.sqrt(Math.max(1 - muView * muView, 0));
@@ -505,9 +683,7 @@ function viewRayOf(
     weighted: new Float64Array(absorbers),
   };
   const out: ViewStep[] = [];
-  for (let i = steps - 1; i >= 0; i -= 1) {
-    const near = length * (i / steps) ** 2;
-    const far = length * ((i + 1) / steps) ** 2;
+  for (const [near, far] of viewPiecesOf(frame, sinView, muView, length, steps)) {
     const dt = far - near;
     const t = 0.5 * (near + far);
     const x = t * sinView;
@@ -956,7 +1132,7 @@ export function discThermalMarcher(
   }
   const frame = bandFrameOf(input.medium, geometry);
   const lnBands = input.bands.map((each) => log(each.gravityRatio));
-  const steps = options.viewSteps ?? viewStepsOf(input);
+  const steps = viewStepsOf(input, options);
   return (muView) => {
     const ray = viewRayOf(frame, input.source, input.curves, input.source.slots, muView, steps);
     const out: ThermalRgb = [0, 0, 0];
@@ -967,7 +1143,10 @@ export function discThermalMarcher(
 
 /** A bake's options, for the tests' convergence. */
 export interface DiscBakeOptions {
-  /** The view ray's steps: {@link DISC_VIEW_STEPS}, or {@link DISC_DECK_VIEW_STEPS} over a deck. */
+  /**
+   * The view ray's quadratic steps: {@link DISC_VIEW_STEPS}, or {@link DISC_DECK_VIEW_STEPS} over a
+   * deck; on a ground, halved as the body's own would be (the module's remarks).
+   */
   readonly viewSteps?: number;
 }
 
@@ -998,7 +1177,7 @@ export function discAirMarcher(
   const suns = Array.from({ length: slots }, (_, slot) =>
     sunTableOf(frame, rays, input.curves[slot] ?? input.curves[0] ?? []),
   );
-  const steps = options.viewSteps ?? viewStepsOf(input);
+  const steps = viewStepsOf(input, options);
   const scratch = nodeScratch();
   const decoded = Array.from({ length: slots }, (_, slot) =>
     decodedThickLayer(input.source, band * slots + slot),
@@ -1072,7 +1251,7 @@ export function bakeDiscBand(
   const slots = source.slots;
   const sunFloor = discSunFloorOf(bands, input.medium.topHeightM);
   const lit = new Float32Array(slots * DISC_LAYER_VALUES);
-  const steps = options.viewSteps ?? viewStepsOf(input);
+  const steps = viewStepsOf(input, options);
   const scratch = nodeScratch();
   const air: [number, number, number] = [0, 0, 0];
   const frame = bandFrameOf(input.medium, geometry);
