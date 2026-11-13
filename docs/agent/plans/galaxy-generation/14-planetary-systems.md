@@ -34476,3 +34476,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Lean (2026-11-10), ruled by the UX advisor:_ a choice with no focus target (a host, a belt, a
     disc, the halo, a planet not present or off its orbit, or a moon or ring of one) keeps the
     focus and moves the selection alone; `FOCUS BODY` still returns the map to the system frame.
+- **P14.T43.c, the countdown's long form, ruled (2026-11-13, the owner's delegated UX call,
+  ux-calls-and-checklist-gaps):** adopted as built. The guide's Times bullet now gives a
+  countdown on a display with the `DISPLAY TIME` long form that form whole (`T-0 yr 000/00:04:12`
+  under a day), its field sized for `T+2000 yr 000/00:00:00`; `format.test.ts` pins the form
+  under a day. The column's look at both sizes stays on the owner's checklist.

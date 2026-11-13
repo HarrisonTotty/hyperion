@@ -646,6 +646,7 @@ function at(seconds: number): UniverseTime {
 describe("formatCountdown", () => {
   it.each([
     ["an event a day ahead", 0, 86_400, "T-0 yr 001/00:00:00"],
+    ["one 4 min 12 s ahead, in the long form whole", 0, 252, "T-0 yr 000/00:04:12"],
     ["one half a minute past", 30, 0, "T+0 yr 000/00:00:30"],
     ["one at the display time", 5, 5, "T+0 yr 000/00:00:00"],
     [

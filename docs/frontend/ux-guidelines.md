@@ -306,7 +306,12 @@ never use them for decoration, branding, chart series or hover effects.
   says so (`FROM +X`).
 - Times use a 24-hour clock and always carry a label naming the time system:
   `MET 57/14:08:33` (days/hours:minutes:seconds), `UTC 14:08:33`. Countdown timers are
-  negative before the event and positive after it: `T-00:04:12`, `T+00:00:30`.
+  negative before the event, positive after it and `T+` at it: `T-00:04:12`, `T+00:00:30`. On a
+  display that shows the `DISPLAY TIME` long form (below), a countdown runs from the display time
+  and takes that form whole, its zero years and days included, so that a column of countdowns
+  keeps one form and its clocks line up: `T-6 yr 102/22:22:51`, `T-0 yr 000/00:04:12`. Its field
+  is sized for `T+2000 yr 000/00:00:00`, an event at one edge of the clock window counted from
+  the other.
 - Universe time, the galaxy's own clock counted from the generator's epoch, is labelled `UT`
   and shown as signed years: `UT +12.50 yr`. `UT` never means Universal Time; the wall
   clock in the header strip is `UTC`.
