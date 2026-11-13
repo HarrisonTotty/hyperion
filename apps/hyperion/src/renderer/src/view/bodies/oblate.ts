@@ -30,26 +30,49 @@ const PHI_STEPS = 192;
 /** Entries of each figure's table in sin β, from 0 to 1. */
 const TABLE_ENTRIES = 33;
 
+/**
+ * cos φ and sin φ at the quadrature's azimuths, each the value its point took afresh: a figure's
+ * table took 608,256 of each (perf-long-tasks-2: 312 to 416 ms of the page's thread on the pod as
+ * an oblate body's disc was first drawn), of only {@link PHI_STEPS} angles.
+ */
+let azimuths: { readonly cos: Float64Array; readonly sin: Float64Array } | null = null;
+
+function azimuthsOf(): { readonly cos: Float64Array; readonly sin: Float64Array } {
+  if (azimuths === null) {
+    const cos = new Float64Array(PHI_STEPS);
+    const sin = new Float64Array(PHI_STEPS);
+    for (let j = 0; j < PHI_STEPS; j += 1) {
+      const phi = ((j + 0.5) * 2 * Math.PI) / PHI_STEPS;
+      cos[j] = Math.cos(phi);
+      sin[j] = Math.sin(phi);
+    }
+    azimuths = { cos, sin };
+  }
+  return azimuths;
+}
+
 /** m(β) by midpoint quadrature over the surface (a = 1). */
 function secondMomentRaw(cOverA: number, sinBeta: number): number {
   const c = cOverA;
   const cosBeta = Math.sqrt(Math.max(0, 1 - sinBeta * sinBeta));
+  const { cos, sin } = azimuthsOf();
   let first = 0;
   let second = 0;
   for (let i = 0; i < THETA_STEPS; i += 1) {
     const theta = ((i + 0.5) * Math.PI) / THETA_STEPS;
     const sinT = Math.sin(theta);
     const cosT = Math.cos(theta);
+    // c sin²θ as each point formed it, (c sin θ) sin θ, before its azimuth's factor.
+    const radial = c * sinT * sinT;
+    const nz = sinT * cosT;
     for (let j = 0; j < PHI_STEPS; j += 1) {
-      const phi = ((j + 0.5) * 2 * Math.PI) / PHI_STEPS;
       // ∂r/∂θ × ∂r/∂φ = (c sin²θ cos φ, c sin²θ sin φ, sin θ cos θ), outward, |·| = dS ÷ dθ dφ.
-      const nx = c * sinT * sinT * Math.cos(phi);
-      const nz = sinT * cosT;
+      const nx = radial * (cos[j] ?? 0);
       const projected = nx * cosBeta + nz * sinBeta;
       if (projected <= 0) {
         continue;
       }
-      const ny = c * sinT * sinT * Math.sin(phi);
+      const ny = radial * (sin[j] ?? 0);
       first += projected;
       second += (projected * projected) / Math.hypot(nx, ny, nz);
     }

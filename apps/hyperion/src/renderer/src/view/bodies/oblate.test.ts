@@ -5,6 +5,24 @@ import { shapePhase } from "../appearance/shapes";
 import { oblateAlbedoScale, projectedSecondMoment, spheroidGeometricIntegral } from "./oblate";
 
 describe("the spheroid's disc integral", () => {
+  it("holds the bits the quadrature made with each point's own cosine and sine (perf-long-tasks-2)", () => {
+    // FNV-1a over the f64 bytes, little-endian, of m at 65 latitudes for three figures, as the
+    // tables were made before their azimuths' cosines and sines were tabulated.
+    const values: number[] = [];
+    for (const cOverA of [0.902, 0.935, 0.98]) {
+      for (let k = 0; k <= 64; k += 1) {
+        values.push(projectedSecondMoment(cOverA, k / 64));
+      }
+    }
+    let digest = 0x811c9dc5;
+    for (const word of new Uint32Array(Float64Array.from(values).buffer)) {
+      for (let byte = 0; byte < 4; byte += 1) {
+        digest = Math.imul(digest ^ ((word >>> (8 * byte)) & 0xff), 0x01000193) >>> 0;
+      }
+    }
+    expect(digest.toString(16)).toBe("8bc95c34");
+  });
+
   it("gives a sphere m = ⅔ at every latitude, and its quadrature agrees", () => {
     expect(projectedSecondMoment(1, 0.4)).toBe(2 / 3);
     expect(projectedSecondMoment(1 - 1e-9, 0)).toBeCloseTo(2 / 3, 4);
