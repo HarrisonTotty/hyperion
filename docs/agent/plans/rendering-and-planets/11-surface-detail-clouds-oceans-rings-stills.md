@@ -896,6 +896,8 @@ Rust files are under `crates/hyperion-surface/src/` and client files under
 
 ### R11.T1 The decoration setting and label
 
+Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T1.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T1.md).
+
 Add the ladder entries of Design note 18 as fields of R05's `ViewSettings`, with their high and low
 values in `SETTINGS` (`view/quality/qualitySetting.ts`) (`decoration`, `scatterDensity`,
 `clouds`, `cloudShadows`, `oceanComponents`, `oceanRefraction`, `whitecaps`, `rings`,
@@ -1098,6 +1100,7 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   R = [γ₁τ′ + (γ₃ − γ₁μ₀)(1 − e^(−τ′ ÷ μ₀))] ÷ (1 + γ₁τ′); Joseph, Wiscombe and Weinman 1976,
   Meador and Weaver 1980) and from a plane-parallel Henyey–Greenstein Monte Carlo of statistical
   error about 0.002, which the task re-runs in its Vitest reference at a smoke size:
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T7.a.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T7.a.md).
 
   | τ   | g    | μ₀  | Monte Carlo | δ-Eddington |
   | --- | ---- | --- | ----------- | ----------- |
@@ -1287,6 +1290,7 @@ on it.
   exceeds the cap less two quanta; with none, a controller fed round trips of GPU time plus a 3 ms
   overhead never proposes a batch whose GPU time exceeds the cap, grows by at most 1.5 times and
   halves after an overrun; no planned dispatch exceeds 50 ms at the measured cost per workgroup.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.a.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.a.md).
 - **R11.T10.b Rendering.** `stillJob.ts`: the scene snapshot with the cells surveyed at the request,
   the offscreen target through R01's `createRenderTarget`, every high-setting pipeline created
   asynchronously (`createMaterialAsync`, `createComputeAsync`) before the first batch, each tile
@@ -1314,6 +1318,7 @@ on it.
   live view's frame time, lost devices and GPU-process restarts (none allowed), the batch sizes the
   controller settled on with and without timestamps, the first still's pipeline-compile time, the
   streaming wait against the 20 s timeout, and whether 2,048² tiles fit the memory ceiling.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.d.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.d.md).
 
 Files: `stills/*`, `apps/hyperion/src/main/stills.ts`, `apps/hyperion/src/preload/api.ts`, tests.
 Acceptance: `pnpm test`, `just ci`, `just test-render` (T10.b's small still), and the recorded soak.
@@ -1367,6 +1372,8 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
 
 ## Risks and open points
 
+Task records as built: [11-surface-detail-clouds-oceans-rings-stills/records/](11-surface-detail-clouds-oceans-rings-stills/records/), one file per task, each linked from its entry under Tasks.
+
 - **The rock site mapping** (Design note 4) is a ruling of medium to low confidence: no published
   law covers generated worlds, and on airless worlds the exponential law cannot fit the lunar size
   distribution, so small rocks there are knowingly wrong. A lunar boulder size distribution (for
@@ -1378,8 +1385,6 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
 - **Plan 14's cloud fraction** (Design note 9's finding) gives a Mars-like world Earth's 67% and a
   Titan-like world none, until plan 14 makes it depend on the condensable. Until then this plan's
   clouds on those worlds are wrong in amount, though right in optics.
-- **The zonal climatology** is an ask of R09; until it exists the clouds over unsurveyed ground use
-  T7.a's provisional stand-in.
 - **The sea over unsurveyed ground** is not drawn (Design note 11), which removes the glint that
   makes an ocean world recognisable before a survey. A disc-statistical glint on R07's reference
   body restores it (Design note 11; `signoff-12.md`, item 33).
@@ -1402,8 +1407,6 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   sessions plan's or the flight model's `planned_path` removes the risk.
 - **Cloud shadows on the low setting** are off, as the brainstorm's ladder says, though they cost
   under 0.1 ms; whether to turn them on is proposed to the owner as a brainstorm correction.
-- **Stills' timings** come from one probe under shared load; the tile size, the streaming timeout
-  and the controller's settled batches are measured in T10.d, and the tile constants may move.
 - **The ocean on the quadtree.** Open question 7's risk is reduced by drawing near water on a
   projected grid and keeping waves out of the authoritative surface; a later ruling that waves are
   collidable, or a tide model, reopens it.
@@ -1436,206 +1439,6 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   - `liquids.ts`'s four rows become the registry's test values, and a CH₄–C₂H₆–N₂ liquid's index
     follows its composition (from memory, checked then).
   - R11.T4's rock k_base is by (class, entry).
-- **Deviations in T10.a, as built** (2026-10-20; lane `lane/58-r11-t10a-still-job`, from
-  `rendering-and-planets` at `ae4bd052`, merged with `b9515f03`; main's rulings (a)–(c) for
-  R11.T10.a).
-  - _Files._ New: `stills/stillPlan.ts` and `stills/batchController.ts`, with their tests. No wire,
-    protocol, DTO, golden, generator version, engine type or settings list changes; nothing outside
-    `stills/` changes.
-  - _The Consumes check (ruling (c), at `ae4bd052`)._ R01: `GpuCapabilities.maxTextureDimension2D`
-    (`engine/platform.ts`, on `RenderEngine.capabilities`), `GpuTimer` with `GraphicsStatus.timer`
-    (`engine/status.ts`, its doc naming "Dawn's 65,536 ns quantization"), `onPassTimes` and
-    `createRenderTarget(spec: RenderTargetSpec)` are as the row says; `PassTimes` holds `passes`, a
-    list of `{ label, ns, bracketed }`, not a map keyed by `FrameSubmission.label`; `readTexture`
-    takes a fourth parameter, `access?: "cpu" | "tolerance"`, which the row's
-    `readTexture(texture, level?, rect?)` does not show, and throws `PresentationOnlyReadback` for
-    a texture last written by a `presentation-only` kernel, which T10.b's read-back must not meet.
-    R02: the row's "fixed reversed-Z infinite
-    projection" is `perspectiveReversedInfinite(fovXRad, aspect, nearM)` in `camera/projection.ts`,
-    with `project(v, camera, viewport)`, `toViewAxes` and `NEAR_PLANE_M`, as the row says. R05:
-    `QualitySetting` (`"high" | "low"`) is as the row says; `SelectionInput.grounded` is
-    `ReadonlyArray<GroundContact>`, the row's `readonly GroundContact[]`; `selectPatches(input)`
-    on a `SelectionInput`, `screenSpaceErrorPx(boundM, distanceM, view)`, `ViewSelectionInput` and
-    `cull.ts`' `Frustum`, `frustumOf` and `inFrustum`, which T10.a reads, are in `terrain/` but not
-    named in the row.
-  - _The decoration-fade test is deferred._ It waits for T2 (the Tasks preamble; main's rulings) and
-    is added when T2's fade exists, in `stillPlan.test.ts`, with the fade taken at
-    `footprintView`'s pixel; T10.a's test line is complete only then, and main assigns the task that
-    adds it. The rest of T10.a's test line is built. _Assigned 2026-10-20 to R11.T2, the task that
-    builds the fade (main's ruling at T10.a's landing); T2.a's Tests carry it._
-  - _The names._ Provides kept: `planTiles`, `tileProjection`, `nextBatch(measured)` (a method of
-    the class `BatchController`) and `STILL_TILE_MAX_PX`. Added in `stillPlan.ts`:
-    `tileLimitPx(maxTextureDimension2D, setting)`; `tileFrustum(camera, tile, marginPx = 0)`, a
-    `cull.ts` `Frustum`; `footprintView(view, still)`, a `ViewSelectionInput`;
-    `splitDispatch(workgroups, costPerWorkgroupNs | null)`, a `DispatchSplit`; `MAX_DISPATCH_NS`;
-    `PROBE_WORKGROUPS`; the types `PixelRect`, `StillTile`, `StillTiling`, `DispatchPiece` and
-    `DispatchSplit`. In `batchController.ts`: `TIMESTAMP_QUANTUM_NS`, `EMPTY_SUBMIT_SAMPLES`,
-    `batchCapNs(setting, frameIntervalNs)`, `timestampBudgetNs(setting, frameIntervalNs)`,
-    `passTimeBoundNs(measuredNs, timer)`, `medianNs(samplesNs)` and the types `BatchTiming`,
-    `BatchControllerOptions`, `BatchMeasurement`, `MeasuredPass` and `Batch`. T10.b reads them
-    there.
-  - _Where the figures live._ `stillPlan.ts`: `STILL_TILE_MAX_PX`, `MAX_DISPATCH_NS` (50 ms) and the
-    64 px width step from the 256-byte rule. `batchController.ts`: q (`TIMESTAMP_QUANTUM_NS`), the
-    two-quantum margin, the caps (6 ms, T ÷ 4), the 1.5 times growth, the halving and the five
-    empty submits, each a module constant citing Design note 17.
-  - _The calls on the open points._
-    - A batch's unit is one whole pass, named by a label for its pass and tile, since units of one
-      label are predicted at one cost. The controller is built with the job's queue of units and
-      proposes runs of it.
-    - With timestamps, a unit is predicted at its label's latest pass time, the largest of one
-      measurement's passes of that label. Under `quantized` it is measured + q, since a difference
-      of two quantised timestamps is off the true time by less than one quantum, so the sum bounds
-      the batch's true time. The batch is filled to the cap less 2q, which is kept under `full`
-      too, the conservative reading.
-    - Without timestamps, the GPU time is the round trip less the median of five empty submits, at
-      least 0, and the cost per unit that time over the batch's units.
-    - The first batch is one unit in either mode. A dispatch's first piece, before any cost per
-      workgroup, is a probe of one workgroup; the rest is split by the probe's measured cost.
-    - Missing data never grows a batch. With timestamps, a unit whose label has not been measured
-      is proposed alone, unpredicted; without, the last size repeats.
-    - A still width that is not a multiple of 64 px: the last column's texture is padded to the next
-      multiple, under 64 px, and cropped on the CPU at assembly, so any still size works. The
-      grid is as few, and as equal, tiles as L allows: 3,840 px on low is two 1,920 px columns,
-      not 2,048 + 1,792.
-    - A tile's frustum culls against its rect, not its padded texture; `marginPx` lets T10.b
-      widen it by the jitter's reach.
-    - A single unit predicted over the budget, and a workgroup over 50 ms, is proposed alone and
-      flagged (`overBudget`, `over-bound`), never planned silently.
-    - _One departure from the test line._ Whole units cannot grow from one by at most 1.5 times,
-      since ⌊1.5⌋ = 1 would stall, so a batch of one grows to two; from two units on, growth is at
-      most ⌊1.5 n⌋. Either step is still limited to what fits the cap at the cost measured. The
-      test is written so.
-    - _Two readings of the test line._ With timestamps, a single unit predicted over the budget
-      (`overBudget`) and a unit not yet measured (`predictedNs` `null`) are proposed alone and are
-      exempt from "no proposed batch's predicted time exceeds the cap less two quanta"; T10.b
-      answers `overBudget` by splitting the pass. Without timestamps, "never proposes a batch whose
-      GPU time exceeds the cap" is checked at the cost per unit last measured, since a jump in cost
-      makes one overrun unavoidable, which the halving answers.
-    - A negative pass time, which a reset of the timestamp counter gives (R01 does not clamp it),
-      is skipped and its label keeps its last time, as the WebGPU specification's note on
-      timestamp queries allows.
-    - WebGPU has no base workgroup, so a `DispatchPiece` runs as a dispatch of its own count with
-      `firstWorkgroup` an offset its kernel adds (a uniform in T10.b's split kernels).
-    - After an overrun the next batch is ⌊n ÷ 2⌋ units, or fewer where the cost measured fits
-      fewer: at a threefold jump, 162 → 54, not 81.
-    - `maxUnits` caps a batch's units, which T10.b's re-request after a loss sets to half the
-      batch in flight.
-  - _Figures._ L at a limit of 8,192 and of 16,384: 2,048 and 2,048 on low, 4,096 and 4,096 on high.
-    3,840 × 2,160: 2 × 2 tiles of 1,920 × 1,080 on low (`bytesPerRow` 7,680), one tile of
-    3,840 × 2,160 on high (15,360). The caps less 2q: 5,868,928 ns on low; 4,039,678 ns on high at
-    T = 16.683 ms, whose cap is 4,170,750 ns. The projection test's tolerance, per point:
-    (w ÷ 2) × 2⁻²⁴ × (|m₀ x ÷ w_clip| + |m₈|) px in x, y likewise with h, m₅ and m₉, plus
-    64 ε (W + H) for the `f64` arithmetic; at most about 2⁻²⁴ W, 2.3 × 10⁻⁴ px at 3,840 px wide.
-  - _Sources re-checked_ (2026-10-20, by a research agent): 8,192 is WebGPU's default (the Limits
-    table, the Candidate Recommendation Draft of 15 September 2026); the 256-byte rule is
-    "validating GPUTexelCopyBufferInfo" (§11.2.2), from which `writeTexture` is exempt; 640 ms and
-    2,500 ms are `Kconfig.profile`'s defaults; `TdrDelay` is 2 s (Microsoft). Gen9 preempting
-    compute between thread groups and 3D work between draws is confirmed for Linux only (i915's
-    Gen9 workarounds, Mesa's ANV); Intel's Windows driver is not checked.
-- **Deferred findings (2026-10-13 rule) (R11.T10.a).**
-  - With timestamps, a batch's prediction sums its pass times and leaves out the gaps between
-    passes, which no timestamp covers. Under `quantized` the quantum added to each pass covers
-    them; under `full` only the two-quantum margin does. T10.d's soak shows whether `full` needs an
-    allowance per pass.
-- **Deviations in T7.a.1, as built** (2026-10-20; lane `lane/60-r11-t7a1-delta-eddington`, from
-  `rendering-and-planets` at `61f628e4`; main's rulings (a)–(i) for R11.T7.a.1).
-  - _Files._ New: `clouds/cloudOptics.ts`, `clouds/slabMonteCarlo.ts` and `clouds/slabFixtures.ts`,
-    with `cloudOptics.test.ts` and `slabMonteCarlo.test.ts`. Nothing outside `clouds/` changes; no
-    wire, protocol, DTO, golden, generator version, engine type or settings list moves.
-  - _The tolerance (ruling (e))._ δ-Eddington's R is held to 3% of the table's Monte Carlo column
-    at τ ≥ 10 and to 10% at τ = 1 at either μ₀. The test line's 2.5% fails the table's own τ 10,
-    g 0.85, μ₀ 0.5 row (2.54%), and its 10% at τ = 1, given for an oblique sun only, is extended to
-    μ₀ = 1, where the table's rows are 8.9% and 5.8%. The smoke holds |R_N − R_table| to
-    4√(σ_N² + 0.002²), σ_N = √(R_table(1 − R_table) ÷ N); δ-Eddington is never compared with the
-    smoke run, whose σ on a bias near 10% would make the result hang on the seed.
-  - _The names._ Provides kept: `deltaEddington({ tau, asymmetry, singleScatterAlbedo, mu0 })`.
-    Added in `cloudOptics.ts`: the types `DeltaEddingtonInput` and `SlabFluxFractions`
-    (`reflectance`, `directTransmittance`, `diffuseTransmittance`, `absorptance`) and
-    `CONSERVATIVE_CO_ALBEDO`. In `slabMonteCarlo.ts`: `slabMonteCarlo(input, uniform)` with
-    `SlabMonteCarloInput` (`tau`, `asymmetry`, `mu0`, `photons`) and `SlabMonteCarloResult`
-    (`photons`, `reflected`, `transmitted`, `reflectance`, `transmittance`). In `slabFixtures.ts`:
-    `SLAB_CASES` and `SlabCase`, the twelve cases as one fixture for both tests, in `clouds/`
-    because the lane could not edit `test/`.
-  - _The calls._
-    - The conservative switch: the conservative solution at 1 − ϖ₀ ≤ 10⁻¹²
-      (`CONSERVATIVE_CO_ALBEDO`), the rulings' lean. Across it R moves at most 8.0 × 10⁻¹¹ at
-      τ ≤ 50 (g 0–0.85, μ₀ 0.05–1), and the absorptance dropped is at most 1.2 × 10⁻¹⁰. The
-      scaled co-albedo is computed as (1 − ϖ₀) ÷ (1 − ϖ₀f), without the cancellation of 1 − ϖ′.
-    - kμ₀ = 1: within |1 − kμ₀| < 10⁻⁵ the scattered part (R, and T less the scaled direct beam
-      e^(−τ′ ÷ μ₀)) is interpolated linearly in μ₀ between the closed form at kμ₀ = 1 ∓ 10⁻⁵, and
-      e^(−τ′ ÷ μ₀) is added at μ₀ itself, so that ϖ₀ = 0 keeps T_diff = 0 exactly (interpolating
-      the whole T left T_diff at −4 × 10⁻¹² there). Inside the window the result is within
-      8.3 × 10⁻¹² of an 80-digit solution, and the step at the window's edges is up to
-      1.7 × 10⁻¹¹ in R or T; the tests hold the step to 10⁻⁹, and ϖ₀ = 0 there to 10⁻¹⁵.
-    - The Monte Carlo takes no ϖ₀: it is the table's conservative run, and R_N + T_N = 1 holds by
-      count. It draws isotropic scatterings below |g| = 10⁻⁸, where the inverse's 0 ÷ 0 loses
-      precision.
-    - The monotonic test allows a fall of 10⁻¹⁵, a few ulps, for `Math.exp`'s platform
-      differences; no fall occurs on the grid here.
-  - _Figures._
-    - The twelve cases: largest |R − table| 4.53 × 10⁻⁵, at τ 10, g 0.75, μ₀ 0.5 (0.695645).
-    - Against the Monte Carlo column: largest |R − R_MC| ÷ R_MC 2.53% at τ ≥ 10 (τ 10, g 0.85,
-      μ₀ 0.5) and 9.65% at τ = 1 (g 0.85, μ₀ 0.5).
-    - The ODE check at 20,000 RK4 steps: largest difference 5.1 × 10⁻¹⁴ for the general solution
-      (ϖ₀ 0.5–0.999), 5.1 × 10⁻¹³ for the conservative one, and 4.7 × 10⁻¹² at kμ₀ = 1 (ϖ₀ 0.5,
-      g 0.5; ϖ₀ 0.9, g 0.95). The review's 80-digit solution meets the code to 2 × 10⁻¹⁴ at 944
-      regular points, and the general solution just above the switch to 7 × 10⁻¹¹ down to
-      τ = 10⁻³.
-    - The closure grid (3 × 5 × 4 × 61): R + T + A within 1.1 × 10⁻¹⁶ of 1, no part below 0, A = 0
-      at ϖ₀ = 1, and no fall of R in τ. Main's 600-value grid (below), re-run here, shows none.
-    - The smoke: N = 20,000 photons a case, case i on `seededRandom(0x7a11 + i)`. The twelve cases
-      took 1.12 s under Vitest on the laptop at a 1-minute load of 2.1, and 1.2 s in plain Node at
-      2.3. Its largest deviation is 0.0061 against a bound of 0.0111 (τ 1, g 0.75, μ₀ 1), 0.55 of
-      it; the isotropic control is 0.430 off the g 0.85 row, against a bound of 0.016.
-  - _Main's checks (2026-10-20)._ A 2 × 10⁶-photon Monte Carlo reproduces the table's column within
-    0.0026; δ-Eddington's largest biases against it are 2.62% at τ ≥ 10 and 9.85% at τ = 1. The
-    grid of ϖ₀ {0.99, 0.999, 1}, eleven g, nine μ₀ and 600 τ over [10⁻⁴, 10⁴] shows no violation of
-    R ∈ [0, 1], A ≥ 0, T_diff ≥ 0 or R non-decreasing in τ.
-  - _Sources re-checked_ (2026-10-20, by a research agent, from the scanned pages). Every formula of
-    the rulings matches the papers read; no difference to raise.
-    - Joseph, Wiscombe and Weinman 1976, read in full: f = g² (eq. 5a), g′ = (g − f) ÷ (1 − f)
-      (eq. 2b) = g ÷ (1 + g) (eq. 5b), τ′ (eq. 13), ϖ′ (eq. 14). They give no closed-form R or T
-      themselves, and validated over g 0–0.95, τ 0.01–100, ϖ₀ 0.1–0.99 and μ₀ 0.1–1 (their
-      Table 1).
-    - Meador and Weaver 1980, read in full: γ₁–γ₃ (Table 1, the Eddington row; the table has no
-      δ-Eddington row, the scaled values going into the Eddington coefficients), γ₄ = 1 − γ₃
-      (eq. 21), the two-stream equations (eqs. 12 and 13), R and T for a collimated beam over a
-      black surface (eqs. 14 and 15), α₁, α₂ and k (eqs. 16–18) and the conservative solution
-      (eq. 24). Their τ′ is the layer's total optical thickness, not a scaled one.
-    - Henyey and Greenstein 1941, read in full: the phase function (eq. 2) and g as its mean
-      cosine (eq. 3). The inverse-CDF draw is not theirs; it is read as eq. 3.19 of Wang and
-      Jacques's MCML manual, which conditions it on g > 0 and gives 2ξ − 1 at g = 0, as built.
-    - Toon et al. 1989 not read (closed, and no open copy found); cited as the secondary statement
-      of the two-stream equations' form only.
-- **Deferred findings (2026-10-13 rule) (R11.T7.a.1).**
-  - δ-Eddington's absorptance is 2–10% below a plane-parallel Henyey–Greenstein Monte Carlo's at
-    ϖ₀ 0.99–0.999 (main's, 5 × 10⁵ photons, 2026-10-20). A by δ-Eddington against A by the Monte
-    Carlo, at ϖ₀ 0.99, g 0.85 and μ₀ 1 unless stated: 0.01124 against 0.01182 at τ 1; 0.16364
-    against 0.17627 at τ 10; 0.16130 against 0.17158 at τ 10, μ₀ 0.5; 0.48950 against 0.50001 at
-    τ 50; 0.01831 against 0.02036 at ϖ₀ 0.999, τ 10; 0.10275 against 0.10622 at ϖ₀ 0.999, τ 50. R
-    is within about 2% at τ ≥ 10, and 11% high at τ = 1. T7.c's octave fit and R12's audit read it.
-    Nothing changes, since visible cloud ϖ₀ is about 1 − 10⁻⁵.
-  - The removable singularity at kμ₀ = 1 is reachable at ϖ₀ ≥ 0.9 when g is near 1, since ϖ′ falls
-    to 0 as g rises to 1: from g 0.930 at ϖ₀ 0.9 (k 1.11 at g 0.95), from g 0.994 at ϖ₀ 0.99 and
-    from g 0.9994 at ϖ₀ 0.999. The rulings' "k ≤ 0.76 there" holds at g 0.85. `deltaEddington`
-    steps around it at every ϖ₀, so nothing changes here; T7.b's and T7.c's `f32` twins must step
-    around it too, with a window wide enough for `f32`.
-  - At τ 1, g 0.85, μ₀ 1, δ-Eddington's R (0.046669) is about 10% above a converged Monte Carlo:
-    10.0 ± 0.2% and 10.2 ± 0.15% in two 10⁷-photon runs (this lane's and its review's, 2026-10-20;
-    R_MC 0.04243 and 0.04235), against main's 9.85% at 2 × 10⁶. The table's 0.0429 sits about
-    0.0005 high, within its stated 0.002, so the 10% bound holds against the table's column but not
-    against a converged run. T7.c's octave fit and R12's audit should read it as about 10%.
-- **R11.T1, as built (2026-11-02).**
-  - `ViewSettings` extends `R11Ladder` (`surface/decoration/decorationSetting.ts`, with
-    `CloudRendering`, `RingRendering`, `DECORATION_ON`, `decorationAllowed(ladder, frame)` and
-    `decorationStatement(drawn, surveyReading)`); the values stand in `SETTINGS`.
-  - What was drawn travels `TerrainViewFrame.decorated` → `LiveFrameTerrain.decorated` →
-    `ViewFrameDrawn.decoration`; every pass sets `false` until T2.b sets the first.
-  - Where the label stands (lean, 2026-11-02, the guide's survey line): after the primary's survey
-    line's middle dot (`surveyLines`' `decoration`, `TerrainLabelInput.decoration`; the line's
-    tallest form holds it on high), else among `labelStatements` (its third argument) where that
-    line is a state or gives way for room; an instrument's in its label block, its survey line
-    standing on a `GROUND` page that may be closed.
 - **The terrain resolve's texture budget for R11 (ruled 2026-11-13, ux-calls-and-checklist-gaps;
   R14's records):** the resolve binds 15 of WebGPU's 16 sampled textures a stage. T9.a's rings'
   shadow, τ(r) at one crossing, goes in the resolve frame's `rgba32float` row (a storage buffer in

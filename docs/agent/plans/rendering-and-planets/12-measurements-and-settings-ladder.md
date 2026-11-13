@@ -699,6 +699,8 @@ T11.a needs T8 and T10; T11.b needs T9. T12 closes.
 
 ### R12.T0 Reconcile with R01–R11 as built
 
+Records: [12-measurements-and-settings-ladder/records/R12.T0.md](12-measurements-and-settings-ladder/records/R12.T0.md).
+
 Run the `revalidate-plan` skill over this plan. For every name under Consumes, find its signature in
 the tree and correct the call sites; fold in each earlier plan's "as built" deviations. Build the
 ladder inventory in this plan's Risks section: for every row of the brainstorm's ladder (clouds,
@@ -779,6 +781,7 @@ outcome in the task it falls on.
   "Documentation Layout", in this plan's Risks and in the commit message of T1.b, ruled 2026-10-19
   (`signoff-12.md`, item 34). This plan does not edit `.claude/`; the owner applies the line.
   Acceptance: the line is in Risks as ruled.
+  Records: [12-measurements-and-settings-ladder/records/R12.T1.c.md](12-measurements-and-settings-ladder/records/R12.T1.c.md).
 
 Files: `packages/perf/**`, `apps/hyperion/package.json`, the root `package.json`,
 `pnpm-lock.yaml`, `docs/measurements/rendering/*`, `justfile`, this plan's Risks.
@@ -951,6 +954,7 @@ Files: `packages/perf/src/{compare,cli/compare}.ts` and tests, `justfile`.
   test name, that R02's label-block test states the setting and that R05's and R10's grounded-body
   tests run at both settings and both styles. Acceptance: `pnpm test`, `just ci`, and
   `just test-render` passes at every setting.
+  Records: [12-measurements-and-settings-ladder/records/R12.T7.a.md](12-measurements-and-settings-ladder/records/R12.T7.a.md).
 - **R12.T7.b Written.** The ladder audit section of `budget.md`, hand-written: per row, the plan and
   task of each setting, whether they landed in one task (from `git log`), the tests that exercise
   each, the quality limits that R08 and R11 list for the audit, and a finding where one is missing,
@@ -961,6 +965,8 @@ Files: `apps/hyperion/src/renderer/src/view/perf/ladder.test.ts`, R01's `src/smo
 `renderer/smoke.html`, `docs/measurements/rendering/budget.md`.
 
 ### R12.T8 The UHD 620 runs
+
+Records: [12-measurements-and-settings-ladder/records/R12.T8.md](12-measurements-and-settings-ladder/records/R12.T8.md).
 
 Every subtask is by hand, by the owner on the UHD 620 laptop, and recorded, on AC at the default
 power profile, the display at 1080p60, with every build, lane and test on the machine stopped first:
@@ -993,6 +999,8 @@ Files: `docs/measurements/rendering/{runs.v1.jsonl,budget.md}`, this plan's Desi
 
 ### R12.T9 The discrete runs
 
+Records: [12-measurements-and-settings-ladder/records/R12.T9.md](12-measurements-and-settings-ladder/records/R12.T9.md).
+
 On the development machine: its RTX 3080, the recommended specification (Design note 11), its
 projector set to 1920 × 1080 at 59.94 Hz (it has no exact 60 Hz mode), X11, the NVIDIA driver and
 the same switch set, with the same preconditions where the machine has the files (a desktop has no
@@ -1013,10 +1021,13 @@ and recorded.
   a repeat of T8.c's station run on the owner's UHD 620 with placement `remote`, restarted per
   repetition by the operator's script. Acceptance: as T8.c and T8.d, for the discrete column; the
   station wireframe's figure on the UHD 620 with the server placement `remote`.
+  Records: [12-measurements-and-settings-ladder/records/R12.T9.b.md](12-measurements-and-settings-ladder/records/R12.T9.b.md).
 
 Files: as T8.
 
 ### R12.T10 Replace the budget's estimates
+
+Records: [12-measurements-and-settings-ladder/records/R12.T10.md](12-measurements-and-settings-ladder/records/R12.T10.md).
 
 In `budget.md`, the measured tables and prose: which estimates held; which pass gave on the discrete
 target (the lower ends summed to about 9 ms and the upper to about 18 ms), or, until T9 has run,
@@ -1053,6 +1064,8 @@ Acceptance: `just ci`; every change in the log has a before and an after record;
 each after-record states the change with its verdict.
 
 ### R12.T12 Verification pass
+
+Records: [12-measurements-and-settings-ladder/records/R12.T12.md](12-measurements-and-settings-ladder/records/R12.T12.md).
 
 - **R12.T12.a The UHD 620 again.** The owner re-runs every scene on the UHD 620 at the settings
   T11.a left, by T8's procedure, record and regenerate the table. Acceptance: the records validate;
@@ -1091,24 +1104,10 @@ generator version it ran at. The plan reserves nothing in the generator.
 
 ## Risks and open points
 
-- **The discrete reference exceeds its class.** T9 runs on the development machine's RTX 3080,
-  above the RTX 4060 class the brainstorm names; a rented cloud instance is still not a stand-in
-  (Design note 11). A pass there does not show a pass on an RTX 4060, so `budget.md` labels the
-  discrete column with the card and its headroom. The runner's preconditions and samplers were
-  written for the UHD 620 laptop (a `Mains` supply, `thermal_throttle`, i915's frequency files); on
-  the desktop those read `null`, and how T2's `checkQuiet` treats a machine with no `Mains` supply
-  (refuse, or pass as always on AC) is open until T2 is built.
-- **The brainstorm's step 3 sentence** that the forced switches give per-pass GPU time uncoarsened
-  is wrong, as R01 and R05 also found (Design note 4); T10's draft corrects it. Its Sources line
-  crediting `--enable-unsafe-webgpu` with lifting the quantisation is right, but that flag is the
-  broadest of three routes, and the narrow one is the Dawn toggle.
+Task records as built: [12-measurements-and-settings-ladder/records/](12-measurements-and-settings-ladder/records/), one file per task, each linked from its entry under Tasks.
+
 - **NVIDIA's process type** (Design note 6): whether Chromium's GPU process shows as `G` or `C+G` is
   unverified; T9's first `nvidia-smi -q -x` settles it, and the XML path reads either.
-- **Thresholds provisional until T8.** The warm-up window's 5% and 2 °C, the 20-point throttle
-  margin, ε of 3% and 1 point, and five repetitions are engineering choices (medium confidence),
-  revised from T8.d's measured spread. The trend screen at five repetitions can fire only on a
-  perfectly monotone sequence (p ≈ 0.017, Design note 7) and has low power; T8.d's per-repetition
-  plots are the real check.
 - **Run time.** A descent repetition is about 20 minutes (Design note 13), so a descent scene's five
   repetitions with warm-up and control take some two hours of quiet machine; T8 and T9 are split
   per scene for that reason, and the owner's other work must stop for each.
@@ -1118,9 +1117,6 @@ generator version it ran at. The plan reserves nothing in the generator.
 - **Sustained bandwidth.** The UHD 620's 34.1 GB/s is a theoretical peak (Design note 11); the
   sustained share the GPU gets is lower, estimated at 70–80% of peak for the whole machine and not
   measured here, since no benchmark runs on the shared machine.
-- **The documentation layout** (T1.c): the drafted line for `.claude/CLAUDE.md`,
-  `docs/measurements/` — recorded measurements of the product, one directory per run family — is
-  ruled (`signoff-12.md`, item 34) and left for the owner to apply to `.claude/CLAUDE.md`.
 - **Memory categories named by their owners.** The five names this plan asked for are now in the
   owning plans' tasks: `height-cache` (R05.T11.a), `atmosphere-tables` (R05.T12.b) and
   `atmosphere-view` (R05.T12.c), which R08 keeps for its widened, per-sun and thick tables (R08
@@ -1142,20 +1138,9 @@ generator version it ran at. The plan reserves nothing in the generator.
   which is why a record names the machine and not only the GPU.
 - **Frame intervals are R05's.** Presentation times from the trace, with the `requestAnimationFrame`
   fallback; this plan inherits R05's definition and says so in `budget.md`.
-- **The station's server placement.** With one machine the station run is co-resident and does not
-  count (Design note 8); T9.b removes that by serving from the development machine to the owner's
-  UHD 620, which needs both machines at once.
 - **The main screen at 4K** waits on R07's main screen and so on the sessions, ship state and
   closed-loop commands, which have no plan. When it exists, a `main-screen-4k` scene joins the
   catalogue to measure the internal scale the brainstorm says it may render below native at.
-- **The RTX 4060's memory speed** (17 Gbps, so 272 GB/s) is from memory; T9 runs on an RTX 3080,
-  so its `nvidia-smi -q` cannot settle it, and it stays NVIDIA's published figure.
-- **`just test-render` is not in `just ci`** (R01.T9.e), so T7.a's anti-rot check runs where R01's
-  gate runs it, on tasks that touch the engine or a shader; if the owner moves it into `ci`, the
-  check moves with it.
-- **The ladder inventory** is written by T0.
-- **Sessions ask.** The single-player server's default pool cap and the height-worker count are
-  handed to the sessions work by T12.
 - **The hardware decisions, decided 2026-09-30 by a delegated decision** (the orchestration's
   hardware record), as they fall on this plan:
   - _The discrete column (item 1):_ the RTX 3080 is the recommended specification; criteria
