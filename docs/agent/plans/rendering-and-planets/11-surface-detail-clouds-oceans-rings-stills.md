@@ -250,13 +250,15 @@ ambiguous, the design note that reads it is named.
   and `readBuffer(buffer, access?)`, not harness-only; each throws `PresentationOnlyReadback` for a
   resource a `presentation-only` kernel wrote last, which T10.b's read-back must not meet, and
   `access: "tolerance"`, which lifts that refusal, is the smoke harness's alone); `MemoryCategory`,
-  the union later plans extend (`engine/memory.ts`; R11 adds `clouds`, re-validated 2026-11-02), on
-  every creation; the device-loss and GPU-process-loss fault and
+  the union later plans extend, on every creation (`view/engine/memory.ts`; R11 adds `clouds`, and
+  T9 `rings`, not there yet; re-validated 2026-11-02); the device-loss and GPU-process-loss fault and
   its three-loss rule; the preload's `HyperionApi`, to which this plan adds `ipcRenderer.invoke`
   handlers of its own, validating the sender itself (R01 sets no invoke convention); the SwiftShader
   smoke harness, `just test-render`, into whose `WGSL_CATALOGUE` every shader here is registered for
   its no-f16 and no-subgroup runs.
-- **R02:** the camera, camera-relative `f64` differencing and per-patch origins; `BodyFixedPosition`
+- **R02:** the camera, camera-relative `f64` differencing and per-patch origins; the rings'
+  ellipses, `ringEllipse(ring: RingGeometry, projection, viewport)` in `view/wireframe/bodies.ts`
+  (re-validated 2026-11-02); `BodyFixedPosition`
   and its client mirror; the fixed reversed-Z infinite projection; `transparentLayerOrder`
   (R02.T7.b: opaque first, then per body back to front, within a body the shells above the camera by
   descending altitude, then the rings' plane, then the shells below by ascending altitude, as
@@ -308,11 +310,15 @@ ambiguous, the design note that reads it is named.
   in R07's tone-mapping pass (its Design note 12); `post/tonemap.wgsl`, which applies R02's AgX;
   bloom, run once on a still's assembled image; `starIlluminance(disc, distanceM)`; the
   analytic-disc and point regimes, whose far ring annulus this plan supplies in place of R02's cased
-  ellipse (Design note 14; R07 expects it in its Scope and its Consumes of R11); several views
+  ellipse (Design note 14; R07 expects it in its Scope and its Consumes of R11; re-validated
+  2026-11-02: the `disc` of `LitRegime` in `view/bodies/regime.ts`, the rings R02's cased ellipses
+  in `photoreal/overlay.ts`, the `rings` slot `built: false` in `photoreal/passes.ts`); several views
   sharing one `QualitySetting` with per-view budgets (`viewBudgets(views, setting, …)`), one
   photorealistic at a time on the low setting (`photorealisticAllowed`); and `litBody.wgsl`'s call
   of this plan's `ring_shadow_on_body(p, sun) -> vec3f` for a ringed body, through a stub returning
-  1 until `ringShadow.wgsl` replaces it, skipped where `ringShadowOnBody` is off (Design note 14).
+  1 until `ringShadow.wgsl` replaces it, skipped where `ringShadowOnBody` is off (Design note 14;
+  re-validated 2026-11-02: the stub is called in `bodyDisc.wgsl`'s and `discAir.wgsl`'s light loops,
+  `p` the point from the body's centre ÷ a along the galactic axes, the disc record its data).
 - **R08:** `HillaireAtmosphere`, whose `aerialPerspective(view)` exposes the volume and the
   transmittance table, for lighting clouds (a 2D array texture, one layer a curvature slice, read
   through `oblate.wgsl`'s slice lookup at the ray's latitude and azimuth, never as one texture;
@@ -336,9 +342,9 @@ ambiguous, the design note that reads it is named.
   `heightM`, `atmosphereM` and `sphere`, which is `{ bottomRadiusM, horizonAngleRad }` on a sphere
   and `null` on an oblate body, with `skyViewColumnOf(table, d)` for each azimuth's R_α and β
   (corrected 2026-10-14); `surfaceLighting.wgsl`'s
-  `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` and
-  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (R08.T9.b; re-validated
-  2026-11-02: each takes a last `curve : u32`, the light's slot, and an includer binds the eight
+  `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad, curve) -> vec3f`
+  and `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad, curve) -> vec3f` (R08.T9.b;
+  re-validated 2026-11-02: `curve : u32` is the light's slot, and an includer binds the eight
   tables of `surfaceLightingTextures(first)` from `surfaceLightingTablesOf(tables)`), through
   which lit clouds, oceans and rings take each sun's light and the sky's, each call at the lit
   point's geodetic height and latitude and the sun's azimuth from local north there (R08 Design
@@ -348,7 +354,8 @@ ambiguous, the design note that reads it is named.
   `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` and `classifyRegime(medium, cover: BodyCover)`, whose
   `cover.cloudFraction` is P14.T24.b's and whose per-body rule gives `cloudDeck` exactly where
   Design note 9 does; and R08's reference tracer beside which the ring subcommand sits in
-  `hyperion-fit` (its Design note 10, whose output is JSON fixtures; this plan's is a shipped
+  `hyperion-fit` (`atmosphere-reference` and `atmosphere-sweep`, `cli.rs`' `Command`, re-validated
+  2026-11-02; its Design note 10, whose output is JSON fixtures; this plan's is a shipped
   TypeScript module, a further kind of `hyperion-fit` output, Design note 15).
   Every read of R08's tables (the aerial volume, the transmittance slices, the sky table) takes
   R08's texel mapping (R08 Design note 19), through R08's lookups or `texelUvFromUnit` in R08's
@@ -392,7 +399,9 @@ ambiguous, the design note that reads it is named.
   ladder entries into its `SettingSnapshot`, maps its pass labels to `BudgetRow`s, counts its
   allocations by `MemoryCategory` and audits Design note 18's quality limits.
 - **Galaxy plan 14:** `RingDto` (`ring_kind`, `material`, `inner_edge_m`, `outer_edge_m`,
-  `optical_depth`, `gaps` with `radius_m`) and the sim's `planetary::rings::RING_PARTICLE_RADII`;
+  `optical_depth`, `gaps` with `radius_m`, and an optional `normal`; the client's `Ring` in
+  `lib/system/model.ts`, and the view's `ViewRing` in `view/scene/model.ts`, which T9 extends, re-validated
+  2026-11-02) and the sim's `planetary::rings::RING_PARTICLE_RADII` (1 cm, 5 m);
   P14.T14's poles and `body_fixed_at`; P14.T24.b's cloud, ocean and ice fractions (re-validated
   2026-11-02: `BodySurface.cloudFraction`, `lib/system/model.ts`; the decks P14.T52.c's
   `BodySurface.aerosols`' `decks` and `modes`, a mode's `opticalDepth` in-cloud), surface age and
