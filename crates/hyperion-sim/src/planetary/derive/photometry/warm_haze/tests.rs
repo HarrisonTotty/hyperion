@@ -1,12 +1,12 @@
-//! The fit's fixture, GJ 1214 b: what it draws at 31, and its bright haze under 32's rules at the
-//! fitted optical depth against the brief's targets.
+//! The fit's fixture, GJ 1214 b: its bright haze at the fitted optical depth against the brief's
+//! targets.
 
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::chem::HostAbundances;
 use crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH;
-use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand, with_every_32_hold};
+use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand};
 use crate::tables::warm_haze::COAGULATED_HAZE_OPTICAL_DEPTH;
 use crate::units::{Dex, Watts};
 
@@ -66,39 +66,14 @@ fn hazes_of(envelope: &crate::planetary::record::Envelope) -> Vec<(&'static str,
         .collect()
 }
 
-/// The fixture first (the brief): at 31 GJ 1214 b, its zero-albedo `T_eq` 595 K, draws no
-/// photochemical haze, its S₈ vapour unsaturated in a stratosphere near 500 K and its soot below
-/// Gao et al.'s grid, and its closed form a Bond albedo of 0.012 under its M dwarf's light, against
-/// its measured 0.51 ± 0.06 (Kempton et al. 2023).
-#[test]
-fn gj_1214_b_draws_no_haze_at_31() {
-    let held = GJ_1214_B
-        .light_under(
-            ClosedReading {
-                rules: EnvelopeColumnRules::Clipped,
-                bright_haze_optical_depth: BRIGHT_HAZE_OPTICAL_DEPTH,
-                coagulated_haze_optical_depth: COAGULATED_HAZE_OPTICAL_DEPTH,
-            },
-            BondAlbedo::from_fraction(0.3),
-        )
-        .expect("the fixture's column");
-    assert!(
-        (held.zero_albedo_temperature_k - 595.3).abs() < 0.1,
-        "{held:?}"
-    );
-    assert!((held.bond_albedo - 0.0120).abs() < 5e-4, "{held:?}");
-    let envelope = by_hand(held.equilibrium_temperature_k);
-    assert_eq!(hazes_of(&envelope), [], "{held:?}");
-}
-
-/// Under every 32 hold the fixture's record carries the bright haze alone, its slab and its
-/// coagulated mode at their τ(550), whole below 600 K and above 550 K, and its closed form meets
+/// The fixture's record carries the bright haze alone, its slab and its coagulated mode at their
+/// τ(550), whole below 600 K and above 550 K, and its closed form meets
 /// the brief's: its Bond albedo within the measured 0.39–0.63 (pinned at the fit's), B/V 0.6–0.7
 /// and R/V 1.1–1.6 in its column's spherical albedo, `p_V` 0.15–0.25, its q the bright haze's.
 /// The slab sets the visible; the coagulated mode, read in each bin to its own τ of 10, the
 /// infrared, where two thirds of a 3,250 K host's light lies (research-leans-52).
 #[test]
-fn under_every_32_hold_gj_1214_b_draws_its_bright_haze() {
+fn gj_1214_b_draws_its_bright_haze() {
     let light = GJ_1214_B
         .light(COAGULATED_HAZE_OPTICAL_DEPTH)
         .expect("the fixture's column");
@@ -119,7 +94,7 @@ fn under_every_32_hold_gj_1214_b_draws_its_bright_haze() {
     }
     assert!((light.bond_albedo - 0.5100).abs() < 5e-4, "{light:?}");
     // By hand the given T_eq is the zero-albedo one, which sets the hazes' shares.
-    let envelope = with_every_32_hold(|| by_hand(light.zero_albedo_temperature_k));
+    let envelope = by_hand(light.zero_albedo_temperature_k);
     let hazes = hazes_of(&envelope);
     assert_eq!(hazes.len(), 2, "{hazes:?}");
     for ((key, tau), want) in hazes

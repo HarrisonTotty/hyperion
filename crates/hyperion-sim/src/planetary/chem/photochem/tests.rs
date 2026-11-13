@@ -790,20 +790,11 @@ fn pin_the_bright_haze(w: &mut hyperion_testkit::golden::GoldenWriter) {
     w.f64("bright haze r_eff", size.effective_radius().value());
     w.f64("bright haze v_eff", size.effective_variance());
     {
-        use crate::planetary::derive::photometry::envelope_bond::EnvelopeColumnRules;
         use crate::planetary::hooks::envelope_atmosphere::haze_shares;
-        for (t_eq, t0) in [
-            (650.0, 672.0),
-            (640.0, 655.5),
-            (560.0, 595.0),
-            (450.0, 475.0),
-        ] {
-            for rules in [EnvelopeColumnRules::Clipped, EnvelopeColumnRules::Whole] {
-                let (soot, bright) = haze_shares(rules, Kelvin::new(t_eq), Kelvin::new(t0));
-                let at = format!("{rules:?} at T_eq {t_eq} K, T0 {t0} K");
-                w.f64(&format!("soot share {at}"), soot);
-                w.f64(&format!("bright haze share {at}"), bright);
-            }
+        for t0 in [672.0, 655.5, 595.0, 475.0] {
+            let (soot, bright) = haze_shares(Kelvin::new(t0));
+            w.f64(&format!("soot share at T0 {t0} K"), soot);
+            w.f64(&format!("bright haze share at T0 {t0} K"), bright);
         }
     }
     w.f64("bright haze record tau", BRIGHT_HAZE_OPTICAL_DEPTH);

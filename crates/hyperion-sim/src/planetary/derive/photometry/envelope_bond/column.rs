@@ -32,7 +32,7 @@
 //!   ([`settling_size_at`]); its τ(550) P14.T49.e's ([`Mode::new`], [`AerosolMode::of_settling`]),
 //!   cut on a hot dayside as P14.T52.h cuts it.
 //! - **The hazes**: P14.T52.b's rules on that gas, as P14.T52.d reads them: the S₈ haze, soot
-//!   (by [`soot_weight`](crate::planetary::hooks::envelope_atmosphere::soot_weight); from 32 with
+//!   (by [`soot_weight`](crate::planetary::hooks::envelope_atmosphere::soot_weight), with
 //!   the bright haze and its coagulated mode in the share its taper drops, [`haze_shares`], the
 //!   column then read to each bin's own floor, `ColumnFloor::EachBin`), the ice giants' haze on a
 //!   CH₄ deck and the chromophore on an NH₃ deck
@@ -82,17 +82,15 @@ use crate::units::{
 };
 
 use super::{
-    Absorbers, COLUMN_TOP_PA, ColumnFloor, ColumnMode, EnvelopeColumn, EnvelopeColumnRules,
-    OPTICS_BANDS, assemble_under, band_weighted, bin_albedos_under, log_bracket, narrow_table_for,
-    particle_optics_at, particle_table, table_for_under,
+    Absorbers, COLUMN_TOP_PA, ColumnFloor, ColumnMode, EnvelopeColumn, OPTICS_BANDS, assemble,
+    band_weighted, bin_albedos, log_bracket, narrow_table_for, particle_optics_at, particle_table,
+    table_for,
 };
 
-/// How the closed form reads a column: the envelope column's rules, and the τ(550) of the bright
-/// haze ([`bright_haze`]) and of its coagulated mode ([`coagulated_haze`]) at their whole share.
+/// How the closed form reads a column: the τ(550) of the bright haze ([`bright_haze`]) and of its
+/// coagulated mode ([`coagulated_haze`]) at their whole share.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ClosedReading {
-    /// The envelope column's rules.
-    pub(crate) rules: EnvelopeColumnRules,
     /// The bright haze's τ(550) where it takes the whole of the soot's column.
     pub(crate) bright_haze_optical_depth: f64,
     /// Its coagulated mode's τ(550) at the same share.
@@ -100,14 +98,13 @@ pub(crate) struct ClosedReading {
 }
 
 impl ClosedReading {
-    /// The record's: the rules in force, the bright haze's
+    /// The record's: the bright haze's
     /// [`BRIGHT_HAZE_OPTICAL_DEPTH`](crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH)
     /// and the fitted
     /// [`COAGULATED_HAZE_OPTICAL_DEPTH`](crate::tables::warm_haze::COAGULATED_HAZE_OPTICAL_DEPTH).
     #[must_use]
     pub(crate) fn in_force() -> Self {
         Self {
-            rules: EnvelopeColumnRules::in_force(),
             bright_haze_optical_depth: crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH,
             coagulated_haze_optical_depth: crate::tables::warm_haze::COAGULATED_HAZE_OPTICAL_DEPTH,
         }
@@ -641,7 +638,7 @@ pub(crate) fn snapshot_column(inputs: &AtmosphereInputs) -> Option<EnvelopeColum
     snapshot_column_under(ClosedReading::in_force(), inputs)
 }
 
-/// [`snapshot_column`] read as `reading` says, whatever the rules in force.
+/// [`snapshot_column`] read as `reading` says.
 #[cfg(test)]
 #[must_use]
 pub(crate) fn snapshot_column_under(
@@ -658,7 +655,6 @@ fn closed_column(
     reading: ClosedReading,
     inputs: &AtmosphereInputs,
 ) -> Option<(EnvelopeColumn, [f64; OPTICS_BANDS])> {
-    let rules = reading.rules;
     let (mass, radius) = (inputs.mass.value(), inputs.radius.value());
     let gravity = GRAVITATIONAL_CONSTANT * mass / (radius * radius);
     let equilibrium = inputs.equilibrium.value();
@@ -725,11 +721,7 @@ fn closed_column(
     let mut gas = gas_of(&abundances, shape.at(1.0e5), &rows)?;
     let (modes, decks) = decks(&shape, &mut gas, (g, inputs.equilibrium), &rows);
     let mut column_modes = Vec::with_capacity(modes.len() + 4);
-    column_modes.extend(
-        modes
-            .iter()
-            .filter_map(|mode| column_mode_under(rules, mode)),
-    );
+    column_modes.extend(modes.iter().filter_map(column_mode));
     let zero_albedo = equilibrium_temperature(inputs.flux, BondAlbedo::from_fraction(0.0));
     let haze_modes = hazes(
         &shape,
@@ -738,25 +730,25 @@ fn closed_column(
         (g, inputs.equilibrium, zero_albedo),
         reading,
     );
-    let bright = bright_share(rules, &haze_modes);
+    let bright = bright_share(&haze_modes);
     for (_, mode) in &haze_modes {
-        if let Some(mode) = column_mode_under(rules, mode) {
+        if let Some(mode) = column_mode(mode) {
             column_modes.push(mode);
         }
     }
-    let floor = ColumnFloor::of(rules, haze_modes.iter().map(|(rule, _)| *rule));
+    let floor = ColumnFloor::of(haze_modes.iter().map(|(rule, _)| *rule));
     Some((
-        closed_assembly((rules, floor), gravity, &gas, &shape, &column_modes),
+        closed_assembly(floor, gravity, &gas, &shape, &column_modes),
         bright,
     ))
 }
 
-/// The column of `modes` on the profile `shape` of the gas `gas` under `gravity` (m s⁻²) by the
-/// rules `rules` to the floor `floor` ([`assemble_under`]): its Rayleigh scattering its deep
-/// gas's, and each layer's absorbers held to their saturation on the profile.
+/// The column of `modes` on the profile `shape` of the gas `gas` under `gravity` (m s⁻²) to the
+/// floor `floor` ([`assemble`]): its Rayleigh scattering its deep gas's, and each layer's absorbers
+/// held to their saturation on the profile.
 #[must_use]
 fn closed_assembly(
-    (rules, floor): (EnvelopeColumnRules, ColumnFloor),
+    floor: ColumnFloor,
     gravity: f64,
     gas: &Gas,
     shape: &Profile,
@@ -770,8 +762,8 @@ fn closed_assembly(
         ..Absorbers::default()
     };
     let metallicity = gas.metallicity_dex;
-    assemble_under(
-        (rules, floor),
+    assemble(
+        floor,
         (gravity, gas.molar_mass),
         &scattering,
         modes,
@@ -795,10 +787,7 @@ fn closed_assembly(
 /// soot's (research-leans-52). The photometry weighs a provisional envelope's phase integral by
 /// it (`photometry`'s "The colour of a provisional envelope").
 #[must_use]
-pub(super) fn bright_share(
-    rules: EnvelopeColumnRules,
-    hazes: &[(HazeRule, AerosolMode)],
-) -> [f64; OPTICS_BANDS] {
+pub(super) fn bright_share(hazes: &[(HazeRule, AerosolMode)]) -> [f64; OPTICS_BANDS] {
     let mut sums = [[0.0; 2]; OPTICS_BANDS];
     for (rule, mode) in hazes {
         let which = match rule {
@@ -815,7 +804,7 @@ pub(super) fn bright_share(
             optics: Some((table, radius)),
             coverage,
             ..
-        }) = column_mode_under(rules, mode)
+        }) = column_mode(mode)
         else {
             continue;
         };
@@ -847,9 +836,7 @@ fn profile_free_one_bar(
 
 /// The Bond albedo of the gas envelope `inputs` describes under the light `shade`, its own
 /// column's ([`snapshot_column`], [`super::column_bond`]); `None` where the closed form gives no column,
-/// or where its column returns no light at all (labelled): to 31, an opaque top layer the Eddington
-/// closure holds at R = 0, ω′(4 − 3g′) < 1, as a soot-shrouded sub-Neptune's (τ 17, ω about 0.25),
-/// where the photometry needs a p above 0 and a semi-infinite layer reflects a few per cent.
+/// or where its column returns no light at all (labelled), where the photometry needs a p above 0.
 #[cfg(test)]
 #[must_use]
 pub(crate) fn snapshot_bond(inputs: &AtmosphereInputs, shade: &HostShade) -> Option<f64> {
@@ -879,8 +866,8 @@ pub(crate) struct ClosedLight {
     pub(crate) bright_share: [f64; OPTICS_BANDS],
 }
 
-/// [`snapshot_light`] read as `reading` says, whatever the rules in force, with the bright haze's
-/// share of the hazes' scattering.
+/// [`snapshot_light`] read as `reading` says, with the bright haze's share of the hazes'
+/// scattering.
 #[must_use]
 pub(crate) fn snapshot_light_under(
     reading: ClosedReading,
@@ -888,7 +875,7 @@ pub(crate) fn snapshot_light_under(
     shade: &HostShade,
 ) -> Option<ClosedLight> {
     let (column, bright_share) = closed_column(reading, inputs)?;
-    let bins = bin_albedos_under(reading.rules, &column);
+    let bins = bin_albedos(&column);
     let bond = band_weighted(&bins, shade.bands());
     (bond.is_finite() && bond > 0.0 && bond <= 1.0).then_some(ClosedLight {
         bond,
@@ -897,27 +884,17 @@ pub(crate) fn snapshot_light_under(
     })
 }
 
-/// A mode as the column's assembly reads it: `None` for one with no τ(550).
-#[cfg(test)]
-pub(crate) fn column_mode(mode: &AerosolMode) -> Option<ColumnMode> {
-    column_mode_under(EnvelopeColumnRules::in_force(), mode)
-}
-
-/// [`column_mode`] under the rules `rules`, whatever the rules in force: its optics its narrow
-/// table where it has one under them ([`narrow_table_for`]), else its wide one.
+/// A mode as the column's assembly reads it: `None` for one with no τ(550); its optics its narrow
+/// table where it has one ([`narrow_table_for`]), else its wide one.
 #[must_use]
-pub(crate) fn column_mode_under(
-    rules: EnvelopeColumnRules,
-    mode: &AerosolMode,
-) -> Option<ColumnMode> {
+pub(crate) fn column_mode(mode: &AerosolMode) -> Option<ColumnMode> {
     let tau = mode.optical_depth().ok()?.value();
     let profile = mode.profile();
     let key = mode.material().substance().key();
     let optics = match mode.size() {
-        Ok(ParticleSize::Distribution(d)) => narrow_table_for(rules, key.as_str(), &d)
+        Ok(ParticleSize::Distribution(d)) => narrow_table_for(key.as_str(), &d)
             .or_else(|| {
-                particle_table(key.as_str(), mode.phase())
-                    .map(|table| table_for_under(rules, table, &d))
+                particle_table(key.as_str(), mode.phase()).map(|table| table_for(table, &d))
             })
             .map(|table| (table, d.effective_radius().value())),
         Ok(ParticleSize::Aggregate(_)) | Err(_) => None,
@@ -1150,9 +1127,9 @@ fn decks(
 
 /// The hazes P14.T52.b's rules give on `shape` in the gas `gas` the decks `decks` leave, under
 /// gravity `gravity` at `T_eq` `equilibrium` and zero-albedo `T_eq` `zero_albedo`, as P14.T52.d
-/// reads them on a starlit envelope, read as `reading` says (from 32 the bright haze and its
-/// coagulated mode in the share of the soot's column its taper drops,
-/// `envelope_atmosphere::haze_shares`), each with its rule.
+/// reads them on a starlit envelope, read as `reading` says (the bright haze and its coagulated
+/// mode in the share of the soot's column its taper drops, `envelope_atmosphere::haze_shares`),
+/// each with its rule.
 fn hazes(
     shape: &Profile,
     gas: &Gas,
@@ -1177,7 +1154,7 @@ fn hazes(
     if let Ok(Some(haze)) = sulphur_haze(&air, gas.sulphide) {
         hazes.push((haze, 1.0));
     }
-    let (weight, bright) = haze_shares(reading.rules, equilibrium, zero_albedo);
+    let (weight, bright) = haze_shares(zero_albedo);
     let methane_aloft = gas.methane.at(upper, t_upper, gas.metallicity_dex);
     if weight > 0.0
         && let Ok(Some(haze)) = soot(&air, methane_aloft)

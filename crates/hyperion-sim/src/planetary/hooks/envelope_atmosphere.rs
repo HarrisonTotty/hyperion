@@ -224,8 +224,7 @@
 //!   only within Gao et al.'s grid: their models span `T_eq` 700–2,800 K, so the rule's column is
 //!   scaled by [`SOOT_GRID_EDGE`]'s linear taper, 0 at and below 600 K and whole from 700 K (stated;
 //!   the rule's own 950 K edge is unchanged). The cool giants' stratospheric hazes are not modelled.
-//! - **The bright haze** ([`bright_haze`], from generator version 32; research-leans-50's ruling,
-//!   2026-11-10): the taper reads the zero-albedo `T_eq`, and the share of the soot's column it
+//! - **The bright haze** ([`bright_haze`]; research-leans-50's ruling, 2026-11-10): the taper reads the zero-albedo `T_eq`, and the share of the soot's column it
 //!   drops is Khare et al.'s tholin, of τ(550) 10 at its whole share, cut at its cool edge
 //!   (400–550 K) (`haze_shares`), over its coagulated mode to 10 mbar ([`coagulated_haze`],
 //!   research-leans-52), of the fitted τ(550) at the same share.
@@ -322,7 +321,6 @@ use crate::planetary::chem::photochem::{
 use crate::planetary::chem::quench::{
     ApplyQuenchError, DeriveQuenchError, EddyDiffusion, MixingColumn, Quench,
 };
-use crate::planetary::derive::photometry::envelope_bond::EnvelopeColumnRules;
 use crate::planetary::derive::radius::giant_share;
 use crate::planetary::hooks::aerosols::{
     Absorber, AerosolDeck, AerosolMode, BuildAbsorberError, CLOUD_EDDY_DIFFUSION, DECK_WIDTH,
@@ -530,8 +528,8 @@ pub const ABSORBER_LEVEL: Pascals = Pascals::new(1.0e3);
 /// (Nature Astronomy 4, 951); [`soot`]'s own 950 K edge, above which it gives way to the silicates,
 /// is unchanged.
 ///
-/// From generator version 32 (`haze_shares`) the taper reads the zero-albedo `T_eq`, and the
-/// share of the soot's column it drops is the bright haze's ([`bright_haze`]), not nothing
+/// The taper (`haze_shares`) reads the zero-albedo `T_eq`, and the share of the soot's column it
+/// drops is the bright haze's ([`bright_haze`]), not nothing
 /// (research-leans-50's ruling, 2026-11-10): whole at 700 K, Gao et al.'s grid floor, and none at
 /// 600 K, just above GJ 1214 b's 595 K (Cloutier et al. 2021, AJ 162, 174, recalled), whose Bond
 /// albedo of 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67, recalled) soot cannot give: even a
@@ -1798,33 +1796,20 @@ pub(crate) fn soot_weight(equilibrium_temperature: Kelvin) -> f64 {
     }
 }
 
-/// The shares of [`soot`]'s column an envelope of equilibrium temperature `equilibrium_temperature`
-/// and zero-albedo equilibrium temperature `zero_albedo_temperature` draws under the envelope
-/// column's rules `rules`, as soot and as the bright haze ([`bright_haze`], of its rule's τ):
-///
-/// - [`EnvelopeColumnRules::Clipped`], to 31: soot's [`soot_weight`] of `T_eq`, and no bright haze;
-/// - [`EnvelopeColumnRules::Whole`], from 32 (research-leans-50's ruling, 2026-11-10): soot's
-///   [`soot_weight`] of the zero-albedo `T_eq`, s, and the bright haze, its coagulated mode alike
-///   ([`coagulated_haze`]), 1 − s of its τ times its cool edge's share
-///   ([`bright_haze_cool_share`]). The zero-albedo `T_eq` does not follow the
-///   Bond albedo the hazes themselves set, so the hazes' shares no longer feed on their own
-///   albedo: keyed on `T_eq`, the owner's draw's soot thickened as the soot darkened it (667 to
-///   671 K, τ(550) 2.20 to 2.28), and the bright haze with its coagulated mode cuts GJ 1214 b's
-///   `T_eq` by 97 K.
+/// The shares of [`soot`]'s column an envelope of zero-albedo equilibrium temperature
+/// `zero_albedo_temperature` draws, as soot and as the bright haze ([`bright_haze`], of its rule's
+/// τ; research-leans-50's ruling, 2026-11-10): soot's [`soot_weight`] of the zero-albedo `T_eq`,
+/// s, and the bright haze, its coagulated mode alike ([`coagulated_haze`]), 1 − s of its τ times
+/// its cool edge's share ([`bright_haze_cool_share`]). The zero-albedo `T_eq` does not follow the
+/// Bond albedo the hazes themselves set, so the hazes' shares do not feed on their own albedo:
+/// keyed on `T_eq`, the owner's draw's soot thickened as the soot darkened it (667 to 671 K,
+/// τ(550) 2.20 to 2.28), and the bright haze with its coagulated mode cuts GJ 1214 b's `T_eq` by
+/// 97 K.
 #[must_use]
-pub(crate) fn haze_shares(
-    rules: EnvelopeColumnRules,
-    equilibrium_temperature: Kelvin,
-    zero_albedo_temperature: Kelvin,
-) -> (f64, f64) {
-    match rules {
-        EnvelopeColumnRules::Clipped => (soot_weight(equilibrium_temperature), 0.0),
-        EnvelopeColumnRules::Whole => {
-            let soot = soot_weight(zero_albedo_temperature);
-            let bright = (1.0 - soot) * bright_haze_cool_share(zero_albedo_temperature);
-            (soot, if bright > 0.0 { bright } else { 0.0 })
-        }
-    }
+pub(crate) fn haze_shares(zero_albedo_temperature: Kelvin) -> (f64, f64) {
+    let soot = soot_weight(zero_albedo_temperature);
+    let bright = (1.0 - soot) * bright_haze_cool_share(zero_albedo_temperature);
+    (soot, if bright > 0.0 { bright } else { 0.0 })
 }
 
 /// The photochemistry of a starlit envelope of upper atmosphere `air`, zero-albedo equilibrium
@@ -1845,14 +1830,10 @@ fn photochemistry(
             .find(|d| d.condensate().substance().key().as_str() == key)
     };
     // Each haze with the share of its rule's amount drawn: soot's taper below Gao et al.'s grid,
-    // and from 32 the bright haze and its coagulated mode in the share it drops.
+    // and the bright haze and its coagulated mode in the share it drops.
     let mut hazes: Vec<(Haze, f64)> = Vec::new();
     hazes.extend(sulphur_haze(air, sulphur)?.map(|haze| (haze, 1.0)));
-    let (weight, bright) = haze_shares(
-        EnvelopeColumnRules::in_force(),
-        air.equilibrium_temperature,
-        zero_albedo_temperature,
-    );
+    let (weight, bright) = haze_shares(zero_albedo_temperature);
     let methane = share_of(upper, "CH4");
     if weight > 0.0 {
         hazes.extend(soot(air, methane)?.map(|haze| (haze, weight)));

@@ -28,8 +28,8 @@
 //!
 //! In each of the optics' twelve bins ([`SPECTRAL_BIN_EDGES_NM`]) the column is a stack of
 //! homogeneous layers over a black floor, each layer's diffuse reflectance and transmission by
-//! a δ-scaled two-stream ([`layer_two_stream`]; the δ-Eddington closure to 31, the δ-PIFM from 32,
-//! "The column read whole" below) and the layers joined by the adding rule from the floor up, at
+//! a δ-scaled two-stream ([`layer_two_stream`]; the δ-PIFM closure, "The column read whole"
+//! below) and the layers joined by the adding rule from the floor up, at
 //! each of eight g-points of the bin's correlated-k gas absorption (the gases' k-distributions taken as perfectly correlated, a stated approximation); the bin's spherical
 //! albedo is their weighted sum, and the Bond albedo the bins weighted by the hosts' light
 //! ([`band_weighted`]). Each layer holds:
@@ -61,37 +61,35 @@
 //! # What is not modelled
 //!
 //! - **Below the floor** nothing is read: a conservative deck read whole would give the albedo of
-//!   a semi-infinite cloud (decision-deep-decks-split §6.6), so the floor is black (from 32, in a
-//!   column with the bright haze, each bin's own floor; "The column read whole").
+//!   a semi-infinite cloud (decision-deep-decks-split §6.6), so the floor is black (in a column
+//!   with the bright haze, each bin's own floor; "The column read whole").
 //! - **Thermal emission** in the last bins, and the alkali lines' cores (within 25 cm⁻¹).
 //! - **The host's \[Fe/H\] and C/O on the snapshot path**: the closed form takes a protosolar host
 //!   ([`column`](mod@column)).
 //!
-//! # The column read whole (from generator version 32)
+//! # The column read whole
 //!
-//! To 31 the column starts at [`COLUMN_TOP_PA`], so a haze above it (Gao et al.'s soot, which forms
-//! at 0.1 Pa) is not read, and a dark layer, ω′(4 − 3g′) < 1, reflects nothing (the δ-Eddington's
-//! γ₂ < 0, held at R = 0). From 32 ([`ENVELOPE_COLUMN_VERSION`], [`EnvelopeColumnRules`]) the
-//! column starts at its highest mode's top where that lies above 1 Pa, and every layer takes the
+//! The column starts at its highest mode's top where that lies above [`COLUMN_TOP_PA`], so that a
+//! haze above it (Gao et al.'s soot, which forms at 0.1 Pa) is read, and every layer takes the
 //! δ-PIFM closure (Zdunkowski, Welch and Korb 1980), whose γ₂ is never negative and which is the
 //! δ-Eddington's at ω = 1. Against an exact doubling of a Henyey–Greenstein layer lit diffusely
 //! (the lane's check, 48 streams a hemisphere, re-derived by its science check) it runs 0.5–9% low
 //! over ω 0.1–1 and τ 0.3–17, where the δ-Eddington runs 0.005–0.06 low and below 0 for ω under
-//! about 0.3. A gamma soot mode, as the record draws Gao et al.'s, reads its own narrow Mie table
+//! about 0.3, so that a dark layer, ω′(4 − 3g′) < 1, would reflect nothing under it (its γ₂ < 0,
+//! held at R = 0). A gamma soot mode, as the record draws Gao et al.'s, reads its own narrow Mie table
 //! ([`narrow_table_for`]). A gas envelope above
 //! `HOT_GIANT_TEMPERATURE`, which has no analogue, then takes its p from its column's own albedo
 //! by band (`photometry`'s module documentation).
 //!
-//! Under the same hold (research-leans-50's ruling, the lane `fix-dark-sub-neptune-2`) the soot's
-//! column is shared by the zero-albedo `T_eq` with a bright organic haze, Khare et al.'s tholin
+//! By research-leans-50's ruling (the lane `fix-dark-sub-neptune-2`) the soot's column is shared by the zero-albedo `T_eq` with a bright organic haze, Khare et al.'s tholin
 //! (`envelope_atmosphere::haze_shares`, `photochem::bright_haze`), on the record and in the closed
 //! form alike; the tholin reads a narrow table of its own and has no wide one; and the closed form
 //! gives the bright haze's share of its hazes' light by bin
 //! ([`column::ClosedLight::bright_share`]), by which the photometry weighs a provisional
 //! envelope's q (`photometry::BRIGHT_HAZE_PHASE_INTEGRAL`).
 //!
-//! Under it too (research-leans-52's ruling, 2026-11-13, the lane `fix-dark-sub-neptune-3`) the
-//! bright haze has a coagulated mode beneath its slab (`photochem::coagulated_haze`), and a column
+//! By research-leans-52's ruling (2026-11-13, the lane `fix-dark-sub-neptune-3`) the bright haze
+//! has a coagulated mode beneath its slab (`photochem::coagulated_haze`), and a column
 //! that holds the bright haze is read in each bin down to where that bin's own τ, its Rayleigh and
 //! its particles', reaches 10 ([`ColumnFloor::EachBin`]), not τ(550): its infrared, where the
 //! 0.1 µm slab is thin, is read in the coagulated mode below. The crossing layer is cut there, a
@@ -113,7 +111,6 @@ use crate::substance::optics::SPECTRAL_BIN_EDGES_NM;
 use crate::substance::rayleigh::gas_cross_section;
 use crate::substance::{CondensedPhase, Element, MOLAR_GAS_CONSTANT};
 use crate::units::consts::BOLTZMANN_CONSTANT;
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 pub(crate) mod column;
 pub(crate) mod narrow;
@@ -131,75 +128,6 @@ const REFERENCE_NM: f64 = 550.0;
 /// The absorption optical depth from the top below which a g-point's deeper layers are not added:
 /// 30, two ways e^−60 of the light, under any float's resolution of an albedo.
 const OPAQUE_ABSORPTION: f64 = 30.0;
-
-/// The generator version from which an envelope's column is read whole (the [module
-/// documentation](self), "The column read whole"): 32, held with the 32 train.
-///
-/// Below it [`EnvelopeColumnRules::in_force`] is [`EnvelopeColumnRules::Clipped`], and every
-/// envelope's Bond and geometric albedo is as it was, bit for bit. 32's bump deletes this hold,
-/// [`EnvelopeColumnRules`] with its `Clipped` arm and its matches (in [`layer_two_stream`], whose
-/// `rules` parameter [`bin_albedos_under`] reads, `column_top`, [`narrow_table_for`],
-/// [`ColumnFloor::of`], `envelope_atmosphere::haze_shares` and [`gas_envelope_light`]), the `rules` of
-/// [`column::ClosedReading`] and the `_under` functions' (each folding into its plain one), the
-/// tests that call the `Clipped` arm, the tests' switch, its line in the tests' `HeldRules` and in
-/// `with_every_32_hold`, and its tripwire (`the_envelope_column_is_held_only_until_the_32_bump`);
-/// `photometry`'s `the_solar_system_draws_itself_in_its_surfaces_colours` then finds the giants'
-/// colours. The bright haze's table (`tables::warm_haze`, emitted `--since 31`, the emitter's
-/// ceiling) is restamped at the bump.
-pub(crate) const ENVELOPE_COLUMN_VERSION: GeneratorVersion = GeneratorVersion::new(32);
-
-/// How an envelope's column is read (its hold, [`ENVELOPE_COLUMN_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum EnvelopeColumnRules {
-    /// Version 31's and before: from [`COLUMN_TOP_PA`], each layer by the δ-Eddington, a dark
-    /// layer's R held at 0, and no colour of its own.
-    Clipped,
-    /// Version 32's: from its highest mode's top, each layer by the δ-PIFM, and its albedo by band
-    /// its colour.
-    Whole,
-}
-
-impl EnvelopeColumnRules {
-    /// The rules this generator version gives: the whole column's from
-    /// [`ENVELOPE_COLUMN_VERSION`], the clipped one's below it; in the tests, the rules a test's
-    /// switch sets on its thread ([`with_envelope_column`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = ENVELOPE_COLUMN_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= ENVELOPE_COLUMN_VERSION {
-            Self::Whole
-        } else {
-            Self::Clipped
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The envelope column's rules a test sets on its thread, `None` for the version's.
-    static ENVELOPE_COLUMN_RULES: core::cell::Cell<Option<EnvelopeColumnRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the envelope column's rules `rules` on this thread, for the tests to reach
-/// 32's column ahead of the bump; the version's rules are set back after, a panic in `run`
-/// included. A record derives lazily, so a test reads it inside the switch. 32's bump deletes it
-/// with the hold.
-#[cfg(test)]
-pub(crate) fn with_envelope_column<R>(rules: EnvelopeColumnRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<EnvelopeColumnRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            ENVELOPE_COLUMN_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(ENVELOPE_COLUMN_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// The gases a layer's absorption reads, by mole fraction.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -236,7 +164,7 @@ pub(crate) struct ColumnLayer {
     pub(crate) particles: [[f64; 3]; OPTICS_BANDS],
 }
 
-/// Where a column's floor lies ([`assemble_under`], [`bin_albedos_under`]).
+/// Where a column's floor lies ([`assemble`], [`bin_albedos`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ColumnFloor {
     /// R08's: where τ(550) from the top, the gas's Rayleigh and every mode's, reaches
@@ -244,26 +172,23 @@ pub(crate) enum ColumnFloor {
     Visual,
     /// In each bin where that bin's own τ from the top, its Rayleigh and its particles'
     /// extinction, reaches [`FLOOR_OPTICAL_DEPTH`], the layer it crosses cut there (a
-    /// homogeneous layer's share, exact for one): from 32 a column that holds the bright haze's
+    /// homogeneous layer's share, exact for one): a column that holds the bright haze's
     /// (research-leans-52's ruling, 2026-11-13; the [module documentation](self), "The column read
     /// whole").
     EachBin,
 }
 
 impl ColumnFloor {
-    /// The floor of a column read under `rules` whose photochemical hazes are those of the rules
-    /// `hazes`: [`ColumnFloor::EachBin`] under [`EnvelopeColumnRules::Whole`] with the bright haze
-    /// ([`HazeRule::Bright`]), [`ColumnFloor::Visual`] otherwise, so that the giants' columns stay
-    /// as they were (a lean, 2026-11-13, landed as ruled).
+    /// The floor of a column whose photochemical hazes are those of the rules `hazes`:
+    /// [`ColumnFloor::EachBin`] with the bright haze ([`HazeRule::Bright`]),
+    /// [`ColumnFloor::Visual`] otherwise, so that the giants' columns stay as they were (a lean,
+    /// 2026-11-13, landed as ruled).
     #[must_use]
-    pub(crate) fn of(
-        rules: EnvelopeColumnRules,
-        hazes: impl IntoIterator<Item = HazeRule>,
-    ) -> Self {
-        let bright = hazes.into_iter().any(|rule| rule == HazeRule::Bright);
-        match (rules, bright) {
-            (EnvelopeColumnRules::Whole, true) => Self::EachBin,
-            (EnvelopeColumnRules::Whole, false) | (EnvelopeColumnRules::Clipped, _) => Self::Visual,
+    pub(crate) fn of(hazes: impl IntoIterator<Item = HazeRule>) -> Self {
+        if hazes.into_iter().any(|rule| rule == HazeRule::Bright) {
+            Self::EachBin
+        } else {
+            Self::Visual
         }
     }
 }
@@ -449,44 +374,26 @@ impl LayerGas {
 }
 
 /// The diffuse reflectance and transmission of a homogeneous layer of optical depth `tau`,
-/// single-scattering albedo `omega` and asymmetry `g`, over black and lit diffusely, by the closure
-/// `rules` give, each δ-scaled (Joseph, Wiscombe and Weinman 1976), its deep limit R = γ₂ ÷ (k +
-/// γ₁), T = 0 where k τ′ passes 300 (e^−600 of the light), which the hyperbolic functions would
-/// overflow:
+/// single-scattering albedo `omega` and asymmetry `g`, over black and lit diffusely, by the δ-PIFM
+/// closure, δ-scaled (Joseph, Wiscombe and Weinman 1976), its deep limit R = γ₂ ÷ (k + γ₁), T = 0
+/// where k τ′ passes 300 (e^−600 of the light), which the hyperbolic functions would overflow.
 ///
-/// - [`EnvelopeColumnRules::Clipped`]: the δ-Eddington of `area_mix`'s haze layer (Meador and
-///   Weaver 1980, Table 1), γ₁ = (7 − ω′(4 + 3g′)) ÷ 4, γ₂ = −(1 − ω′(4 − 3g′)) ÷ 4. A dark,
-///   forward layer, ω′(4 − 3g′) < 1, whose R would be negative takes R = 0, as `area_mix`'s does
-///   (a lower bound: such a layer reflects some).
-/// - [`EnvelopeColumnRules::Whole`]: the δ-PIFM, the practical improved flux method of
-///   Zdunkowski, Welch and Korb 1980 (Beitr. Phys. Atmos. 53, 147–166), γ₁ = (8 − ω′(5 + 3g′)) ÷
-///   4, γ₂ = 3ω′(1 − g′) ÷ 4, as ECMWF's ecRad writes them (`radiation_two_stream.F90`, citing
-///   that paper; Hogan and Bozzo 2018, J. Adv. Model. Earth Syst. 10, 1990), read by the lane's
-///   science check (Räisänen 2002, Q. J. R. Meteorol. Soc. 128, 2397, Table 1, recalled): never
-///   negative, the δ-Eddington's at ω′ = 1, and within 10% of an exact
-///   diffuse reflectance where the δ-Eddington is not (the [module documentation](self), "The
-///   column read whole").
+/// The δ-PIFM is the practical improved flux method of Zdunkowski, Welch and Korb 1980 (Beitr.
+/// Phys. Atmos. 53, 147–166), γ₁ = (8 − ω′(5 + 3g′)) ÷ 4, γ₂ = 3ω′(1 − g′) ÷ 4, as ECMWF's ecRad
+/// writes them (`radiation_two_stream.F90`, citing that paper; Hogan and Bozzo 2018, J. Adv.
+/// Model. Earth Syst. 10, 1990), read by the lane's science check (Räisänen 2002, Q. J. R.
+/// Meteorol. Soc. 128, 2397, Table 1, recalled): never negative, the δ-Eddington's at ω′ = 1, and
+/// within 10% of an exact diffuse reflectance where the δ-Eddington of `area_mix`'s haze layer
+/// (Meador and Weaver 1980, Table 1) is not (the [module documentation](self), "The column read
+/// whole").
 #[must_use]
-pub(crate) fn layer_two_stream(
-    rules: EnvelopeColumnRules,
-    tau: f64,
-    omega: f64,
-    g: f64,
-) -> (f64, f64) {
+pub(crate) fn layer_two_stream(tau: f64, omega: f64, g: f64) -> (f64, f64) {
     let f = g * g;
     let scaled_tau = (1.0 - omega * f) * tau;
     let scaled_omega = (1.0 - f) * omega / (1.0 - omega * f);
     let scaled_g = g / (1.0 + g);
-    let (gamma_1, gamma_2) = match rules {
-        EnvelopeColumnRules::Clipped => (
-            (7.0 - scaled_omega * (4.0 + 3.0 * scaled_g)) / 4.0,
-            -(1.0 - scaled_omega * (4.0 - 3.0 * scaled_g)) / 4.0,
-        ),
-        EnvelopeColumnRules::Whole => (
-            (8.0 - scaled_omega * (5.0 + 3.0 * scaled_g)) / 4.0,
-            3.0 * scaled_omega * (1.0 - scaled_g) / 4.0,
-        ),
-    };
+    let gamma_1 = (8.0 - scaled_omega * (5.0 + 3.0 * scaled_g)) / 4.0;
+    let gamma_2 = 3.0 * scaled_omega * (1.0 - scaled_g) / 4.0;
     let square = gamma_1 * gamma_1 - gamma_2 * gamma_2;
     if square <= 1e-24 {
         let reflected = gamma_1 * scaled_tau / (1.0 + gamma_1 * scaled_tau);
@@ -508,19 +415,9 @@ pub(crate) fn layer_two_stream(
 }
 
 /// The spherical albedo of `column` over a black floor in each of the optics' bins (the
-/// [module](self)'s engine), each layer by the closure the rules in force give.
-#[cfg(test)]
+/// [module](self)'s engine), each layer by the δ-PIFM ([`layer_two_stream`]).
 #[must_use]
 pub(crate) fn bin_albedos(column: &EnvelopeColumn) -> [f64; OPTICS_BANDS] {
-    bin_albedos_under(EnvelopeColumnRules::in_force(), column)
-}
-
-/// [`bin_albedos`] under the rules `rules`, whatever the rules in force.
-#[must_use]
-pub(crate) fn bin_albedos_under(
-    rules: EnvelopeColumnRules,
-    column: &EnvelopeColumn,
-) -> [f64; OPTICS_BANDS] {
     let masses = absorber_masses();
     let air = (column.gravity, column.molar_mass_g_per_mol);
     let molecule = column.molar_mass_g_per_mol / 1_000.0 * BOLTZMANN_CONSTANT / MOLAR_GAS_CONSTANT;
@@ -583,7 +480,7 @@ pub(crate) fn bin_albedos_under(
                 }
                 let omega = sca / tau;
                 let asymmetry = if sca > 0.0 { g_sca / sca } else { 0.0 };
-                let (reflected, through) = layer_two_stream(rules, tau, omega, asymmetry);
+                let (reflected, through) = layer_two_stream(tau, omega, asymmetry);
                 below = reflected + through * through * below / (1.0 - reflected * below);
             }
             albedo += weight * below;
@@ -630,7 +527,7 @@ pub(crate) fn particle_table(key: &str, phase: CondensedPhase) -> Option<usize> 
 
 /// A particle table the column reads (its Mie spheres' extinction over its 550 nm value, ω and g
 /// by effective radius and bin): one of [`opacity::PARTICLES`]', over the decks' `σ_g` 2
-/// log-normal, or from 32 one of [`narrow::NARROW_PARTICLES`]', over a gamma of `v_eff` 0.05
+/// log-normal, or one of [`narrow::NARROW_PARTICLES`]', over a gamma of `v_eff` 0.05
 /// ([`table_for`]); each its index there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ParticleTable {
@@ -660,52 +557,39 @@ impl ParticleTable {
     }
 }
 
-/// The table a mode of material `table` ([`particle_table`]) whose sizes are `distribution` reads
-/// under the rules in force: [`EnvelopeColumnRules::Clipped`] the table itself, every mode at the
-/// decks' `σ_g` 2 log-normal; [`EnvelopeColumnRules::Whole`] for a gamma distribution of `v_eff`
-/// [`narrow::NARROW_EFFECTIVE_VARIANCE`] of a material with a narrow table
-/// ([`narrow::NARROW_KEYS`]) that one.
+/// The table a mode of material `table` ([`particle_table`]) whose sizes are `distribution` reads:
+/// for a gamma distribution of `v_eff` [`narrow::NARROW_EFFECTIVE_VARIANCE`] of a material with a
+/// narrow table ([`narrow::NARROW_KEYS`]) that one, else the table itself, at the decks' `σ_g` 2
+/// log-normal.
 ///
 /// The narrow tables are soot's and the bright haze's tholin (`reduce_narrow.py`; the lanes'
 /// leans, 2026-11-10): the record draws Gao et al.'s soot as a gamma of `v_eff` 0.05, whose ω at
 /// 50 nm is 0.16, 0.10 and 0.07 in B, V and R against the wide table's 0.22, 0.18 and 0.14, and
 /// the tholin has no wide table. The cold giants' hazes, gammas too, keep the wide table, with
 /// which their optical depths were fitted on the giants' measured albedos and colours (a finding).
-#[cfg(test)]
 #[must_use]
 pub(crate) fn table_for(
     table: usize,
     distribution: &crate::substance::SizeDistribution,
 ) -> ParticleTable {
-    table_for_under(EnvelopeColumnRules::in_force(), table, distribution)
-}
-
-/// [`table_for`] under the rules `rules`, whatever the rules in force.
-#[must_use]
-pub(crate) fn table_for_under(
-    rules: EnvelopeColumnRules,
-    table: usize,
-    distribution: &crate::substance::SizeDistribution,
-) -> ParticleTable {
     let key = opacity::PARTICLE_KEYS.get(table).copied().unwrap_or("");
-    narrow_table_for(rules, key, distribution).unwrap_or(ParticleTable::Wide(table))
+    narrow_table_for(key, distribution).unwrap_or(ParticleTable::Wide(table))
 }
 
-/// The narrow table a mode of the material keyed `key` whose sizes are `distribution` reads under
-/// the rules `rules`: from 32 ([`EnvelopeColumnRules::Whole`]) a gamma distribution of `v_eff`
-/// [`narrow::NARROW_EFFECTIVE_VARIANCE`] of a material with one ([`narrow::NARROW_KEYS`]); `None`
-/// otherwise. The bright haze's tholin ([`bright_haze`]) has a narrow table and no wide one.
+/// The narrow table a mode of the material keyed `key` whose sizes are `distribution` reads: for a
+/// gamma distribution of `v_eff` [`narrow::NARROW_EFFECTIVE_VARIANCE`] of a material with one
+/// ([`narrow::NARROW_KEYS`]); `None` otherwise. The bright haze's tholin ([`bright_haze`]) has a
+/// narrow table and no wide one.
 ///
 /// [`bright_haze`]: crate::planetary::chem::photochem::bright_haze
 #[must_use]
 pub(crate) fn narrow_table_for(
-    rules: EnvelopeColumnRules,
     key: &str,
     distribution: &crate::substance::SizeDistribution,
 ) -> Option<ParticleTable> {
     use crate::substance::SizeDistributionKind;
-    match (rules, distribution.kind()) {
-        (EnvelopeColumnRules::Whole, SizeDistributionKind::Gamma) => {
+    match distribution.kind() {
+        SizeDistributionKind::Gamma => {
             let width = distribution.effective_variance() - narrow::NARROW_EFFECTIVE_VARIANCE;
             narrow::NARROW_KEYS
                 .iter()
@@ -713,11 +597,7 @@ pub(crate) fn narrow_table_for(
                 .filter(|_| width.abs() < 1e-9)
                 .map(ParticleTable::Narrow)
         }
-        (EnvelopeColumnRules::Whole, SizeDistributionKind::LogNormal)
-        | (
-            EnvelopeColumnRules::Clipped,
-            SizeDistributionKind::Gamma | SizeDistributionKind::LogNormal,
-        ) => None,
+        SizeDistributionKind::LogNormal => None,
     }
 }
 
@@ -750,21 +630,17 @@ const FLOOR_BISECTIONS: u32 = 40;
 /// on the table's giants and the hot fixture, the lane's check).
 const LAYER_STEP_LN_P: f64 = 2.0;
 
-/// The top of a column of `modes` under the rules in force, Pa ([`assemble`]): [`COLUMN_TOP_PA`]
-/// under [`EnvelopeColumnRules::Clipped`]; under [`EnvelopeColumnRules::Whole`] the highest top of
-/// a mode with a τ where that lies above it.
+/// The top of a column of `modes`, Pa ([`assemble`]): the highest top of a mode with a τ where that
+/// lies above [`COLUMN_TOP_PA`], else [`COLUMN_TOP_PA`].
 #[must_use]
-fn column_top(rules: EnvelopeColumnRules, modes: &[ColumnMode]) -> f64 {
-    match rules {
-        EnvelopeColumnRules::Clipped => COLUMN_TOP_PA,
-        // Positive tops alone, so that no signed zero or NaN reaches the fold's `min` (portable
-        // across targets) or the floor search's ln.
-        EnvelopeColumnRules::Whole => modes
-            .iter()
-            .filter(|mode| mode.coverage > 0.0 && mode.tau > 0.0 && mode.top > 0.0)
-            .map(|mode| mode.top)
-            .fold(COLUMN_TOP_PA, f64::min),
-    }
+fn column_top(modes: &[ColumnMode]) -> f64 {
+    // Positive tops alone, so that no signed zero or NaN reaches the fold's `min` (portable across
+    // targets) or the floor search's ln.
+    modes
+        .iter()
+        .filter(|mode| mode.coverage > 0.0 && mode.tau > 0.0 && mode.top > 0.0)
+        .map(|mode| mode.top)
+        .fold(COLUMN_TOP_PA, f64::min)
 }
 
 /// One mode of a column as its assembly reads it: its τ(550) laid by its profile, (p ÷
@@ -804,7 +680,7 @@ impl ColumnMode {
 }
 
 /// The level of a column's floor `floor` from its top `top` (Pa), its Rayleigh τ(550) per Pa
-/// `rayleigh_per_pa` and its modes `modes` with their tables' brackets `brackets` ([`assemble_under`]):
+/// `rayleigh_per_pa` and its modes `modes` with their tables' brackets `brackets` ([`assemble`]):
 /// by [`FLOOR_BISECTIONS`] bisections in ln p from the top to [`FLOOR_SEARCH_BOTTOM_PA`], the last
 /// level where τ(550) from p = 0 ([`ColumnFloor::Visual`]) or the least of the bins' τ from the top
 /// ([`ColumnFloor::EachBin`]) lies under [`FLOOR_OPTICAL_DEPTH`].
@@ -874,40 +750,20 @@ fn floor_level(
 
 /// The column of `modes` in a gas of mean molar mass `molar_mass` (g mol⁻¹) whose Rayleigh
 /// scattering is that of `scattering` ([`rayleigh_of`]) under `gravity` (m s⁻²), its temperature
-/// by pressure `temperature_at` and its absorbers by pressure and temperature `gas_at`: the floor
-/// where τ(550) from the top, the gas's Rayleigh and each mode's, reaches
-/// [`FLOOR_OPTICAL_DEPTH`] (by [`FLOOR_BISECTIONS`] bisections in ln p from the top to 10⁹ Pa), and
-/// the layers from the top down to it split at each mode's base, at e^−1 and e^−3 of its column
-/// above it and at its top, none wider than [`LAYER_STEP_LN_P`]. The top is [`COLUMN_TOP_PA`]
-/// under [`EnvelopeColumnRules::Clipped`], whatever lies above it; under
-/// [`EnvelopeColumnRules::Whole`] it is the highest top of a mode with a τ where that lies above
-/// [`COLUMN_TOP_PA`], so that a haze there is read.
-#[cfg(test)]
+/// by pressure `temperature_at` and its absorbers by pressure and temperature `gas_at`, to the
+/// floor `floor`, and the layers from the top down to it split at each mode's base, at e^−1 and
+/// e^−3 of its column above it and at its top, none wider than [`LAYER_STEP_LN_P`]. The top is the
+/// highest top of a mode with a τ where that lies above [`COLUMN_TOP_PA`], so that a haze there is
+/// read, else [`COLUMN_TOP_PA`].
+///
+/// Under [`ColumnFloor::Visual`] the floor lies where τ(550) from the top, the gas's Rayleigh and
+/// each mode's, reaches [`FLOOR_OPTICAL_DEPTH`] (by [`FLOOR_BISECTIONS`] bisections in ln p from
+/// the top to 10⁹ Pa); under [`ColumnFloor::EachBin`] the column reaches down to where every bin's
+/// own τ from the top, its Rayleigh and its particles' extinction, reaches [`FLOOR_OPTICAL_DEPTH`]
+/// (by the same bisection, to 10⁹ Pa at most), and [`bin_albedos`] cuts each bin at its own.
 #[must_use]
 pub(crate) fn assemble(
-    air: (f64, f64),
-    scattering: &Absorbers,
-    modes: &[ColumnMode],
-    temperature_at: impl Fn(f64) -> f64,
-    gas_at: impl Fn(f64, f64) -> Absorbers,
-) -> EnvelopeColumn {
-    assemble_under(
-        (EnvelopeColumnRules::in_force(), ColumnFloor::Visual),
-        air,
-        scattering,
-        modes,
-        temperature_at,
-        gas_at,
-    )
-}
-
-/// [`assemble`] under the rules `rules`, whatever the rules in force, to the floor `floor`: under
-/// [`ColumnFloor::EachBin`] the column reaches down to where every bin's own τ from the top, its
-/// Rayleigh and its particles' extinction, reaches [`FLOOR_OPTICAL_DEPTH`] (by the same bisection,
-/// to 10⁹ Pa at most), and [`bin_albedos_under`] cuts each bin at its own.
-#[must_use]
-pub(crate) fn assemble_under(
-    (rules, floor): (EnvelopeColumnRules, ColumnFloor),
+    floor: ColumnFloor,
     (gravity, molar_mass): (f64, f64),
     scattering: &Absorbers,
     modes: &[ColumnMode],
@@ -917,7 +773,7 @@ pub(crate) fn assemble_under(
     let rayleigh = rayleigh_of(scattering);
     let molecule = molar_mass / 1_000.0 * BOLTZMANN_CONSTANT / MOLAR_GAS_CONSTANT;
     let rayleigh_per_pa = rayleigh / (molecule * gravity);
-    let top = column_top(rules, modes);
+    let top = column_top(modes);
     let brackets: Vec<Option<(ParticleTable, (usize, f64))>> = modes
         .iter()
         .map(|mode| {
@@ -998,17 +854,16 @@ pub(crate) fn assemble_under(
     }
 }
 
-/// A gas envelope's Bond albedo under the light `shade` in the pass `inputs` describe, and from
-/// 32 its colour and its bright haze's share of its hazes' light: its own column's
+/// A gas envelope's Bond albedo under the light `shade` in the pass `inputs` describe, its colour
+/// and its bright haze's share of its hazes' light: its own column's
 /// ([`column::snapshot_light_under`]), T51.b's class table's ([`giant_bond`]) where the closed form
 /// gives no column (no internal heat to join an adiabat, an envelope not hydrogen-dominated,
 /// abundances refused) or its column no light (labelled).
 ///
 /// The colour is its column's spherical albedo in the B, V and R bins
-/// ([`ColourBand`](super::area_mix::ColourBand)) under [`EnvelopeColumnRules::Whole`]; `None` under
-/// [`EnvelopeColumnRules::Clipped`], for the class table, and where those albedos are not a colour
-/// ([`DiscColour::new`]). The share is the bright haze's of its photochemical hazes' scattering in
-/// the same bins under [`EnvelopeColumnRules::Whole`] where its column holds a bright haze, `None`
+/// ([`ColourBand`](super::area_mix::ColourBand)); `None` for the class table, and where those
+/// albedos are not a colour ([`DiscColour::new`]). The share is the bright haze's of its
+/// photochemical hazes' scattering in the same bins where its column holds a bright haze, `None`
 /// otherwise; the photometry weighs its phase integral by it.
 ///
 /// [`giant_bond`]: super::area_mix::giant_bond
@@ -1025,14 +880,11 @@ pub(crate) fn gas_envelope_light(
                 v: bins[ColourBand::V.bin()],
                 r: bins[ColourBand::R.bin()],
             };
-            let (colour, bright) = match EnvelopeColumnRules::in_force() {
-                EnvelopeColumnRules::Clipped => (None, None),
-                EnvelopeColumnRules::Whole => (
-                    DiscColour::new(in_bands(&light.bins)),
-                    BrightShare::new(in_bands(&light.bright_share)),
-                ),
-            };
-            (light.bond, colour, bright)
+            (
+                light.bond,
+                DiscColour::new(in_bands(&light.bins)),
+                BrightShare::new(in_bands(&light.bright_share)),
+            )
         }
         None => (
             super::area_mix::giant_bond(shade, inputs.heated, inputs.class),

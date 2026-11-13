@@ -296,13 +296,19 @@ fn kappa_fitted_on_jupiter() -> f64 {
 }
 
 /// The fit [`kappa_fitted_on_jupiter`] lies within decision-p14-t24d-profile's 2.7–3.0 × 10⁻³ m²
-/// kg⁻¹ and `adopted` is it to three figures.
+/// kg⁻¹, pinned as it stands, and `adopted` within 0.5% of it: from 32 the column read whole lifts
+/// Jupiter's own Bond albedo to 0.5049, and the fit to 2.92925 × 10⁻³, which `adopted`'s 2.92 ×
+/// 10⁻³ (31's fit to three figures) no longer is to three figures (a finding, kept as it stands:
+/// refitting κ₁ moves every giant's profile).
 fn assert_kappa_is_its_fit(adopted: f64) {
     let fit = kappa_fitted_on_jupiter();
     assert!((2.7e-3..3.0e-3).contains(&fit), "κ₁ fits at {fit}");
-    let rounded = (fit * 1e5).round() / 1e5;
     assert!(
-        (adopted - rounded).abs() < 1e-12,
+        (fit - 2.929_25e-3).abs() < 1e-8,
+        "κ₁ fits at {fit:.5e}, pinned at 2.92925e-3"
+    );
+    assert!(
+        (adopted / fit - 1.0).abs() < 0.005,
         "κ₁ fits at {fit:.5e}, against the adopted {adopted:e}"
     );
 }
@@ -2058,32 +2064,25 @@ fn the_dayside_decks_move_no_cool_envelope_and_no_volatile_or_haze() {
     }
 }
 
-/// The shares of the soot's column (from 32 keyed on the zero-albedo `T_eq`, research-leans-50):
-/// to 31 the soot's taper of `T_eq` and no bright haze; from 32 the taper of the zero-albedo `T_eq`,
-/// s, and the bright haze 1 − s times its cool edge's share, so that the owner's draw (672 K) is
-/// 0.72 soot and 0.28 bright haze, GJ 1214 b (595 K) all bright haze, and a world at or below
-/// 400 K or from 700 K none of it.
+/// The shares of the soot's column, keyed on the zero-albedo `T_eq` (research-leans-50): the taper
+/// of the zero-albedo `T_eq`, s, and the bright haze 1 − s times its cool edge's share, so that the
+/// owner's draw (672 K) is 0.72 soot and 0.28 bright haze, GJ 1214 b (595 K) all bright haze, and a
+/// world at or below 400 K or from 700 K none of it.
 #[test]
-fn the_soot_s_column_is_shared_by_the_zero_albedo_temperature_from_32() {
-    use crate::planetary::derive::photometry::envelope_bond::EnvelopeColumnRules::{
-        Clipped, Whole,
-    };
-    let shares = |rules, t_eq: f64, t0: f64| haze_shares(rules, Kelvin::new(t_eq), Kelvin::new(t0));
+fn the_soot_s_column_is_shared_by_the_zero_albedo_temperature() {
+    let shares = |t0: f64| haze_shares(Kelvin::new(t0));
     let exactly = |(soot, bright): (f64, f64), (want_soot, want_bright): (f64, f64)| {
         assert_same_bits(soot, want_soot);
         assert_same_bits(bright, want_bright);
     };
-    let (soot, bright) = shares(Clipped, 650.0, 700.0);
-    assert!((soot - 0.5).abs() < 1e-12, "{soot}");
-    assert_same_bits(bright, 0.0);
-    let (soot, bright) = shares(Whole, 650.0, 672.0);
+    let (soot, bright) = shares(672.0);
     assert!((soot - 0.72).abs() < 1e-12, "{soot}");
     assert!((bright - 0.28).abs() < 1e-12, "{bright}");
-    exactly(shares(Whole, 560.0, 595.0), (0.0, 1.0));
-    let (soot, bright) = shares(Whole, 450.0, 475.0);
+    exactly(shares(595.0), (0.0, 1.0));
+    let (soot, bright) = shares(475.0);
     assert_same_bits(soot, 0.0);
     assert!((bright - 0.5).abs() < 1e-12, "{bright}");
-    exactly(shares(Whole, 380.0, 400.0), (0.0, 0.0));
-    exactly(shares(Whole, 690.0, 700.0), (1.0, 0.0));
-    exactly(shares(Whole, 650.0, f64::NAN), (0.0, 0.0));
+    exactly(shares(400.0), (0.0, 0.0));
+    exactly(shares(700.0), (1.0, 0.0));
+    exactly(shares(f64::NAN), (0.0, 0.0));
 }

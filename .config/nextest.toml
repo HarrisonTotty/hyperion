@@ -144,17 +144,10 @@ threads-required = 16
 test-group = "@global"
 priority = 50
 
-# The envelope column's census of the planet viewer's draws generates them on sixteen threads of its
-# own (`CENSUS_THREADS` in `planetary/viewer/envelope_census.rs`).
+# The warm sub-Neptunes' haze census of the planet viewer's draws generates them on sixteen threads
+# of its own (`CENSUS_THREADS` in `planetary/viewer/envelope_census.rs`).
 [[profile.default.overrides]]
-filter = "package(hyperion-sim) & test(=planetary::viewer::envelope_census::under_every_32_hold_the_envelope_column_moves_only_gas_envelopes_and_their_satellites)"
-threads-required = 16
-test-group = "@global"
-priority = 50
-
-# The warm sub-Neptunes' haze census, on the same sixteen threads.
-[[profile.default.overrides]]
-filter = "package(hyperion-sim) & test(=planetary::viewer::envelope_census::under_every_32_hold_the_warm_sub_neptunes_take_their_hazes_by_temperature)"
+filter = "package(hyperion-sim) & test(=planetary::viewer::envelope_census::the_warm_sub_neptunes_take_their_hazes_by_temperature)"
 threads-required = 16
 test-group = "@global"
 priority = 50

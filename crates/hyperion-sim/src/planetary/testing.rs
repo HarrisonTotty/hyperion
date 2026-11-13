@@ -51,16 +51,6 @@ mod held;
 #[cfg(test)]
 pub(crate) use held::{HeldRules, in_shares};
 
-/// `run`'s result with every planetary hold of version 32 in force on this thread (train 32): an
-/// envelope's column read whole
-/// ([`ENVELOPE_COLUMN_VERSION`](super::derive::photometry::envelope_bond::ENVELOPE_COLUMN_VERSION)).
-/// A 32 hold's bump deletes its line here.
-#[cfg(test)]
-pub(crate) fn with_every_32_hold<R>(run: impl FnOnce() -> R) -> R {
-    use super::derive::photometry::envelope_bond::{EnvelopeColumnRules, with_envelope_column};
-    with_envelope_column(EnvelopeColumnRules::Whole, run)
-}
-
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,
 /// unvalidated, as the crate's own tests state one: for other crates' tests of what a derivation
 /// reads of an air, as the server's conversion of P14.T51.j's oxidised surface does (a caller's

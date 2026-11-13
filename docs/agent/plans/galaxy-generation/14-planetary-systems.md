@@ -34562,3 +34562,6 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Accept:_ part 2's, with both slow censuses by name:
     `under_every_32_hold_the_envelope_column_moves_only_gas_envelopes_and_their_satellites` and
     `under_every_32_hold_the_warm_sub_neptunes_take_their_hazes_by_temperature`.
+- **P14.T24.h.b's column folded at 32 (train 32):** the hold and its `_under` twins gone; mover
+  census deleted; haze census renamed `the_warm_sub_neptunes_take_their_hazes_by_temperature`. Lean
+  as recorded: the disc twin pinned as it stands (+0.67 stops in B) while a client lane fixes it.

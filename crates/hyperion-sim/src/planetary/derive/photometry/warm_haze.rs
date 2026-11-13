@@ -5,7 +5,7 @@
 //! research-leans-52's ruling, 2026-11-13) on the planet's measured Bond albedo, and for the sim's
 //! tests. Not a part of the generator's API.
 //!
-//! The fixture is read under 32's rules whatever the version's (`envelope_bond`'s "The column read
+//! The fixture's column is read whole, as a record's is (`envelope_bond`'s "The column read
 //! whole"), its bright haze's slab at
 //! [`BRIGHT_HAZE_OPTICAL_DEPTH`](crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH) and
 //! its coagulated mode at the optical depth it is given, its `T_eq` iterated with its own Bond
@@ -27,7 +27,6 @@ use crate::planetary::derive::composition::{MassFractions, SnowLineSide, composi
 use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
 use crate::planetary::derive::photometry::area_mix::OPTICS_BANDS;
 use crate::planetary::derive::photometry::area_mix::{ColourBand, HostShade};
-use crate::planetary::derive::photometry::envelope_bond::EnvelopeColumnRules;
 use crate::planetary::derive::photometry::envelope_bond::column::{
     ClosedReading, snapshot_light_under,
 };
@@ -165,7 +164,7 @@ impl WarmFixture {
         }
     }
 
-    /// Its light under 32's rules with its bright haze's coagulated mode of τ(550)
+    /// Its light with its bright haze's coagulated mode of τ(550)
     /// `coagulated_haze_optical_depth` at its whole share, the slab at the record's, its `T_eq` its
     /// own Bond albedo's after `FIXED_POINT_STEPS` steps; `None` for an optical depth that is not
     /// finite and positive, and where the closed form gives it no column.
@@ -174,29 +173,15 @@ impl WarmFixture {
         if !(coagulated_haze_optical_depth.is_finite() && coagulated_haze_optical_depth > 0.0) {
             return None;
         }
-        self.light_under(
-            ClosedReading {
-                rules: EnvelopeColumnRules::Whole,
-                bright_haze_optical_depth:
-                    crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH,
-                coagulated_haze_optical_depth,
-            },
-            BondAlbedo::from_fraction(0.3),
-        )
-    }
-
-    /// [`light`](Self::light) read as `reading` says, from the Bond albedo `start`.
-    #[must_use]
-    pub(crate) fn light_under(
-        &self,
-        reading: ClosedReading,
-        start: BondAlbedo,
-    ) -> Option<WarmLight> {
+        let reading = ClosedReading {
+            bright_haze_optical_depth: crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH,
+            coagulated_haze_optical_depth,
+        };
         let flux = self.flux();
         let shade = HostShade::of_host(Kelvin::new(self.host_temperature_k));
         let fractions = self.fractions()?;
         let zero_albedo = equilibrium_temperature(flux, BondAlbedo::from_fraction(0.0)).value();
-        let mut albedo = start;
+        let mut albedo = BondAlbedo::from_fraction(0.3);
         let mut light = None;
         for _ in 0..FIXED_POINT_STEPS {
             let equilibrium = equilibrium_temperature(flux, albedo);

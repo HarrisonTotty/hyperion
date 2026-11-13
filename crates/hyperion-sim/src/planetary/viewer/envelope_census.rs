@@ -1,15 +1,14 @@
 //! The envelope column read whole, on `RANDOMIZE`'s draws (P14.T24.h.b, the lanes
-//! `fix-dark-sub-neptune` and `fix-dark-sub-neptune-2`; `envelope_bond`'s "The column read
-//! whole", held at 32): the warm soot-hazed sub-Neptune the planet viewer drew teal at 29 and near
-//! black once its air came, its photometry against its disc twin; the census of what the hold
-//! moves; and the census of the warm sub-Neptunes' hazes, soot and the bright haze, by kind.
+//! `fix-dark-sub-neptune`, `fix-dark-sub-neptune-2` and `fix-dark-sub-neptune-3`;
+//! `envelope_bond`'s "The column read whole", from 32): the warm soot-hazed sub-Neptune the planet
+//! viewer drew teal at 29 and near black once its air came, its photometry against its disc twin;
+//! and the census of the warm sub-Neptunes' hazes, soot and the bright haze, by kind.
 
 use super::tests::{galaxy, grid};
 use super::*;
-use crate::planetary::derive::photometry::{Bands, PhaseTemplate};
-use crate::planetary::placement::OrbitHost;
+use crate::planetary::derive::photometry::Bands;
 use crate::planetary::record::Section;
-use crate::planetary::testing::{in_shares, with_every_32_hold};
+use crate::planetary::testing::in_shares;
 
 /// `RANDOMIZE`'s draw 2 of the universe of seed 0x4d2 (the server's test universe, which the
 /// planet-variety lane's captures drew, 2026-11-06), as `draw_inputs` gives it at 31: a 10.0 M⊕
@@ -31,7 +30,7 @@ const DARK_SUB_NEPTUNE: RawPlanetInputs = RawPlanetInputs {
     nitrogen_rank: None,
 };
 
-/// [`DARK_SUB_NEPTUNE`]'s disc as R08's disc twin draws it under 32's rules (the lane
+/// [`DARK_SUB_NEPTUNE`]'s disc as R08's disc twin draws it from 32 (the lane
 /// `fix-dark-sub-neptune-3`'s measurement, 2026-11-13): the client's `test/discAirCases.ts`
 /// (`bakedDiscAir`, `integratedRadianceAt` at phase 0 from 10⁹ m, `geometricAlbedoOf`, its table's
 /// disc) on the record's air as `body_detail` sends it, assembled by `assembleMedium` under the
@@ -51,7 +50,7 @@ const DARK_SUB_NEPTUNE_TWIN: Bands = Bands {
     r: 0.0471,
 };
 
-/// [`DARK_SUB_NEPTUNE`]'s disc as the client's full passes draw it under 32's rules, routed through
+/// [`DARK_SUB_NEPTUNE`]'s disc as the client's full passes draw it from 32, routed through
 /// its thick table: [`DARK_SUB_NEPTUNE_TWIN`]'s harness's `routed` (the same measurement). Without
 /// the coagulated mode it gave 0.0424, 0.0569 and 0.0647.
 const DARK_SUB_NEPTUNE_MARCH: Bands = Bands {
@@ -60,9 +59,10 @@ const DARK_SUB_NEPTUNE_MARCH: Bands = Bands {
     r: 0.0604,
 };
 
-/// How far above [`DARK_SUB_NEPTUNE_TWIN`] the draw's p lies in B and V under every 32 hold, in
-/// stops, pinned as it stands (a finding: the table reads the layers its slab hides): +0.67 and
-/// +0.39 measured, past the brief's third of a stop; R lies within a third.
+/// How far above [`DARK_SUB_NEPTUNE_TWIN`] the draw's p lies in B and V, in stops, pinned as it
+/// stands (a lean, 2026-11-13, while a client lane fixes the disc table; a finding: the table reads
+/// the layers its slab hides): +0.67 and +0.39 measured, past the brief's third of a stop; R lies
+/// within a third.
 const TWIN_EXCESS_AS_IT_STANDS: [f64; 2] = [0.70, 0.42];
 
 /// The Bond albedo under which the owner's draw is still dark (research-leans-50: "stays dark
@@ -72,39 +72,23 @@ const DARK: f64 = 0.1;
 /// A third of a stop, the brief's agreement: a factor of 2^(1/3).
 const THIRD_OF_A_STOP: f64 = 1.0 / 3.0;
 
-/// The geometric albedo the record of `raw`'s planet publishes under the rules in force.
-fn photometry_of(raw: RawPlanetInputs) -> Bands {
-    let system = ViewerSystem::generate(PlanetInputs::try_from(raw).expect("in range"))
-        .expect("a drawn planet's system");
-    let index = BodyIndex::try_from(system.planet().body_index()).expect("a planet's index");
-    let record = system
-        .planets()
-        .body_at(system.context(), index, UniverseTime::EPOCH)
-        .expect("the drawn planet's record");
-    let Section::Ok(photometry) = record.photometry() else {
-        panic!("the drawn planet has its photometry");
-    };
-    photometry.geometric_albedo()
-}
-
 /// Each band's p over `twin`'s, in stops: log₂ of the ratio, B, V and R.
 fn stops(p: Bands, twin: Bands) -> [f64; 3] {
     [p.b / twin.b, p.v / twin.v, p.r / twin.r].map(crate::math::log2)
 }
 
-/// The warm soot-hazed sub-Neptune's photometry meets its disc twin under every 32 hold: each of B,
-/// V and R within a third of a stop of the client's full passes ([`DARK_SUB_NEPTUNE_MARCH`]), and
-/// its table's disc ([`DARK_SUB_NEPTUNE_TWIN`]) in R, in B and V as it stands
-/// ([`TWIN_EXCESS_AS_IT_STANDS`]); at 31 its R lies a stop under the twin: its column started below
-/// its soot, which lies above 1 Pa, and the δ-Eddington held its dark layers at R = 0, so that its
-/// p was Neptune's row scaled by a Bond albedo of 0.027 that the gas alone returned. From 32 its
-/// soot keeps 0.72 of its column and the bright haze the rest (its zero-albedo `T_eq` 672 K), its q
-/// weighed toward the bright haze's by that haze's share of the hazes' light, and it stays dark:
-/// its Bond albedo under [`DARK`], 0.048 with the coagulated mode (research-leans-52).
+/// The warm soot-hazed sub-Neptune's photometry meets its disc twin: each of B, V and R within a
+/// third of a stop of the client's full passes ([`DARK_SUB_NEPTUNE_MARCH`]), and its table's disc
+/// ([`DARK_SUB_NEPTUNE_TWIN`]) in R, in B and V as it stands ([`TWIN_EXCESS_AS_IT_STANDS`]); to 31
+/// its R lay a stop under the twin: its column started below its soot, which lies above 1 Pa, and
+/// the δ-Eddington held its dark layers at R = 0, so that its p was Neptune's row scaled by a Bond
+/// albedo of 0.027 that the gas alone returned. Its soot keeps 0.72 of its column and the bright
+/// haze the rest (its zero-albedo `T_eq` 672 K), its q weighed toward the bright haze's by that
+/// haze's share of the hazes' light, and it stays dark: its Bond albedo under [`DARK`], 0.048 with
+/// the coagulated mode (research-leans-52).
 #[test]
-fn under_every_32_hold_the_dark_sub_neptune_meets_its_full_passes_and_stays_dark() {
-    let held = photometry_of(DARK_SUB_NEPTUNE);
-    let (whole, bond, zero_albedo) = with_every_32_hold(|| {
+fn the_dark_sub_neptune_meets_its_full_passes_and_stays_dark() {
+    let (whole, bond, zero_albedo) = {
         let system =
             ViewerSystem::generate(PlanetInputs::try_from(DARK_SUB_NEPTUNE).expect("in range"))
                 .expect("a drawn planet's system");
@@ -124,26 +108,23 @@ fn under_every_32_hold_the_dark_sub_neptune_meets_its_full_passes_and_stays_dark
             bond,
             t_eq / crate::math::powf(1.0 - bond, 0.25),
         )
-    });
-    let twin = DARK_SUB_NEPTUNE_TWIN;
-    let (at_31, at_32) = (stops(held, twin), stops(whole, twin));
+    };
+    let twin = stops(whole, DARK_SUB_NEPTUNE_TWIN);
     let march = stops(whole, DARK_SUB_NEPTUNE_MARCH);
     eprintln!(
-        "at 31: p {held:?}, {at_31:+.2?} stops; under every 32 hold: p {whole:?}, {at_32:+.2?} \
-         stops (B, V, R) over the table's disc and {march:+.2?} over the full passes, its Bond \
-         albedo {bond:.4}, its zero-albedo T_eq {zero_albedo:.1} K"
+        "p {whole:?}, {twin:+.2?} stops (B, V, R) over the table's disc and {march:+.2?} over the \
+         full passes, its Bond albedo {bond:.4}, its zero-albedo T_eq {zero_albedo:.1} K"
     );
     for (band, stop) in ["B", "V", "R"].into_iter().zip(march) {
         assert!(stop.abs() <= THIRD_OF_A_STOP, "{band}: {stop:+.3} stops");
     }
-    for (stop, limit) in at_32.into_iter().zip(
+    for (stop, limit) in twin.into_iter().zip(
         TWIN_EXCESS_AS_IT_STANDS
             .into_iter()
             .chain([THIRD_OF_A_STOP]),
     ) {
-        assert!((-THIRD_OF_A_STOP..=limit).contains(&stop), "{at_32:?}");
+        assert!((-THIRD_OF_A_STOP..=limit).contains(&stop), "{twin:?}");
     }
-    assert!(at_31[2] < -2.0 * THIRD_OF_A_STOP, "{at_31:?}");
     assert!(bond < DARK, "{bond}");
     assert!((zero_albedo - 672.0).abs() < 1.0, "{zero_albedo}");
 }
@@ -154,108 +135,6 @@ const CENSUS_DRAWS: usize = 200;
 /// The threads the census generates its draws on (its `threads-required` in
 /// `.config/nextest.toml`).
 const CENSUS_THREADS: usize = 16;
-
-/// One body of a draw: its index, whether it is a gas envelope or one's satellite, the template of
-/// that envelope (its own or its parent's), and its record's text under the rules in force.
-struct Censused {
-    index: BodyIndex,
-    enveloped: Option<PhaseTemplate>,
-    text: String,
-}
-
-/// One draw's bodies ([`Censused`]); `None` where the draw finds no planet.
-fn bodies_of(seed: u64) -> Option<Vec<Censused>> {
-    let drawn = draw_inputs(galaxy(), grid(), seed).ok()?;
-    let system = ViewerSystem::generate(drawn.inputs).ok()?;
-    let (ctx, planets) = (system.context(), system.planets());
-    let mut out = Vec::new();
-    for index in planets.indices() {
-        let Ok(record) = planets.body_at(ctx, index, UniverseTime::EPOCH) else {
-            continue;
-        };
-        // A gas envelope: a body drawn with a giant's template, which only a gas envelope takes
-        // (`photometry::choose`), whether or not its record derives its envelope section.
-        let enveloped = |record: &crate::planetary::record::BodyRecord| match record.photometry() {
-            Section::Ok(photometry) => match photometry.template() {
-                template @ (PhaseTemplate::Jupiter
-                | PhaseTemplate::Saturn
-                | PhaseTemplate::Uranus
-                | PhaseTemplate::Neptune) => Some(template),
-                PhaseTemplate::AirlessIce
-                | PhaseTemplate::Moon
-                | PhaseTemplate::Mercury
-                | PhaseTemplate::Mars
-                | PhaseTemplate::Earth
-                | PhaseTemplate::Venus
-                | PhaseTemplate::Magma
-                | PhaseTemplate::Snowball => None,
-            },
-            Section::NotModelled | Section::NotApplicable | Section::NotResolved => None,
-        };
-        let parent = record.identity().parent().and_then(|host| match host {
-            OrbitHost::Body(parent) => planets.body_at(ctx, parent, UniverseTime::EPOCH).ok(),
-            OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => None,
-        });
-        out.push(Censused {
-            index,
-            enveloped: enveloped(&record).or_else(|| parent.as_ref().and_then(enveloped)),
-            text: format!("{record:?}"),
-        });
-    }
-    Some(out)
-}
-
-/// What the envelope column moves (its hold's census): over `RANDOMIZE`'s first 200 draws, every
-/// body's record under every 32 hold against 31's, the movers counted. Only gas envelopes and the
-/// satellites of one move, every other body bit for bit; the movers are stated by their
-/// envelope's template (Jupiter's and Saturn's for the gas giants, Neptune's for the ice giants and
-/// the sub-Neptunes).
-#[test]
-#[ignore = "slow: 200 viewer draws generated twice, some minutes"]
-fn under_every_32_hold_the_envelope_column_moves_only_gas_envelopes_and_their_satellites() {
-    let draws = |rules_32: bool| {
-        let run = || {
-            in_shares(CENSUS_DRAWS, CENSUS_THREADS, |k| {
-                bodies_of(u64::try_from(k).expect("a share's index fits") + 1)
-            })
-        };
-        if rules_32 {
-            with_every_32_hold(run)
-        } else {
-            run()
-        }
-    };
-    let (held, whole) = (draws(false), draws(true));
-    let (mut bodies, mut envelopes) = (0_usize, 0_usize);
-    let mut moved: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    for (seed, (a, b)) in held.iter().zip(&whole).enumerate() {
-        let (Some(a), Some(b)) = (a, b) else {
-            assert_eq!(a.is_none(), b.is_none(), "draw {}", seed + 1);
-            continue;
-        };
-        assert_eq!(a.len(), b.len(), "draw {}: the same bodies", seed + 1);
-        for (before, after) in a.iter().zip(b) {
-            bodies += 1;
-            envelopes += usize::from(before.enveloped.is_some());
-            if before.text != after.text {
-                let template = before.enveloped.unwrap_or_else(|| {
-                    panic!(
-                        "draw {} body {:?}: moved, but neither a gas envelope nor one's satellite",
-                        seed + 1,
-                        before.index
-                    )
-                });
-                *moved.entry(format!("{template:?}")).or_default() += 1;
-            }
-        }
-    }
-    let total: usize = moved.values().sum();
-    eprintln!(
-        "{bodies} bodies; {envelopes} gas envelopes and their satellites, of which {total} moved, \
-         by template {moved:?}"
-    );
-    assert!(total > 0, "the hold moves the census's envelopes");
-}
 
 /// The margin the haze census's edges take, K: a zero-albedo `T_eq` rebuilt from a record's `T_eq`
 /// and Bond albedo, not its flux, as the record's own is.
@@ -305,18 +184,16 @@ fn sub_neptunes_of(seed: u64) -> Option<Vec<WarmHazes>> {
     Some(out)
 }
 
-/// The warm sub-Neptunes' hazes by kind (the brief's census): over `RANDOMIZE`'s first 200 draws
-/// under every 32 hold, every sub-Neptune whose record carries an envelope, counted by its
+/// The warm sub-Neptunes' hazes by kind (the brief's census): over `RANDOMIZE`'s first 200 draws,
+/// every sub-Neptune whose record carries an envelope, counted by its
 /// photochemical hazes of the soot's column. Soot keeps a zero-albedo `T_eq` above 600 K and the
 /// bright haze one inside 400–700 K, as `envelope_atmosphere::haze_shares` gives them, and both
 /// lie together only inside 600–700 K. The census's counts and ranges are printed.
 #[test]
 #[ignore = "slow: 200 viewer draws, some minutes"]
-fn under_every_32_hold_the_warm_sub_neptunes_take_their_hazes_by_temperature() {
-    let draws = with_every_32_hold(|| {
-        in_shares(CENSUS_DRAWS, CENSUS_THREADS, |k| {
-            sub_neptunes_of(u64::try_from(k).expect("a share's index fits") + 1)
-        })
+fn the_warm_sub_neptunes_take_their_hazes_by_temperature() {
+    let draws = in_shares(CENSUS_DRAWS, CENSUS_THREADS, |k| {
+        sub_neptunes_of(u64::try_from(k).expect("a share's index fits") + 1)
     });
     let mut kinds: std::collections::BTreeMap<&str, (usize, f64, f64)> =
         std::collections::BTreeMap::new();
