@@ -250,7 +250,8 @@ ambiguous, the design note that reads it is named.
   and `readBuffer(buffer, access?)`, not harness-only; each throws `PresentationOnlyReadback` for a
   resource a `presentation-only` kernel wrote last, which T10.b's read-back must not meet, and
   `access: "tolerance"`, which lifts that refusal, is the smoke harness's alone); `MemoryCategory`,
-  the union later plans extend, on every creation; the device-loss and GPU-process-loss fault and
+  the union later plans extend (`engine/memory.ts`; R11 adds `clouds`, re-validated 2026-11-02), on
+  every creation; the device-loss and GPU-process-loss fault and
   its three-loss rule; the preload's `HyperionApi`, to which this plan adds `ipcRenderer.invoke`
   handlers of its own, validating the sender itself (R01 sets no invoke convention); the SwiftShader
   smoke harness, `just test-render`, into whose `WGSL_CATALOGUE` every shader here is registered for
@@ -296,7 +297,9 @@ ambiguous, the design note that reads it is named.
 - **R06:** each host's `HostDisc`: `angular_radius`, `mean_luminance` (cd/m², per channel) and its
   limb-darkening `PowerTwo`, for the planet's penumbra on a ring. The star's direction comes from
   R03's scene positions and its illuminance from R07's `starIlluminance(disc, distanceM)` (lux).
-- **R07:** the photorealistic style's pass list, with the slots it leaves for this plan's passes;
+- **R07:** the photorealistic style's pass list (`photoreal/passes.ts`, its `clouds` slot after the
+  atmosphere's; `METER_CLASS` in `post/meter.ts`; re-validated 2026-11-02), with the slots it leaves
+  for this plan's passes;
   `shaders/litBody.wgsl`'s `body_brdf`, `sphere_irradiance` and `eclipse_visible`, which the ring
   and ocean passes call; `METER_CLASS`, which each pass writes in the HDR target's alpha, keeping
   the destination alpha wherever it blends, as every transparent pass here does (its Design note
@@ -334,7 +337,9 @@ ambiguous, the design note that reads it is named.
   and `null` on an oblate body, with `skyViewColumnOf(table, d)` for each azimuth's R_α and β
   (corrected 2026-10-14); `surfaceLighting.wgsl`'s
   `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` and
-  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (R08.T9.b), through
+  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (R08.T9.b; re-validated
+  2026-11-02: each takes a last `curve : u32`, the light's slot, and an includer binds the eight
+  tables of `surfaceLightingTextures(first)` from `surfaceLightingTablesOf(tables)`), through
   which lit clouds, oceans and rings take each sun's light and the sky's, each call at the lit
   point's geodetic height and latitude and the sun's azimuth from local north there (R08 Design
   note 17); `modeOptics(mode, wavelengthNm)`, the per-wavelength asymmetry and single-scattering
@@ -353,7 +358,8 @@ ambiguous, the design note that reads it is named.
 - **R09:** `FieldView`, with `CoarseField` on the server and `PartialField` on the client
   (`is_surveyed`); `FieldHeader` (`sea_level`, `craters: CraterParams`, and `surface_age: Gyr` and
   `surface_pressure: Pascals`, plan 14's figures carried for this plan's `RockSite`);
-  `SynthesisCell` (`water_surface_mm`, `ice`, `class`); `ClimateCell` at level L − 1 (each
+  `SynthesisCell` (`water_surface_mm`, `ice`, `class`); `ClimateCell` (`field/cells.rs`: `wind`,
+  `month_precipitation`, `month_anomaly`, re-validated 2026-11-02) at level L − 1 (each
   month's anomaly, precipitation, the labelled heuristic, and 10 m wind: the resultant's direction
   and the mean speed), on R09's months of equal eccentric anomaly of the seasonal orbit, found from
   the scene's time through `month_blend` and `FieldHeader.season_eccentricity`; `CoarseCrater`
@@ -387,7 +393,9 @@ ambiguous, the design note that reads it is named.
   allocations by `MemoryCategory` and audits Design note 18's quality limits.
 - **Galaxy plan 14:** `RingDto` (`ring_kind`, `material`, `inner_edge_m`, `outer_edge_m`,
   `optical_depth`, `gaps` with `radius_m`) and the sim's `planetary::rings::RING_PARTICLE_RADII`;
-  P14.T14's poles and `body_fixed_at`; P14.T24.b's cloud, ocean and ice fractions, surface age and
+  P14.T14's poles and `body_fixed_at`; P14.T24.b's cloud, ocean and ice fractions (re-validated
+  2026-11-02: `BodySurface.cloudFraction`, `lib/system/model.ts`; the decks P14.T52.c's
+  `BodySurface.aerosols`' `decks` and `modes`, a mode's `opticalDepth` in-cloud), surface age and
   crater density, and P14.T13.c's surface state, once the surface section carries them; the rocks
   read the surface age and pressure through R09's `FieldHeader`, not from plan 14 directly, and
   the `AIRLESS_PRESSURE` constant. **Asked of plan 14**,
@@ -808,7 +816,9 @@ ambiguous, the design note that reads it is named.
 19. **Motion.** Clouds move with the simulation's wind and waves with its time: that is the world
     moving, which guide item 8's reduced-motion rule does not stop ("the world cannot be frozen").
     The month is found from the seasonal orbit's mean anomaly at the scene's time with R09's
-    `month_blend`, called through R10's wasm field or a TypeScript twin tested against it. The
+    `month_blend`, called through R10's wasm field or a TypeScript twin tested against it (re-validated
+    2026-11-02: `field::months::month_blend(header, mean_anomaly) -> MonthBlend`; neither it nor a
+    `ClimateCell` reader is exported by `wasm.rs`, so T7 blends the stand-in's months itself). The
     coverage, the wind and the sea state are blended between the two nearest months, so the seasons
     turn without a step at a month's edge, and on an eccentric orbit faster near periapsis, as the
     climate does. Both hold still when the scene's time rate is zero, and clouds fade to their mean
