@@ -14,14 +14,15 @@ import type {
 } from "@hyperion/protocol";
 
 import type { CatalogueClass, ChartLayer, MemberClass } from "./model";
-import { layerLetter } from "./wire";
+import { layerLetter, UNLISTED_LAYER } from "./wire";
 
 /**
- * A band's letter in a composed reading: the em dash for a layer this build does not know, so that
- * the reading keeps its other parts (the guide's data states, `MATERIAL REGOLITH · —`).
+ * A band's letter in a composed reading: {@link UNLISTED_LAYER} for a layer this build does not
+ * know, which the server did send, so that the reading keeps its other parts
+ * (`LIVING · UNLISTED LAYER · FIRST · BINARY`).
  */
 function bandLetter(band: ChartLayer): string {
-  return layerLetter(band) ?? "—";
+  return layerLetter(band) ?? UNLISTED_LAYER;
 }
 
 /**
@@ -257,8 +258,8 @@ function tracerWords(tracer: CentreTracerWire): string {
  * are, the layer of its primaries' band, and a cluster's generation and multiplicity
  * (`LIVING · A · FIRST · BINARY`) or the centre's episode and tracer (`LIVING · A · EPISODE 0 ·
  * STARS`), or a listed entry's catalogue class; `null` for a class or a catalogue class this build
- * does not know, which reads Missing. A band's layer it does not know is the em dash in its place
- * (`LIVING · — · FIRST · BINARY`).
+ * does not know, which reads Missing. A band's layer it does not know is named in its place
+ * (`LIVING · UNLISTED LAYER · FIRST · BINARY`).
  */
 export function memberClassWords(memberClass: MemberClass): string | null {
   let words: string | null;

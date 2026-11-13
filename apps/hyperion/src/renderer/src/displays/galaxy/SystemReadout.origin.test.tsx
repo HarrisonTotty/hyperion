@@ -342,7 +342,7 @@ describe("SystemReadout's values this build does not know (plan 09, P09.T41.c)",
     expect(valueOf(readout, "ORIGIN")).toBe("—");
   });
 
-  it("reads a member's class with a band's layer it does not know, its letter Missing, and the rest as before", () => {
+  it("reads a member's class with a band's layer it does not know, naming it UNLISTED LAYER, and the rest as before", () => {
     const cluster = (memberClass: Extract<MemberClassWire, { type: "cluster" }>) =>
       aSystem({
         origin: { type: "feature_member", feature: OPEN_CLUSTER.id },
@@ -370,7 +370,7 @@ describe("SystemReadout's values this build does not know (plan 09, P09.T41.c)",
       }),
     );
 
-    expect(valueOf(readout, "MEMBER CLASS")).toBe("LIVING · — · FIRST · SINGLE");
+    expect(valueOf(readout, "MEMBER CLASS")).toBe("LIVING · UNLISTED LAYER · FIRST · SINGLE");
     expect(readings(readout).filter(([label]) => label !== "MEMBER CLASS")).toEqual(others);
   });
 });

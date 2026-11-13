@@ -19,7 +19,7 @@ import type {
   ChartResult,
   ChartSystem,
 } from "../../lib/galaxy/model";
-import { layerLetter } from "../../lib/galaxy/wire";
+import { layerLetter, UNLISTED_LAYER } from "../../lib/galaxy/wire";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import type { RequestState } from "../../lib/useServerRequest";
 import { windowRange } from "../../lib/windowRange";
@@ -34,7 +34,7 @@ import {
 } from "./chartModel";
 import { usePageTabFocus } from "./pageTabFocus";
 
-/** A value of the census table that is Missing: a layer, band or status this build does not know. */
+/** A value of the census table that is Missing: a status this build does not know. */
 const MISSING = <span className="readout__missing">—</span>;
 
 /** What a layer's line in the census table says about the layer, in words. */
@@ -152,6 +152,11 @@ interface CensusTableProps {
  * One row per mass layer, lightest first: its band, what was expected in the sphere, and what came
  * back. The substellar layers a query asked for come first, named by their designation letters, `G`
  * for the free-floating planets and `F` for the brown dwarfs (plan 13, P13.T8.c).
+ *
+ * @remarks
+ * A layer this build does not know is named {@link UNLISTED_LAYER} across its letter's and band's
+ * cells, since the server sent it and the letter's column cannot hold the name; its band, whose
+ * unit only the layer decides, is not shown (the guide's `UNLISTED LAYER` row, 2026-11-13).
  */
 function CensusTable({ layers }: CensusTableProps) {
   return (
@@ -170,10 +175,18 @@ function CensusTable({ layers }: CensusTableProps) {
       <tbody>
         {censusLinesLightestFirst(layers).map((layer) => (
           <tr key={lineKey(layer)}>
-            <th scope="row">{layerLetter(layer.layer) ?? MISSING}</th>
-            <td className="census-table__band">
-              <Band line={layer} />
-            </td>
+            {layer.layer === "unknown" ? (
+              <th scope="row" colSpan={2}>
+                {UNLISTED_LAYER}
+              </th>
+            ) : (
+              <>
+                <th scope="row">{layerLetter(layer.layer)}</th>
+                <td className="census-table__band">
+                  <Band line={layer} />
+                </td>
+              </>
+            )}
             <td className="census-table__count">{expectedCount(layer.expected)}</td>
             <td className="census-table__count">{formatNumber(layer.returned, 0)}</td>
             <td className="census-table__status">{statusWords(layer.status)}</td>

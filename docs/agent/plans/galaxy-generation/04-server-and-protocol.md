@@ -2002,3 +2002,7 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     line reads its letter and band Missing and stands by its band. `layerBands` ignores it, so the
     answer still charts, and where it is the lightest included, `COMPLETE ABOVE` reads its edge
     Missing.
+  - _Ruled 2026-11-13 (the owner's delegated UX call, ux-calls-and-checklist-gaps):_ amended. A
+    reading that names an unknown layer reads `UNLISTED LAYER` (`wire.ts`'s `UNLISTED_LAYER`), never
+    Missing: the census line's row header across its `LAYER` and `BAND` cells (its band not shown)
+    and a `MEMBER CLASS`'s band (`featureWords.ts`'s `bandLetter`). Its masses stay Missing.

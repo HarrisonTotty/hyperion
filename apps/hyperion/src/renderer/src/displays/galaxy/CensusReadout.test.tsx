@@ -505,18 +505,19 @@ describe("CensusReadout's growing enums (plan 04's reserved list)", () => {
     return within(screen.getByRole("table")).getAllByRole("row").slice(1);
   }
 
-  it("reads a layer this build does not know as Missing, placed by its band", async () => {
+  it("names a layer this build does not know UNLISTED LAYER, never Missing, placed by its band", async () => {
     // Its band, 1.0E-9 to 1.0E-6 M☉, starts below layer A's, so it is listed first.
     const rows = await tableRows(
       toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), anUnknownLayerLine())),
     );
 
     expect(rows).toHaveLength(6);
-    expect(rowText(rows, 0)).toEqual(["—", "—", "2.4", "2", "INCLUDED"]);
+    expect(rowText(rows, 0)).toEqual(["UNLISTED LAYER", "2.4", "2", "INCLUDED"]);
     expect(rowText(rows, 1)[0]).toBe("A");
-    const [letter, band] = rows[0] === undefined ? [] : within(rows[0]).getAllByText("—");
-    expect(letter).toHaveClass("readout__missing");
-    expect(band).toHaveClass("readout__missing");
+    expect(
+      within(screen.getByRole("table")).getByRole("rowheader", { name: "UNLISTED LAYER" }),
+    ).toBeInTheDocument();
+    expect(rows[0] && within(rows[0]).queryByText("—")).toBeNull();
   });
 
   it("lists a layer this build does not know after a lighter known one", async () => {
@@ -525,7 +526,14 @@ describe("CensusReadout's growing enums (plan 04's reserved list)", () => {
       toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), heavy)),
     );
 
-    expect(rows.map((_, index) => rowText(rows, index)[0])).toEqual(["A", "B", "C", "D", "E", "—"]);
+    expect(rows.map((_, index) => rowText(rows, index)[0])).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "UNLISTED LAYER",
+    ]);
   });
 
   it("reads a status this build does not know as Missing", async () => {
@@ -535,7 +543,7 @@ describe("CensusReadout's growing enums (plan 04's reserved list)", () => {
     );
     const [status] = rows[0] === undefined ? [] : within(rows[0]).getAllByRole("cell").slice(-1);
 
-    expect(rowText(rows, 0)[4]).toBe("—");
+    expect(rowText(rows, 0)[3]).toBe("—");
     expect(status && within(status).getByText("—")).toHaveClass("readout__missing");
   });
 

@@ -444,9 +444,17 @@ export function chartKindOf(layer: ChartLayer): ChartKind {
 }
 
 /**
+ * The name a reading gives a layer this build does not know, as a newer server's may be: the
+ * server sent it, so it is never Missing (the guide's `UNLISTED LAYER` row, the owner's delegated
+ * call, 2026-11-13).
+ */
+export const UNLISTED_LAYER = "UNLISTED LAYER";
+
+/**
  * The letter a layer is named by in the census: `A` to `E` for the stellar layers, and `F` and `G`
  * for the brown dwarfs and the free-floating planets, the letters their designations carry (plan
- * 01's layer letters); `null`, which reads Missing, for a layer this build does not know.
+ * 01's layer letters); `null` for a layer this build does not know, which a reading names
+ * {@link UNLISTED_LAYER}.
  */
 export function layerLetter(layer: ChartLayer): string | null {
   let letter: string | null;
